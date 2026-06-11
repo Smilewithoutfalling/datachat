@@ -1,0 +1,6 @@
+field,description
+date,销售日期，格式 YYYY-MM-DD
+region,销售地区，取值有华东、华北、华南
+product,产品代号，取值有 A、B、C 三种
+units,销售数量，单位为件
+price,单价，单位为元

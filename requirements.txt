@@ -1,0 +1,8 @@
+langgraph
+langchain-openai
+pandas
+matplotlib
+python-dotenv
+streamlit
+rank_bm25
+jieba
