@@ -23,7 +23,7 @@ def summarize(state):
     if state.get("error"):
         msg = _FAIL_PROMPT.format(question=state["question"], error=state["error"])
     else:
-        note = "（已生成图表 outputs/chart.png）" if state.get("chart_path") else ""
+        note = f"（已生成图表 {state['chart_path']}）" if state.get("chart_path") else ""
         msg = _OK_PROMPT.format(
             question=state["question"], result=state["result"], chart_note=note
         )

@@ -46,6 +46,7 @@ def load_retriever(df_path: str):
     d = read_csv(path)
     if "field" not in d.columns or "description" not in d.columns:
         return None
+    d = d.dropna(subset=["field", "description"])
     entries = list(zip(d["field"].astype(str), d["description"].astype(str)))
     if not entries:
         return None

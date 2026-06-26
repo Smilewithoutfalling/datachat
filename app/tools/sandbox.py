@@ -59,25 +59,27 @@ def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: int = 20):
             box["error"] = traceback.format_exc(limit=3)
 
     t = threading.Thread(target=target, daemon=True)
-    t.start()
-    t.join(timeout)
-    plt.savefig = _orig_savefig
-    if t.is_alive():
-        plt.close("all")
-        return None, None, f"TimeoutError: 代码执行超过 {timeout} 秒"
-    if "error" in box:
-        plt.close("all")
-        return None, None, box["error"]
+    try:
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            plt.close("all")
+            return None, None, f"TimeoutError: 代码执行超过 {timeout} 秒"
+        if "error" in box:
+            plt.close("all")
+            return None, None, box["error"]
 
-    # 兜底：只要代码画了图，就由我们把当前图存到 chart_path，
-    # 不依赖模型是否正确调用了 plt.savefig（重定向已兜住大多数情况）。
-    if plt.get_fignums():
-        try:
-            plt.savefig(chart_path)
-        except Exception:
-            pass
-    plt.close("all")
+        # 兜底：只要代码画了图，就由我们把当前图存到 chart_path，
+        # 不依赖模型是否正确调用了 plt.savefig（重定向已兜住大多数情况）。
+        if plt.get_fignums():
+            try:
+                _orig_savefig(chart_path)
+            except Exception:
+                pass
+        plt.close("all")
 
-    result = ns.get("result")
-    chart = chart_path if os.path.exists(chart_path) else None
-    return result, chart, None
+        result = ns.get("result")
+        chart = chart_path if os.path.exists(chart_path) else None
+        return result, chart, None
+    finally:
+        plt.savefig = _orig_savefig
