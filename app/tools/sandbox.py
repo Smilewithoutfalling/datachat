@@ -2,6 +2,9 @@ import os
 import threading
 import traceback
 
+import builtins
+
+import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")          # 无界面后端，服务器/脚本下也能出图
@@ -19,8 +22,28 @@ _SAFE_BUILTINS = {
         "abs", "min", "max", "sum", "len", "range", "round", "sorted",
         "list", "dict", "set", "tuple", "str", "int", "float", "bool",
         "enumerate", "zip", "map", "filter", "print", "isinstance",
+        "any", "all", "reversed", "repr",
+        "ValueError", "KeyError", "TypeError", "IndexError", "ZeroDivisionError", "Exception",
     ]
 }
+
+# 允许 import 的模块（按顶层包名）。模型（如 Qwen）常无视"不要 import"写 import numpy/matplotlib，
+# 沙箱直接拦截会让整题执行失败；pandas 的部分方法（如 Timestamp.strftime）也会在运行时延迟导入（B28）。
+# 这些包本身已在命名空间里，放行不扩大攻击面；同进程沙箱仍可经 pd 逃逸（B01），阶段 2 子进程沙箱再收紧。
+_ALLOWED_IMPORTS = {
+    "numpy", "pandas", "matplotlib", "math", "statistics", "datetime", "calendar",
+    "re", "collections", "itertools", "functools", "decimal", "json", "warnings",
+    "time", "locale", "_strptime",
+}
+
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level == 0 and name.split(".")[0] in _ALLOWED_IMPORTS:
+        return builtins.__import__(name, globals, locals, fromlist, level)
+    raise ImportError(f"沙箱不允许导入 {name!r}；可直接使用 df、pd、np、plt")
+
+
+_SAFE_BUILTINS["__import__"] = _safe_import
 
 
 def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: int = 20):
@@ -33,6 +56,7 @@ def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: int = 20):
         "__builtins__": _SAFE_BUILTINS,
         "df": df,
         "pd": pd,
+        "np": np,
         "plt": plt,
         "chart_path": chart_path,
         "result": None,

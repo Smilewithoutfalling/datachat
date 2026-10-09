@@ -1,0 +1,69 @@
+{
+  "time": "2026-10-09T16:02:39",
+  "git_sha": "b710e23?",
+  "agent": "workflow",
+  "python": "3.11.17",
+  "pandas": "3.0.6",
+  "model": "glm-5.1",
+  "temperature": 0.0,
+  "base_url_host": "open.bigmodel.cn",
+  "data_sha256": "abe40a78ff53",
+  "data": "data/sample_eval.csv",
+  "oracle": false,
+  "use_dictionary": true,
+  "run": 1,
+  "repeat": 1,
+  "overall": {
+    "n": 1,
+    "correct": 0,
+    "executed": 0,
+    "correctness_rate": 0.0,
+    "execution_success_rate": 0.0,
+    "conditional_correctness_rate": null,
+    "reviewer_fix_rate": null,
+    "initial_errors": 0,
+    "infra_errors": 1,
+    "avg_duration_s": 11.0062,
+    "avg_tokens": 0.0
+  },
+  "by_category": {
+    "aggregation": {
+      "n": 1,
+      "correct": 0,
+      "executed": 0,
+      "correctness_rate": 0.0,
+      "execution_success_rate": 0.0,
+      "conditional_correctness_rate": null,
+      "reviewer_fix_rate": null,
+      "initial_errors": 0,
+      "infra_errors": 1,
+      "avg_duration_s": 11.0062,
+      "avg_tokens": 0.0
+    }
+  },
+  "cases": [
+    {
+      "id": "agg_001",
+      "category": "aggregation",
+      "question": "哪个地区的总销售额最高？",
+      "correct": false,
+      "executed": false,
+      "initial_error": false,
+      "infra_error": true,
+      "error_kind": "llm",
+      "error": "LLM 调用失败（rate_limit，共尝试 4 次）：OpenAIRateLimitError: Error code: 429 - {'error': {'code': '1113', 'message': '余额不足或无可用资源包,请充值。'}}",
+      "attempts": 0,
+      "duration_s": 11.0062,
+      "tokens": 0,
+      "code": "",
+      "expected": "华南",
+      "actual": "None",
+      "answer": "",
+      "expected_obj": {
+        "kind": "value",
+        "data": "华南"
+      },
+      "actual_obj": null
+    }
+  ]
+}

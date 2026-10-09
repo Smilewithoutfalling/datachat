@@ -45,7 +45,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         """在已加载的数据表 df（pandas DataFrame）上执行 Python/pandas 代码并返回结果。
 
         约定：
-        - df 已就绪，不要重新读文件、不要 import；可用 pd、plt。
+        - df 已就绪，不要重新读文件；pd、np、plt 已就绪，无需 import。
         - 把要查看的结论赋值给变量 result。
         - 需要图表时用 plt 绘制并调用 plt.savefig(chart_path) 保存。
         返回执行结果文本或报错信息（报错时请据此修正代码后重试）。
@@ -74,7 +74,9 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "工作方式：先想清分析思路，再用 run_python_on_data 执行代码来验证；"
         "若报错，读取错误信息、修正代码后重试，直到拿到正确结果。"
         "你最后一次成功执行的代码里的 result 会被当作最终答案保存和展示，所以最后一次执行时 result 必须直接回答问题："
-        "问\"哪个\"给标签本身，问\"多少\"给数值，问\"各…/每…\"给以分组键为索引的 Series 或表，问\"哪些记录\"给筛选出的行；"
+        "问\"哪个\"时 result 只放标签本身（如 '华中'，不要拼接说明文字或数值），问\"多少\"给数值，"
+        "问\"各…/每…\"给以分组键为索引的 Series 或表，问\"哪些/哪条记录\"给筛选出的行（DataFrame），"
+        "问题含多个小问时 result 用 dict 把每个小问都答上；数值、说明放在最终中文结论里。"
         "不要用中间表或整张排序表收尾。"
         "如果问题需要图表，请务必画图并保存。\n\n"
         f"{CHART_GUIDE}\n\n"

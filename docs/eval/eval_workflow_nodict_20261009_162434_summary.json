@@ -1,0 +1,92 @@
+{
+  "python": "3.11.17",
+  "pandas": "3.0.6",
+  "model": "Qwen3.5-397B-A17B",
+  "temperature": 0.0,
+  "base_url_host": "grg-aikits-test.grgbanking.com",
+  "data_sha256": "abe40a78ff53",
+  "data": "data/sample_eval.csv",
+  "oracle": false,
+  "use_dictionary": false,
+  "git_sha": "b710e23?",
+  "aggregate": {
+    "runs": 3,
+    "mean": 73.33333333333333,
+    "min": 70.0,
+    "max": 76.0,
+    "stdev": 3.0550504633038935,
+    "avg_duration_s": 4.804694666666666,
+    "avg_tokens": 2422.84
+  },
+  "runs": [
+    {
+      "run": 1,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_workflow_nodict_20261009_162434_run1.json",
+      "overall": {
+        "n": 50,
+        "correct": 35,
+        "executed": 43,
+        "correctness_rate": 70.0,
+        "execution_success_rate": 86.0,
+        "conditional_correctness_rate": 81.3953488372093,
+        "reviewer_fix_rate": 22.22222222222222,
+        "initial_errors": 9,
+        "infra_errors": 0,
+        "avg_duration_s": 2.5494760000000003,
+        "avg_tokens": 2608.24
+      },
+      "by_category": {
+        "aggregation": 93.33333333333333,
+        "filtering": 66.66666666666666,
+        "correlation": 60.0,
+        "timeseries": 53.84615384615385
+      }
+    },
+    {
+      "run": 2,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_workflow_nodict_20261009_162434_run2.json",
+      "overall": {
+        "n": 50,
+        "correct": 38,
+        "executed": 46,
+        "correctness_rate": 76.0,
+        "execution_success_rate": 92.0,
+        "conditional_correctness_rate": 82.6086956521739,
+        "reviewer_fix_rate": 20.0,
+        "initial_errors": 5,
+        "infra_errors": 0,
+        "avg_duration_s": 4.34412,
+        "avg_tokens": 2293.86
+      },
+      "by_category": {
+        "aggregation": 93.33333333333333,
+        "filtering": 91.66666666666666,
+        "correlation": 60.0,
+        "timeseries": 53.84615384615385
+      }
+    },
+    {
+      "run": 3,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_workflow_nodict_20261009_162434_run3.json",
+      "overall": {
+        "n": 50,
+        "correct": 37,
+        "executed": 45,
+        "correctness_rate": 74.0,
+        "execution_success_rate": 90.0,
+        "conditional_correctness_rate": 82.22222222222221,
+        "reviewer_fix_rate": 0.0,
+        "initial_errors": 5,
+        "infra_errors": 0,
+        "avg_duration_s": 7.520487999999999,
+        "avg_tokens": 2366.42
+      },
+      "by_category": {
+        "aggregation": 93.33333333333333,
+        "filtering": 91.66666666666666,
+        "correlation": 50.0,
+        "timeseries": 53.84615384615385
+      }
+    }
+  ]
+}

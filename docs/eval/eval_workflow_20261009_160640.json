@@ -1,0 +1,72 @@
+{
+  "time": "2026-10-09T16:06:49",
+  "git_sha": "b710e23?",
+  "agent": "workflow",
+  "python": "3.11.17",
+  "pandas": "3.0.6",
+  "model": "Qwen3.5-397B-A17B",
+  "temperature": 0.0,
+  "base_url_host": "grg-aikits-test.grgbanking.com",
+  "data_sha256": "abe40a78ff53",
+  "data": "data/sample_eval.csv",
+  "oracle": false,
+  "use_dictionary": true,
+  "run": 1,
+  "repeat": 1,
+  "overall": {
+    "n": 1,
+    "correct": 1,
+    "executed": 1,
+    "correctness_rate": 100.0,
+    "execution_success_rate": 100.0,
+    "conditional_correctness_rate": 100.0,
+    "reviewer_fix_rate": null,
+    "initial_errors": 0,
+    "infra_errors": 0,
+    "avg_duration_s": 8.9721,
+    "avg_tokens": 1388.0
+  },
+  "by_category": {
+    "aggregation": {
+      "n": 1,
+      "correct": 1,
+      "executed": 1,
+      "correctness_rate": 100.0,
+      "execution_success_rate": 100.0,
+      "conditional_correctness_rate": 100.0,
+      "reviewer_fix_rate": null,
+      "initial_errors": 0,
+      "infra_errors": 0,
+      "avg_duration_s": 8.9721,
+      "avg_tokens": 1388.0
+    }
+  },
+  "cases": [
+    {
+      "id": "agg_001",
+      "category": "aggregation",
+      "question": "哪个地区的总销售额最高？",
+      "correct": true,
+      "executed": true,
+      "initial_error": false,
+      "infra_error": false,
+      "error_kind": null,
+      "error": null,
+      "attempts": 0,
+      "duration_s": 8.9721,
+      "tokens": 1388,
+      "code": "df['sales'] = df['units'] * df['price']\nregion_sales = df.groupby('region')['sales'].sum()\nresult = region_sales.idxmax()\n\nax = region_sales.sort_values(ascending=False).plot(kind='bar', color='skyblue')\nax.set_title('各地区总销售额对比')\nax.set_xlabel('地区')\nax.set_ylabel('总销售额')\nax.bar_label(ax.containers[0], fmt='%.1f')\nplt.tight_layout()\nplt.savefig(chart_path)",
+      "expected": "华南",
+      "actual": "华南",
+      "answer": "华南地区的总销售额最高。",
+      "expected_obj": {
+        "kind": "value",
+        "data": "华南"
+      },
+      "actual_obj": {
+        "kind": "value",
+        "data": "华南"
+      }
+    }
+  ]
+}
