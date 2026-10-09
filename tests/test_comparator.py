@@ -72,7 +72,9 @@ def test_dataframe_superset_columns_and_reset_index():
     e = pd.DataFrame({"a": [1, 2]}, index=[5, 9])
     a = pd.DataFrame({"a": [1, 2], "extra": [0, 0]})
     assert results_equal(a, e)
-    assert not results_equal(pd.DataFrame({"b": [1, 2]}), e)
+    # 阶段 1.5（B24 规则 8）：列名不同但值相同 → 按值匹配判对；值不同仍判错
+    assert results_equal(pd.DataFrame({"b": [1, 2]}), e)
+    assert not results_equal(pd.DataFrame({"b": [1, 3]}), e)
 
 
 def test_dataframe_order_when_ordered():
