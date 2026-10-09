@@ -317,7 +317,7 @@ TS_CASES = [
     EvalCase(
         id="ts_008", category="timeseries",
         question="每月各地区销售额的变化趋势",
-        ground_truth="df['date'] = pd.to_datetime(df['date']); result = df.assign(sales=df['units'] * df['price']).pivot_table(values='sales', index=df['date'].dt.month, columns='region', aggfunc='sum', fill_value=0).astype(int)",
+        ground_truth="df['date'] = pd.to_datetime(df['date']); result = df.assign(sales=df['units'] * df['price']).pivot_table(values='sales', index=df['date'].dt.month, columns='region', aggfunc='sum', fill_value=0)",
         keywords=["pivot_table", "month", "groupby"],
     ),
     EvalCase(
