@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -202,16 +203,21 @@ class LLMClient:
         return self.invoke_message(prompt).content
 
 
+_FENCE_RE = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\n(.*?)(?:\n[ \t]*```|\Z)", re.S | re.I)
+
+
 def strip_code(text: str) -> str:
-    """去掉模型可能输出的 ```python ... ``` 代码块标记，只留纯代码。"""
+    """从模型输出中取出纯代码。
+
+    - 有 ``` 代码块（哪怕前面有标题/说明文字）：取代码块内容，多个时取最长的一个；
+    - 没有代码块：原样返回（去首尾空白）。
+    """
     t = text.strip()
-    if t.startswith("```"):
-        lines = t.splitlines()
-        lines = lines[1:]                      # 去掉开头 ```python
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]                 # 去掉结尾 ```
-        t = "\n".join(lines)
-    return t.strip()
+    blocks = [b.strip() for b in _FENCE_RE.findall(t)]
+    blocks = [b for b in blocks if b]
+    if blocks:
+        return max(blocks, key=len)
+    return t
 
 
 def node_llm(config) -> LLMClient:
