@@ -153,7 +153,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 2. 提交本阶段改动并回填本条 SHA。
 3. 进入阶段 2：子进程沙箱（B01 B02 B03）。
 
-## [3] 2026-10-09 · 阶段 1.5 评测校准 · commit <待提交>
+## [3] 2026-10-09 · 阶段 1.5 评测校准 · commit b710e23
 基线：91575c5（b6568b9 + numpy 2.4.6 兼容 Python 3.11 + [2] 回填 SHA）。起因：S 在本地用真实 DeepSeek Key 跑了阶段 1 的评测（报告见 docs/eval/），逐题复核发现严格正确率严重低估，评测本身先要修准，否则阶段 2 改沙箱时没有可信的回归指标。
 
 ### 当前技术栈
@@ -218,7 +218,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 ### 指标快照
 - 测试：248 项 = 243 通过 + 5 xfail（B01×4、B28×1）。[2] 为 173 项 = 169 通过 + 4 xfail。Python 3.11.17 与 3.12.15 各在 fresh venv 按 requirements-dev.txt 安装后结果相同。
 - oracle 自检：workflow 50/50、react 50/50；两份 oracle 报告 `--rescore` 往返后仍 50/50。
-- 真实 LLM 基线：待 S 用 deepseek flash 跑（见下一步），本条提交后回填。
+- 真实 LLM 基线：S 实际用 Qwen3.5-397B-A17B 跑完，见 [4]。
 
 ### 下一步
 1. S 在本地跑三组，每组 3 次（每次约 5 元）：
@@ -226,3 +226,61 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
    把 outputs/ 里的 *_run*.json 和 *_summary.json 放进 docs/eval/ 推到 eval-results 分支，Hark 复核后回填本条，作为第一组可信基线。预算紧可以先每组 1 次。
 2. 提交本阶段改动并回填 SHA。
 3. 进入阶段 2：子进程沙箱（B01 B02 B03 B28）。
+
+## [4] 2026-10-09 · 阶段 1.5 第二轮（实测复核后修正）· commit <待提交>
+上一条：[3]（b710e23）。
+
+### 当前技术栈
+同 [3]。
+
+### 阶段 1.5 真实评测（S 本地，b710e23，50 题 × 3 次，docs/eval/*_20261009_16*）
+模型 Qwen3.5-397B-A17B（公司网关，OpenAI 兼容协议，temperature 0）。报告 git_sha = "b710e23?"（S 的 conda 环境里没有 git，按 B27 的回退读 .git，可信）。GLM-5.1 只试了 1 题，接口失败，作废（160228）。
+
+| 配置 | 3 次正确 | 均值 | 执行成功 | 首次报错 | 平均 token | 用 [4] 比较器重评 |
+|---|---|---|---|---|---|---|
+| workflow + 字典 | 35 / 35 / 35 | 70.0% | 43/50 | 9 | 2603 | 37 / 37 / 37 → 74.0% |
+| workflow 无字典 | 35 / 38 / 37 | 73.3% | 43–46/50 | 5–9 | 2423 | 37 / 39 / 38 → 76.0% |
+| react | 40 / 38 / 40 | 78.7% | 49/50 | 3–5 | 5319 | 43 / 42 / 46 → 87.3% |
+
+- 这是第一组带模型名和 SHA 的基线，但模型换成了 Qwen，不能和阶段 1（DeepSeek，未记录模型）的 56% / 58% / 46% 比。
+- workflow + 字典 3 次逐题完全相同，第 2、3 次平均耗时从 11.2 s 降到 2.6 s / 2.4 s：网关很可能缓存了 temperature 0 的相同请求，所以这组的标准差 0 不代表模型稳定（B31）。
+- workflow 每次有 4–7 题代码没跑起来：Qwen 无视"不要 import"写 `import matplotlib.pyplot / numpy`，沙箱报 `ImportError: __import__ not found`，reviewer 改 3 次也没去掉（5 题）；用 np 但沙箱没给（agg_011）；代码块前加了 markdown 标题，strip_code 没剥掉（filt_005、corr_006）。
+- 结果契约的副作用：react 把标签拼成句子（"华中，平均单价 90.88 元"、"产品A，总销量 2325 件"、"2024-05 环比增长率最高"）；workflow 的 ts_009 只给"第二季度"，summarizer 拿不到两季数字，回答"无法回答"。
+- 重评后仍判错的主要是真错或口径分歧：ts_005（订单数算成件数）、ts_011（加权均价 vs 简单均价）、corr_003（占比方向）、corr_007（逐行标准差 vs 汇总后标准差）、corr_001（占比 vs 件数）、agg_015、ts_009；react 有 2 题 "Sorry, need more steps"（recursion_limit 12 触顶）。
+
+### 本次完成（对照 [3]）
+| 问题 | 状态 | 证据 |
+|---|---|---|
+| B28 | 已解决 | tools/sandbox.py 加白名单 `__import__`：numpy、pandas、matplotlib、math、statistics、datetime、calendar、re、collections、itertools、functools、decimal、json、warnings、time、locale、_strptime；其他（os、sys、subprocess、shutil、importlib…）报"沙箱不允许导入"。命名空间预置 np。builtins 补 any/all/reversed/repr 与常用异常类，没有加 getattr/type（避免多开 dunder 逃逸口）。test_timestamp_strftime_works 去掉 xfail；新增 test_whitelisted_imports_and_np、test_other_imports_blocked×5 |
+| B29 | 已解决（规则范围内） | eval/comparator.py 新增规则 13–17（文件头逐条说明）：13 期望 1 行表、实际是该行 Series；14 期望索引是月份序号 1–12、实际是 '2024-01' 等；15 ISO 周标签 '2024-W01' 算时间索引；16 模型自起键名的汇总 dict（期望数值时 ≤4 项；期望标签元组时取 dict 里的标签值按序比）；17 去掉实际多出的 总计/合计/All/Total 行列。tests/test_comparator.py 每条规则一组正反例 |
+| B30 | 已解决 | core/llm.py strip_code 改为在全文里找 ``` 代码块（前后有说明文字也行），多个取最长；无代码块原样返回。新增 tests/test_strip_code.py（5 例） |
+| B25 | 补 1 道 | ts_008 标准答案去掉 `.astype(int)`（把 .5 截掉，4977.5 vs 4977 恰好超出 1e-4 相对误差） |
+| 结果契约 | 修订 | codegen / reviewer / react 提示词：问"哪个"时 result 只放标签本身，不拼说明文字或数值；问题含多个小问时 result 用 dict 全部答上；"不要 import"改为"pd、np、plt 已就绪，无需 import，不要导入其他库" |
+
+### 新发现
+| 编号 | 严重度 | 位置 | 描述 | 计划阶段 |
+|---|---|---|---|---|
+| B29 | P1 | eval/comparator.py | 规则 1–12 之外的 5 种形态（见上） | 1.5（本次） |
+| B30 | P1 | core/llm.py strip_code | 代码块前有文字时整段原样 exec → SyntaxError | 1.5（本次） |
+| B31 | P2 | 评测方法 | 网关对 temperature 0 的相同请求可能有缓存，`--repeat` 不独立；需要时加请求扰动或换 temperature>0 | 3 |
+| B32 | P2 | eval/cases.py | corr_003（占比方向）、corr_007（标准差口径）、ts_011（平均单价口径）题面有歧义，模型的另一种理解也合理；应在题面写清 | 3 |
+| B33 | P2 | core/service.py | ReAct recursion_limit=12 偶尔触顶，回答 "Sorry, need more steps" | 4 |
+
+### 假设与判断
+- 白名单 import 不扩大攻击面：这些包本来就在命名空间里（pd 能直接拿到 os，B01），放行只是不让正常代码失败。阶段 2 子进程沙箱再整体收紧。
+- 规则 16 放宽 dict 到 4 项只适用于 dict（模型自己起键名的汇总），Series 仍 ≤3；5 项 dict（像按地区汇总的整张表）仍判错，测试里有反例。
+- 重评只能修判分，不能修"没跑起来"的题；沙箱和 strip_code 修好后 workflow 能多跑几题，需要新一轮实测才知道多多少。
+
+### 当前已知问题
+同 [3]，去掉 B28；加 B31、B32、B33。B12 改为"17 条规则之外的形态仍判错"。
+
+### 指标快照
+- 测试：264 项 = 260 通过 + 4 xfail（B01×4）。[3] 为 248 项 = 243 通过 + 5 xfail。Python 3.11。
+- oracle 自检：workflow 50/50、react 50/50。
+- 真实 LLM（b710e23，Qwen3.5-397B-A17B）：见上表；按本条比较器重评 workflow+字典 74.0%、无字典 76.0%、react 87.3%。
+
+### 下一步
+1. 提交本条改动并回填 SHA；把 eval-1.5 分支的 14 份报告并进 master 的 docs/eval/。
+2. 可选：S 用本条代码再跑一轮 workflow（同模型），看沙箱 / strip_code 修复后执行成功率。
+3. 进入阶段 2：子进程沙箱（B01 B02 B03）。
+
