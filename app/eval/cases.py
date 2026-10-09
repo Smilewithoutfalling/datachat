@@ -16,6 +16,8 @@ class EvalCase:
     has_chart: bool = False
     # 结果顺序是否计分（B12）：只有题目明确要求排序/排名时为 True，比较器据此决定是否比较顺序
     ordered: bool = False
+    # 题目问"占比"时，比例（0.49）与百分数（49%）都算对（B24 规则 12）；问"百分比"的不设
+    percent_equiv: bool = False
 
 
 # ============================================================
@@ -76,6 +78,7 @@ AGG_CASES = [
         question="各产品的总销量占比分别是多少？",
         ground_truth="result = (df.groupby('product')['units'].sum() / df['units'].sum()).round(4)",
         keywords=["groupby", "sum"],
+        percent_equiv=True,
     ),
     EvalCase(
         id="agg_010", category="aggregation",
@@ -135,7 +138,7 @@ FILT_CASES = [
     EvalCase(
         id="filt_003", category="filtering",
         question="单价在50到100元之间的产品有哪些记录？",
-        ground_truth="result = df[(df['price'] >= 50) & (df['price'] <= 100)][['product', 'price']].drop_duplicates()",
+        ground_truth="result = df[(df['price'] >= 50) & (df['price'] <= 100)][['product', 'price']]",
         keywords=["price", "&"],
     ),
     EvalCase(
@@ -214,8 +217,9 @@ CORR_CASES = [
     EvalCase(
         id="corr_003", category="correlation",
         question="每个产品在各地区的销售额占比",
-        ground_truth="result = df.assign(sales=df['units'] * df['price']).groupby(['product', 'region'])['sales'].sum().groupby(level=0).apply(lambda x: (x / x.sum() * 100).round(2))",
+        ground_truth="result = df.assign(sales=df['units'] * df['price']).groupby(['product', 'region'])['sales'].sum().groupby(level=0, group_keys=False).apply(lambda x: (x / x.sum() * 100).round(2))",
         keywords=["groupby", "sum"],
+        percent_equiv=True,
     ),
     EvalCase(
         id="corr_004", category="correlation",
@@ -238,13 +242,13 @@ CORR_CASES = [
     EvalCase(
         id="corr_007", category="correlation",
         question="分析各产品在不同地区的销量标准差，判断分布是否均匀。",
-        ground_truth="result = df.groupby('product')['units'].std().round(2)",
+        ground_truth="result = df.groupby(['product', 'region'])['units'].sum().groupby(level=0).std().round(2)",
         keywords=["groupby", "std"],
     ),
     EvalCase(
         id="corr_008", category="correlation",
         question="对比各地区产品A的总销售额。",
-        ground_truth="result = df[df['product'] == 'A'].assign(sales=lambda x: x['units'] * x['price']).groupby('region')['sales'].sum().astype(int)",
+        ground_truth="result = df[df['product'] == 'A'].assign(sales=lambda x: x['units'] * x['price']).groupby('region')['sales'].sum()",
         keywords=["product", "A", "groupby", "sum"],
     ),
     EvalCase(
@@ -319,13 +323,13 @@ TS_CASES = [
     EvalCase(
         id="ts_009", category="timeseries",
         question="第一季度和第二季度的销售总额分别是多少？哪个季度更高？",
-        ground_truth="df['date'] = pd.to_datetime(df['date']); df['quarter'] = df['date'].dt.quarter; result = df.assign(sales=df['units'] * df['price']).groupby('quarter')['sales'].sum().astype(int)",
+        ground_truth="df['date'] = pd.to_datetime(df['date']); df['quarter'] = df['date'].dt.quarter; result = df.assign(sales=df['units'] * df['price']).groupby('quarter')['sales'].sum()",
         keywords=["quarter", "groupby", "sum"],
     ),
     EvalCase(
         id="ts_010", category="timeseries",
         question="哪个月份销量增长最快（环比增长率最高）？",
-        ground_truth="df['date'] = pd.to_datetime(df['date']); monthly = df.set_index('date')['units'].resample('ME').sum(); result = int(str(monthly.diff().idxmax())[5:7]) if len(monthly) > 1 else 1",
+        ground_truth="df['date'] = pd.to_datetime(df['date']); monthly = df.set_index('date')['units'].resample('ME').sum(); result = int(str(monthly.pct_change().idxmax())[5:7]) if len(monthly) > 1 else 1",
         keywords=["resample", "sum", "diff"],
     ),
     EvalCase(

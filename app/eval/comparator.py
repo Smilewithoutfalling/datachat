@@ -12,6 +12,17 @@
   5. 期望 DataFrame，实际列是其超集（多带了几列）→ 只比较期望的列；行索引是否 reset 不影响；
   6. 时间标签：Timestamp(月末) / Period('2024-01') / '2024-01' 视为同一个月；两边都是时间索引时按位置比值；
   7. 数值：相对误差 1e-4；期望值本身被 round 到 d 位小数（d≤4）时，允许半个末位的误差；NaN 等于 NaN。
+
+阶段 1.5 补充（B24，来自阶段 1 真实评测的逐题复核）：
+  8. 列名不同：模型常把分组列改成中文（月份/地区/产品）或多带几列（销售额 + 占比、环比列）。
+     期望 Series 时，在实际表里按"值"找一对（标签列, 数值列）还原成 Series；期望 DataFrame 时，
+     名字对不上的列按值的多重集合匹配。只按值匹配，不看列名。
+  9. 期望元组/列表、实际是 N 行表：任一列按顺序等于期望即对（如 最高/最低月份 的两行表）。
+ 10. 期望数值标量、实际是"单行汇总"（1 行表，或 ≤3 项、标签为文字的 Series/dict）：其中有一项等于期望即对。
+     更长的容器不适用——否则"返回整列"会碰巧包含答案（如中位数恰好是某地区的总额）。
+ 11. 期望是月份/季度序号（5、2），实际是 '2024-05' / Period / 'Q2' / '2024Q2' → 比较月份/季度部分。
+ 12. 百分数与比例：只对题目问"占比"的用例（EvalCase.percent_equiv）接受 ×100 / ÷100；
+     题目明确要"百分比"时仍按原值比较。
 规则之外的形态差异仍判错，需人工抽检（见 DEVLOG）。
 """
 import math
@@ -21,17 +32,49 @@ import numpy as np
 import pandas as pd
 
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+_QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
 
 
 # ------------------------------------------------------------------ 入口
-def results_equal(actual, expected, float_tol=1e-4, *, ordered=None) -> bool:
-    """actual：模型结果；expected：标准答案。ordered=None 时按 expected 推断。"""
+def results_equal(actual, expected, float_tol=1e-4, *, ordered=None, percent_equiv=False) -> bool:
+    """actual：模型结果；expected：标准答案。ordered=None 时按 expected 推断。
+    percent_equiv=True 时允许实际结果是期望的 ×100 或 ÷100（规则 12）。"""
     if ordered is None:
         ordered = looks_ranked(expected)
+    a, e = _py(actual), _py(expected)
+    variants = [a]
+    if percent_equiv:
+        variants += [v for v in (_scale(a, 100), _scale(a, 0.01)) if v is not None]
+    for v in variants:
+        try:
+            if _eq(v, e, float_tol, ordered):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _scale(v, f):
+    """把结果里的数值乘以 f；没有可缩放的数值时返回 None。"""
     try:
-        return _eq(_py(actual), _py(expected), float_tol, ordered)
+        if _is_num(v):
+            return v * f
+        if isinstance(v, pd.Series):
+            return v * f if pd.api.types.is_numeric_dtype(v) else None
+        if isinstance(v, pd.DataFrame):
+            num = v.select_dtypes("number").columns
+            if len(num) == 0:
+                return None
+            out = v.copy()
+            out[num] = out[num] * f
+            return out
+        if isinstance(v, dict):
+            return {k: (x * f if _is_num(x) else x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return type(v)(x * f if _is_num(x) else x for x in v)
     except Exception:
-        return False
+        return None
+    return None
 
 
 def looks_ranked(obj) -> bool:
@@ -96,6 +139,23 @@ def _month_key(x):
     return None
 
 
+def _period_part(x, n: int):
+    """期望是序号 n 时：x 能看作季度（Q2、2024Q2、季度 Period）且 1≤n≤4 → 返回季度号；
+    能看作月份（'2024-05'、Timestamp、月 Period）且 1≤n≤12 → 返回月份号；否则 None。"""
+    x = _py(x)
+    if isinstance(x, pd.Period) and x.freqstr.upper().startswith("Q"):
+        return x.quarter if 1 <= n <= 4 else None
+    if isinstance(x, str):
+        m = _QUARTER_RE.match(x.strip())
+        if m:
+            return int(m.group(1)) if 1 <= n <= 4 else None
+    if 1 <= n <= 12:
+        mk = _month_key(x)
+        if mk is not None:
+            return int(mk[5:7])
+    return None
+
+
 def _decimals(v: float):
     s = repr(float(v))
     if "e" in s or "." not in s:
@@ -110,6 +170,10 @@ def _scalar_eq(a, e, tol) -> bool:
         return True
     if _is_nan(a) or _is_nan(e):
         return False
+    if _is_num(e) and not _is_num(a) and float(e).is_integer():
+        p = _period_part(a, int(e))     # 规则 11：月份/季度序号
+        if p is not None:
+            return p == int(e)
     if _is_num(a) and _is_num(e):
         e_is_float = isinstance(e, float)
         a, e = float(a), float(e)
@@ -185,7 +249,10 @@ def _vs_scalar(a, e, tol) -> bool:
     if isinstance(a, pd.Series) and len(a) == 1:
         if _scalar_eq(a.iloc[0], e, tol):
             return True
-        return isinstance(e, str) and _scalar_eq(a.index[0], e, tol)   # Series 只剩一项时，标签即答案
+        if isinstance(e, str) or (_is_num(e) and _period_part(a.index[0], int(e)) is not None
+                                  and float(e).is_integer()):
+            return _scalar_eq(a.index[0], e, tol)   # Series 只剩一项时，标签即答案
+        return False
     u = _unwrap_single(a)
     if u is not a and _is_scalar(u):
         return _scalar_eq(u, e, tol)
@@ -202,11 +269,31 @@ def _vs_scalar(a, e, tol) -> bool:
             items = list(a.iloc[0].values)
         if items is not None:
             labels = [x for x in map(_py, items) if isinstance(x, (str, pd.Timestamp, pd.Period))]
-            return len(labels) == 1 and _scalar_eq(labels[0], e, tol)
+            if len(labels) == 1 and _scalar_eq(labels[0], e, tol):
+                return True
+    # 规则 10：期望数值，实际是单行汇总
+    if _is_num(e):
+        vals = None
+        if isinstance(a, pd.DataFrame) and len(a) == 1:
+            vals = list(a.iloc[0].values)
+        elif isinstance(a, (pd.Series, dict)) and 1 < len(a) <= 3:
+            keys = list(a.index if isinstance(a, pd.Series) else a.keys())
+            if all(isinstance(k, str) and not _month_key(k) for k in keys):
+                vals = list(a.values if isinstance(a, pd.Series) else a.values())
+        if vals is not None:
+            return any(_is_num(_py(v)) and _scalar_eq(v, e, tol) for v in vals)
     return False
 
 
 def _vs_sequence(a, e: list, tol) -> bool:
+    # 规则 9：实际是 N 行表，任一列按顺序等于期望
+    if isinstance(a, pd.DataFrame) and a.shape[0] == len(e) and a.shape[0] > 1:
+        flat = _flatten(a)
+        for c in range(flat.shape[1]):
+            col = list(flat.iloc[:, c].values)
+            if all(_eq(_py(x), _py(y), tol, ordered=True) for x, y in zip(col, e)):
+                return True
+        return False
     if isinstance(a, pd.Series):
         a = list(a.values)
     elif isinstance(a, dict):
@@ -282,12 +369,65 @@ def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
     for c in candidates:
         if _series_eq(c, e, tol, ordered):
             return True
+    # 规则 8：按值找（标签列, 数值列）
+    for c in _label_value_series(a, len(e)):
+        if _series_eq(c, e, tol, ordered):
+            return True
     # 规则 4：两级 MultiIndex Series vs 透视宽表
     if isinstance(e.index, pd.MultiIndex) and e.index.nlevels == 2:
         wide = e.unstack()
         if _frame_eq(a, wide, tol, ordered=False) or _frame_eq(a.T, wide, tol, ordered=False):
             return True
     return False
+
+
+def _label_value_series(a: pd.DataFrame, n: int, max_cols: int = 20):
+    """规则 8：把表里每一对（标签列, 数值列）还原成 Series；有意义的行索引也算一列标签。"""
+    if len(a) != n:
+        return
+    flat = _flatten(a)
+    if flat.shape[1] > max_cols or flat.columns.duplicated().any():
+        return
+    for lc in flat.columns:
+        labels = flat[lc]
+        if pd.api.types.is_float_dtype(labels):
+            continue
+        for vc in flat.columns:
+            if vc == lc or not pd.api.types.is_numeric_dtype(flat[vc]) or pd.api.types.is_bool_dtype(flat[vc]):
+                continue
+            yield pd.Series(flat[vc].values, index=pd.Index(labels.values))
+
+
+def _same_values(x: pd.Series, y: pd.Series, tol) -> bool:
+    """两列的值作为多重集合是否相同（不看列名和顺序）。"""
+    if len(x) != len(y):
+        return False
+    xv, yv = [_py(v) for v in x.values], [_py(v) for v in y.values]
+    if all(_is_num(v) or _is_nan(v) for v in yv) and all(_is_num(v) or _is_nan(v) for v in xv):
+        key = lambda v: (1, 0.0) if _is_nan(v) else (0, float(v))  # noqa: E731
+        return all(_scalar_eq(p, q, tol) for p, q in zip(sorted(xv, key=key), sorted(yv, key=key)))
+    norm = lambda v: _month_key(v) or _label(v)  # noqa: E731
+    return sorted(map(norm, xv)) == sorted(map(norm, yv))
+
+
+def _match_columns(a: pd.DataFrame, e: pd.DataFrame, tol):
+    """规则 8（表）：同名列直接对应，其余期望列按值在实际表里找一列；找不全返回 None。"""
+    mapping, used = {}, set()
+    for ec in e.columns:
+        if ec in a.columns and ec not in used:
+            mapping[ec] = ec
+            used.add(ec)
+    for ec in e.columns:
+        if ec in mapping:
+            continue
+        for ac in a.columns:
+            if ac not in used and _same_values(a[ac], e[ec], tol):
+                mapping[ec] = ac
+                used.add(ac)
+                break
+        else:
+            return None
+    return pd.DataFrame({ec: a[ac].values for ec, ac in mapping.items()})
 
 
 def _vs_frame(a, e: pd.DataFrame, tol, ordered) -> bool:
@@ -332,7 +472,12 @@ def _frame_eq(a: pd.DataFrame, e: pd.DataFrame, tol, ordered) -> bool:
                 return False
             a = a.rename(columns={first[0]: "index"})
         else:
-            return False
+            if a.columns.duplicated().any() or e.columns.duplicated().any():
+                return False
+            matched = _match_columns(a, e, tol)
+            if matched is None:
+                return False
+            a = matched
     cols = list(e.columns)
     ra = [tuple(_py(v) for v in row) for row in a[cols].itertuples(index=False, name=None)]
     re_ = [tuple(_py(v) for v in row) for row in e[cols].itertuples(index=False, name=None)]

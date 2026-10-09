@@ -78,6 +78,8 @@ python run_react.py data/sample.csv "各地区各产品的销量分布，画图�
 # 3c. 评测（--agent react 测 ReAct 版；--oracle 不需要 Key，用标准答案自检评测流水线）
 python run_eval.py
 python run_eval.py --oracle
+python run_eval.py --repeat 3            # 同一配置连跑 3 次，看均值与波动
+python run_eval.py --rescore outputs/eval_xxx.json   # 不调模型，按当前比较器/标准答案重新打分
 
 # 3d. 单轮网页界面（工作流版）
 streamlit run ui/streamlit_app.py

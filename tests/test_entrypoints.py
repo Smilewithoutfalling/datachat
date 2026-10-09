@@ -29,3 +29,17 @@ def test_run_eval_oracle_cli(tmp_path):
                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     assert "100.0%" in p.stdout and out.exists()
+
+
+def test_run_eval_repeat_and_rescore_cli(tmp_path):
+    """阶段 1.5：--repeat 输出每次报告和汇总；--rescore 用存下的结构化结果离线重新打分。"""
+    out = tmp_path / "r.json"
+    p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--category", "ts", "--repeat", "2",
+                        "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    runs = sorted(tmp_path.glob("r_run*.json"))
+    assert len(runs) == 2 and list(tmp_path.glob("*_summary.json"))
+    p = subprocess.run([sys.executable, "run_eval.py", "--rescore", str(runs[0])],
+                       cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "13/13 = 100.0%" in p.stdout

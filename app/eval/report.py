@@ -7,28 +7,165 @@ B11 口径修正：
 - 分类统计：某类没有题时按空集计算（旧版 `items or self.results` 会退回到全部题）。
 - 新增：基础设施失败数（LLM 超时/限流/缺 Key）、平均耗时、平均 token。
 """
+import hashlib
 import json
+import os
+import platform
 import subprocess
 from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
 
 
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _git(*args):
+    return subprocess.run(["git", "-C", _REPO, *args], capture_output=True, text=True, timeout=5)
+
+
+def _sha_from_files(short: bool):
+    """不依赖 git 命令：直接读 .git/HEAD 与 refs（Windows 上 conda 环境常常找不到 git，B27）。"""
+    git_dir = os.path.join(_REPO, ".git")
+    head = open(os.path.join(git_dir, "HEAD"), encoding="utf-8").read().strip()
+    sha = head
+    if head.startswith("ref:"):
+        ref = head.split(" ", 1)[1].strip()
+        path = os.path.join(git_dir, *ref.split("/"))
+        if os.path.exists(path):
+            sha = open(path, encoding="utf-8").read().strip()
+        else:
+            sha = ""
+            packed = os.path.join(git_dir, "packed-refs")
+            if os.path.exists(packed):
+                for line in open(packed, encoding="utf-8"):
+                    parts = line.strip().split(" ")
+                    if len(parts) == 2 and parts[1] == ref:
+                        sha = parts[0]
+    if not sha:
+        return None
+    return (sha[:7] if short else sha) + "?"      # "?"：没能检查工作区是否有未提交改动
+
+
 def git_sha(short: bool = True) -> str:
+    """当前 commit；工作区有改动时加 -dirty。git 不可用时退回读 .git 文件，并在末尾加 "?"。"""
     try:
-        args = ["git", "rev-parse"] + (["--short"] if short else []) + ["HEAD"]
-        sha = subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True,
-                               text=True, timeout=5).stdout.strip()
-        return (sha + ("-dirty" if dirty else "")) if sha else "unknown"
+        r = _git("rev-parse", *(["--short"] if short else []), "HEAD")
+        sha = r.stdout.strip()
+        if sha:
+            dirty = _git("status", "--porcelain", "--untracked-files=no").stdout.strip()
+            return sha + ("-dirty" if dirty else "")
+    except Exception:
+        pass
+    try:
+        return _sha_from_files(short) or "unknown"
     except Exception:
         return "unknown"
 
 
+def run_metadata(llm_config=None, data_path: str | None = None) -> dict:
+    """报告里记下复现所需的环境：模型、温度、接口、依赖版本、数据文件指纹（B27）。"""
+    meta = {"python": platform.python_version()}
+    try:
+        import pandas
+        meta["pandas"] = pandas.__version__
+    except Exception:
+        pass
+    if llm_config is not None:
+        meta["model"] = getattr(llm_config, "model", None)
+        meta["temperature"] = getattr(llm_config, "temperature", None)
+        base = getattr(llm_config, "base_url", None) or ""
+        meta["base_url_host"] = base.split("//")[-1].split("/")[0] or None
+    if data_path and os.path.exists(data_path):
+        meta["data_sha256"] = hashlib.sha256(open(data_path, "rb").read()).hexdigest()[:12]
+    return meta
+
+
+# ---------------------------------------------------------------- 结果对象的可还原存储
+def _enc(x):
+    import math
+
+    import numpy as np
+    import pandas as pd
+    if isinstance(x, np.generic):
+        x = x.item()
+    if isinstance(x, tuple):
+        return {"t": [_enc(i) for i in x]}
+    if isinstance(x, (pd.Timestamp, pd.Period)):
+        return str(x.date()) if isinstance(x, pd.Timestamp) and x == x.normalize() else str(x)
+    if x is None or x is pd.NaT or x is pd.NA or (isinstance(x, float) and math.isnan(x)):
+        return None
+    if isinstance(x, (str, int, float, bool)):
+        return x
+    return str(x)
+
+
+def _dec(x):
+    if isinstance(x, dict) and "t" in x:
+        return tuple(_dec(i) for i in x["t"])
+    return float("nan") if x is None else x
+
+
+def _index(labels, names):
+    import pandas as pd
+    labels = [_dec(v) for v in labels]
+    if labels and all(isinstance(v, tuple) for v in labels):
+        return pd.MultiIndex.from_tuples(labels, names=names)
+    return pd.Index(labels, name=names[0] if names else None)
+
+
+def dump_obj(v):
+    """把结果对象存成可还原的 JSON（用于 --rescore 离线重新打分）。时间值存成字符串，
+    还原后不再是 Timestamp/Period，比较器对月份标签有归一规则，个别题可能与在线打分不同。"""
+    import numpy as np
+    import pandas as pd
+    try:
+        if isinstance(v, pd.DataFrame):
+            return {"kind": "frame", "index": [_enc(i) for i in v.index], "index_names": list(v.index.names),
+                    "columns": [_enc(c) for c in v.columns], "column_names": list(v.columns.names),
+                    "values": [[_enc(x) for x in row] for row in v.itertuples(index=False, name=None)]}
+        if isinstance(v, pd.Series):
+            return {"kind": "series", "index": [_enc(i) for i in v.index], "index_names": list(v.index.names),
+                    "name": _enc(v.name), "values": [_enc(x) for x in v.values]}
+        if isinstance(v, np.generic):
+            v = v.item()
+        if isinstance(v, tuple):
+            return {"kind": "tuple", "data": [dump_obj(x) for x in v]}
+        if isinstance(v, list):
+            return {"kind": "list", "data": [dump_obj(x) for x in v]}
+        if isinstance(v, dict):
+            return {"kind": "dict", "data": [[_enc(k), dump_obj(x)] for k, x in v.items()]}
+        return {"kind": "value", "data": _enc(v)}
+    except Exception:
+        return {"kind": "repr", "data": str(v)[:2000]}
+
+
+def load_obj(d):
+    import pandas as pd
+    if d is None:
+        return None
+    k = d.get("kind")
+    if k == "frame":
+        cols = _index(d["columns"], d.get("column_names") or [None])
+        return pd.DataFrame([[_dec(x) for x in row] for row in d["values"]],
+                            index=_index(d["index"], d.get("index_names") or [None]), columns=cols)
+    if k == "series":
+        return pd.Series([_dec(x) for x in d["values"]], index=_index(d["index"], d.get("index_names") or [None]),
+                         name=_dec(d.get("name")) if d.get("name") is not None else None)
+    if k == "tuple":
+        return tuple(load_obj(x) for x in d["data"])
+    if k == "list":
+        return [load_obj(x) for x in d["data"]]
+    if k == "dict":
+        return {_dec(key): load_obj(x) for key, x in d["data"]}
+    return _dec(d.get("data")) if k == "value" else d.get("data")
+
+
 class EvalReport:
-    def __init__(self, results: list):
-        """results: list[dict] from EvalRunner.run_all()"""
+    def __init__(self, results: list, meta: dict | None = None):
+        """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果"""
         self.results = results
+        self.meta = meta or {}
         self.total = len(results)
         self.by_category = {}
         for r in results:
@@ -88,6 +225,7 @@ class EvalReport:
             "time": datetime.now().isoformat(timespec="seconds"),
             "git_sha": git_sha(),
             "agent": agents[0] if len(agents) == 1 else agents,
+            **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
         }
@@ -105,6 +243,10 @@ class EvalReport:
                 "attempts": r.get("attempts"), "duration_s": r.get("duration_s"),
                 "tokens": r.get("tokens"), "code": r.get("code"),
                 "expected": str(r.get("expected"))[:500], "actual": str(r.get("actual"))[:500],
+                "answer": (r.get("answer") or "")[:2000],
+                # 可还原的结构化结果：比较器改了之后可以用 run_eval.py --rescore 离线重新打分（B26）
+                "expected_obj": dump_obj(r.get("expected")),
+                "actual_obj": dump_obj(r.get("actual")) if r.get("executed") else None,
             })
         data = {**self.summary(), **(extra or {}), "cases": rows}
         with open(path, "w", encoding="utf-8") as f:
@@ -120,6 +262,8 @@ class EvalReport:
         print("=" * 60)
         print("  DataChat 评测报告")
         print(f"  时间: {s['time']}    commit: {s['git_sha']}    agent: {s['agent']}")
+        if s.get("model"):
+            print(f"  模型: {s['model']}    temperature: {s.get('temperature')}    数据指纹: {s.get('data_sha256')}")
         print(f"  总用例: {self.total}")
         print("=" * 60)
 
