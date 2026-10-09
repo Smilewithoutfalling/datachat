@@ -74,7 +74,8 @@ class EvalRunner:
         if res.executed:
             out["executed"] = True
             out["actual"] = res.result
-            out["correct"] = results_equal(res.result, expected, ordered=case.ordered)
+            out["correct"] = results_equal(res.result, expected, ordered=case.ordered,
+                                           percent_equiv=case.percent_equiv)
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):
