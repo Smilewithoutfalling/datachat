@@ -152,3 +152,77 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 1. S 用自己的 Key 跑 `python run_eval.py` 和 `python run_eval.py --agent react`（各约 50 题，可加 `--no-dict` 对比字典增益），把带 SHA 的 JSON 报告数字补进本条，作为第一组可信基线；再人工抽检判错的题，确认是模型错还是比较器规则没覆盖。
 2. 提交本阶段改动并回填本条 SHA。
 3. 进入阶段 2：子进程沙箱（B01 B02 B03）。
+
+## [3] 2026-10-09 · 阶段 1.5 评测校准 · commit <待提交>
+基线：91575c5（b6568b9 + numpy 2.4.6 兼容 Python 3.11 + [2] 回填 SHA）。起因：S 在本地用真实 DeepSeek Key 跑了阶段 1 的评测（报告见 docs/eval/），逐题复核发现严格正确率严重低估，评测本身先要修准，否则阶段 2 改沙箱时没有可信的回归指标。
+
+### 当前技术栈
+与 [2] 相同，无新增依赖。新增 `app/eval/rescore.py`；`run_eval.py` 新增 `--repeat N`、`--rescore REPORT`。
+
+### 阶段 1 真实评测（S 本地，2026-10-09，50 题，data/sample_eval.csv）
+| 报告 | Agent | 字典 | 严格正确率 | 聚合 | 过滤 | 关联 | 时序 | 执行成功 | 首次报错 | 平均耗时 | 平均 token |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| eval_workflow_20261009_142257 | workflow | 开 | 56% | 11/15 | 11/12 | 5/10 | 1/13 | 100% | 1 | 22.7 s | 5788 |
+| eval_workflow_20261009_145029 | workflow | 关 | 58% | 14/15 | 11/12 | 3/10 | 1/13 | 100% | 4 | 24.2 s | 5957 |
+| eval_react_20261009_142854 | react | 开 | 46% | 8/15 | 7/12 | 4/10 | 4/13 | 100% | 13 | 6.2 s | 6297 |
+
+- eval_workflow_20261009_140017：50 题全部 401（Key 未配好），被正确归为基础设施失败（error_kind=llm），不计入。
+- 三份报告的 git_sha 都是 unknown，模型名未记录（见 B27），所以这组数字只能当参考，不能当基线。
+- 逐题人工复核（Hark 读输出判定，非独立评审）：workflow+字典 22 道判错里，18 道数值全对、只是形态不同，2 道是标准答案有问题，1 道理解分歧（corr_001 给占比），1 道口径分歧（agg_002 用加权均价）→ 人工口径约 46–48/50；无字典那次约 47/50。react 27 道判错里，形态误判 13，答案在结果里但没抽出来 5（返回整列排序），真错或不完整 9 → 约 36–41/50。
+- 字典开/关差 2 个百分点，人工口径也持平；两次 workflow 运行之间有 4–5 题翻转，单次运行看不出字典增益。
+
+### 本次完成（对照 [2]）
+| 问题 | 状态 | 证据 |
+|---|---|---|
+| B24 | 已解决（规则范围内） | eval/comparator.py 新增规则 8–12（文件头逐条说明）：8 按值找（标签列, 数值列）还原 Series、表的列按值匹配，不看列名；9 期望元组时 N 行表任一列按序相等即对；10 期望数值时单行汇总（1 行表或 ≤3 项文字标签的 Series/dict）含该值即对；11 期望月份/季度序号时接受 '2024-05'、Period、'Q2'、'2024Q2'；12 只对问"占比"的题（EvalCase.percent_equiv：agg_009、corr_003）接受 ×100/÷100，问"百分比"的 corr_002 仍要求百分数。tests/test_comparator_cases.py 按阶段 1 模型的真实输出新增 16 种应判对的写法、7 种应判错的答案（合计应判对 33、应判错 15）（含"整列碰巧包含中位数""加权均价""件数 vs 占比"）；tests/test_comparator.py 中"列名不同即判错"的断言改为按值判断 |
+| B25 | 已解决 | eval/cases.py 修 6 道标准答案：filt_003 去掉 drop_duplicates（题目问记录）；corr_003 groupby(group_keys=False) 去掉重复的 product 索引层；corr_007 改为先按产品×地区汇总再求标准差（题目是"在不同地区"）；corr_008、ts_009 去掉 astype(int)（原来把 .5 截掉）；ts_010 用 pct_change（题目是增长率，原来用 diff；本数据两者都是 5 月）。oracle 自检两种 Agent 仍 50/50 |
+| B26 | 部分解决 | 报告每题存 answer（最终回答）与可还原的 expected_obj / actual_obj；`run_eval.py --rescore` 不调模型、按当前比较器和标准答案重新打分，并逐题列出变化（oracle 报告往返 50/50，tests/test_comparator_cases.py::test_dump_load_keeps_judgement 覆盖全部 48 种写法）。codegen / reviewer / ReAct 提示词加"结果契约"：result 必须直接回答问题（问哪个给标签、问多少给数值、问各…给分组结果、问哪些记录给行），不用中间表或整张排序表收尾——这也是以后前端渲染需要的约定。仍未做：react 的最终文字回答不参与打分 |
+| B27 | 已解决 | eval/report.py git_sha 用 `git -C <仓库>`，git 不可用时直接读 .git/HEAD 与 refs，末尾加 "?" 表示没检查改动（tests/test_eval_cases.py::test_git_sha_without_git_binary）；报告记录模型、temperature、接口主机、Python/pandas 版本、数据文件 sha256 前 12 位，不记 Key（::test_report_metadata_records_model_and_data）；`--repeat N` 每次一份报告 + 汇总（均值、区间、标准差）（tests/test_entrypoints.py::test_run_eval_repeat_and_rescore_cli） |
+
+### 新发现
+| 编号 | 严重度 | 位置 | 描述 | 计划阶段 |
+|---|---|---|---|---|
+| B24 | P1 | eval/comparator.py | 规则 3 靠"列名 = 期望索引名"把表还原成 Series，模型改中文列名或多带列就判错；比例尺度、序号标签、元组 vs 两行表也不认。阶段 1 真实评测 workflow 22 道判错中 18 道属此类 | 1.5（本次） |
+| B25 | P1 | eval/cases.py | 6 道标准答案有误或与题意不符（见上） | 1.5（本次） |
+| B26 | P1 | eval/runner.py、react_agent.py | ReAct 打分取最后一次执行的 result，常是中间表；报告不存最终回答与结构化结果，比较器一改就得重新花钱跑 | 1.5 部分 / 3 |
+| B27 | P2 | eval/report.py | git_sha 在 S 的 Windows conda 环境里为 unknown；不记录模型；每配置只跑 1 次 | 1.5（本次） |
+| B28 | P1 | tools/sandbox.py | 沙箱 builtins 缺 `__import__`，pandas 内部延迟导入的方法（如 `pd.Timestamp.strftime`）报 KeyError，模型写的正常代码会失败；tests/test_sandbox.py::test_timestamp_strftime_works 以 xfail(strict) 登记 | 2 |
+
+### 假设与判断
+- 规则 8 只按值匹配列：单列表即使列名完全不同、值相同也判对。代价是理论上可能把"另一列碰巧同值"判对，60 行数据上概率可忽略；收益是不再因为中文列名误判。
+- 规则 10 限定"单行/≤3 项"：更长的容器不放行，否则"返回整列"会碰巧包含答案（tests 里的 agg_013 反例：中位数 58043.0 恰好等于华北总额）。
+- "答案在整列里但没抽出来"（react 返回各地区排序而不是"华南"）仍判错：产品要直接回答，靠结果契约解决，不靠比较器放宽。
+- 新规则对阶段 1 那三份报告的影响无法直接重算（旧报告只存了 500 字文本预览）。按逐题复核估计，workflow+字典的 22 道里规则可覆盖约 16 道（agg_009 corr_002 corr_003 ts_001–007 ts_010 ts_011 ts_013 filt_003 corr_007），剩下的 agg_008（一句话）、corr_004（多统计量 Series）、ts_008、ts_009（文字索引）靠结果契约。这是估计，以 S 下一轮实测为准。
+- 结果契约会改变模型输出，所以阶段 1.5 之后的数字与阶段 1 不可直接比较，需重新定基线。
+
+### 当前已知问题
+| 编号 | 严重度 | 位置 | 描述 | 计划阶段 |
+|---|---|---|---|---|
+| B01 | P0 | tools/sandbox.py run_code | 同进程 exec 可逃逸（读环境变量里的 Key、执行 shell、写文件） | 2 |
+| B02 | P0 | sandbox.py 线程 join | 超时杀不掉线程，无内存上限 | 2 |
+| B03 | P1 | sandbox.py 猴补丁 plt.savefig | 恢复已完整；全局状态并发互踩仍在 | 2 |
+| B28 | P1 | sandbox.py builtins | 缺 `__import__`，pandas 延迟导入失败 | 2 |
+| B04 | P1 | schema.py / dictionary.py | 污染已除；注入只做了截断 + 分隔块缓解 | 2（沙箱兜底）/ 7 |
+| B05 | P1 | graph.py _route_after_exec | 只修报错不修答错 | 7 |
+| B09 | P1 | schema.py | 无枚举值/范围/空值率 | 7 |
+| B26 | P2 | eval | ReAct 最终文字回答不参与打分 | 3 |
+| B12 | P2 | eval/comparator.py | 12 条规则之外的形态（文字句子、多统计量 Series、文字索引）仍判错，需人工抽检 | 3 |
+| B13 | P2 | eval/cases.py | 50 题 / 60 行单表，难度偏低 | 3 |
+| B17 | P2 | — | 无 CI、无日志框架（入口仍用 print） | 3 |
+| B18 | P1 | ui/chat_app.py | 无身份与持久化；临时文件不清理；记忆在进程内存 | 4 |
+| B20 | P2 | app/react_agent.py | create_react_agent 已弃用，需迁移 | 4 |
+| B21 | P2 | core/llm.py ReAct 路径 | ReAct 重试次数记为 None | 4 |
+| B22 | P2 | tools/csv_io.py | Big5 可能被 gb18030 误解码 | 4 |
+| B23 | P2 | — | 无限流、无模型降级、无 token 预算上限 | 4 |
+
+### 指标快照
+- 测试：248 项 = 243 通过 + 5 xfail（B01×4、B28×1）。[2] 为 173 项 = 169 通过 + 4 xfail。Python 3.11.17 与 3.12.15 各在 fresh venv 按 requirements-dev.txt 安装后结果相同。
+- oracle 自检：workflow 50/50、react 50/50；两份 oracle 报告 `--rescore` 往返后仍 50/50。
+- 真实 LLM 基线：待 S 用 deepseek flash 跑（见下一步），本条提交后回填。
+
+### 下一步
+1. S 在本地跑三组，每组 3 次（每次约 5 元）：
+   `python run_eval.py --repeat 3`、`python run_eval.py --no-dict --repeat 3`、`python run_eval.py --agent react --repeat 3`；
+   把 outputs/ 里的 *_run*.json 和 *_summary.json 放进 docs/eval/ 推到 eval-results 分支，Hark 复核后回填本条，作为第一组可信基线。预算紧可以先每组 1 次。
+2. 提交本阶段改动并回填 SHA。
+3. 进入阶段 2：子进程沙箱（B01 B02 B03 B28）。
