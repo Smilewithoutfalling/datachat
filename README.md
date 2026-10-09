@@ -57,6 +57,10 @@ pip install -r requirements.txt
 # 2. 配置 DeepSeek API Key
 cp .env.example .env      # 然后编辑 .env 填入 DEEPSEEK_API_KEY
 
+# 2b. 跑测试（不需要 API Key）
+pip install -r requirements-dev.txt
+python -m pytest -q
+
 # 3a. 工作流版（固定状态图）
 python run.py
 python run.py data/sample.csv "各产品的平均单价是多少？画柱状图。"
