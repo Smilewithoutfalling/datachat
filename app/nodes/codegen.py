@@ -1,10 +1,13 @@
-from app.llm import get_llm, strip_code
+from app.core.llm import node_llm, strip_code
 from app.tools.plotting import CHART_GUIDE
 
 _PROMPT = """根据分析计划写一段 pandas 代码。
 
 数据表结构：
 {schema}
+
+相关字段说明（来自数据字典）：
+{field_notes}
 
 用户问题：{question}
 
@@ -20,12 +23,13 @@ _PROMPT = """根据分析计划写一段 pandas 代码。
 {chart_guide}"""
 
 
-def generate_code(state):
-    llm = get_llm()
+def generate_code(state, config=None):
+    llm = node_llm(config)
     msg = _PROMPT.format(
         schema=state["schema"],
+        field_notes=state.get("field_notes") or "（无）",
         question=state["question"],
-        plan=state["plan"],
+        plan=state.get("plan", ""),
         chart_guide=CHART_GUIDE,
     )
-    return {"code": strip_code(llm.invoke(msg).content)}
+    return {"code": strip_code(llm.invoke(msg))}

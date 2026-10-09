@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest==9.1.1
+# openai SDK 的传输层依赖（版本由 openai==3.26.1 决定）；tests/test_llm.py 直接导入它来构造超时/限流异常，故显式锁定
+httpx2==2.13.1

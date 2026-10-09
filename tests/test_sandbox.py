@@ -57,6 +57,7 @@ def test_file_write_blocked(sample_df, chart_path, tmp_path):
 
 
 def test_timeout_reported(sample_df, chart_path):
-    # 注意 B02：超时后线程仍在后台运行，这里只验证超时会被报告
-    _, _, err = run_code("while True:\n    pass", sample_df, chart_path, timeout=1)
+    # 注意 B02：超时后线程仍在后台运行，这里只验证超时会被报告。
+    # 用有限的忙循环（约几秒）代替 while True：否则泄漏的线程会一直抢 GIL，拖慢后面所有测试
+    _, _, err = run_code("for _ in range(60_000_000):\n    pass", sample_df, chart_path, timeout=0.5)
     assert err and "TimeoutError" in err

@@ -14,6 +14,8 @@ class EvalCase:
     ground_truth: str       # pandas代码，执行后 result = 期望结果
     keywords: list = field(default_factory=list)   # 生成代码应包含的关键词
     has_chart: bool = False
+    # 结果顺序是否计分（B12）：只有题目明确要求排序/排名时为 True，比较器据此决定是否比较顺序
+    ordered: bool = False
 
 
 # ============================================================
@@ -128,6 +130,7 @@ FILT_CASES = [
         question="列出华东地区的所有销售记录，按日期排序。",
         ground_truth="result = df[df['region'] == '华东'].sort_values('date')[['date', 'region', 'product', 'units', 'price']]",
         keywords=["region", "sort_values"],
+        ordered=True,
     ),
     EvalCase(
         id="filt_003", category="filtering",
@@ -158,6 +161,7 @@ FILT_CASES = [
         question="销售额超过5000元的订单有哪些？按销售额从高到低排列。",
         ground_truth="result = df.assign(sales=df['units'] * df['price']).query('sales > 5000').sort_values('sales', ascending=False)[['date', 'region', 'product', 'units', 'price']]",
         keywords=["sales", "sort_values", ">"],
+        ordered=True,
     ),
     EvalCase(
         id="filt_008", category="filtering",
@@ -298,6 +302,7 @@ TS_CASES = [
         question="4月份各产品的销售额排名",
         ground_truth="df['date'] = pd.to_datetime(df['date']); result = df[df['date'].dt.month == 4].assign(sales=df['units'] * df['price']).groupby('product')['sales'].sum().sort_values(ascending=False)",
         keywords=["month", "groupby", "sum", "sort_values"],
+        ordered=True,
     ),
     EvalCase(
         id="ts_007", category="timeseries",
