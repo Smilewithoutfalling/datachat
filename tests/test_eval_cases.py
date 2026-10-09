@@ -107,3 +107,24 @@ def test_report_json(tmp_path):
     report.to_json(str(out))
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["overall"]["n"] == 3 and data["git_sha"] and len(data["cases"]) == 3
+    assert all("answer" in c and c["actual_obj"] and c["expected_obj"] for c in data["cases"])
+
+
+def test_report_metadata_records_model_and_data():
+    """B27：报告记录模型、温度、接口主机、数据指纹，但不记录 Key。"""
+    from app.eval.report import run_metadata
+    meta = run_metadata(LLMConfig(model="deepseek-x", api_key="sk-secret"), EVAL_DATA)
+    assert meta["model"] == "deepseek-x" and meta["temperature"] == 0.0
+    assert meta["base_url_host"] == "api.deepseek.com" and len(meta["data_sha256"]) == 12
+    assert "sk-secret" not in json.dumps(meta)
+
+
+def test_git_sha_without_git_binary(monkeypatch):
+    """B27：git 命令不可用（Windows conda 环境常见）时，从 .git 文件读出 SHA，末尾加 ? 表示未检查改动。"""
+    from app.eval import report as rep
+
+    def boom(*a, **k):
+        raise FileNotFoundError("git")
+    monkeypatch.setattr(rep, "_git", boom)
+    sha = rep.git_sha()
+    assert sha != "unknown" and sha.endswith("?") and len(sha) == 8
