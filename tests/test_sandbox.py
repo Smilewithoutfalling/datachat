@@ -61,3 +61,9 @@ def test_timeout_reported(sample_df, chart_path):
     # 用有限的忙循环（约几秒）代替 while True：否则泄漏的线程会一直抢 GIL，拖慢后面所有测试
     _, _, err = run_code("for _ in range(60_000_000):\n    pass", sample_df, chart_path, timeout=0.5)
     assert err and "TimeoutError" in err
+
+
+@pytest.mark.xfail(strict=True, reason="B28：沙箱 builtins 缺 __import__，pandas 内部延迟导入（Timestamp.strftime）报 KeyError；阶段 2 子进程沙箱解决")
+def test_timestamp_strftime_works(sample_df, chart_path):
+    result, _, err = run_code("result = pd.Timestamp('2024-05-31').strftime('%Y-%m')", sample_df, chart_path)
+    assert err is None and result == "2024-05"
