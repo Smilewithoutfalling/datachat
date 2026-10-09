@@ -9,8 +9,7 @@ from app.core import analyze
 from app.eval.cases import EvalCase
 from app.eval.comparator import results_equal
 from app.tools.csv_io import read_csv
-from app.tools.persist import new_chart_path
-from app.tools.sandbox import run_code
+from app.tools.sandbox import run_trusted
 
 
 class EvalRunner:
@@ -27,9 +26,8 @@ class EvalRunner:
         self.max_attempts = max_attempts
 
     def _run_code(self, code: str):
-        """在 sandbox 中执行代码，返回 (result, error)。"""
-        chart_path = new_chart_path()
-        result, chart, error = run_code(code, self.df.copy(), chart_path)
+        """执行标准答案（可信代码，本进程执行，不走子进程沙箱），返回 (result, error)。"""
+        result, error = run_trusted(code, self.df.copy())
         return result, error or None
 
     def run_single(self, case: EvalCase):
