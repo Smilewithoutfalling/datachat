@@ -88,13 +88,15 @@ def test_no_double_execution(monkeypatch):
     from app.eval import runner as runner_mod
     from app.nodes import executor
     calls = []
-    real = executor.run_code
+    real_code, real_trusted = executor.run_code, runner_mod.run_trusted
 
-    def counting(*a, **k):
-        calls.append(a[0])
-        return real(*a, **k)
-    monkeypatch.setattr(executor, "run_code", counting)
-    monkeypatch.setattr(runner_mod, "run_code", counting)
+    def counting(real):
+        def f(*a, **k):
+            calls.append(a[0])
+            return real(*a, **k)
+        return f
+    monkeypatch.setattr(executor, "run_code", counting(real_code))         # 模型代码：子进程沙箱
+    monkeypatch.setattr(runner_mod, "run_trusted", counting(real_trusted))  # 标准答案：本进程
     case = ALL_CASES[0]
     _runner("workflow", lambda c: oracle_model(c.ground_truth)).run_single(case)
     assert len(calls) == 2
