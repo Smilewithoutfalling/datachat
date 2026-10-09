@@ -1,16 +1,30 @@
-"""评测执行器：对每条用例调用工作流，执行 ground truth，比较结果。"""
+"""评测执行器：对每条用例调用 analyze()，执行 ground truth，比较结果。
 
+阶段 1 变化：
+- 走统一的 analyze()，两种 Agent 都能测（agent="workflow" | "react"）。
+- 直接用 analyze() 返回的结构化 result 打分，不再把最终代码重跑一遍（B07：消除双重执行）。
+- 每题记录耗时与 token；LLM/基础设施失败（error_kind="llm"）单独计数，不与"代码写错"混在一起。
+"""
+from app.core import analyze
 from app.eval.cases import EvalCase
 from app.eval.comparator import results_equal
-from app.tools.sandbox import run_code
 from app.tools.csv_io import read_csv
 from app.tools.persist import new_chart_path
+from app.tools.sandbox import run_code
 
 
 class EvalRunner:
-    def __init__(self, df_path: str):
+    def __init__(self, df_path: str, *, agent: str = "workflow", llm_config=None,
+                 model_factory=None, use_dictionary: bool = True, max_attempts: int = 3):
+        """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
+        为 None 时用真实模型（llm_config 或环境变量）。"""
         self.df_path = df_path
         self.df = read_csv(df_path)
+        self.agent = agent
+        self.llm_config = llm_config
+        self.model_factory = model_factory
+        self.use_dictionary = use_dictionary
+        self.max_attempts = max_attempts
 
     def _run_code(self, code: str):
         """在 sandbox 中执行代码，返回 (result, error)。"""
@@ -21,80 +35,47 @@ class EvalRunner:
     def run_single(self, case: EvalCase):
         """执行单条用例，返回结果 dict。
 
-        结果包含:
-            executed: bool     — 工作流是否成功执行（无error）
-            correct: bool      — 结果是否正确
-            initial_error: str — 初始执行是否报错
-            error: str         — 最终错误信息（如果有）
-            attempts: int      — 重试次数
-            expected: any      — ground truth 期望结果
-            actual: any        — 模型生成代码的执行结果
-            code: str          — 最终代码
+        executed: bool      — 是否有代码执行成功并拿到结果
+        correct: bool       — 结果是否正确（只有 executed 才可能为 True）
+        initial_error: bool — 第一次执行是否报错（用于修复率）
+        infra_error: bool   — 是否因 LLM/基础设施失败而没有答案（超时、限流、缺 Key 等）
+        error / error_kind  — 最终错误
+        attempts / expected / actual / code / answer / chart / duration_s / tokens
         """
-        result = {
-            "case": case,
-            "executed": False,
-            "correct": False,
-            "initial_error": None,
-            "error": None,
-            "attempts": 0,
-            "expected": None,
-            "actual": None,
-            "code": "",
+        out = {
+            "case": case, "agent": self.agent, "executed": False, "correct": False,
+            "initial_error": False, "infra_error": False, "error": None, "error_kind": None,
+            "attempts": 0, "expected": None, "actual": None, "code": "", "answer": "",
+            "chart": None, "duration_s": None, "tokens": None,
         }
 
-        # 1. 运行 ground truth 获取期望结果
-        expected_result, gt_error = self._run_code(case.ground_truth)
+        # 1. ground truth
+        expected, gt_error = self._run_code(case.ground_truth)
         if gt_error:
-            result["error"] = f"[ground_truth 执行失败] {gt_error}"
-            return result
-        result["expected"] = expected_result
+            out["error"], out["error_kind"] = f"[ground_truth 执行失败] {gt_error}", "ground_truth"
+            return out
+        out["expected"] = expected
 
-        # 2. 调用完整工作流（需要 DeepSeek API）
-        try:
-            from app.graph import build_graph
-            from app.tools.dictionary import augment_question, load_retriever
-            from app.tools.schema import describe_csv
+        # 2. 被测 Agent
+        chat_model = self.model_factory(case) if self.model_factory else None
+        res = analyze(self.df_path, case.question, agent=self.agent, llm_config=self.llm_config,
+                      chat_model=chat_model, max_attempts=self.max_attempts,
+                      use_dictionary=self.use_dictionary, log=False)
+        out.update({
+            "attempts": res.attempts, "code": res.code, "answer": res.answer,
+            "initial_error": res.initial_error is not None,
+            "infra_error": res.error_kind in ("llm", "dataset"),
+            "error": res.error, "error_kind": res.error_kind,
+            "chart": res.chart_path, "duration_s": res.timings.get("total"),
+            "tokens": res.usage.total_tokens if res.usage.reported else None,
+        })
 
-            schema = describe_csv(self.df_path)
-            retriever = load_retriever(self.df_path)
-            app = build_graph()
-            state = app.invoke({
-                "question": augment_question(case.question, retriever),
-                "df_path": self.df_path,
-                "schema": schema,
-                "attempts": 0,
-                "max_attempts": 3,
-            })
-        except Exception as e:
-            result["error"] = f"[工作流调用失败] {e}"
-            return result
-
-        result["attempts"] = state.get("attempts", 0)
-        result["code"] = state.get("code", "")
-        final_error = state.get("error", "")
-
-        # 判断初始是否报错
-        if result["attempts"] > 0:
-            result["initial_error"] = True
-
-        if not final_error:
-            # 3. 无错误：执行模型生成的代码，比较结果
-            actual_result, exec_error = self._run_code(state["code"])
-            if exec_error:
-                result["error"] = f"[最终代码执行失败] {exec_error}"
-                return result
-            result["executed"] = True
-            result["actual"] = actual_result
-            result["correct"] = results_equal(actual_result, expected_result)
-        elif result["attempts"] >= state.get("max_attempts", 3):
-            # 用尽重试仍失败
-            result["error"] = final_error
-        else:
-            # 不应该走到这里（error但未用尽重试），保守处理
-            result["error"] = final_error
-
-        return result
+        # 3. 打分：直接用 analyze 的结构化结果
+        if res.executed:
+            out["executed"] = True
+            out["actual"] = res.result
+            out["correct"] = results_equal(res.result, expected, ordered=case.ordered)
+        return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):
         """逐个执行用例，返回 results list。"""
