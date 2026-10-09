@@ -23,6 +23,13 @@
  11. 期望是月份/季度序号（5、2），实际是 '2024-05' / Period / 'Q2' / '2024Q2' → 比较月份/季度部分。
  12. 百分数与比例：只对题目问"占比"的用例（EvalCase.percent_equiv）接受 ×100 / ÷100；
      题目明确要"百分比"时仍按原值比较。
+阶段 1.5 第二轮（B29，来自 Qwen3.5 实测复核）：
+ 13. 期望 1 行表（"哪条记录"），实际是这一行的 Series（索引是列名）→ 转成 1 行表再比。
+ 14. 期望索引/列是月份序号（1–12，groupby(dt.month) 的结果），实际是 '2024-01' / Timestamp / Period → 比较月份部分。
+ 15. ISO 周标签（'2024-W01'）也算时间索引，两边都是时间索引时按位置比值。
+ 16. 模型自己起键名的汇总 dict：期望数值时 ≤4 项也可（规则 10 的 Series 仍 ≤3）；
+     期望标签元组（最高/最低月份）时，取 dict 里的标签值按顺序比较。
+ 17. 实际多了"总计/合计/All/Total"汇总行或列（crosstab margins=True）而期望没有 → 去掉再比。
 规则之外的形态差异仍判错，需人工抽检（见 DEVLOG）。
 """
 import math
@@ -33,6 +40,8 @@ import pandas as pd
 
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 _QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
+_WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}$", re.IGNORECASE)
+_MARGIN_LABELS = {"总计", "合计", "总和", "汇总", "all", "total", "sum"}
 
 
 # ------------------------------------------------------------------ 入口
@@ -210,12 +219,42 @@ def _is_scalar(v) -> bool:
     return not isinstance(v, (pd.Series, pd.DataFrame, list, tuple, dict, set))
 
 
+def _is_margin(x) -> bool:
+    return isinstance(x, str) and x.strip().lower() in _MARGIN_LABELS
+
+
+def _drop_margins(a, e):
+    """规则 17：实际多出的汇总行/列（期望里没有）去掉。"""
+    if not isinstance(a, (pd.Series, pd.DataFrame)) or not isinstance(e, (pd.Series, pd.DataFrame)):
+        return a
+    e_labels = {_label(x) for x in e.index}
+    if isinstance(e, pd.DataFrame):
+        e_labels |= {_label(c) for c in e.columns}
+    out = a
+    rows = [x for x in out.index if _is_margin(x) and _label(x) not in e_labels]
+    if rows and len(rows) < len(out):
+        out = out.drop(index=rows)
+    if isinstance(out, pd.DataFrame):
+        cols = [c for c in out.columns if _is_margin(c) and _label(c) not in e_labels]
+        if cols and len(cols) < out.shape[1]:
+            out = out.drop(columns=cols)
+    return out
+
+
 # ------------------------------------------------------------------ 分派
 def _eq(a, e, tol, ordered) -> bool:
     if a is None and e is None:
         return True
     if a is None or e is None:
         return False
+    if isinstance(e, (pd.Series, pd.DataFrame)) and isinstance(a, (pd.Series, pd.DataFrame)):
+        trimmed = _drop_margins(a, e)
+        if trimmed is not a:
+            return _eq(trimmed, e, tol, ordered) or _eq_core(a, e, tol, ordered)
+    return _eq_core(a, e, tol, ordered)
+
+
+def _eq_core(a, e, tol, ordered) -> bool:
     if isinstance(e, pd.DataFrame):
         return _vs_frame(a, e, tol, ordered)
     if isinstance(e, pd.Series):
@@ -276,7 +315,7 @@ def _vs_scalar(a, e, tol) -> bool:
         vals = None
         if isinstance(a, pd.DataFrame) and len(a) == 1:
             vals = list(a.iloc[0].values)
-        elif isinstance(a, (pd.Series, dict)) and 1 < len(a) <= 3:
+        elif (isinstance(a, pd.Series) and 1 < len(a) <= 3) or (isinstance(a, dict) and 1 < len(a) <= 4):
             keys = list(a.index if isinstance(a, pd.Series) else a.keys())
             if all(isinstance(k, str) and not _month_key(k) for k in keys):
                 vals = list(a.values if isinstance(a, pd.Series) else a.values())
@@ -294,6 +333,11 @@ def _vs_sequence(a, e: list, tol) -> bool:
             if all(_eq(_py(x), _py(y), tol, ordered=True) for x, y in zip(col, e)):
                 return True
         return False
+    if isinstance(a, dict) and len(a) > len(e) and all(isinstance(_py(x), str) for x in e):
+        # 规则 16：{'最高月份': '2024-06', '最高销售额': 54406.5, ...} → 取标签值
+        labels = [_py(x) for x in a.values() if isinstance(_py(x), (str, pd.Timestamp, pd.Period))]
+        if len(labels) == len(e):
+            a = labels
     if isinstance(a, pd.Series):
         a = list(a.values)
     elif isinstance(a, dict):
@@ -320,7 +364,8 @@ def _is_time_index(idx) -> bool:
     if isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex)):
         return True
     try:
-        return len(idx) > 0 and all(_month_key(x) is not None for x in idx)
+        return len(idx) > 0 and (all(_month_key(x) is not None for x in idx)
+                                 or all(isinstance(x, str) and _WEEK_RE.match(x.strip()) for x in idx))
     except Exception:
         return False
 
@@ -340,7 +385,25 @@ def _series_eq(a: pd.Series, e: pd.Series, tol, ordered) -> bool:
                 return all(_scalar_eq(av[k], v, tol) for k, v in zip(ke, e.values))
         # 周/日频等无法按月对齐时，按位置比较数值
         return all(_scalar_eq(x, y, tol) for x, y in zip(a.values, e.values))
+    # 规则 14：期望索引是月份序号
+    parts = _month_numbers(a.index, e.index)
+    if parts is not None:
+        return _mapping_eq(dict(zip(parts, a.values)), dict(zip(e.index, e.values)), tol, ordered)
     return False
+
+
+def _month_numbers(idx, e_idx):
+    """规则 14：e_idx 全是 1–12 的整数、idx 全能看作月份时，返回 idx 的月份号列表；否则 None。"""
+    try:
+        ev = [_py(x) for x in e_idx]
+        if not ev or not all(_is_num(x) and float(x).is_integer() and 1 <= x <= 12 for x in ev):
+            return None
+        parts = [_period_part(x, 12) for x in idx]
+        if None in parts or len(set(parts)) != len(parts):
+            return None
+        return parts
+    except Exception:
+        return None
 
 
 def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
@@ -406,6 +469,9 @@ def _same_values(x: pd.Series, y: pd.Series, tol) -> bool:
     if all(_is_num(v) or _is_nan(v) for v in yv) and all(_is_num(v) or _is_nan(v) for v in xv):
         key = lambda v: (1, 0.0) if _is_nan(v) else (0, float(v))  # noqa: E731
         return all(_scalar_eq(p, q, tol) for p, q in zip(sorted(xv, key=key), sorted(yv, key=key)))
+    parts = _month_numbers(xv, yv)
+    if parts is not None:                                  # 规则 14
+        return sorted(parts) == sorted(int(v) for v in yv)
     norm = lambda v: _month_key(v) or _label(v)  # noqa: E731
     return sorted(map(norm, xv)) == sorted(map(norm, yv))
 
@@ -437,6 +503,10 @@ def _vs_frame(a, e: pd.DataFrame, tol, ordered) -> bool:
             return _frame_eq(wide, e, tol, ordered=False) or _frame_eq(wide.T, e, tol, ordered=False)
         if e.shape[1] == 1:
             return _series_eq(a, e.iloc[:, 0], tol, ordered)
+        if len(e) == 1 and not isinstance(a.index, pd.MultiIndex):   # 规则 13
+            e_cols = {_label(c) for c in e.columns}
+            if e_cols <= {_label(x) for x in a.index}:
+                return _frame_eq(a.to_frame().T, e, tol, ordered=False)
         return False
     if isinstance(a, (dict, list)):
         try:
