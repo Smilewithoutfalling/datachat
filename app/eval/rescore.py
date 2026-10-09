@@ -11,8 +11,7 @@ from app.eval.cases import ALL_CASES
 from app.eval.comparator import results_equal
 from app.eval.report import load_obj
 from app.tools.csv_io import read_csv
-from app.tools.sandbox import run_code
-from app.tools.persist import new_chart_path
+from app.tools.sandbox import run_trusted
 
 
 def rescore(report_path: str, data_path: str | None = None) -> dict:
@@ -29,7 +28,7 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             skipped.append(row["id"])
             rows.append({"id": row["id"], "category": row["category"], "correct": row.get("correct")})
             continue
-        expected, _, err = run_code(case.ground_truth, df.copy(), new_chart_path())
+        expected, err = run_trusted(case.ground_truth, df.copy())
         try:
             actual = load_obj(row["actual_obj"])
         except Exception:
