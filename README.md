@@ -34,6 +34,11 @@
 
 ## 文件导读
 
+- `app/core/`         —— **内核服务层（阶段 1）**：所有入口只调 `analyze()`
+  - `service.py`：`analyze(dataset, question, *, agent="workflow"|"react", llm_config, ...)` → `AnalysisResult`
+  - `result.py`：结构化结果（回答、原始结果对象、代码、图表、执行轨迹、错误、耗时、token）
+  - `llm.py`：`LLMConfig`（显式超时/重试/退避）、`LLMClient`（带退避重试 + token 统计）
+  - `testing.py`：离线假模型（单测与 `run_eval.py --oracle` 用）
 - `app/graph.py`     —— 工作流版状态图与条件边（先读这个，理解整体流程）
 - `app/react_agent.py` —— ReAct 版（自主工具调用），对比着读最能体会两种架构差异
 - `app/state.py`     —— 工作流版在节点间流转的 State 定义
@@ -44,7 +49,8 @@
 - `app/tools/sandbox.py`  —— 受限命名空间 + 超时的代码执行（安全相关）
 - `app/tools/plotting.py` —— 中文字体 + 汇报级图表样式（解决中文乱码、美化）
 - `app/tools/schema.py`   —— CSV 表结构描述
-- `app/llm.py`       —— DeepSeek（OpenAI 兼容）模型封装
+- `app/llm.py`       —— 兼容层（旧的 get_llm），实现已移到 `app/core/llm.py`
+- `app/eval/`        —— 评测：50 题用例、比较器（顺序/答案形态规则见 comparator.py 文件头）、报告
 - `ui/streamlit_app.py` —— 单轮网页界面（工作流版）
 - `ui/chat_app.py`   —— 多轮对话界面（ReAct 版 + 记忆，支持追问）
 
@@ -69,12 +75,28 @@ python run.py data/sample.csv "各产品的平均单价是多少？画柱状图�
 python run_react.py
 python run_react.py data/sample.csv "各地区各产品的销量分布，画图说明。"
 
-# 3c. 单轮网页界面（工作流版）
+# 3c. 评测（--agent react 测 ReAct 版；--oracle 不需要 Key，用标准答案自检评测流水线）
+python run_eval.py
+python run_eval.py --oracle
+
+# 3d. 单轮网页界面（工作流版）
 streamlit run ui/streamlit_app.py
 
-# 3d. 多轮对话界面（ReAct 版，支持记忆与追问）
+# 3e. 多轮对话界面（ReAct 版，支持记忆与追问）
 streamlit run ui/chat_app.py
 ```
+
+在代码里调用：
+
+```python
+from app.core import analyze, LLMConfig
+res = analyze("data/sample.csv", "哪个地区的总销售额最高？", agent="workflow",
+              llm_config=LLMConfig.from_env(timeout=30, max_retries=3))
+print(res.answer, res.result, res.usage.total_tokens, res.timings["total"])
+```
+
+可选环境变量：`DATACHAT_LLM_TIMEOUT`（单次请求超时秒数，默认 60）、`DATACHAT_LLM_MAX_RETRIES`（默认 3）、`DEEPSEEK_BASE_URL`。
+CSV 编码自动检测 UTF-8 / UTF-16（BOM）/ GB18030（含 GBK）；识别不了会明确报错，不再静默乱码。
 
 生成的图表保存在 `outputs/charts/`（每次唯一命名，不覆盖历史）；
 每次运行追加一行记录到 `outputs/runs.jsonl`（问了什么、答了什么、生成了哪些图）。
