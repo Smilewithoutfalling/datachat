@@ -40,6 +40,49 @@ SHOULD_PASS = [
                "result = df.assign(s=df['units'] * df['price']).groupby(df['date'].dt.strftime('%Y-%m'))['s'].sum()"),
     ("ts_007", MONTHLY + "result = (m.idxmax(), m.idxmin())"),                             # Timestamp vs 'YYYY-MM'
     ("ts_007", MONTHLY + "result = (m.idxmax().to_period('M'), m.idxmin().to_period('M'))"),
+    # ---- 阶段 1.5（B24）：阶段 1 真实评测里被误判的写法，按模型实际输出复刻 ----
+    ("ts_001", MONTHLY + "result = pd.DataFrame({'年月': m.index.strftime('%Y-%m'), '销售额': m.values})"),  # 中文列名
+    ("ts_004", "df['date'] = pd.to_datetime(df['date'])\n"
+               "u = df[df['product'] == 'A'].set_index('date')['units'].resample('ME').sum()\n"
+               "result = pd.DataFrame({'month': u.index.strftime('%Y-%m'), 'units': u.values, 'diff': u.diff().values})"),
+    ("ts_005", "df['date'] = pd.to_datetime(df['date'])\n"
+               "c = df.groupby(df['date'].dt.strftime('%Y-%m')).size()\n"
+               "result = pd.DataFrame({'月份': c.index, '订单数量': c.values})"),
+    ("ts_006", "df['date'] = pd.to_datetime(df['date'])\n"
+               "s = df[df['date'].dt.month == 4].assign(sales=df['units'] * df['price']).groupby('product')['sales'].sum()"
+               ".sort_values(ascending=False)\n"
+               "result = pd.DataFrame({'产品': s.index, '销售额': s.values, '排名': range(1, len(s) + 1)})"),
+    ("ts_011", "df['date'] = pd.to_datetime(df['date'])\n"
+               "g = df.groupby(df['date'].dt.strftime('%Y-%m'))\n"
+               "result = pd.DataFrame({'month': list(g.groups), 'avg_price_weighted': (g.apply(lambda x: (x.units*x.price).sum()/x.units.sum())).values,"
+               " 'avg_price_simple': g['price'].mean().values})"),
+    ("ts_013", "df['date'] = pd.to_datetime(df['date'])\n"
+               "w = df.set_index('date')['units'].resample('W').sum()\n"
+               "result = pd.DataFrame({'week_start': w.index - pd.Timedelta(days=6), 'units': w.values})"),   # 周起始日标签
+    ("corr_002", "s = (df['units'] * df['price']).groupby(df['region']).sum()\n"
+                 "result = pd.DataFrame({'region': s.index, '销售额': s.values, '销售额占比(%)': s.values / s.sum() * 100})"
+                 ".sort_values('销售额', ascending=False)"),                                      # 多带一列
+    ("corr_008", "d = df[df['product'] == 'A'].assign(sales=lambda x: x['units'] * x['price'])\n"
+                 "s = d.groupby('region')['sales'].sum().sort_values(ascending=False)\n"
+                 "result = pd.DataFrame({'地区': s.index, '产品A总销售额': s.values})"),
+    ("agg_009", "s = df.groupby('product')['units'].sum()\n"
+                "result = pd.DataFrame({'product': s.index, '销量占比(%)': (s / s.sum() * 100).round(2).values})"),  # 占比：百分数
+    ("corr_003", "s = df.assign(sales=df['units'] * df['price']).pivot_table(index='product', columns='region', values='sales', aggfunc='sum')\n"
+                 "result = s.div(s.sum(axis=1), axis=0).round(4)"),                                 # 占比：比例宽表
+    ("ts_002", "df['date'] = pd.to_datetime(df['date'])\n"
+               "q = df.assign(sales=df['units'] * df['price']).groupby('Q' + df['date'].dt.quarter.astype(str))['sales'].sum()\n"
+               "result = q[q == q.max()]"),                                                        # 'Q2' vs 2
+    ("ts_010", "df['date'] = pd.to_datetime(df['date'])\n"
+               "m = df.set_index('date')['units'].resample('ME').sum().pct_change()\n"
+               "result = str(m.idxmax())[:7]"),                                           # '2024-05' vs 5
+    ("ts_003", "df['date'] = pd.to_datetime(df['date'])\n"
+               "j = df[df['date'].dt.month == 1]['units'].sum(); r = df[df['date'].dt.month == 3]['units'].sum()\n"
+               "result = pd.DataFrame({'年份': [2024], '1月销量': [j], '3月销量': [r], '增长量': [r - j]})"),  # 单行汇总
+    ("ts_007", MONTHLY + "result = pd.DataFrame({'类型': ['最高', '最低'], '月份': [str(m.idxmax())[:7], str(m.idxmin())[:7]],"
+                         " '销售额': [m.max(), m.min()]})"),                                       # 两行表 vs 元组
+    ("filt_003", "result = df[(df['price'] >= 50) & (df['price'] <= 100)].reset_index(drop=True)"),  # gold 修正后：全部记录
+    ("corr_007", "t = df.groupby(['product', 'region'])['units'].sum()\n"
+                 "result = t.groupby(level=0).agg(['std', 'mean']).rename(columns={'std': '销量标准差'})"),
 ]
 
 SHOULD_FAIL = [
@@ -56,6 +99,18 @@ SHOULD_FAIL = [
                  "result = (df['units'] * df['price']).groupby(df['region']).sum() / total"),  # 比例 vs 百分比
     ("ts_003", "df['date'] = pd.to_datetime(df['date'])\n"
                "result = int(df[df['date'].dt.month == 1]['units'].sum() - df[df['date'].dt.month == 3]['units'].sum())"),
+    # ---- 阶段 1.5：新规则不能放过的错误 ----
+    ("agg_013", "result = df.assign(s=df['units'] * df['price']).groupby('region')['s'].sum()"),  # 整列碰巧含中位数
+    ("agg_013", "result = df.assign(s=df['units'] * df['price']).groupby('region')['s'].median()"),  # 口径错
+    ("agg_002", "d = df.assign(s=df['units'] * df['price']).groupby('product')[['s', 'units']].sum()\n"
+                "result = pd.DataFrame({'product': d.index, '平均单价': d['s'] / d['units']})"),           # 加权均价 ≠ 简单均价
+    ("corr_001", "t = pd.crosstab(df['region'], df['product'], values=df['units'], aggfunc='sum')\n"
+                 "result = t.div(t.sum(axis=1), axis=0) * 100"),                                       # 件数 vs 占比
+    ("agg_015", "result = df.assign(s=df['units'] * df['price']).groupby('region')['s'].mean()"),      # 理解错
+    ("ts_010", "df['date'] = pd.to_datetime(df['date'])\n"
+               "m = df.set_index('date')['units'].resample('ME').sum().pct_change()\n"
+               "result = str(m.idxmin())[:7]"),                                           # 月份错
+    ("ts_007", MONTHLY + "result = pd.DataFrame({'月份': [str(m.idxmin())[:7], str(m.idxmax())[:7]]})"),  # 顺序反
 ]
 
 
@@ -68,10 +123,24 @@ def _exec(code):
 @pytest.mark.parametrize("cid,code", SHOULD_PASS, ids=[f"{c}-{i}" for i, (c, _) in enumerate(SHOULD_PASS)])
 def test_equivalent_forms_judged_correct(cid, code):
     case = CASES[cid]
-    assert results_equal(_exec(code), _exec(case.ground_truth), ordered=case.ordered)
+    assert results_equal(_exec(code), _exec(case.ground_truth), ordered=case.ordered,
+                         percent_equiv=case.percent_equiv)
 
 
 @pytest.mark.parametrize("cid,code", SHOULD_FAIL, ids=[f"{c}-{i}" for i, (c, _) in enumerate(SHOULD_FAIL)])
 def test_wrong_answers_judged_wrong(cid, code):
     case = CASES[cid]
-    assert not results_equal(_exec(code), _exec(case.ground_truth), ordered=case.ordered)
+    assert not results_equal(_exec(code), _exec(case.ground_truth), ordered=case.ordered,
+                             percent_equiv=case.percent_equiv)
+
+
+@pytest.mark.parametrize("cid,code,expect", [(c, k, True) for c, k in SHOULD_PASS] + [(c, k, False) for c, k in SHOULD_FAIL],
+                         ids=lambda x: x if isinstance(x, str) and len(x) < 10 else "")
+def test_dump_load_keeps_judgement(cid, code, expect):
+    """B26：报告里存的结构化结果还原后，--rescore 的判定要与在线一致。"""
+    from app.eval.report import dump_obj, load_obj
+    import json
+    case = CASES[cid]
+    restored = load_obj(json.loads(json.dumps(dump_obj(_exec(code)), default=str)))
+    assert results_equal(restored, _exec(case.ground_truth), ordered=case.ordered,
+                         percent_equiv=case.percent_equiv) is expect
