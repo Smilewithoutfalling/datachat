@@ -1,8 +1,12 @@
-langgraph
-langchain-openai
-pandas
-matplotlib
-python-dotenv
-streamlit
-rank_bm25
-jieba
+# 运行依赖（版本锁定于 2026-10-09，在 Python 3.12 + 下列版本上通过 pytest）
+langgraph==1.2.14
+langchain-core==1.6.9
+langchain-openai==1.7.0
+openai==3.26.1
+pandas==3.0.6
+numpy==2.5.3
+matplotlib==3.11.2
+python-dotenv==1.2.4
+streamlit==1.65.0
+rank-bm25==0.2.2
+jieba==0.42.1
