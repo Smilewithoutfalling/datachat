@@ -63,7 +63,21 @@ def test_timeout_reported(sample_df, chart_path):
     assert err and "TimeoutError" in err
 
 
-@pytest.mark.xfail(strict=True, reason="B28：沙箱 builtins 缺 __import__，pandas 内部延迟导入（Timestamp.strftime）报 KeyError；阶段 2 子进程沙箱解决")
 def test_timestamp_strftime_works(sample_df, chart_path):
     result, _, err = run_code("result = pd.Timestamp('2024-05-31').strftime('%Y-%m')", sample_df, chart_path)
     assert err is None and result == "2024-05"
+
+
+# ---- B28/B29：白名单 import ----
+def test_whitelisted_imports_and_np(sample_df, chart_path):
+    code = "import numpy as np\nimport matplotlib.pyplot as plt\nfrom math import sqrt\nresult = float(np.sqrt(sqrt(16)))"
+    result, _, err = run_code(code, sample_df, chart_path)
+    assert err is None and result == 2.0
+    result, _, err = run_code("result = int(np.sum(df['units']))", sample_df, chart_path)
+    assert err is None and result == int(sample_df["units"].sum())
+
+
+@pytest.mark.parametrize("mod", ["os", "subprocess", "sys", "shutil", "importlib"])
+def test_other_imports_blocked(sample_df, chart_path, mod):
+    _, _, err = run_code(f"import {mod}\nresult = 1", sample_df, chart_path)
+    assert err and "ImportError" in err and mod in err
