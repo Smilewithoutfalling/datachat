@@ -212,3 +212,56 @@ def test_rule19_rank_numbers_vs_values():
     assert results_equal(pd.Series([3, 1, 2, 4, 5], index=list("ABECD")), e)
     assert not results_equal(pd.Series([1, 2, 3, 4, 5], index=list("EBACD")), e)
     assert not results_equal(pd.Series([1, 2, 3], index=list("BEA")), e)
+
+
+# ---- 规则 20（B46）：答案外面裹了附加信息
+def test_rule20_label_vs_sorted_series():
+    s = pd.Series([153906.21, 152786.38, 96935.99], index=pd.Index(["杭州", "上海", "武汉"], name="city"))
+    assert results_equal(s, "杭州")
+    assert results_equal(s.sort_values(), "武汉")                       # 升序时榜首是最小值
+    assert not results_equal(s, "上海")
+    assert not results_equal(s.sort_index(), "杭州")                    # 没按值排序：看不出答案
+    assert not results_equal(pd.Series([5.0, 5.0, 1.0], index=["甲", "乙", "丙"]), "甲")   # 榜首并列
+
+
+def test_rule20_scalar_inside_dict():
+    a = {"2023年内离职人数": 14, "2023-01-01在职人数": 183, "流失率(%)": 7.65}
+    assert results_equal(a, 7.65)
+    assert not results_equal(a, 7.5)
+    # 不唯一（≤4 项的 dict 归规则 10 管，这里用 5 项）
+    assert not results_equal({"甲项指标值": 7.65, "乙项指标值": 7.65, "丙项指标值": 1, "丁项指标值": 2, "戊项指标值": 3}, 7.65)
+    assert results_equal({"甲项指标值": 7.65, "乙项指标值": 7.7, "丙项指标值": 1, "丁项指标值": 2, "戊项指标值": 3}, 7.65)
+    assert not results_equal({"2024-01": 1.0, "2024-02": 7.65, "2024-03": 3.0}, 7.65)  # 时间序列
+    assert not results_equal({f"k{i}": i for i in range(9)} | {"x": 7.65}, 7.65)  # 太多项
+    # 嵌套的多种口径不算对
+    hedged = {"口径A": {"复购率": "73.15%"}, "口径B": {"复购率": "75.46%"}}
+    assert not results_equal(hedged, 75.46)
+
+
+def test_rule20_label_inside_dict():
+    a = {"top_day": "2024-05-04", "top_sold": 579, "top5": {"2024-05-04": 579, "2024-05-05": 560}}
+    assert results_equal(a, "2024-05-04")
+    assert results_equal({"总销量最高的SKU": "K100", "总销量": 14769}, "K100")
+    assert not results_equal({"按销售额最好": "数码", "按销量最好": "服饰", "x": 1}, "数码")   # 两个标签
+
+
+def test_rule20_series_inside_dict():
+    e = pd.Series([545, 500, 299], index=pd.Index(["S01", "S02", "S05"], name="store"))
+    assert results_equal({"各门店期末库存": e.copy(), "合计": 1344}, e)
+    assert results_equal({"总行数": 1218, "各店": {"S01": 545, "S02": 500, "S05": 299},
+                          "分布": {"a": 1, "b": 2}}, e)
+    assert not results_equal({"各店": {"S01": 545, "S02": 501, "S05": 299}, "合计": 1345}, e)
+
+
+def test_rule20_dict_keys_contain_labels():
+    e = pd.Series([19.72, 14.85], index=pd.Index(["周末", "工作日"], name="date"))
+    assert results_equal({"工作日平均销量": 14.85, "周末平均销量": 19.72, "工作日记录数": 1320, "周末记录数": 520}, e)
+    assert not results_equal({"工作日平均销量": 19.72, "周末平均销量": 14.85}, e)
+    assert not results_equal({"工作日平均": 14.85, "周末平均": 19.72, "周末均值": 19.72}, e)   # 一个标签对应两个键
+
+
+def test_rule20_sentence_string():
+    assert results_equal("退款率 7.00%（已退款 84 / 去重订单 1200）", 7.0)
+    assert results_equal("共 1,200 单", 1200)
+    assert not results_equal("7.00% 或 7.5%", 7.0)
+    assert not results_equal("已退款 84 / 去重订单 1200", 84)
