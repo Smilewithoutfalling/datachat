@@ -40,6 +40,14 @@
 19. 百分数字符串（'7.00%'、Series/dict 里的 '50.58%'）按数值比较；dict 的键里含季度/月份
     （'第一季度销售总额'）且期望是序号索引时按序号对齐，dict 里的非数值项（'哪个季度更高'）忽略；
     问排名时给名次 1..n 的 Series，与期望数值从大到小的次序一致即算对（无并列时）。
+阶段 3c（B46，来自 eval-3b 的 ReAct 复核；只在上面的规则都不匹配时才用，且要求"唯一"以免奖励罗列多种口径）：
+ 20. a) 期望是标签、实际是按值排好序的数值 Series（榜首不并列）→ 榜首标签即答案；
+     b) 实际是带附加信息的 dict（≤8 项、键是文字而不是月份）：
+        期望数值时，第一层数值项里恰好一个等于期望；期望标签时，第一层恰好一个标签值且等于期望；
+        期望 Series/表时，dict 里恰好一个子对象（Series/表/dict）等于期望；
+        期望 Series 且索引是文字标签时，每个标签恰好对应一个"含该标签的键"且数值相等（'工作日平均销量' ↔ '工作日'）；
+        嵌套 dict 里的标量不参与（{'口径A': {'复购率': …}, '口径B': {…}} 这种罗列口径的不算对）；
+     c) 实际是一句话字符串、期望数值：句中恰好一个百分数（没有百分数时恰好一个数字）且等于期望。
 阶段 3：应拒答题由 is_refusal() 判定（"无法回答：<原因>"，原因至少 2 个字），不经过上面的规则。
 """
 import math
@@ -87,8 +95,85 @@ def results_equal(actual, expected, float_tol=1e-4, *, ordered=None, percent_equ
             if _eq(v, e, float_tol, ordered):
                 return True
         except Exception:
+            pass
+        try:
+            if _extras_eq(v, e, float_tol, ordered):
+                return True
+        except Exception:
             continue
     return False
+
+
+# ------------------------------------------------------------------ 规则 20（B46）
+_NUM_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?![A-Za-z0-9_.])")
+_PCT_TOKEN_RE = re.compile(r"([-+]?\d+(?:\.\d+)?)\s*%")
+_EXTRAS_MAX = 8
+_DATE_KEY_RE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
+
+
+def _is_label_value(v) -> bool:
+    return isinstance(v, (pd.Timestamp, pd.Period)) or (isinstance(v, str) and not _is_num(v) and _pct(v) is None)
+
+
+def _extras_eq(a, e, tol, ordered) -> bool:
+    """规则 20：答案对、但外面裹了附加信息的形态。见模块说明。"""
+    # a) 期望标签，实际是排好序的数值 Series
+    if _is_label_value(e) and isinstance(a, pd.Series) and len(a) > 1 \
+            and pd.api.types.is_numeric_dtype(a) and not isinstance(a.index, pd.MultiIndex):
+        if (a.is_monotonic_decreasing or a.is_monotonic_increasing) and a.iloc[0] != a.iloc[1]:
+            return _scalar_eq(_py(a.index[0]), e, tol)
+        return False
+    # c) 一句话字符串
+    if isinstance(a, str) and _is_num(e):
+        pcts = _PCT_TOKEN_RE.findall(a)
+        if pcts:
+            return len(pcts) == 1 and _scalar_eq(float(pcts[0]), e, tol)
+        nums = _NUM_TOKEN_RE.findall(a)
+        return len(nums) == 1 and _scalar_eq(float(nums[0].replace(",", "")), e, tol)
+    # b) 带附加信息的 dict
+    if not isinstance(a, dict) or not (1 < len(a) <= _EXTRAS_MAX):
+        return False
+    if not all(isinstance(k, str) and not _DATE_KEY_RE.match(k.strip()) for k in a):
+        return False                     # 键本身是日期/月份 → 是时间序列，不是"答案 + 附加信息"
+    vals = {k: _py(v) for k, v in a.items()}
+    if _is_num(e):
+        leaves = [v for v in vals.values() if _is_num(v) or _pct(v) is not None]
+        if len(leaves) == len(vals) and max(len(k.strip()) for k in vals) <= 4:
+            return False                 # {'华东': 1, '华北': 2, …}：是分组汇总表，碰巧含期望值不算（同规则 10）
+        return sum(1 for v in leaves if _scalar_eq(v, e, tol)) == 1
+    if _is_label_value(e):
+        labels = [v for v in vals.values() if _is_label_value(v)]
+        return len(labels) == 1 and _scalar_eq(labels[0], e, tol)
+    if isinstance(e, (pd.Series, pd.DataFrame)):
+        subs = [v for v in vals.values() if isinstance(v, (pd.Series, pd.DataFrame, dict))]
+        hits = 0
+        for v in subs:
+            try:
+                hits += bool(_eq(v, e, tol, ordered))
+            except Exception:
+                pass
+        if hits == 1:
+            return True
+        if isinstance(e, pd.Series) and not ordered:
+            return _keys_contain_labels(vals, e, tol)
+    return False
+
+
+def _keys_contain_labels(vals: dict, e: pd.Series, tol) -> bool:
+    """规则 20 b：{'工作日平均销量': 14.85, '周末平均销量': 19.72, '工作日记录数': 1320} 对 Series(周末, 工作日)。"""
+    labels = [_py(x) for x in e.index]
+    if len(labels) < 2 or not all(isinstance(x, str) and x for x in labels):
+        return False
+    used = set()
+    for lab, ev in zip(labels, e.values):
+        others = [o for o in labels if o != lab and lab in o]          # '周末' 也是 '非周末' 的一部分时
+        keys = [k for k, v in vals.items()
+                if lab in k and not any(o in k for o in others)
+                and (_is_num(v) or _pct(v) is not None) and _scalar_eq(v, _py(ev), tol)]
+        if len(keys) != 1 or keys[0] in used:
+            return False
+        used.add(keys[0])
+    return True
 
 
 def _scale(v, f):

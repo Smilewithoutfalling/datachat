@@ -15,7 +15,7 @@ import time
 from collections import defaultdict
 from functools import lru_cache
 
-from app.core.llm import (LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
+from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
 from app.core.result import AnalysisResult, Step, format_result, refusal_from_answer
 
@@ -236,6 +236,13 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         elif isinstance(m, AIMessage):
             res.steps.append(Step("answer", content=str(m.content)))
             res.answer = str(m.content)
+    bad = api_error_text(res.answer)
+    if bad is not None:
+        # 网关以错误 JSON 充当回复（B45）：不是答案，按 LLM 基础设施失败记
+        res.answer = ""
+        if res.error is None:
+            res.error = f"LLM 调用失败（gateway_error）：接口返回错误内容：{bad}"
+            res.error_kind = "llm"
     if res.answer.strip().startswith("Sorry, need more steps"):
         # langgraph 剩余步数不足时不抛 GraphRecursionError，而是塞一条英文占位答复（B39）
         res.answer = ""

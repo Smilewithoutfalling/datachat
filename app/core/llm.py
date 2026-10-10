@@ -118,6 +118,38 @@ class LLMError(RuntimeError):
         self.cause = cause
 
 
+_API_ERROR_KEYS = {"message", "error", "detail", "msg", "code", "status", "type", "param", "request_id"}
+
+
+def api_error_text(text) -> Optional[str]:
+    """B45：网关有时以 200 返回一段错误 JSON 作为"回复内容"，例如
+    {"message":"prompt: A user's message must contain at least one image or a PDF or audio."}。
+    整段内容是一个 JSON 对象、键全是错误字段（message/error/detail…）时返回错误说明，否则 None。
+    正常结论（中文文字、代码、含其他键的 JSON）不受影响。"""
+    import json
+
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
+    if not (t.startswith("{") and t.endswith("}")):
+        return None
+    try:
+        obj = json.loads(t)
+    except Exception:
+        return None
+    if not isinstance(obj, dict) or not obj or not set(obj) <= _API_ERROR_KEYS:
+        return None
+    err = obj.get("error")
+    if isinstance(err, dict):
+        err = err.get("message") or json.dumps(err, ensure_ascii=False)
+    msg = obj.get("message") or err or obj.get("detail") or obj.get("msg")
+    return str(msg) if msg else None
+
+
+class GatewayErrorContent(Exception):
+    """模型接口返回了错误 JSON 而不是回复（B45）。按短暂故障处理，可重试。"""
+
+
 def classify_error(exc: BaseException) -> tuple[str, bool]:
     """返回 (kind, 是否可重试)。只重试短暂性故障；鉴权/参数错误重试无意义。"""
     try:
@@ -139,6 +171,8 @@ def classify_error(exc: BaseException) -> tuple[str, bool]:
         if isinstance(exc, openai.APIStatusError):
             code = getattr(exc, "status_code", 0) or 0
             return ("server", True) if code >= 500 else ("http_%d" % code, False)
+    if isinstance(exc, GatewayErrorContent):
+        return "gateway_error", True
     if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
         return "timeout", True
     if isinstance(exc, ConnectionError):
@@ -186,6 +220,10 @@ class LLMClient:
             attempts += 1
             try:
                 msg = self.model.invoke(prompt)
+                bad = api_error_text(getattr(msg, "content", None))
+                if bad is not None:
+                    self.tracker.add_message(msg)
+                    raise GatewayErrorContent(f"接口返回错误内容：{bad}")
             except Exception as e:  # noqa: BLE001
                 kind, retryable = classify_error(e)
                 if not retryable or attempts > self.config.max_retries:

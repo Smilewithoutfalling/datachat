@@ -100,7 +100,7 @@ AGG_CASES = [
     ),
     EvalCase(
         id="agg_015", category="aggregation",
-        question="平均每个地区的销售额是多少？",
+        question="各地区总销售额的平均值是多少？",  # B47：原题"平均每个地区的销售额"可读成各地区的单笔平均
         ground_truth="result = (df['units'] * df['price']).groupby(df['region']).sum().mean()",
         keywords=["groupby", "sum", "mean"],
     ),
@@ -229,7 +229,7 @@ CORR_CASES = [
     ),
     EvalCase(
         id="corr_007", category="correlation",
-        question="先按产品和地区汇总销量，再求每个产品在各地区之间销量的标准差，判断分布是否均匀。",
+        question="先按产品和地区汇总销量，再求每个产品在各地区之间销量的样本标准差（保留两位小数），判断分布是否均匀。",  # B47：原题未说明样本/总体口径与精度
         ground_truth="result = df.groupby(['product', 'region'])['units'].sum().groupby(level=0).std().round(2)",
         keywords=["groupby", "std"],
     ),
