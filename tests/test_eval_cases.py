@@ -5,10 +5,10 @@ import pytest
 
 from app.core import LLMConfig
 from app.core.testing import oracle_model
-from app.eval.cases import ALL_CASES
-from app.eval.comparator import results_equal
+from app.eval.cases import ALL_CASES, DATASETS
+from app.eval.comparator import is_refusal, results_equal
 from app.eval.report import EvalReport
-from app.eval.runner import EvalRunner
+from app.eval.runner import EvalRunner, score
 from conftest import ROOT
 
 EVAL_DATA = os.path.join(ROOT, "data", "sample_eval.csv")
@@ -16,15 +16,71 @@ EVAL_DATA = os.path.join(ROOT, "data", "sample_eval.csv")
 
 def test_case_count_and_ids_unique():
     ids = [c.id for c in ALL_CASES]
-    assert len(ids) == 50 and len(set(ids)) == 50
+    assert len(ids) == 130 and len(set(ids)) == 130
+    by = {}
+    for c in ALL_CASES:
+        by[c.dataset] = by.get(c.dataset, 0) + 1
+    assert by == {"sales": 50, "orders": 30, "employees": 25, "inventory": 25}
+
+
+def test_case_flags_consistent():
+    for c in ALL_CASES:
+        assert c.dataset in DATASETS, c.id
+        assert c.expect_refusal == (c.category == "refusal"), c.id
+        assert bool(c.alt_ground_truths) <= (c.category == "ambiguity"), c.id
+        if c.category == "ambiguity":
+            assert c.alt_ground_truths, c.id
+
+
+_RUNNER = EvalRunner(EVAL_DATA)
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
 def test_ground_truth_executes(case):
-    runner = EvalRunner(EVAL_DATA)
-    result, err = runner._run_code(case.ground_truth)
-    assert err is None
-    assert results_equal(result, result)
+    outs, err = _RUNNER.expected_all(case)
+    assert err is None and len(outs) == 1 + len(case.alt_ground_truths)
+    assert results_equal(outs[0], outs[0])
+    if case.expect_refusal:
+        assert is_refusal(outs[0])
+    else:
+        assert not is_refusal(outs[0])
+
+
+def test_ambiguity_alternatives_differ_from_main():
+    """歧义题至少有一个其他理解的答案和主答案不同，否则这道题测不出歧义。"""
+    for c in ALL_CASES:
+        if c.category != "ambiguity":
+            continue
+        outs, _ = _RUNNER.expected_all(c)
+        assert any(not results_equal(o, outs[0]) for o in outs[1:]), c.id
+
+
+def test_refusal_scoring():
+    case = next(c for c in ALL_CASES if c.id == "ord_024")
+    assert score("无法回答：数据中没有成本字段", case, [])
+    assert not score("无法回答", case, [])               # 没有原因
+    assert not score("无法回答：", case, [])
+    assert not score(None, case, [])
+    assert not score("数码", case, [])                   # 编了一个答案
+    normal = next(c for c in ALL_CASES if c.id == "ord_001")
+    assert not score("无法回答：数据不足", normal, [1200])   # 能答的题拒答算错
+    assert score(1200, normal, [1200])
+
+
+def test_alt_ground_truth_accepted():
+    case = next(c for c in ALL_CASES if c.id == "emp_024")
+    outs, _ = _RUNNER.expected_all(case)
+    assert score(240, case, outs) and score(203, case, outs)
+    assert not score(17, case, outs)
+
+
+def test_eval_data_matches_generator():
+    """data/eval/*.csv 必须与 scripts/gen_eval_data.py 的输出逐字节一致（改了脚本要重新生成）。"""
+    import subprocess
+    import sys
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "gen_eval_data.py"), "--check"],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert p.returncode == 0, p.stdout + p.stderr
 
 
 def _r(executed, correct):
@@ -56,7 +112,7 @@ def _runner(agent, factory):
 
 @pytest.mark.parametrize("agent", ["workflow", "react"])
 def test_oracle_pipeline_all_correct(agent):
-    """模型输出 = 标准答案时，全部 50 题必须判对：验证流水线与打分口径本身。"""
+    """模型输出 = 标准答案时，全部 130 题必须判对：验证流水线与打分口径本身（含拒答题与 4 张表）。"""
     runner = _runner(agent, lambda c: oracle_model(c.ground_truth, agent))
     results = runner.run_all(ALL_CASES)
     report = EvalReport(results)
