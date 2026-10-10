@@ -8,16 +8,14 @@
 import json
 
 from app.eval.cases import ALL_CASES
-from app.eval.comparator import results_equal
 from app.eval.report import load_obj
-from app.tools.csv_io import read_csv
-from app.tools.sandbox import run_trusted
+from app.eval.runner import EvalRunner, score
 
 
 def rescore(report_path: str, data_path: str | None = None) -> dict:
     data = json.load(open(report_path, encoding="utf-8"))
     cases = {c.id: c for c in ALL_CASES}
-    df = read_csv(data_path or data["data"])
+    runner = EvalRunner(data_path or data.get("data"))     # 阶段 3：按题目的 dataset 取表
     rows, changed, skipped = [], [], []
     for row in data["cases"]:
         case = cases.get(row["id"])
@@ -28,15 +26,14 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             skipped.append(row["id"])
             rows.append({"id": row["id"], "category": row["category"], "correct": row.get("correct")})
             continue
-        expected, err = run_trusted(case.ground_truth, df.copy())
+        expected_list, err = runner.expected_all(case)
         try:
             actual = load_obj(row["actual_obj"])
         except Exception:
             skipped.append(row["id"])
             rows.append({"id": row["id"], "category": row["category"], "correct": row.get("correct")})
             continue
-        ok = (err is None) and results_equal(actual, expected,
-                                             ordered=case.ordered, percent_equiv=case.percent_equiv)
+        ok = (err is None) and score(actual, case, expected_list)
         if ok != row.get("correct"):
             changed.append({"id": row["id"], "before": row.get("correct"), "after": ok})
         rows.append({"id": row["id"], "category": row["category"], "correct": ok})

@@ -1,0 +1,6 @@
+field,description
+date,销售日期，格式 YYYY-MM-DD，范围 2024-01-05 至 2024-06-30
+region,销售地区，取值有华东、华北、华南、华中、西南
+product,产品代号，取值有 A、B、C、D、E
+units,销售数量，单位为件；每行是一条销售记录（一笔订单）
+price,单价，单位为元；销售额 = units × price

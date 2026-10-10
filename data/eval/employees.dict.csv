@@ -1,0 +1,11 @@
+field,description
+emp_id,"员工编号"
+dept,"所属部门，取值有研发、销售、市场、财务、人力、运营"
+level,"职级，P4 最低、P8 最高"
+gender,"性别，男或女"
+birth_year,"出生年份"
+city,"工作城市，取值有北京、上海、深圳"
+hire_date,"入职日期，格式 YYYY-MM-DD"
+leave_date,"离职日期，格式 YYYY-MM-DD；为空表示仍在职（数据截至 2024-09-30）"
+monthly_salary,"月薪（税前基本工资），单位为元"
+perf_2023,"2023 年度绩效，A 最好、D 最差；2024 年入职的员工为空"

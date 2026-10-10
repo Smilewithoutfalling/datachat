@@ -6,29 +6,59 @@
 - 每题记录耗时与 token；LLM/基础设施失败（error_kind="llm"）单独计数，不与"代码写错"混在一起。
 """
 from app.core import analyze
-from app.eval.cases import EvalCase
-from app.eval.comparator import results_equal
+from app.eval.cases import DATASETS, EvalCase
+from app.eval.comparator import is_refusal, results_equal
 from app.tools.csv_io import read_csv
 from app.tools.sandbox import run_trusted
 
 
 class EvalRunner:
-    def __init__(self, df_path: str, *, agent: str = "workflow", llm_config=None,
-                 model_factory=None, use_dictionary: bool = True, max_attempts: int = 3):
+    def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
+                 model_factory=None, use_dictionary: bool = True, max_attempts: int = 3,
+                 datasets: dict | None = None):
         """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
-        为 None 时用真实模型（llm_config 或环境变量）。"""
-        self.df_path = df_path
-        self.df = read_csv(df_path)
+        为 None 时用真实模型（llm_config 或环境变量）。
+        阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。"""
+        self.datasets = dict(DATASETS if datasets is None else datasets)
+        if df_path:
+            self.datasets["sales"] = df_path
+        self.df_path = self.datasets["sales"]
+        self._frames = {}
         self.agent = agent
         self.llm_config = llm_config
         self.model_factory = model_factory
         self.use_dictionary = use_dictionary
         self.max_attempts = max_attempts
 
-    def _run_code(self, code: str):
+    def path_for(self, case: EvalCase) -> str:
+        if case.dataset not in self.datasets:
+            raise KeyError(f"未知数据表 {case.dataset!r}，可选：{', '.join(self.datasets)}")
+        return self.datasets[case.dataset]
+
+    def frame(self, name: str = "sales"):
+        if name not in self._frames:
+            self._frames[name] = read_csv(self.datasets[name])
+        return self._frames[name]
+
+    @property
+    def df(self):
+        return self.frame("sales")
+
+    def _run_code(self, code: str, dataset: str = "sales"):
         """执行标准答案（可信代码，本进程执行，不走子进程沙箱），返回 (result, error)。"""
-        result, error = run_trusted(code, self.df.copy())
+        result, error = run_trusted(code, self.frame(dataset).copy())
         return result, error or None
+
+    def expected_all(self, case: EvalCase):
+        """标准答案及歧义题的其他合理答案。返回 ([结果...], 第一个报错)。"""
+        outs, first_err = [], None
+        for code in [case.ground_truth, *case.alt_ground_truths]:
+            r, err = self._run_code(code, case.dataset)
+            if err:
+                first_err = first_err or err
+            else:
+                outs.append(r)
+        return outs, first_err
 
     def run_single(self, case: EvalCase):
         """执行单条用例，返回结果 dict。
@@ -48,15 +78,15 @@ class EvalRunner:
         }
 
         # 1. ground truth
-        expected, gt_error = self._run_code(case.ground_truth)
+        expected_list, gt_error = self.expected_all(case)
         if gt_error:
             out["error"], out["error_kind"] = f"[ground_truth 执行失败] {gt_error}", "ground_truth"
             return out
-        out["expected"] = expected
+        out["expected"] = expected_list[0]
 
         # 2. 被测 Agent
         chat_model = self.model_factory(case) if self.model_factory else None
-        res = analyze(self.df_path, case.question, agent=self.agent, llm_config=self.llm_config,
+        res = analyze(self.path_for(case), case.question, agent=self.agent, llm_config=self.llm_config,
                       chat_model=chat_model, max_attempts=self.max_attempts,
                       use_dictionary=self.use_dictionary, log=False)
         out.update({
@@ -72,8 +102,7 @@ class EvalRunner:
         if res.executed:
             out["executed"] = True
             out["actual"] = res.result
-            out["correct"] = results_equal(res.result, expected, ordered=case.ordered,
-                                           percent_equiv=case.percent_equiv)
+            out["correct"] = score(res.result, case, expected_list)
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):
@@ -96,3 +125,13 @@ class EvalRunner:
                 print(f"{mark} {detail}")
             results.append(r)
         return results
+
+
+def score(actual, case: EvalCase, expected_list: list) -> bool:
+    """阶段 3 打分：应拒答题看是否拒答且给了原因；其他题拒答即错，否则与任一合理答案相等即对。"""
+    if case.expect_refusal:
+        return is_refusal(actual)
+    if is_refusal(actual):
+        return False
+    return any(results_equal(actual, e, ordered=case.ordered, percent_equiv=case.percent_equiv)
+               for e in expected_list)
