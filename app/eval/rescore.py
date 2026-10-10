@@ -7,6 +7,7 @@
 """
 import json
 
+from app.core.llm import api_error_text
 from app.core.result import refusal_from_answer
 from app.eval.cases import ALL_CASES
 from app.eval.report import load_obj
@@ -17,9 +18,11 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
     data = json.load(open(report_path, encoding="utf-8"))
     cases = {c.id: c for c in ALL_CASES}
     runner = EvalRunner(data_path or data.get("data"))     # 阶段 3：按题目的 dataset 取表
-    rows, changed, skipped = [], [], []
+    rows, changed, skipped, infra = [], [], [], []
     for row in data["cases"]:
         case = cases.get(row["id"])
+        if api_error_text(row.get("answer")) is not None:
+            infra.append(row["id"])          # B45：旧报告里网关错误 JSON 被当成了结论，按基础设施失败记
         refusal = refusal_from_answer(row.get("answer"))
         if case is not None and refusal is not None and not row.get("actual_obj"):
             # B40：ReAct 没调工具、直接在结论里按契约拒答，旧报告里 result 为空
@@ -64,4 +67,4 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             "correctness_rate": correct / n * 100 if n else None,
             "by_category": {k: {"correct": c, "n": t} for k, (c, t) in by_cat.items()},
             "by_dataset": {k: {"correct": c, "n": t} for k, (c, t) in by_ds.items()},
-            "changed": changed, "skipped_no_obj": skipped}  # 无结构化结果或还原失败的题，沿用原判定
+            "changed": changed, "skipped_no_obj": skipped, "infra_errors": infra}  # 无结构化结果或还原失败的题，沿用原判定
