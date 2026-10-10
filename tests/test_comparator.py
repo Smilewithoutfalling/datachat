@@ -130,3 +130,39 @@ def test_rule17_margins_dropped():
                      index=pd.Index(["华东", "华北", "总计"], name="region"))
     assert results_equal(a, e)
     assert not results_equal(a.replace({1: 9}), e)
+
+
+def test_rule18_quarter_labels():
+    e = pd.Series([377358.66, 473495.5], index=pd.Index([1, 2], name="order_date"))
+    for a in (pd.Series([377358.66, 473495.5], index=pd.PeriodIndex(["2024Q1", "2024Q2"], freq="Q")),
+              {"第一季度": 377358.66, "第二季度": 473495.5}, {"Q1": 377358.66, "Q2": 473495.5},
+              (377358.66, 473495.5)):
+        assert results_equal(a, e), a
+    assert not results_equal((473495.5, 377358.66), e)
+    assert not results_equal({"第一季度": 473495.5, "第二季度": 377358.66}, e)
+
+
+def test_rule18_month_numbers_vs_time_index():
+    e = pd.Series([10.0, 20.0, 30.0], index=pd.to_datetime(["2024-01-31", "2024-02-29", "2024-03-31"]))
+    assert results_equal(pd.Series([10.0, 20.0, 30.0], index=[1, 2, 3]), e)
+    assert not results_equal(pd.Series([10.0, 30.0, 20.0], index=[1, 2, 3]), e)
+    # 跨年的时间索引不能只按月份号对齐
+    e2 = pd.Series([1.0, 2.0], index=pd.to_datetime(["2023-12-31", "2024-12-31"]))
+    assert not results_equal(pd.Series([1.0, 2.0], index=[12, 12]), e2)
+
+
+def test_rule18_iso_week_numbers():
+    e = pd.Series([1070, 2258, 2108], index=pd.to_datetime(["2024-03-03", "2024-03-10", "2024-03-17"]))
+    assert results_equal(pd.Series([1070, 2258, 2108], index=pd.Index([9, 10, 11], name="week")), e)
+    assert not results_equal(pd.Series([1070, 2108, 2258], index=[9, 10, 11]), e)
+    assert not results_equal(pd.Series([1070, 2258, 2108], index=[11, 10, 9]), e)    # 不是递增的周序号
+
+
+def test_refusal_detection():
+    from app.eval.comparator import is_refusal
+    assert is_refusal("无法回答：数据中没有成本字段")
+    assert is_refusal("  无法回答，表里没有年龄 ")
+    assert not is_refusal("无法回答")
+    assert not is_refusal("无法回答：")
+    assert not is_refusal("数据中没有成本字段")
+    assert not is_refusal(None) and not is_refusal(0)
