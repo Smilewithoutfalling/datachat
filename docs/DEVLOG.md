@@ -393,7 +393,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 
 ---
 
-## [7] 2026-10-10 · 阶段 3b 基线复核与修复 · commit <待提交>
+## [7] 2026-10-10 · 阶段 3b 基线复核与修复 · commit 69a63e0（PR #7）
 
 ### 基线（S 运行，分支 eval-3 b87aef3，docs/eval/phase3/）
 - 模型 Qwen3.5-397B-A17B（网关 grg-aikits-test.grgbanking.com），temperature 0，Python 3.11.17，pandas 3.0.6，130 题，n=1。
@@ -427,3 +427,34 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 ### 下一步
 - S 删除 eval-3 上的 eval_compare_oracle_20261010_092954.json 后合并（或由本次 PR 一并处理）。
 - 合并后建议 S 再跑一次 `--agent react`，验证 B39/B40/B44 的实际效果；workflow 不必重跑。
+
+## [8] 2026-10-10 · 阶段 3c ReAct 复跑复核与修复 · commit <待提交>
+
+### 复跑（S 运行，分支 eval-3b 4a435e0，docs/eval/phase3b/）
+- 代码 69a63e0，模型 Qwen3.5-397B-A17B（同一网关），temperature 0，Python 3.11.17，pandas 3.0.6，130 题，n=1；只跑 react。
+- 报告 git_sha 仍为 "69a63e0?"：S 的环境里 Python 调不到 git（B48）。
+
+| 配置 | [7] 原判 | [7] 重评 | **3b 实跑** | 本阶段重评 | 应拒答 |
+|---|---|---|---|---|---|
+| react 有字典 | 86.9% | 90.8% | **92.3%**（120/130） | **96.9%**（126/130） | 8/9（另 1 题网关报错） |
+| react 无字典 | 83.8% | 87.7% | **91.5%**（119/130） | **96.9%**（126/130） | 9/9 |
+
+- B39 生效：两次都没有出现 "Sorry, need more steps"；B44 生效：没有出现 ConversionError；B40 生效：拒答 8/9、9/9。
+- 用本阶段比较器重评旧报告：workflow 98.5% / 97.7%（不变，规则 20 没有改动 workflow 的任何判定），react（阶段 3 报告）92.3% / 90.8%。
+- 本阶段重评后剩下的错题：有字典 agg_015（题意歧义，B47 改题）、corr_007（总体标准差且只留 1 位小数，B47 改题）、ord_030（没按 order_id 去重，75.77%）、ord_026（网关报错，B45）；无字典 corr_007（只留 1 位小数）、ord_027（没去重）、ord_029（同时给出按销售额、按销量两种答案）、ord_030（两种口径并列）。真正算错的只有“没去重”这类数据陷阱，两次各 1 题。
+
+### 本阶段修复
+| ID | 级别 | 位置 | 问题与修复 |
+|---|---|---|---|
+| B45 | P1 | app/core/llm.py、service.py、rescore.py | 网关以 200 状态码返回 `{"message":"prompt: A user's message must contain at least one image…"}` 作为回复内容，ReAct 把它当成结论（ord_026）。新增 `api_error_text()`：整段内容是只含错误字段（message/error/detail…）的 JSON 时识别为接口错误。ReAct 记 error_kind=llm（计入基础设施失败，不算答错）；工作流的 LLMClient 视为可重试的 gateway_error；--rescore 在 infra_errors 里列出旧报告中的这类题 |
+| B46 | P1 | app/eval/comparator.py、react_agent.py | ReAct 常把答案装进带附加信息的 dict（样本数、明细、中间统计），或返回排好序的整张 Series 回答"哪个"。比较器规则 20（只在其他规则都不匹配时才用，且要求唯一匹配）：a) 期望标签、实际是按值排序的 Series 且榜首不并列 → 比较榜首；b) ≤8 项、键为文字的 dict：第一层恰好一个数值/标签等于期望，或恰好一个子对象等于期望 Series，或每个期望标签恰好对应一个含该标签的键；嵌套 dict 里的标量不参与，以免奖励罗列多种口径；全是数值且键 ≤4 字的视为分组表，不适用；c) 一句话字符串里恰好一个百分数（或恰好一个数字）。同时收紧 ReAct 提示词：单一问题不要把答案装进 dict 或附带样本数、明细、其他口径 |
+| B47 | P2 | cases.py、cases_extra.py | agg_015 "平均每个地区的销售额"可读成各地区的单笔平均 → 改为"各地区总销售额的平均值是多少？"；corr_007 没写样本/总体口径和精度 → 题目写明"样本标准差（保留两位小数）"；ord_030 增加"排除已退款"的有效订单口径（73.15%）作为合理答案。注意：agg_015、corr_007 的题面变了，与之前的基线不完全可比 |
+| B48 | P3 | app/eval/report.py | git_sha 带 "?" 的原因没有记录。现在依次找 DATACHAT_GIT 环境变量 → PATH → Windows 默认安装位置的 git；仍失败时报告写 git_sha_note（找不到 git，或 git 的退出码与 stderr，例如 safe.directory 拒绝），控制台也会打印 |
+
+### 指标快照
+- 单测：Linux Python 3.11 **386 passed**。
+
+### 下一步
+- S 再跑一次 `--agent react`（有字典 / 无字典），验证 B46 提示词收紧后 dict 形态是否减少、B47 改题后的效果；顺便看报告里有没有 git_sha_note。
+- 阶段 3 收尾后进入阶段 4（见 roadmap/plan.md）。
+
