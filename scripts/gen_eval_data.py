@@ -223,9 +223,10 @@ def main():
     args = ap.parse_args()
     files = build()
     if args.check:
+        # 比较时统一换行符：Windows 上 git 可能把 LF 签出成 CRLF（core.autocrlf），内容相同即可
         bad = [f for f, text in files.items()
                if not os.path.exists(os.path.join(OUT_DIR, f))
-               or open(os.path.join(OUT_DIR, f), encoding="utf-8", newline="").read() != text]
+               or open(os.path.join(OUT_DIR, f), encoding="utf-8", newline="").read().replace("\r\n", "\n") != text]
         if bad:
             print("与生成脚本不一致：", ", ".join(bad))
             sys.exit(1)
