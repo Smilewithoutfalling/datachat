@@ -91,7 +91,7 @@ def datasets_metadata(datasets: dict) -> dict:
         d = dict_path_for(path)
         out[name] = {"path": os.path.relpath(path, _REPO).replace(os.sep, "/"),
                      "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()[:12],
-                     "dictionary": os.path.exists(d)}
+                     "dictionary_file": os.path.exists(d)}   # 文件是否存在；本次是否使用看顶层 use_dictionary
     return out
 
 
