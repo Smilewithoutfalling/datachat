@@ -1,0 +1,2 @@
+# 评测数据按 LF 存储（scripts/gen_eval_data.py --check 逐字节对比）
+data/eval/*.csv text eol=lf
