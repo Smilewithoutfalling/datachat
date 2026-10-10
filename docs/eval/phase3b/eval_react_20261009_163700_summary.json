@@ -1,0 +1,92 @@
+{
+  "python": "3.11.17",
+  "pandas": "3.0.6",
+  "model": "Qwen3.5-397B-A17B",
+  "temperature": 0.0,
+  "base_url_host": "grg-aikits-test.grgbanking.com",
+  "data_sha256": "abe40a78ff53",
+  "data": "data/sample_eval.csv",
+  "oracle": false,
+  "use_dictionary": true,
+  "git_sha": "b710e23?",
+  "aggregate": {
+    "runs": 3,
+    "mean": 78.66666666666667,
+    "min": 76.0,
+    "max": 80.0,
+    "stdev": 2.309401076758503,
+    "avg_duration_s": 8.79979533333333,
+    "avg_tokens": 5318.773333333333
+  },
+  "runs": [
+    {
+      "run": 1,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_react_20261009_163700_run1.json",
+      "overall": {
+        "n": 50,
+        "correct": 40,
+        "executed": 49,
+        "correctness_rate": 80.0,
+        "execution_success_rate": 98.0,
+        "conditional_correctness_rate": 81.63265306122449,
+        "reviewer_fix_rate": 100.0,
+        "initial_errors": 4,
+        "infra_errors": 0,
+        "avg_duration_s": 8.913407999999999,
+        "avg_tokens": 5209.48
+      },
+      "by_category": {
+        "aggregation": 93.33333333333333,
+        "filtering": 91.66666666666666,
+        "correlation": 70.0,
+        "timeseries": 61.53846153846154
+      }
+    },
+    {
+      "run": 2,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_react_20261009_163700_run2.json",
+      "overall": {
+        "n": 50,
+        "correct": 38,
+        "executed": 49,
+        "correctness_rate": 76.0,
+        "execution_success_rate": 98.0,
+        "conditional_correctness_rate": 77.55102040816327,
+        "reviewer_fix_rate": 100.0,
+        "initial_errors": 5,
+        "infra_errors": 0,
+        "avg_duration_s": 9.152667999999997,
+        "avg_tokens": 5398.48
+      },
+      "by_category": {
+        "aggregation": 93.33333333333333,
+        "filtering": 91.66666666666666,
+        "correlation": 70.0,
+        "timeseries": 46.15384615384615
+      }
+    },
+    {
+      "run": 3,
+      "file": "D:\\Coding\\claude\\datachat\\outputs\\eval_react_20261009_163700_run3.json",
+      "overall": {
+        "n": 50,
+        "correct": 40,
+        "executed": 49,
+        "correctness_rate": 80.0,
+        "execution_success_rate": 98.0,
+        "conditional_correctness_rate": 81.63265306122449,
+        "reviewer_fix_rate": 100.0,
+        "initial_errors": 3,
+        "infra_errors": 0,
+        "avg_duration_s": 8.333309999999997,
+        "avg_tokens": 5348.36
+      },
+      "by_category": {
+        "aggregation": 100.0,
+        "filtering": 91.66666666666666,
+        "correlation": 70.0,
+        "timeseries": 53.84615384615385
+      }
+    }
+  ]
+}
