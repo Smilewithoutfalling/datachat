@@ -104,7 +104,9 @@ def main():
         all_correct = all_correct and ok
         compare[agent] = runs
     if len(agents) > 1:
-        _print_compare(compare, os.path.join(OUTPUT_DIR, f"eval_compare{'_oracle' if args.oracle else ''}_{stamp}.json"))
+        # 给了 --out 时 compare 写在同一目录，测试不会往真实 outputs/ 里落文件（B42）
+        out_dir = os.path.dirname(os.path.abspath(args.out)) if args.out else OUTPUT_DIR
+        _print_compare(compare, os.path.join(out_dir, f"eval_compare{'_oracle' if args.oracle else ''}_{stamp}.json"))
     # 返回码：全部正确为0，否则为1
     sys.exit(0 if all_correct else 1)
 
