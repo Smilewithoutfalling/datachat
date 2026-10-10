@@ -37,6 +37,9 @@
      期望索引是时间或从 1 起的连续序号时，实际是等长 list/tuple → 按位置比值。
 规则之外的形态差异仍判错，需人工抽检（见 DEVLOG）。
 
+19. 百分数字符串（'7.00%'、Series/dict 里的 '50.58%'）按数值比较；dict 的键里含季度/月份
+    （'第一季度销售总额'）且期望是序号索引时按序号对齐，dict 里的非数值项（'哪个季度更高'）忽略；
+    问排名时给名次 1..n 的 Series，与期望数值从大到小的次序一致即算对（无并列时）。
 阶段 3：应拒答题由 is_refusal() 判定（"无法回答：<原因>"，原因至少 2 个字），不经过上面的规则。
 """
 import math
@@ -53,18 +56,20 @@ _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4}
 _MARGIN_LABELS = {"总计", "合计", "总和", "汇总", "all", "total", "sum"}
 
 
-REFUSAL_PREFIX = "无法回答"
+from app.core.result import REFUSAL_PREFIX, is_refusal, refusal_from_answer  # noqa: F401  (re-export)
+_PCT_RE = re.compile(r"^\s*([-+]?\d+(?:\.\d+)?)\s*%\s*$")
+_EMBED_Q_RE = re.compile(r"(?:第\s*([一二三四1-4])\s*季度|Q([1-4])(?!\d))", re.IGNORECASE)
+_EMBED_M_RE = re.compile(r"(?<!\d)(1[0-2]|0?[1-9])\s*月")
 
 
-def is_refusal(v) -> bool:
-    """结果契约（阶段 3）：数据回答不了时 result = "无法回答：<原因>"。只有前缀、没有原因的不算。"""
-    if not isinstance(v, str):
-        return False
-    s = v.strip()
-    if not s.startswith(REFUSAL_PREFIX):
-        return False
-    reason = s[len(REFUSAL_PREFIX):].strip(" ：:，,。.；;-—\n\t")
-    return len(reason) >= 2
+def _pct(v):
+    """规则 19：'7.00%' 这样的百分数字符串 → 7.0（题目已要求用百分数表示，数值按百分数刻度比较）。"""
+    v = _py(v)
+    if isinstance(v, str):
+        m = _PCT_RE.match(v)
+        if m:
+            return float(m.group(1))
+    return None
 
 
 # ------------------------------------------------------------------ 入口
@@ -206,6 +211,8 @@ def _scalar_eq(a, e, tol) -> bool:
         return True
     if _is_nan(a) or _is_nan(e):
         return False
+    if _pct(a) is not None and _is_num(e):
+        return _scalar_eq(_pct(a), e, tol)
     if _is_num(e) and not _is_num(a) and float(e).is_integer():
         p = _period_part(a, int(e))     # 规则 11：月份/季度序号
         if p is not None:
@@ -347,7 +354,7 @@ def _vs_scalar(a, e, tol) -> bool:
             if all(isinstance(k, str) and not _month_key(k) for k in keys):
                 vals = list(a.values if isinstance(a, pd.Series) else a.values())
         if vals is not None:
-            return any(_is_num(_py(v)) and _scalar_eq(v, e, tol) for v in vals)
+            return any((_is_num(_py(v)) or _pct(v) is not None) and _scalar_eq(v, e, tol) for v in vals)
     return False
 
 
@@ -400,6 +407,8 @@ def _is_time_index(idx) -> bool:
 def _series_eq(a: pd.Series, e: pd.Series, tol, ordered) -> bool:
     if len(a) != len(e):
         return False
+    if _rank_eq(a, e):
+        return True
     if _mapping_eq(dict(zip(a.index, a.values)), dict(zip(e.index, e.values)), tol, ordered):
         return True
     # 规则 6：两边都是时间索引（月末 Timestamp / Period / 'YYYY-MM'），标签写法不同 → 先按月份对齐
@@ -428,6 +437,27 @@ def _series_eq(a: pd.Series, e: pd.Series, tol, ordered) -> bool:
         if _increasing_ints(a.index, 1, 53):
             return all(_scalar_eq(x, y, tol) for x, y in zip(a.values, e.values))
     return False
+
+
+def _rank_eq(a: pd.Series, e: pd.Series) -> bool:
+    """规则 19：问"排名"时实际给名次（1..n），期望给数值：标签相同且名次 = 期望值从大到小的次序即算对。"""
+    try:
+        av = [_py(x) for x in a.values]
+        if sorted(av) != list(range(1, len(e) + 1)) or len(e) < 2:
+            return False
+        if not all(_is_num(_py(x)) for x in e.values) or e.index.has_duplicates:
+            return False
+        if sorted(_py(x) for x in e.values) == list(range(1, len(e) + 1)):
+            return False                                   # 期望本身就是 1..n，不能当名次放宽
+        if sorted(map(_label, a.index)) != sorted(map(_label, e.index)):
+            return False
+        order = [_label(k) for k in e.sort_values(ascending=False, kind="stable").index]
+        if len(set(e.values)) != len(e):
+            return False                                   # 有并列时名次口径不唯一，不放宽
+        rank = {k: i + 1 for i, k in enumerate(order)}
+        return all(rank[_label(k)] == v for k, v in zip(a.index, av))
+    except Exception:
+        return False
 
 
 def _increasing_ints(idx, lo, hi) -> bool:
@@ -479,7 +509,9 @@ def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
     if isinstance(a, pd.Series):
         return _series_eq(a, e, tol, ordered)
     if isinstance(a, dict):
-        return _series_eq(pd.Series(a), e, tol, ordered)
+        if _series_eq(pd.Series(a), e, tol, ordered):
+            return True
+        return _dict_embedded_periods(a, e, tol, ordered)
     if isinstance(a, (list, tuple)):
         # 只有当期望本身没有有意义的标签（默认整数索引）时才按位置比；
         # 规则 18：期望索引是时间或从 1 起的连续序号（季度 1–4、月份 1–12）时也按位置比
@@ -513,6 +545,31 @@ def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
         wide = e.unstack()
         if _frame_eq(a, wide, tol, ordered=False) or _frame_eq(a.T, wide, tol, ordered=False):
             return True
+    return False
+
+
+def _dict_embedded_periods(a: dict, e: pd.Series, tol, ordered) -> bool:
+    """规则 19：{'第一季度销售总额': 131210.0, '第二季度销售总额': 143463.5, '哪个季度更高': '第二季度'}
+    对 Series(index=[1, 2])：只取数值项，键里能读出季度（或月份）序号且一一对应时按序号比较。"""
+    nums = {k: v for k, v in a.items() if _is_num(_py(v)) or _pct(v) is not None}
+    if len(nums) != len(e) or len(e) < 2:
+        return False
+    ev = [_py(x) for x in e.index]
+    if not all(_is_num(x) and float(x).is_integer() for x in ev):
+        return False
+    for rx, hi in ((_EMBED_Q_RE, 4), (_EMBED_M_RE, 12)):
+        if not all(1 <= x <= hi for x in ev):
+            continue
+        parts = []
+        for k in nums:
+            m = rx.search(str(k)) if isinstance(k, str) else None
+            if not m:
+                parts = None
+                break
+            g = next(x for x in m.groups() if x)
+            parts.append(_CN_NUM.get(g) or int(g))
+        if parts and len(set(parts)) == len(parts):
+            return _mapping_eq(dict(zip(parts, nums.values())), dict(zip(e.index, e.values)), tol, ordered)
     return False
 
 
