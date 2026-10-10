@@ -30,7 +30,14 @@
  16. 模型自己起键名的汇总 dict：期望数值时 ≤4 项也可（规则 10 的 Series 仍 ≤3）；
      期望标签元组（最高/最低月份）时，取 dict 里的标签值按顺序比较。
  17. 实际多了"总计/合计/All/Total"汇总行或列（crosstab margins=True）而期望没有 → 去掉再比。
+阶段 3（新评测集的等价写法）：
+ 18. 时间索引的其他写法：期望索引是季度序号 1–4 时，实际 'Q1' / '2024Q1' / 季度 Period / '第一季度' 都可；
+     期望是月份时间索引、实际是同一年的月份序号 1–12 → 按月份号对齐；
+     期望是时间索引、实际是严格递增的 ISO 周序号（1–53）且长度相同 → 按位置比值；
+     期望索引是时间或从 1 起的连续序号时，实际是等长 list/tuple → 按位置比值。
 规则之外的形态差异仍判错，需人工抽检（见 DEVLOG）。
+
+阶段 3：应拒答题由 is_refusal() 判定（"无法回答：<原因>"，原因至少 2 个字），不经过上面的规则。
 """
 import math
 import re
@@ -41,7 +48,23 @@ import pandas as pd
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 _QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
 _WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}$", re.IGNORECASE)
+_CN_QUARTER_RE = re.compile(r"^(?:\d{4}\s*年?\s*)?第?\s*([一二三四1-4])\s*季度?$")
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4}
 _MARGIN_LABELS = {"总计", "合计", "总和", "汇总", "all", "total", "sum"}
+
+
+REFUSAL_PREFIX = "无法回答"
+
+
+def is_refusal(v) -> bool:
+    """结果契约（阶段 3）：数据回答不了时 result = "无法回答：<原因>"。只有前缀、没有原因的不算。"""
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if not s.startswith(REFUSAL_PREFIX):
+        return False
+    reason = s[len(REFUSAL_PREFIX):].strip(" ：:，,。.；;-—\n\t")
+    return len(reason) >= 2
 
 
 # ------------------------------------------------------------------ 入口
@@ -158,6 +181,10 @@ def _period_part(x, n: int):
         m = _QUARTER_RE.match(x.strip())
         if m:
             return int(m.group(1)) if 1 <= n <= 4 else None
+        m = _CN_QUARTER_RE.match(x.strip())                # 规则 18：'第一季度'、'2024年Q'…
+        if m and ("季" in x):
+            g = m.group(1)
+            return (_CN_NUM.get(g) or int(g)) if 1 <= n <= 4 else None
     if 1 <= n <= 12:
         mk = _month_key(x)
         if mk is not None:
@@ -385,11 +412,53 @@ def _series_eq(a: pd.Series, e: pd.Series, tol, ordered) -> bool:
                 return all(_scalar_eq(av[k], v, tol) for k, v in zip(ke, e.values))
         # 周/日频等无法按月对齐时，按位置比较数值
         return all(_scalar_eq(x, y, tol) for x, y in zip(a.values, e.values))
-    # 规则 14：期望索引是月份序号
+    # 规则 14：期望索引是月份序号；规则 18：季度序号
     parts = _month_numbers(a.index, e.index)
     if parts is not None:
         return _mapping_eq(dict(zip(parts, a.values)), dict(zip(e.index, e.values)), tol, ordered)
+    parts = _quarter_numbers(a.index, e.index)
+    if parts is not None:
+        return _mapping_eq(dict(zip(parts, a.values)), dict(zip(e.index, e.values)), tol, ordered)
+    if _is_time_index(e.index):
+        # 规则 18：期望是月份时间索引（同一年），实际是月份序号
+        parts = _month_numbers(e.index, a.index)
+        if parts is not None:
+            return _mapping_eq(dict(zip(a.index, a.values)), dict(zip(parts, e.values)), tol, ordered)
+        # 规则 18：实际是 ISO 周序号
+        if _increasing_ints(a.index, 1, 53):
+            return all(_scalar_eq(x, y, tol) for x, y in zip(a.values, e.values))
     return False
+
+
+def _increasing_ints(idx, lo, hi) -> bool:
+    try:
+        v = [_py(x) for x in idx]
+        return (len(v) > 0 and all(_is_num(x) and float(x).is_integer() and lo <= x <= hi for x in v)
+                and all(p < q for p, q in zip(v, v[1:])))
+    except Exception:
+        return False
+
+
+def _quarter_numbers(idx, e_idx):
+    """规则 18：e_idx 全是 1–4 的整数、idx 全能看作季度时，返回 idx 的季度号列表；否则 None。"""
+    try:
+        ev = [_py(x) for x in e_idx]
+        if not ev or not all(_is_num(x) and float(x).is_integer() and 1 <= x <= 4 for x in ev):
+            return None
+        parts = []
+        for x in idx:
+            x = _py(x)
+            if isinstance(x, pd.Period) and x.freqstr.upper().startswith("Q"):
+                parts.append(x.quarter)
+            elif isinstance(x, str):
+                parts.append(_period_part(x, 4) if (_QUARTER_RE.match(x.strip()) or "季" in x) else None)
+            else:
+                parts.append(None)
+        if None in parts or len(set(parts)) != len(parts):
+            return None
+        return parts
+    except Exception:
+        return None
 
 
 def _month_numbers(idx, e_idx):
@@ -412,8 +481,11 @@ def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
     if isinstance(a, dict):
         return _series_eq(pd.Series(a), e, tol, ordered)
     if isinstance(a, (list, tuple)):
-        # 只有当期望本身没有有意义的标签（默认整数索引）时才按位置比
-        if isinstance(e.index, pd.RangeIndex) and len(a) == len(e):
+        # 只有当期望本身没有有意义的标签（默认整数索引）时才按位置比；
+        # 规则 18：期望索引是时间或从 1 起的连续序号（季度 1–4、月份 1–12）时也按位置比
+        ordinal = _increasing_ints(e.index, 1, 12) and _py(e.index[0]) == 1 and \
+            all(int(_py(q)) - int(_py(p)) == 1 for p, q in zip(e.index, e.index[1:]))
+        if (isinstance(e.index, pd.RangeIndex) or ordinal or _is_time_index(e.index)) and len(a) == len(e):
             return all(_scalar_eq(x, y, tol) for x, y in zip(a, e.values))
         return False
     if not isinstance(a, pd.DataFrame):
