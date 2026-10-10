@@ -344,7 +344,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 2. 可选：S 用本条代码再跑一轮 Qwen 评测，看 [4] 的修复后 workflow 执行成功率。
 3. 阶段 3：评测集扩到 100–150 题，GitHub Actions 跑单测（含 Windows runner，覆盖 B36）。
 
-## [6] 2026-10-10 · 阶段 3 评测集扩展 + CI（进行中）· commit <待提交>
+## [6] 2026-10-10 · 阶段 3 评测集扩展 + CI· commit 30df587（PR #6；CI 25d55e2）
 
 当前阶段：**阶段 3**。CI 已先行合入 master（25d55e2，首轮 4 个组合全过）。
 
@@ -384,3 +384,9 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 1. S 跑新基线：`python run_eval.py --agent both`（约 130 × 2 次调用），以及 `--no-dict` 一组测 RAG 增益（B38 修复后第一次有效对比）。
 2. 根据真实结果复核新题的比较器漏判，再补规则或改题面。
 3. 阶段 4：ReAct 步数上限（B33）、Key 进系统钥匙串。
+
+### [6] 补记：真实模型基线（待运行）
+- Windows CI 首轮失败：签出把 data/eval/*.csv 转成 CRLF，`--check` 逐字节对比不通过；已修复：对比前统一换行 + `.gitattributes` 固定 LF；actions 升到 checkout@v5 / setup-python@v6。
+- 基线命令（在 30df587 之后的 master 上跑，报告自带 commit SHA 与各表 SHA）：
+  `python run_eval.py --agent both` 与 `python run_eval.py --agent both --no-dict`
+- 结果回填到此处，作为 130 题的第一条基线。
