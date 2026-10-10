@@ -131,7 +131,10 @@ ORDER_CASES = [
              question="复购率是多少？",
              ground_truth=_D + "n = d.groupby('user_id').size(); result = round((n >= 2).mean() * 100, 2)",
              alt_ground_truths=[_DONE + "n = d.groupby('user_id').size(); result = round((n >= 2).mean() * 100, 2)",
-                                _D + "n = d.groupby('user_id').size(); result = round(n[n >= 2].sum() / n.sum() * 100, 2)"]),
+                                _D + "n = d.groupby('user_id').size(); result = round(n[n >= 2].sum() / n.sum() * 100, 2)",
+                                # B47：排除已退款的有效订单口径
+                                _D + "d = d[d['status'] != '已退款']; n = d.groupby('user_id').size(); "
+                                     "result = round((n >= 2).mean() * 100, 2)"]),
 ]
 
 
