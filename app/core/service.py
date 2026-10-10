@@ -17,7 +17,7 @@ from functools import lru_cache
 
 from app.core.llm import (LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
-from app.core.result import AnalysisResult, Step, format_result
+from app.core.result import AnalysisResult, Step, format_result, refusal_from_answer
 
 AGENTS = ("workflow", "react")
 
@@ -37,7 +37,7 @@ def analyze(
     chat_model=None,
     max_attempts: int = 3,
     exec_timeout: int = 20,
-    recursion_limit: int = 12,
+    recursion_limit: int = 25,
     use_dictionary: bool = True,
     memory=None,
     thread_id: str | None = None,
@@ -236,6 +236,12 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         elif isinstance(m, AIMessage):
             res.steps.append(Step("answer", content=str(m.content)))
             res.answer = str(m.content)
+    if res.answer.strip().startswith("Sorry, need more steps"):
+        # langgraph 剩余步数不足时不抛 GraphRecursionError，而是塞一条英文占位答复（B39）
+        res.answer = ""
+        if res.error is None:
+            res.error = f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论"
+            res.error_kind = "agent"
 
     ok = [e for e in execs if not e["error"]]
     res.attempts = sum(1 for e in execs if e["error"])
@@ -249,6 +255,10 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         res.result = last["result"]
         res.result_text = format_result(last["result"])
         res.chart_path = last["chart"] or (res.charts[-1] if res.charts else None)
+    elif refusal_from_answer(res.answer) is not None:
+        # 模型没调用工具、直接在结论里按契约拒答（B40）
+        res.result = res.result_text = refusal_from_answer(res.answer)
+        res.executed = True
     elif execs:
         res.code = execs[-1]["code"]
         if res.error is None:

@@ -166,3 +166,49 @@ def test_refusal_detection():
     assert not is_refusal("无法回答：")
     assert not is_refusal("数据中没有成本字段")
     assert not is_refusal(None) and not is_refusal(0)
+
+
+# ---------------------------------------------------------------- 规则 19（阶段 3b，B41）
+def test_rule19_percent_string_scalar():
+    assert results_equal("7.00%", 7.0)
+    assert results_equal("45.81%", 45.81)
+    assert not results_equal("45.8%", 45.81)
+    assert not results_equal("7.00%", 0.5)
+
+
+def test_rule19_percent_strings_in_series_and_dict():
+    idx = ["APP", "小程序", "网页"]
+    assert results_equal(pd.Series(["50.58%", "34.58%", "14.83%"], index=idx),
+                         pd.Series([50.58, 34.58, 14.83], index=idx))
+    assert results_equal({"总订单数": 1200, "已退款订单数": 84, "退款率": "7.00%"}, 7.0)
+
+
+def test_rule19_dict_with_embedded_quarter_keys():
+    e = pd.Series([131210.0, 143463.5], index=pd.Index([1, 2], name="quarter"))
+    assert results_equal({"第一季度销售总额": 131210.0, "第二季度销售总额": 143463.5, "哪个季度更高": "第二季度"}, e)
+    assert results_equal({"2024年Q1": 131210.0, "2024年Q2": 143463.5}, e)
+    assert not results_equal({"第一季度": 143463.5, "第二季度": 131210.0}, e)   # 对错季度
+    assert not results_equal({"华东": 131210.0, "华南": 143463.5}, e)          # 键里没有季度
+
+
+def test_rule19_dict_with_embedded_month_keys():
+    e = pd.Series([34, 21, 5], index=pd.Index([3, 4, 5], name="date"))
+    assert results_equal({"3月": 34, "4月": 21, "5月": 5}, e)
+    assert not results_equal({"3月": 21, "4月": 34, "5月": 5}, e)
+
+
+def test_refusal_from_answer():
+    from app.core.result import refusal_from_answer
+    assert refusal_from_answer("无法回答：数据中没有店长字段。\n更多说明") == "无法回答：数据中没有店长字段。"
+    assert refusal_from_answer("**无法回答：没有供应商字段**") == "无法回答：没有供应商字段"
+    assert refusal_from_answer("无法直接回答，因为没有成本字段") is None
+    assert refusal_from_answer("无法回答") is None
+    assert refusal_from_answer(None) is None
+
+
+def test_rule19_rank_numbers_vs_values():
+    e = pd.Series([13757.5, 10721.5, 4760.0, 4550.0, 4270.0], index=pd.Index(list("BEACD"), name="product"))
+    assert results_equal(pd.Series([1, 2, 3, 4, 5], index=list("BEACD")), e)
+    assert results_equal(pd.Series([3, 1, 2, 4, 5], index=list("ABECD")), e)
+    assert not results_equal(pd.Series([1, 2, 3, 4, 5], index=list("EBACD")), e)
+    assert not results_equal(pd.Series([1, 2, 3], index=list("BEA")), e)

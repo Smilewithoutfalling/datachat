@@ -32,6 +32,8 @@ CHART_GUIDE = (
     "- 必须有中文标题（ax.set_title）和中文坐标轴标签（set_xlabel/set_ylabel）。\n"
     "- 选择合适的图型：对比用柱状图、趋势用折线图、占比用饼图/堆叠图。\n"
     "- 关键数据点加数值标注（ax.text / bar_label），让人不看坐标也能读数。\n"
+    "- 横轴是字符串标签（如 '2024-01'）时，pandas 折线/柱状图的横坐标实际是位置 0..n-1："
+    "用 for i, (lab, y) in enumerate(s.items()): ax.text(i, y, ...) 标注，不要把字符串当 x 传给 ax.text/annotate。\n"
     "- 不要堆砌过多元素，保持简洁；如有多类别再加图例。\n"
     "- 用 plt.savefig(chart_path) 保存（清晰度与白边已全局处理，无需传 dpi）。"
 )

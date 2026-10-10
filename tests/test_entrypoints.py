@@ -55,8 +55,9 @@ def test_run_eval_both_agents_and_rescore_new_tables(tmp_path):
     assert "应拒答" in p.stdout and "workflow" in p.stdout and "react" in p.stdout
     reports = sorted(tmp_path.glob("r_*.json"))
     assert [r.name for r in reports] == ["r_react.json", "r_workflow.json"]
+    assert len(list(tmp_path.glob("eval_compare_oracle_*.json"))) == 1   # B42：compare 跟 --out 同目录
     data = json.loads(reports[1].read_text(encoding="utf-8"))
-    assert data["datasets"]["orders"]["dictionary"] and {c["dataset"] for c in data["cases"]} == {
+    assert data["datasets"]["orders"]["dictionary_file"] and {c["dataset"] for c in data["cases"]} == {
         "orders", "employees", "inventory"}
     p = subprocess.run([sys.executable, "run_eval.py", "--rescore", str(reports[1])],
                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)

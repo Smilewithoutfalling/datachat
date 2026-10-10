@@ -390,3 +390,40 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 - 基线命令（在 30df587 之后的 master 上跑，报告自带 commit SHA 与各表 SHA）：
   `python run_eval.py --agent both` 与 `python run_eval.py --agent both --no-dict`
 - 结果回填到此处，作为 130 题的第一条基线。
+
+---
+
+## [7] 2026-10-10 · 阶段 3b 基线复核与修复 · commit <待提交>
+
+### 基线（S 运行，分支 eval-3 b87aef3，docs/eval/phase3/）
+- 模型 Qwen3.5-397B-A17B（网关 grg-aikits-test.grgbanking.com），temperature 0，Python 3.11.17，pandas 3.0.6，130 题，n=1。
+- 代码 1b27da1。报告里 git_sha 为 "1b27da1?"："?" 表示 S 的环境里调用 git 失败，退回读 .git 文件，**无法判断工作区是否有改动**（不是 -dirty）。
+- 表指纹：sales abe40a78ff53、orders b21bad987c65、employees 3fd0f03966b8、inventory 0aac24693528。
+
+| 配置 | 原判 | 重评（本阶段比较器） | 应拒答 | 剩余错题（重评后） |
+|---|---|---|---|---|
+| workflow 有字典 | 93.8% | **98.5%**（128/130） | 9/9 | ts_001 画图报错，ord_028 题目没写精度（B43） |
+| workflow 无字典 | 93.8% | **97.7%**（127/130） | 9/9 | corr_001 只给地区合计，ts_011、ord_019 画图报错 |
+| react 有字典 | 86.9% | **90.8%**（118/130） | 6/9 | 拒答不守契约 2、步数上限 1，其余见报告 |
+| react 无字典 | 83.8% | **87.7%**（114/130） | 6/9 | 同上，另 4 题撞步数上限 |
+
+- 有/无字典差异在 1 题以内，属单次运行波动范围；在当前 4 张表上，字典没有带来可测的增益（列名已足够自解释）。要测 RAG 增益需要列名含糊的表。
+- react 比 workflow 低约 8 个百分点，主要来自拒答（6/9 vs 9/9）和步数上限，不是计算能力。
+
+### 本阶段修复
+| ID | 级别 | 位置 | 问题与修复 |
+|---|---|---|---|
+| B39 | P1 | app/core/service.py | langgraph 剩余步数不足时不抛异常，而是返回英文占位 "Sorry, need more steps…"，被当成结论。改为记 error_kind=agent；ReAct 默认 recursion_limit 12→25 |
+| B40 | P1 | app/core/service.py、rescore.py | ReAct 不调工具、直接在结论里写"无法回答：…"时 result 为空，拒答题判错。现在结论首行符合契约时取作 result（`refusal_from_answer`，移到 app/core/result.py）；--rescore 对旧报告同样处理。不守契约的说法（"无法直接回答""无法计算"）仍判错；ReAct 提示词要求结论首行原样以"无法回答："开头 |
+| B41 | P1 | app/eval/comparator.py | 比较器规则 19：百分数字符串 '7.00%' 按数值比；dict 键里含季度/月份（'第一季度销售总额'、'3月'）对序号索引 Series 按序号对齐，忽略 dict 中的非数值项；问排名时给名次 1..n 且与期望值从大到小一致即对（并列时不放宽，期望本身是 1..n 时不放宽） |
+| B42 | P2 | run_eval.py | `--agent both` 的 compare 文件固定写进 outputs/，单测因此往真实 outputs/ 落文件（S 的 eval-3 里那份 eval_compare_oracle 就来自 pytest 临时目录，应删除）。现在给了 --out 时写在同目录 |
+| B43 | P2 | cases_extra.py ord_028 | "平均每单买几件？"没写精度，标准答案却 round 到 2 位，模型答 2.3 被判错。题目补"保留两位小数"。本次基线中这题人工判对 |
+| B44 | P2 | app/tools/plotting.py | 横轴是 '2024-01' 这类字符串时，pandas 画图的横坐标实际是位置 0..n-1，模型用 ax.text('2024-01', y) 标注触发 matplotlib ConversionError，整段代码失败（结果其实已算对）。CHART_GUIDE 补了用位置标注的说明。是否在图表失败时保留已算出的 result 留到阶段 4 讨论 |
+| — | P3 | report.py | datasets.*.dictionary 改名为 dictionary_file（只表示文件存在；本次是否使用看顶层 use_dictionary），避免 --no-dict 报告里显示 true 引起误读 |
+
+### 指标快照
+- 单测：Linux Python 3.11 **374 passed**，约 3 分钟。
+
+### 下一步
+- S 删除 eval-3 上的 eval_compare_oracle_20261010_092954.json 后合并（或由本次 PR 一并处理）。
+- 合并后建议 S 再跑一次 `--agent react`，验证 B39/B40/B44 的实际效果；workflow 不必重跑。

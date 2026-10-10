@@ -115,7 +115,7 @@ ORDER_CASES = [
                  "d = df[df['status'] == '已完成']; result = round(d['pay_amount'].sum(), 2)",     # 未去重
              ]),
     EvalCase(id="ord_028", category="ambiguity", dataset="orders",
-             question="平均每单买几件？",
+             question="平均每单买几件？保留两位小数。",
              ground_truth=_D + "result = round(d['qty'].mean(), 2)",
              alt_ground_truths=[_DONE + "result = round(d['qty'].mean(), 2)",
                                 "result = round(df['qty'].mean(), 2)"]),
