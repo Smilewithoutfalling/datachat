@@ -186,3 +186,22 @@ def test_git_sha_without_git_binary(monkeypatch):
     monkeypatch.setattr(rep, "_git", boom)
     sha = rep.git_sha()
     assert sha != "unknown" and sha.endswith("?") and len(sha) == 8
+
+
+def test_ord_030_refund_excluded_alt():
+    """B47：排除已退款的有效订单口径（73.15%）也算对。"""
+    case = next(c for c in ALL_CASES if c.id == "ord_030")
+    outs, _ = _RUNNER.expected_all(case)
+    assert score(73.15, case, outs) and score(75.46, case, outs)
+    assert not score(75.77, case, outs)                 # 没按 order_id 去重
+
+
+def test_git_sha_note_when_git_missing(monkeypatch):
+    """B48：调不到 git 时 sha 带 "?"，并在报告里写明原因。"""
+    from app.eval import report
+    monkeypatch.setenv("DATACHAT_GIT", os.path.join(ROOT, "no-such-git.exe"))
+    sha = report.git_sha()
+    assert sha.endswith("?") or sha == "unknown"
+    assert "DATACHAT_GIT" in (report.git_sha_note() or "")
+    s = EvalReport([], meta={}).summary()
+    assert "git_sha_note" in s
