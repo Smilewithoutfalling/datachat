@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 from datetime import datetime
 
@@ -20,8 +21,39 @@ from app.eval.cases import CATEGORY_MAP
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+_WIN_GIT = (r"C:\Program Files\Git\cmd\git.exe", r"C:\Program Files (x86)\Git\cmd\git.exe")
+_git_problem = None      # B48：最近一次没能调用 git 的原因，报告里写进 git_sha_note
+
+
+def _git_exe() -> str:
+    """git 可执行文件：DATACHAT_GIT 环境变量 > PATH > Windows 默认安装位置。"""
+    exe = os.environ.get("DATACHAT_GIT") or shutil.which("git")
+    if exe:
+        return exe
+    for p in _WIN_GIT:
+        if os.path.exists(p):
+            return p
+    return "git"
+
+
 def _git(*args):
-    return subprocess.run(["git", "-C", _REPO, *args], capture_output=True, text=True, timeout=5)
+    global _git_problem
+    try:
+        r = subprocess.run([_git_exe(), "-C", _REPO, *args], capture_output=True, text=True, timeout=5)
+    except FileNotFoundError:
+        _git_problem = "找不到 git（不在 PATH 上；可设环境变量 DATACHAT_GIT 指向 git.exe）"
+        raise
+    except Exception as e:
+        _git_problem = f"调用 git 失败：{type(e).__name__}: {e}"
+        raise
+    if r.returncode != 0:
+        _git_problem = f"git {args[0]} 退出码 {r.returncode}：{(r.stderr or '').strip()[:200]}"
+    return r
+
+
+def git_sha_note():
+    """git_sha 带 "?" 时说明原因（如 safe.directory 拒绝、git 不在 PATH）；正常时为 None。"""
+    return _git_problem
 
 
 def _sha_from_files(short: bool):
@@ -49,6 +81,8 @@ def _sha_from_files(short: bool):
 
 def git_sha(short: bool = True) -> str:
     """当前 commit；工作区有改动时加 -dirty。git 不可用时退回读 .git 文件，并在末尾加 "?"。"""
+    global _git_problem
+    _git_problem = None
     try:
         r = _git("rev-parse", *(["--short"] if short else []), "HEAD")
         sha = r.stdout.strip()
@@ -239,7 +273,8 @@ class EvalReport:
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         return {
             "time": datetime.now().isoformat(timespec="seconds"),
-            "git_sha": git_sha(),
+            "git_sha": (sha := git_sha()),
+            **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),
             "agent": agents[0] if len(agents) == 1 else agents,
             **self.meta,
             "overall": block(self.results),
@@ -280,6 +315,8 @@ class EvalReport:
         print("=" * 60)
         print("  DataChat 评测报告")
         print(f"  时间: {s['time']}    commit: {s['git_sha']}    agent: {s['agent']}")
+        if s.get("git_sha_note"):
+            print(f"  ⚠ commit 后的 ? 表示没能确认工作区是否干净：{s['git_sha_note']}")
         if s.get("model"):
             print(f"  模型: {s['model']}    temperature: {s.get('temperature')}    数据指纹: {s.get('data_sha256')}")
         print(f"  总用例: {self.total}")
