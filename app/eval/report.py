@@ -38,13 +38,16 @@ def _git_exe() -> str:
 
 def _git(*args):
     global _git_problem
+    exe = _git_exe()
     try:
-        r = subprocess.run([_git_exe(), "-C", _REPO, *args], capture_output=True, text=True, timeout=5)
-    except FileNotFoundError:
-        _git_problem = "找不到 git（不在 PATH 上；可设环境变量 DATACHAT_GIT 指向 git.exe）"
+        r = subprocess.run([exe, "-C", _REPO, *args], capture_output=True, text=True, timeout=5)
+    except FileNotFoundError as e:
+        # B53：记下实际用的路径和系统报错，方便区分"真找不到"和"找到了但启动失败"
+        where = "不在 PATH 上" if exe == "git" else ("路径存在但启动失败" if os.path.exists(exe) else "路径不存在")
+        _git_problem = f"找不到 git（{where}；可设环境变量 DATACHAT_GIT 指向 git.exe）：exe={exe!r}，{e}"
         raise
     except Exception as e:
-        _git_problem = f"调用 git 失败：{type(e).__name__}: {e}"
+        _git_problem = f"调用 git 失败：exe={exe!r}，{type(e).__name__}: {e}"
         raise
     if r.returncode != 0:
         _git_problem = f"git {args[0]} 退出码 {r.returncode}：{(r.stderr or '').strip()[:200]}"
