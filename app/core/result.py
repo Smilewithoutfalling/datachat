@@ -93,3 +93,27 @@ def format_result(result: Any, max_chars: int = 3000, max_rows: int = 60) -> str
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n…（文本已截断，原长 {len(text)} 字符）"
     return text
+
+
+# ---- 拒答契约（阶段 3）：数据回答不了时 result = "无法回答：<原因>" ----
+REFUSAL_PREFIX = "无法回答"
+
+
+def is_refusal(v) -> bool:
+    """结果契约（阶段 3）：数据回答不了时 result = "无法回答：<原因>"。只有前缀、没有原因的不算。"""
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if not s.startswith(REFUSAL_PREFIX):
+        return False
+    reason = s[len(REFUSAL_PREFIX):].strip(" ：:，,。.；;-—\n\t")
+    return len(reason) >= 2
+
+
+def refusal_from_answer(answer):
+    """规则 19：ReAct 没调用工具、直接在结论里拒答时，取结论首行（须以"无法回答"开头）作为 result。"""
+    if not isinstance(answer, str):
+        return None
+    first = answer.strip().splitlines()[0].strip() if answer.strip() else ""
+    first = first.strip("*").strip()
+    return first if is_refusal(first) else None
