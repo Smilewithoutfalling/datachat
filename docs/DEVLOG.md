@@ -227,7 +227,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 2. 提交本阶段改动并回填 SHA。
 3. 进入阶段 2：子进程沙箱（B01 B02 B03 B28）。
 
-## [4] 2026-10-09 · 阶段 1.5 第二轮（实测复核后修正）· commit <待提交>
+## [4] 2026-10-09 · 阶段 1.5 第二轮（实测复核后修正）· commit 59e3625
 上一条：[3]（b710e23）。
 
 ### 当前技术栈
@@ -284,3 +284,62 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 2. 可选：S 用本条代码再跑一轮 workflow（同模型），看沙箱 / strip_code 修复后执行成功率。
 3. 进入阶段 2：子进程沙箱（B01 B02 B03）。
 
+
+## [5] 2026-10-09 · 阶段 2 执行隔离（子进程沙箱）· commit <待提交>
+上一条：[4]（59e3625）。
+
+### 当前技术栈
+同 [4]；沙箱改为子进程。不新增依赖（Windows Job Object 用标准库 ctypes 调）。
+
+### 设计
+- `tools/sandbox.py::run_code()`（签名不变）：每次执行起一个子进程 `python -I -B -X utf8 tools/sandbox_worker.py <临时工作目录>`，执行一次就销毁。
+  - 环境变量白名单（PATH、SYSTEMROOT、LANG、CONDA_PREFIX 等），API Key 与其他变量一概不传；TMP/TEMP 指向工作目录。
+  - 输入：主进程把 df 存成 input.pkl、代码存成 job.json（主进程写，子进程读，方向可信）。
+  - 输出：子进程把结果用 JSON 写到 out.json（`tools/wire.py`，保留 RangeIndex/MultiIndex/DatetimeIndex/PeriodIndex、列 dtype、Timestamp/Period/NaN、dict/list/tuple），图存成 chart.png，主进程再拷到 chart_path。**主进程不反序列化子进程产生的 pickle**。
+  - 超时：主进程 `proc.wait(timeout)`，到点 Windows 用 TerminateJobObject、其他平台 killpg 强杀。
+  - 内存：Windows 用 Job Object 的 ProcessMemoryLimit（`tools/_winjob.py`）；Linux/macOS 子进程在执行前对自己设 RLIMIT_AS（软硬一致，无法调高）。默认 2048 MB，`DATACHAT_SANDBOX_MEM_MB` 可调。
+  - Windows Job 另外限制同时只能 1 个进程（无法再起子进程）、禁读写剪贴板等 UI 操作，关闭句柄连带杀掉。
+  - 预启动：子进程导入 pandas/matplotlib 后报 READY 再等任务，主进程常备 1 个备用进程，把约 0.5 s（Linux）的导入开销藏到上一题执行期间。`DATACHAT_SANDBOX_PREWARM=0` 关闭。
+- 子进程内的审计钩子（`sys.addaudithook`，装上后无法移除；只在模型代码执行前装）：
+  - 禁止：subprocess / os.system / exec / spawn / fork / kill、socket、ctypes、winreg、_winapi、sqlite3、urllib/http 等网络库、webbrowser、gc.get_objects/get_referrers/get_referents、sys._current_frames、pickle.find_class、os.chdir；
+  - 读 traceback / 生成器 / 协程的帧（tb_frame、gi_frame…）被禁，防止拿到外层帧；
+  - 读文件只允许 Python 安装目录与 site-packages、matplotlib 数据与缓存、字体目录、时区目录、工作目录；写文件、删改文件只允许工作目录与 matplotlib 缓存目录；列目录同读规则。
+  - 钩子和目录列表只存在于闭包里，没有名字指向它们；gc 遍历已禁。
+- 受限 builtins + import 白名单沿用 [4]，抽到 `tools/sandbox_policy.py`。
+- 报错格式：tb_frame 被禁后 traceback 模块用不了，改为自己拼 "File "<string>", line N" + 异常类型与消息（reviewer 依赖的信息不变）。
+- `run_trusted()`：评测标准答案在本进程执行（可信代码），`eval/runner.py`、`eval/rescore.py` 改用它；模型代码仍全部走 run_code。
+
+### 本次完成（对照 [4]）
+| 问题 | 状态 | 证据 |
+|---|---|---|
+| B01 | 已解决（桌面威胁模型下） | tests/test_sandbox.py 的 test_escape_blocked×7（pandas 里的 os.popen / os.system、`__subclasses__` 找 Popen、ctypes、socket、gc 遍历、traceback 取帧）、test_api_key_not_in_child_env、test_file_write_blocked、test_file_read_outside_blocked（读临时目录里的 .env、列目录）全部通过，xfail 全部去掉 |
+| B02 | 已解决 | test_timeout_kills_process：死循环 timeout=1 时 15 s 内返回 TimeoutError（实测约 timeout + 0.5 s），进程被杀，没有残留线程 |
+| B03 | 已解决 | 每次执行独立进程与工作目录，plt.savefig 的重定向只在子进程里；test_concurrent_runs_isolated（4 线程并发出图，图与结果不串）、test_parent_matplotlib_untouched |
+| 内存上限 | 新增 | test_memory_limit（1024 MB 上限下申请 4 GB 报 MemoryError） |
+| 结果保真 | 新增 | test_result_types_round_trip；test_comparator_cases 的等价/错误写法全部经子进程执行仍判对 |
+
+### 新发现
+| 编号 | 严重度 | 位置 | 描述 | 计划阶段 |
+|---|---|---|---|---|
+| B34 | P1 | tools/sandbox_worker.py | 审计钩子不是严格安全边界（Python 文档原话）：C 扩展自己打开的文件不经过 open 事件；通过 sys._getframe 仍能走到 worker 的 main 帧（里面没有钩子与 Key，但能看到 df 等）。硬保证只有"Key 不在子进程环境变量里"和进程级限制；本机文件系统没有 OS 级隔离（Windows 要 AppContainer / 低完整性令牌）。阶段 4 把 Key 从 .env 挪进系统钥匙串后，磁盘上不再有明文 Key | 4（钥匙串）、8（容器） |
+| B35 | P2 | tools/sandbox.py | 打包成 exe 后 sys.executable 是应用本身，需要 `<exe> --sandbox-worker` 入口 | 6 |
+| B36 | P2 | tools/_winjob.py | Windows 代码路径（Job Object、内存上限、单进程限制）只能在 Windows 上测。2026-10-10 S 本地 Windows（Python 3.11）跑 tests/test_sandbox.py 28 项全过；首轮唯一失败是测试本身的问题（`CDLL(None)` 在 Windows 上先报 TypeError，到不了 dlopen），已把用例拆成按平台 dlopen 与 `string_at` 读内存两条。之后由 CI Windows runner 持续覆盖 | 2（已本地验证）、3（CI） |
+| B37 | P2 | 性能 | 每次执行多一次进程启动：Linux 约 0.5 s，Windows 预计 1–3 s（未测）；预启动能藏掉大部分。全量测试从约 10 s 变为约 2 分钟 | 3 |
+
+### 假设与判断
+- 威胁模型按 plan.md：桌面单用户、本机数据、自带 Key，重点防恶意 CSV 经提示注入偷 Key、写文件。本条挡住的是 LLM 生成或被注入的常见手法；专门针对审计钩子的绕过（B34）留到容器沙箱。
+- 内存上限 2048 MB：pandas + matplotlib 导入后约 300–600 MB 地址空间，余量够常规分析。Linux 上 RLIMIT_AS 管的是虚拟地址空间，偏保守。
+- 标准答案走本进程：它是仓库里的固定代码，不是模型输出；这样评测不多付一倍的进程开销。
+
+### 当前已知问题
+同 [4]，去掉 B01、B02、B03；加 B34–B37。
+
+### 指标快照
+- 测试：274 项全部通过，0 xfail（[4] 为 260 通过 + 4 xfail）。Python 3.11 与 3.12（Linux）一致，全量约 2 分钟。
+- oracle 自检：workflow 50/50、react 50/50（经子进程沙箱）。
+- Windows（S 本地）：tests/test_sandbox.py 28 项全过；单次 run_code 约 2 s，首次约 4 s（冷启动 + 预启动备用进程）。
+
+### 下一步
+1. ~~S 在 Windows 本地验证 Job Object 路径（B36）~~ 已完成（28/28）。
+2. 可选：S 用本条代码再跑一轮 Qwen 评测，看 [4] 的修复后 workflow 执行成功率。
+3. 阶段 3：评测集扩到 100–150 题，GitHub Actions 跑单测（含 Windows runner，覆盖 B36）。
