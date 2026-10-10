@@ -323,7 +323,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 |---|---|---|---|---|
 | B34 | P1 | tools/sandbox_worker.py | 审计钩子不是严格安全边界（Python 文档原话）：C 扩展自己打开的文件不经过 open 事件；通过 sys._getframe 仍能走到 worker 的 main 帧（里面没有钩子与 Key，但能看到 df 等）。硬保证只有"Key 不在子进程环境变量里"和进程级限制；本机文件系统没有 OS 级隔离（Windows 要 AppContainer / 低完整性令牌）。阶段 4 把 Key 从 .env 挪进系统钥匙串后，磁盘上不再有明文 Key | 4（钥匙串）、8（容器） |
 | B35 | P2 | tools/sandbox.py | 打包成 exe 后 sys.executable 是应用本身，需要 `<exe> --sandbox-worker` 入口 | 6 |
-| B36 | P2 | tools/_winjob.py | Windows 代码路径（Job Object、内存上限、单进程限制）只能在 Windows 上测，沙箱环境是 Linux；需要 S 本地或 CI Windows runner 验证 | 2（S 本地）、3（CI） |
+| B36 | P2 | tools/_winjob.py | Windows 代码路径（Job Object、内存上限、单进程限制）只能在 Windows 上测。2026-10-10 S 本地 Windows（Python 3.11）跑 tests/test_sandbox.py 28 项全过；首轮唯一失败是测试本身的问题（`CDLL(None)` 在 Windows 上先报 TypeError，到不了 dlopen），已把用例拆成按平台 dlopen 与 `string_at` 读内存两条。之后由 CI Windows runner 持续覆盖 | 2（已本地验证）、3（CI） |
 | B37 | P2 | 性能 | 每次执行多一次进程启动：Linux 约 0.5 s，Windows 预计 1–3 s（未测）；预启动能藏掉大部分。全量测试从约 10 s 变为约 2 分钟 | 3 |
 
 ### 假设与判断
@@ -337,8 +337,9 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 ### 指标快照
 - 测试：274 项全部通过，0 xfail（[4] 为 260 通过 + 4 xfail）。Python 3.11 与 3.12（Linux）一致，全量约 2 分钟。
 - oracle 自检：workflow 50/50、react 50/50（经子进程沙箱）。
+- Windows（S 本地）：tests/test_sandbox.py 28 项全过；单次 run_code 约 2 s，首次约 4 s（冷启动 + 预启动备用进程）。
 
 ### 下一步
-1. S 在 Windows 本地跑 `pytest tests/test_sandbox.py -v`，确认 Job Object 路径（B36），并看单次执行耗时。
+1. ~~S 在 Windows 本地验证 Job Object 路径（B36）~~ 已完成（28/28）。
 2. 可选：S 用本条代码再跑一轮 Qwen 评测，看 [4] 的修复后 workflow 执行成功率。
 3. 阶段 3：评测集扩到 100–150 题，GitHub Actions 跑单测（含 Windows runner，覆盖 B36）。
