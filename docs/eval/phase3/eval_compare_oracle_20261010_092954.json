@@ -1,0 +1,39 @@
+{
+  "git_sha": "1b27da1?",
+  "agents": {
+    "workflow": {
+      "correctness_rate": 100.0,
+      "execution_success_rate": 100.0,
+      "avg_duration_s": 1.2900666666666667,
+      "avg_tokens": 45.0,
+      "by_category": {
+        "refusal": 100.0
+      },
+      "by_dataset": {
+        "orders": 100.0,
+        "employees": 100.0,
+        "inventory": 100.0
+      },
+      "files": [
+        "C:\\Users\\HJH\\AppData\\Local\\Temp\\pytest-of-HJH\\pytest-3\\test_run_eval_both_agents_and_0\\r_workflow.json"
+      ]
+    },
+    "react": {
+      "correctness_rate": 100.0,
+      "execution_success_rate": 100.0,
+      "avg_duration_s": 0.9635888888888887,
+      "avg_tokens": 30.0,
+      "by_category": {
+        "refusal": 100.0
+      },
+      "by_dataset": {
+        "orders": 100.0,
+        "employees": 100.0,
+        "inventory": 100.0
+      },
+      "files": [
+        "C:\\Users\\HJH\\AppData\\Local\\Temp\\pytest-of-HJH\\pytest-3\\test_run_eval_both_agents_and_0\\r_react.json"
+      ]
+    }
+  }
+}

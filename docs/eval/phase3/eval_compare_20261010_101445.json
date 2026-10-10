@@ -1,0 +1,51 @@
+{
+  "git_sha": "1b27da1?",
+  "agents": {
+    "workflow": {
+      "correctness_rate": 93.84615384615384,
+      "execution_success_rate": 98.46153846153847,
+      "avg_duration_s": 9.366898461538462,
+      "avg_tokens": 2074.7,
+      "by_category": {
+        "aggregation": 97.22222222222221,
+        "filtering": 100.0,
+        "correlation": 95.45454545454545,
+        "timeseries": 78.57142857142857,
+        "refusal": 100.0,
+        "ambiguity": 100.0
+      },
+      "by_dataset": {
+        "sales": 92.0,
+        "orders": 90.0,
+        "employees": 96.0,
+        "inventory": 100.0
+      },
+      "files": [
+        "D:\\Coding\\claude\\datachat\\outputs\\eval_workflow_nodict_20261010_101445.json"
+      ]
+    },
+    "react": {
+      "correctness_rate": 83.84615384615385,
+      "execution_success_rate": 96.92307692307692,
+      "avg_duration_s": 15.903976923076925,
+      "avg_tokens": 4972.984615384616,
+      "by_category": {
+        "aggregation": 88.88888888888889,
+        "filtering": 92.5925925925926,
+        "correlation": 90.9090909090909,
+        "timeseries": 78.57142857142857,
+        "refusal": 44.44444444444444,
+        "ambiguity": 75.0
+      },
+      "by_dataset": {
+        "sales": 90.0,
+        "orders": 70.0,
+        "employees": 88.0,
+        "inventory": 84.0
+      },
+      "files": [
+        "D:\\Coding\\claude\\datachat\\outputs\\eval_react_nodict_20261010_101445.json"
+      ]
+    }
+  }
+}
