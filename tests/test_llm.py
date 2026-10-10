@@ -92,3 +92,27 @@ def test_usage_tracker_handles_missing_usage():
     t.add_message(type("M2", (), {"usage_metadata": {"input_tokens": 3, "output_tokens": 4}})())
     u = t.snapshot()
     assert u.calls == 2 and u.total_tokens == 7 and u.reported is False
+
+
+# ---- B45：网关以错误 JSON 充当回复
+def test_api_error_text():
+    from app.core.llm import api_error_text
+    msg = '{"message":"prompt: A user\'s message must contain at least one image or a PDF or audio."}'
+    assert api_error_text(msg).startswith("prompt: A user's message")
+    assert api_error_text('{"error": {"message": "rate limited", "code": 429}}') == "rate limited"
+    assert api_error_text('{"result": 1, "message": "x"}') is None        # 有其他键：不是错误包
+    assert api_error_text("各地区销售额如下……") is None
+    assert api_error_text("{不是 JSON}") is None and api_error_text(None) is None
+
+
+def test_gateway_error_content_is_retried():
+    client, sleeps = _client(['{"message": "upstream glitch"}', "好"], backoff_base=1.0)
+    assert client.invoke("hi") == "好"
+    assert sleeps == [1.0]
+
+
+def test_gateway_error_content_gives_up():
+    client, _ = _client(['{"message": "bad"}'] * 3, max_retries=1, backoff_base=0.0)
+    with pytest.raises(LLMError) as ei:
+        client.invoke("hi")
+    assert ei.value.kind == "gateway_error"
