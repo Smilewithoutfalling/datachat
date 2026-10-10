@@ -1,23 +1,11 @@
-"""50条标注测试用例，覆盖聚合/过滤/关联/时序四类分析场景。
+"""评测用例：自然语言问题 + 标准答案代码。
 
-每个用例包含自然语言问题 + 标准答案代码。
+- 原 50 题（data/sample_eval.csv，dataset="sales"），覆盖聚合/过滤/关联/时序；
+- 阶段 3 新增 80 题（app/eval/cases_extra.py），3 张合成表，另含应拒答题与歧义题。
 """
+import os
 
-from dataclasses import dataclass, field
-
-
-@dataclass
-class EvalCase:
-    id: str
-    category: str          # aggregation | filtering | correlation | timeseries
-    question: str           # 中文自然语言问题
-    ground_truth: str       # pandas代码，执行后 result = 期望结果
-    keywords: list = field(default_factory=list)   # 生成代码应包含的关键词
-    has_chart: bool = False
-    # 结果顺序是否计分（B12）：只有题目明确要求排序/排名时为 True，比较器据此决定是否比较顺序
-    ordered: bool = False
-    # 题目问"占比"时，比例（0.49）与百分数（49%）都算对（B24 规则 12）；问"百分比"的不设
-    percent_equiv: bool = False
+from app.eval.case_model import EvalCase  # noqa: F401  （EvalCase 定义移到 case_model，供 cases_extra 共用）
 
 
 # ============================================================
@@ -216,7 +204,7 @@ CORR_CASES = [
     ),
     EvalCase(
         id="corr_003", category="correlation",
-        question="每个产品在各地区的销售额占比",
+        question="每个产品的销售额在各地区的占比（每个产品内部各地区合计为 100%）",
         ground_truth="result = df.assign(sales=df['units'] * df['price']).groupby(['product', 'region'])['sales'].sum().groupby(level=0, group_keys=False).apply(lambda x: (x / x.sum() * 100).round(2))",
         keywords=["groupby", "sum"],
         percent_equiv=True,
@@ -241,7 +229,7 @@ CORR_CASES = [
     ),
     EvalCase(
         id="corr_007", category="correlation",
-        question="分析各产品在不同地区的销量标准差，判断分布是否均匀。",
+        question="先按产品和地区汇总销量，再求每个产品在各地区之间销量的标准差，判断分布是否均匀。",
         ground_truth="result = df.groupby(['product', 'region'])['units'].sum().groupby(level=0).std().round(2)",
         keywords=["groupby", "std"],
     ),
@@ -334,7 +322,7 @@ TS_CASES = [
     ),
     EvalCase(
         id="ts_011", category="timeseries",
-        question="每月平均单价的走势是怎样的？",
+        question="每月的平均单价（按记录简单平均）走势是怎样的？",
         ground_truth="df['date'] = pd.to_datetime(df['date']); result = df.set_index('date')['price'].resample('ME').mean().round(2)",
         keywords=["resample", "mean", "price"],
     ),
@@ -352,11 +340,26 @@ TS_CASES = [
     ),
 ]
 
-ALL_CASES = AGG_CASES + FILT_CASES + CORR_CASES + TS_CASES
+SALES_CASES = AGG_CASES + FILT_CASES + CORR_CASES + TS_CASES
 
 CATEGORY_MAP = {
     "aggregation": "聚合",
     "filtering": "过滤",
     "correlation": "关联",
     "timeseries": "时序",
+    "refusal": "应拒答",
+    "ambiguity": "歧义",
 }
+
+_DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
+# 数据表名 -> CSV 路径（相对仓库根目录）。同目录下的同名 .dict.csv 是它的数据字典
+DATASETS = {
+    "sales": os.path.join(_DATA, "sample_eval.csv"),
+    "orders": os.path.join(_DATA, "eval", "orders.csv"),
+    "employees": os.path.join(_DATA, "eval", "employees.csv"),
+    "inventory": os.path.join(_DATA, "eval", "inventory.csv"),
+}
+
+from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
+
+ALL_CASES = SALES_CASES + EXTRA_CASES
