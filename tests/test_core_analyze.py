@@ -180,3 +180,23 @@ def test_react_multi_turn_memory(sample_path):
     assert [s.name for s in r2.steps] == ["load", "answer"]            # 只含本轮
     assert "问一" in prompt_text(m.calls[-1]) and "第一轮" in prompt_text(m.calls[-1])
     assert not r2.executed and r2.result is None
+
+
+def test_react_refusal_in_answer_without_tool(sample_path):
+    """B40：模型不调工具、直接在结论里按契约拒答 → result 取结论首行。"""
+    m = ScriptedChatModel(replies=["无法回答：数据中没有成本字段。\n所以算不了毛利率。"], calls=[])
+    res = analyze(sample_path, "毛利率是多少", agent="react", chat_model=m, llm_config=FAST)
+    assert res.result == "无法回答：数据中没有成本字段。" and res.executed and res.error is None
+
+
+def test_react_non_contract_refusal_not_rescued(sample_path):
+    m = ScriptedChatModel(replies=["无法直接回答，因为没有成本字段。"], calls=[])
+    res = analyze(sample_path, "毛利率是多少", agent="react", chat_model=m, llm_config=FAST)
+    assert res.result is None and not res.executed
+
+
+def test_react_sorry_placeholder_is_error(sample_path):
+    """B39：langgraph 步数不足时塞 'Sorry, need more steps…'，不能当结论。"""
+    m = ScriptedChatModel(replies=["Sorry, need more steps to process this request."], calls=[])
+    res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    assert res.answer == "" and res.error_kind == "agent" and "recursion_limit" in res.error
