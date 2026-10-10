@@ -116,4 +116,6 @@ def refusal_from_answer(answer):
         return None
     first = answer.strip().splitlines()[0].strip() if answer.strip() else ""
     first = first.strip("*").strip()
+    if first.startswith("我无法回答"):        # B49：结论写成"我无法回答：…"
+        first = first[1:]
     return first if is_refusal(first) else None

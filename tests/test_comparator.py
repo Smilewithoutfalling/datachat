@@ -112,6 +112,8 @@ def test_rule15_iso_week_labels():
     e = pd.Series([120, 380], index=pd.to_datetime(["2024-01-07", "2024-01-14"]))
     assert results_equal(pd.Series([120, 380], index=["2024-W01", "2024-W02"]), e)
     assert not results_equal(pd.Series([380, 120], index=["2024-W01", "2024-W02"]), e)
+    assert results_equal(pd.Series([120, 380], index=["2024-W01 (01-01)", "2024-W02（01-08）"]), e)   # B51
+    assert not results_equal(pd.Series([120, 380], index=["2024-W01 x", "2024-W02 y"]), e)
 
 
 def test_rule16_named_summary_dict():
@@ -203,6 +205,8 @@ def test_refusal_from_answer():
     assert refusal_from_answer("**无法回答：没有供应商字段**") == "无法回答：没有供应商字段"
     assert refusal_from_answer("无法直接回答，因为没有成本字段") is None
     assert refusal_from_answer("无法回答") is None
+    assert refusal_from_answer("我无法回答：数据中没有价格字段。") == "无法回答：数据中没有价格字段。"   # B49
+    assert refusal_from_answer("我认为无法回答：没有价格") is None
     assert refusal_from_answer(None) is None
 
 
@@ -228,8 +232,10 @@ def test_rule20_scalar_inside_dict():
     a = {"2023年内离职人数": 14, "2023-01-01在职人数": 183, "流失率(%)": 7.65}
     assert results_equal(a, 7.65)
     assert not results_equal(a, 7.5)
-    # 不唯一（≤4 项的 dict 归规则 10 管，这里用 5 项）
-    assert not results_equal({"甲项指标值": 7.65, "乙项指标值": 7.65, "丙项指标值": 1, "丁项指标值": 2, "戊项指标值": 3}, 7.65)
+    # B50：两种口径算出同一个值（≤4 项的 dict 归规则 10 管，这里用 5 项）
+    assert results_equal({"甲项指标值": 7.65, "乙项指标值": 7.65, "丙项指标值": 1, "丁项指标值": 2, "戊项指标值": 3}, 7.65)
+    assert results_equal({'原始行数': 1218, 'order_id唯一数': 1200, '整行去重后行数': 1200, 'order_id去重后行数': 1200,
+                          '整行去重_符合条件': 40, 'order_id去重_符合条件': 40}, 40)
     assert results_equal({"甲项指标值": 7.65, "乙项指标值": 7.7, "丙项指标值": 1, "丁项指标值": 2, "戊项指标值": 3}, 7.65)
     assert not results_equal({"2024-01": 1.0, "2024-02": 7.65, "2024-03": 3.0}, 7.65)  # 时间序列
     assert not results_equal({f"k{i}": i for i in range(9)} | {"x": 7.65}, 7.65)  # 太多项

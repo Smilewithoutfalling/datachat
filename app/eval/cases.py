@@ -88,7 +88,7 @@ AGG_CASES = [
     ),
     EvalCase(
         id="agg_013", category="aggregation",
-        question="各地区销售总额的中位数是多少？",
+        question="先算出各地区的总销售额，这几个总额的中位数是多少？",  # B52：原题可读成各地区单笔销售额的中位数
         ground_truth="result = (df['units'] * df['price']).groupby(df['region']).sum().median()",
         keywords=["groupby", "sum", "median"],
     ),
@@ -100,7 +100,7 @@ AGG_CASES = [
     ),
     EvalCase(
         id="agg_015", category="aggregation",
-        question="各地区总销售额的平均值是多少？",  # B47：原题"平均每个地区的销售额"可读成各地区的单笔平均
+        question="先算出各地区的总销售额，这几个总额的平均值是多少？",  # B47/B52：原题"平均每个地区的销售额"可读成各地区的单笔平均
         ground_truth="result = (df['units'] * df['price']).groupby(df['region']).sum().mean()",
         keywords=["groupby", "sum", "mean"],
     ),
