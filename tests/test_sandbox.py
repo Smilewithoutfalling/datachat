@@ -41,7 +41,10 @@ ESCAPES = {
     "shell_via_pandas_module": "result = pd.io.common.os.popen('echo pwned').read()",
     "system_via_pandas_module": "result = pd.io.common.os.system('echo pwned')",
     "popen_via_subclasses": "result = [c for c in ().__class__.__base__.__subclasses__() if c.__name__ == 'Popen'][0](['echo', 'x'])",
-    "ctypes": "result = pd.io.common.os.sys.modules['ctypes'].CDLL(None)",
+    # CDLL(None) 在 Windows 上先在 ctypes 的 Python 代码里报 TypeError，到不了 dlopen；按平台给真实库名
+    "ctypes_dlopen": "ct = pd.io.common.os.sys.modules['ctypes']\n"
+                     "result = ct.CDLL('kernel32' if pd.io.common.os.name == 'nt' else 'libc.so.6')",
+    "ctypes_memory_read": "result = pd.io.common.os.sys.modules['ctypes'].string_at(4096, 8)",  # 被拦则不会真去读这个地址
     "socket": "result = pd.io.common.os.sys.modules['socket'].create_connection(('1.1.1.1', 80))",
     "gc_walk": "result = pd.io.common.os.sys.modules['gc'].get_objects()[:1]",
     "frame_via_traceback": "try:\n    1/0\nexcept Exception as e:\n    result = e.__traceback__.tb_frame",
