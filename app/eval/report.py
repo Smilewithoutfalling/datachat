@@ -81,6 +81,20 @@ def run_metadata(llm_config=None, data_path: str | None = None) -> dict:
     return meta
 
 
+def datasets_metadata(datasets: dict) -> dict:
+    """阶段 3：每张数据表的指纹，以及旁边有没有数据字典（B38：sample_eval 以前没有字典，"有/无字典"两组其实一样）。"""
+    from app.tools.dictionary import dict_path_for
+    out = {}
+    for name, path in datasets.items():
+        if not os.path.exists(path):
+            continue
+        d = dict_path_for(path)
+        out[name] = {"path": os.path.relpath(path, _REPO).replace(os.sep, "/"),
+                     "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()[:12],
+                     "dictionary": os.path.exists(d)}
+    return out
+
+
 # ---------------------------------------------------------------- 结果对象的可还原存储
 def _enc(x):
     import math
@@ -168,9 +182,11 @@ class EvalReport:
         self.meta = meta or {}
         self.total = len(results)
         self.by_category = {}
+        self.by_dataset = {}
         for r in results:
             cat = r["case"].category
             self.by_category.setdefault(cat, []).append(r)
+            self.by_dataset.setdefault(getattr(r["case"], "dataset", "sales"), []).append(r)
 
     def _items(self, items):
         return self.results if items is None else items
@@ -228,6 +244,7 @@ class EvalReport:
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
+            "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
         }
 
     def to_json(self, path: str, extra: dict | None = None) -> None:
@@ -236,7 +253,8 @@ class EvalReport:
         for r in self.results:
             c = r["case"]
             rows.append({
-                "id": c.id, "category": c.category, "question": c.question,
+                "id": c.id, "category": c.category, "dataset": getattr(c, "dataset", "sales"),
+                "question": c.question,
                 "correct": r.get("correct"), "executed": r.get("executed"),
                 "initial_error": r.get("initial_error"), "infra_error": r.get("infra_error"),
                 "error_kind": r.get("error_kind"), "error": r.get("error"),
@@ -283,13 +301,18 @@ class EvalReport:
         print("\n  📂 分类指标")
         print(f"  {'分类':<10} {'用例数':<6} {'正确率':<9} {'执行成功率':<11} {'修复率':<8}")
         print(f"  {'-' * 52}")
-        for cat_key in ["aggregation", "filtering", "correlation", "timeseries"]:
+        for cat_key in CATEGORY_MAP:
             b = s["by_category"].get(cat_key)
             if not b:
                 continue
             cat_name = CATEGORY_MAP.get(cat_key, cat_key)
             print(f"  {cat_name:<10} {b['n']:<6} {self._pct(b['correctness_rate']):<9} "
                   f"{self._pct(b['execution_success_rate']):<11} {self._pct(b['reviewer_fix_rate']):<8}")
+        if len(s["by_dataset"]) > 1:
+            print("\n  🗂  分表指标")
+            for name, b in s["by_dataset"].items():
+                print(f"  {name:<10} {b['n']:<6} {self._pct(b['correctness_rate']):<9} "
+                      f"{self._pct(b['execution_success_rate']):<11} {self._pct(b['reviewer_fix_rate']):<8}")
         print()
 
     def print_details(self, verbose=False):
