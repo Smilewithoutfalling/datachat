@@ -26,7 +26,7 @@
 阶段 1.5 第二轮（B29，来自 Qwen3.5 实测复核）：
  13. 期望 1 行表（"哪条记录"），实际是这一行的 Series（索引是列名）→ 转成 1 行表再比。
  14. 期望索引/列是月份序号（1–12，groupby(dt.month) 的结果），实际是 '2024-01' / Timestamp / Period → 比较月份部分。
- 15. ISO 周标签（'2024-W01'）也算时间索引，两边都是时间索引时按位置比值。
+ 15. ISO 周标签（'2024-W01'，阶段 3d 起也可带括号说明 '2024-W09 (02-26)'）也算时间索引，两边都是时间索引时按位置比值。
  16. 模型自己起键名的汇总 dict：期望数值时 ≤4 项也可（规则 10 的 Series 仍 ≤3）；
      期望标签元组（最高/最低月份）时，取 dict 里的标签值按顺序比较。
  17. 实际多了"总计/合计/All/Total"汇总行或列（crosstab margins=True）而期望没有 → 去掉再比。
@@ -43,7 +43,7 @@
 阶段 3c（B46，来自 eval-3b 的 ReAct 复核；只在上面的规则都不匹配时才用，且要求"唯一"以免奖励罗列多种口径）：
  20. a) 期望是标签、实际是按值排好序的数值 Series（榜首不并列）→ 榜首标签即答案；
      b) 实际是带附加信息的 dict（≤8 项、键是文字而不是月份）：
-        期望数值时，第一层数值项里恰好一个等于期望；期望标签时，第一层恰好一个标签值且等于期望；
+        期望数值时，第一层数值项里有一项等于期望（阶段 3d B50：原为"恰好一个"，几种口径算出同一个值时也算）；期望标签时，第一层恰好一个标签值且等于期望；
         期望 Series/表时，dict 里恰好一个子对象（Series/表/dict）等于期望；
         期望 Series 且索引是文字标签时，每个标签恰好对应一个"含该标签的键"且数值相等（'工作日平均销量' ↔ '工作日'）；
         嵌套 dict 里的标量不参与（{'口径A': {'复购率': …}, '口径B': {…}} 这种罗列口径的不算对）；
@@ -58,7 +58,7 @@ import pandas as pd
 
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 _QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
-_WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}$", re.IGNORECASE)
+_WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}(?:\s*[(（][^()（）]*[)）])?$", re.IGNORECASE)   # B51：可带 '(02-26)' 这类说明
 _CN_QUARTER_RE = re.compile(r"^(?:\d{4}\s*年?\s*)?第?\s*([一二三四1-4])\s*季度?$")
 _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4}
 _MARGIN_LABELS = {"总计", "合计", "总和", "汇总", "all", "total", "sum"}
@@ -140,7 +140,7 @@ def _extras_eq(a, e, tol, ordered) -> bool:
         leaves = [v for v in vals.values() if _is_num(v) or _pct(v) is not None]
         if len(leaves) == len(vals) and max(len(k.strip()) for k in vals) <= 4:
             return False                 # {'华东': 1, '华北': 2, …}：是分组汇总表，碰巧含期望值不算（同规则 10）
-        return sum(1 for v in leaves if _scalar_eq(v, e, tol)) == 1
+        return any(_scalar_eq(v, e, tol) for v in leaves)   # B50：几个口径算出同一个值（整行去重 / 按 order_id 去重）也算
     if _is_label_value(e):
         labels = [v for v in vals.values() if _is_label_value(v)]
         return len(labels) == 1 and _scalar_eq(labels[0], e, tol)
