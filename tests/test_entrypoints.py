@@ -1,4 +1,5 @@
 """B16：命令行入口都经 analyze()（UI 见 test_ui_smoke.py）。"""
+import json
 import subprocess
 import sys
 
@@ -34,7 +35,7 @@ def test_run_eval_oracle_cli(tmp_path):
 def test_run_eval_repeat_and_rescore_cli(tmp_path):
     """阶段 1.5：--repeat 输出每次报告和汇总；--rescore 用存下的结构化结果离线重新打分。"""
     out = tmp_path / "r.json"
-    p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--category", "ts", "--repeat", "2",
+    p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--dataset", "sales", "--category", "ts", "--repeat", "2",
                         "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     runs = sorted(tmp_path.glob("r_run*.json"))
@@ -43,3 +44,21 @@ def test_run_eval_repeat_and_rescore_cli(tmp_path):
                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     assert "13/13 = 100.0%" in p.stdout
+
+
+def test_run_eval_both_agents_and_rescore_new_tables(tmp_path):
+    """阶段 3：--agent both 两个 Agent 各出一份报告；新表、拒答题的报告也能 --rescore。"""
+    out = tmp_path / "r.json"
+    p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--agent", "both", "--category", "refusal",
+                        "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "应拒答" in p.stdout and "workflow" in p.stdout and "react" in p.stdout
+    reports = sorted(tmp_path.glob("r_*.json"))
+    assert [r.name for r in reports] == ["r_react.json", "r_workflow.json"]
+    data = json.loads(reports[1].read_text(encoding="utf-8"))
+    assert data["datasets"]["orders"]["dictionary"] and {c["dataset"] for c in data["cases"]} == {
+        "orders", "employees", "inventory"}
+    p = subprocess.run([sys.executable, "run_eval.py", "--rescore", str(reports[1])],
+                       cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "9/9 = 100.0%" in p.stdout
