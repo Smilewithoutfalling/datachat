@@ -610,7 +610,7 @@ B65（缺失哨兵、合计行）不在本阶段，留给阶段 7 的列画像�
 - S 用闸门 25 题重跑 react（建议 workflow 也跑），只作**回归**：看 ⑤⑥ 是否归零、其余题有无退步、unverified_numbers 有多少。
 - 然后进入阶段 4；M18 重估工期、M20 阶段 7 目标与留出集。
 
-## [13] 2026-10-12 · 阶段 3.6 回归（闸门 25 题，仅回归）+ B68、B69 · commit <待提交>
+## [13] 2026-10-12 · 阶段 3.6 回归（闸门 25 题，仅回归）+ B68、B69 · commit 9a3816b（PR #13）
 
 报告：docs/eval/gate_20261012_140826_react.json、gate_20261012_142736_workflow.json（S 于 9430354 运行；Windows 上 git 不在 PATH，git_sha 带 "?"，git_sha_note 已写明）。**这 25 题已用于定位和修复问题，下面的数字只说明修复是否生效，不是准确率证据。**
 
@@ -635,3 +635,24 @@ B65（缺失哨兵、合计行）不在本阶段，留给阶段 7 的列画像�
 
 ### 判断
 m10 是提示词遵从问题，继续在这 25 题上调提示词就是对着测试集调参。建议不再为 m10 改提示词，B68、B69 合入后进入阶段 4；拒答遵从放到阶段 7 用新的留出题集（M20）检验。
+
+---
+
+## [14] 2026-10-12 · 阶段 4 第一步：API Key 进系统钥匙串 · commit <待提交>
+
+### 改动
+- 新增 app/core/keystore.py：Key 存在系统钥匙串（Windows 凭据管理器；service `datachat`，账户 `llm_api_key`）。`LLMConfig.from_env` 改调 `resolve_api_key()`：**环境变量 DEEPSEEK_API_KEY 显式设置时优先**（开发、CI、临时覆盖），否则读钥匙串。钥匙串没有后端（无桌面的 Linux / CI）时按"未配置"处理，不抛异常。
+- 命令行 `python -m app.core.keystore status|set|migrate|delete`：set 用 getpass 输入，不回显；migrate 把 .env 里的 Key 搬进钥匙串，**不自动改 .env**，由用户手动删掉那一行；status 发现 .env 里还有明文 Key 时会提示。任何输出都不含 Key。
+- 缺 Key 的报错改成指向 `keystore set`。README 与 .env.example 改为默认用钥匙串。
+- requirements.txt 加 keyring 25.7.0 及其依赖，按平台和版本用环境标记锁定（用 uv pip compile 核对过 Windows/Linux × 3.11/3.12 四种组合，无版本冲突）。
+- tests/conftest.py：autouse 换成内存钥匙串。**测试绝不读写开发机上真实的凭据管理器**；否则 S 本机钥匙串里有 Key 时，"缺 Key"相关测试的结果会变。
+
+### 注意
+- 入口脚本仍会 load_dotenv：.env 里留着 Key 时，它以环境变量身份优先于钥匙串。迁移后必须删掉 .env 里那一行，status 会提醒。
+- THREAT_MODEL 不变：钥匙串只是缩小暴露面，同一用户身份下的程序都能读。沙箱 import 白名单里没有 keyring（新测试 test_sandbox_cannot_import_keyring），子进程环境变量本来就不含 Key。
+
+### 测试
+tests/test_keystore.py 新增 9 个（含参数化）；全量 455 通过（3.11 / 3.12）。
+
+### 下一步
+`analyze_stream()` + trace id → FastAPI + SSE → 会话持久化 → PyInstaller spike。
