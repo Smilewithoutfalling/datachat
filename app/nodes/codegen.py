@@ -1,4 +1,5 @@
 from app.core.llm import node_llm, strip_code
+from app.tools.dataset import SINGLE_ACCESS
 from app.tools.plotting import CHART_GUIDE
 
 _PROMPT = """根据分析计划写一段 pandas 代码。
@@ -15,7 +16,7 @@ _PROMPT = """根据分析计划写一段 pandas 代码。
 {plan}
 
 严格遵守以下约定：
-- 数据已加载到变量 df（pandas DataFrame），不要重新读取文件。
+- {data_access}
 - pd（pandas）、np（numpy）、plt（matplotlib.pyplot）已就绪，无需 import；不要导入其他库。
 - 把最终答案赋值给变量 result（可以是 DataFrame / Series / 数值 / 字符串 / dict），result 必须直接回答问题：
   问"哪个/哪一个"：result 只放标签本身（如 '华南'、'A'、'2024-06'），不要拼接说明文字或数值；
@@ -32,6 +33,7 @@ def generate_code(state, config=None):
     llm = node_llm(config)
     msg = _PROMPT.format(
         schema=state["schema"],
+        data_access=state.get("data_access") or SINGLE_ACCESS,
         field_notes=state.get("field_notes") or "（无）",
         question=state["question"],
         plan=state.get("plan", ""),
