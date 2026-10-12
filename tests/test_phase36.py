@@ -176,3 +176,25 @@ def test_topn_labels_on_series_index():
 def test_topn_labels_in_frame_column():
     df = pd.DataFrame({"customer_city": GOLD5, "order_count": [5, 4, 3, 2, 1]}, index=[9, 7, 5, 3, 1])
     assert results_equal(df, GOLD5, ordered=True)
+
+
+# ------------------------------------------------------------------ 回归重跑暴露的两个问题
+def test_extension_array_result_survives_sandbox(chart_path):
+    """B68：回归 workflow s07 的 .unique() 返回 ArrowStringArray，过沙箱后变成了 repr 字符串，比较器自然判错。"""
+    df = pd.DataFrame({"国家": pd.Series(["France", "EIRE", "France", "Germany"], dtype="string")})
+    result, _, err = run_code("result = df['国家'].unique()", df, chart_path)
+    assert err is None and not isinstance(result, str)
+    assert results_equal(result, frozenset({"France", "EIRE", "Germany"}))
+
+
+def test_react_no_exec_no_refusal_is_retried(sample_path):
+    """B69：回归 react m09 只回了一个 'B'：没执行代码、也不是拒答，却记成成功（error 为空）。"""
+    m = ScriptedChatModel(replies=["B", tool_call("result = 3"), "结果是 3。"], calls=[])
+    res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    assert res.ok and res.result == 3 and any(s.name == "retry" for s in res.steps)
+
+
+def test_react_no_exec_no_refusal_persistent_is_error(sample_path):
+    m = ScriptedChatModel(replies=["B"] * 3, calls=[])
+    res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    assert res.error_kind == "agent" and not res.executed and len(m.calls) == 3

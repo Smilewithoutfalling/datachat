@@ -138,6 +138,9 @@ def encode(v, depth: int = 0):
         return {"k": "index", "v": _enc_index(v)}
     if isinstance(v, np.ndarray):
         return {"k": "ndarray", "v": [encode(x, depth + 1) for x in v.tolist()]}
+    if isinstance(v, pd.api.extensions.ExtensionArray):
+        # B68：.unique() 在字符串/可空类型列上返回 ArrowStringArray 等，原来落到 scalar 分支变成 repr 字符串
+        return {"k": "ndarray", "v": [encode(x, depth + 1) for x in np.asarray(v, dtype=object).tolist()]}
     if isinstance(v, tuple):
         return {"k": "tuple", "v": [encode(x, depth + 1) for x in v]}
     if isinstance(v, list):
