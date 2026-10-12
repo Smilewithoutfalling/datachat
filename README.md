@@ -60,8 +60,11 @@
 # 1. 安装依赖（建议在你的 conda 环境里）
 pip install -r requirements.txt
 
-# 2. 配置 DeepSeek API Key
-cp .env.example .env      # 然后编辑 .env 填入 DEEPSEEK_API_KEY
+# 2. 配置 API Key：存进系统钥匙串（Windows 凭据管理器），不再明文写进 .env
+python -m app.core.keystore set       # 粘贴 Key，不回显
+python -m app.core.keystore status    # 看当前生效的 Key 来自哪里
+cp .env.example .env                  # 模型名、base_url 等非机密配置仍写在 .env
+# 已经在 .env 里写过 Key：python -m app.core.keystore migrate，然后删掉 .env 里那一行
 
 # 2b. 跑测试（不需要 API Key）
 pip install -r requirements-dev.txt
