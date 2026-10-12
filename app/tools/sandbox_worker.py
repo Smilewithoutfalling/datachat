@@ -19,6 +19,8 @@ import os
 import sys
 import traceback
 
+STDOUT_MAX = 8000          # 回传的 print 输出上限（字符）
+
 _BLOCKED_PREFIXES = (
     "subprocess.", "os.system", "os.exec", "os.spawn", "os.posix_spawn", "os.startfile", "os.fork",
     "os.forkpty", "os.kill", "os.killpg", "os.chdir", "os.fchdir", "os.chroot",
@@ -205,11 +207,13 @@ def main():
           "chart_path": chart_path, "result": None, "__name__": "__sandbox__"}
 
     real_stdout = sys.stdout
-    sys.stdout = sys.stderr = io.StringIO()   # 模型代码的 print 不回传
+    printed = io.StringIO()
+    sys.stdout = printed                      # 模型代码的 print 回传给调用方（阶段 3.6：ReAct 看得到中间输出）
+    sys.stderr = io.StringIO()                # 警告等 stderr 不回传
     _limit_memory(job.get("mem_mb"))
     _install_guard(read_roots, [workdir, os.environ.get("MPLCONFIGDIR")])
     del job
-    out = {"error": None, "result": None, "chart": False}
+    out = {"error": None, "result": None, "chart": False, "stdout": ""}
     try:
         exec(compile(code, "<string>", "exec"), ns)
     except BaseException as e:
@@ -226,6 +230,10 @@ def main():
             out["error"] = "结果无法回传：" + _format_error(sys.exc_info()[1])
     plt.close("all")
     out["chart"] = os.path.exists(chart_path)
+    text = printed.getvalue()
+    if len(text) > STDOUT_MAX:                # 只留头尾，中间标明截断
+        text = text[:STDOUT_MAX // 2] + f"\n…（print 输出过长，省略 {len(text) - STDOUT_MAX} 字符）…\n" + text[-STDOUT_MAX // 2:]
+    out["stdout"] = text
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False)
     real_stdout.write("DONE\n")
