@@ -7,7 +7,7 @@
 """
 from app.core import analyze
 from app.eval.cases import DATASETS, EvalCase
-from app.eval.comparator import is_refusal, results_equal
+from app.eval.comparator import is_refusal, match_kind, results_equal
 from app.tools.csv_io import read_csv
 from app.tools.sandbox import run_trusted
 
@@ -102,7 +102,8 @@ class EvalRunner:
         if res.executed:
             out["executed"] = True
             out["actual"] = res.result
-            out["correct"] = score(res.result, case, expected_list)
+            out["match"] = score_detail(res.result, case, expected_list)
+            out["correct"] = out["match"] is not None
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):
@@ -129,9 +130,19 @@ class EvalRunner:
 
 def score(actual, case: EvalCase, expected_list: list) -> bool:
     """阶段 3 打分：应拒答题看是否拒答且给了原因；其他题拒答即错，否则与任一合理答案相等即对。"""
+    return score_detail(actual, case, expected_list) is not None
+
+
+def score_detail(actual, case: EvalCase, expected_list: list):
+    """判错返回 None；判对返回靠的是哪一层（M02）："refusal"，或 match_kind 的结果，
+    匹配的是歧义题的备选答案时前面加 "alt:"（如 "alt:strict"）。"""
     if case.expect_refusal:
-        return is_refusal(actual)
+        return "refusal" if is_refusal(actual) else None
     if is_refusal(actual):
-        return False
-    return any(results_equal(actual, e, ordered=case.ordered, percent_equiv=case.percent_equiv)
-               for e in expected_list)
+        return None
+    for i, e in enumerate(expected_list):
+        # 对错仍以 results_equal 为准（与阶段 3 判分逐题一致），match_kind 只负责标注层级
+        if results_equal(actual, e, ordered=case.ordered, percent_equiv=case.percent_equiv):
+            kind = match_kind(actual, e, ordered=case.ordered, percent_equiv=case.percent_equiv) or "relaxed"
+            return kind if i == 0 else f"alt:{kind}"
+    return None
