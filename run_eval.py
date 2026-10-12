@@ -223,6 +223,11 @@ def _rescore(path, data):
         print(f"  变化 {c['id']}: {c['before']} → {c['after']}")
     if r["skipped_no_obj"]:
         print(f"  {len(r['skipped_no_obj'])} 题没有结构化结果（旧报告），沿用原判定")
+    print(f"  判对层级：{r['match_kinds']}")
+    if r["needs_audit"]:
+        print(f"  需人工抽审（判对但不是 strict）{len(r['needs_audit'])} 题：{' '.join(r['needs_audit'])}")
+    if r["evalset_report"] and r["evalset_report"] != r["evalset_now"]:
+        print(f"  ⚠ 评测集指纹变了（报告 {r['evalset_report']} → 现在 {r['evalset_now']}），与原报告不完全可比")
 
 
 if __name__ == "__main__":
