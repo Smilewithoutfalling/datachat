@@ -67,6 +67,14 @@ def sha12(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:12]
 
 
+def rel(path: str) -> str:
+    """相对仓库根目录的路径；Windows 上跨盘符（如临时目录在 C:、仓库在 D:）时原样返回。"""
+    try:
+        return os.path.relpath(path, ROOT)
+    except ValueError:
+        return path
+
+
 def fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=300) as r:
         return r.read()
@@ -114,7 +122,7 @@ def write_csv(df: pd.DataFrame, path: str, header_rows: list[list[str]] | None =
     tail = (",".join(footer) + "\r\n") if footer else ""
     with open(path, "wb") as f:
         f.write((head + body + tail).encode(ENCODING))
-    print(f"  {os.path.relpath(path, ROOT)}  {len(df)} 行  sha256[:12]={sha12(open(path, 'rb').read())}")
+    print(f"  {rel(path)}  {len(df)} 行  sha256[:12]={sha12(open(path, 'rb').read())}")
 
 
 def build_retail():
@@ -139,7 +147,7 @@ def build_olist():
             if sha12(data) != want:
                 sys.exit(f"{name} 指纹不符：{sha12(data)} != {want}")
             open(target, "wb").write(data)
-        print(f"  {os.path.relpath(target, ROOT)}  sha256[:12]={sha12(open(target, 'rb').read())}")
+        print(f"  {rel(target)}  sha256[:12]={sha12(open(target, 'rb').read())}")
 
 
 if __name__ == "__main__":
