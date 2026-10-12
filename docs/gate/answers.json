@@ -1,0 +1,505 @@
+{
+ "questions_sha256": "75a559642e4e",
+ "verify_script_sha256": "69b9d43982d2",
+ "pandas": "3.0.6",
+ "sources": {
+  "uci_online_retail": {
+   "Online Retail.xlsx": "43465a06f2cc"
+  },
+  "olist": {
+   "category_translation.csv": "a81f0d1f27b2",
+   "customers.csv": "c26c17f59f30",
+   "order_items.csv": "4f6abdbbc940",
+   "order_payments.csv": "61674868ed7b",
+   "order_reviews.csv": "012b61c7593e",
+   "orders.csv": "8df58ef3d2d7",
+   "products.csv": "3e6569628a17",
+   "sellers.csv": "31eb9bd50d68"
+  }
+ },
+ "answers": {
+  "s01": {
+   "question": "2011 年全年的销售额是多少英镑？销售额按数量乘以单价算。",
+   "gold": {
+    "kind": "scalar",
+    "value": 8998790.91
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 9820814.28,
+     "why": "去掉取消单（发票号以 C 开头）"
+    }
+   ],
+   "note": "净额：所有行数量×单价求和（取消单为负数，自然冲减）"
+  },
+  "s02": {
+   "question": "一共有多少个不同的客户？",
+   "gold": {
+    "kind": "scalar",
+    "value": 4372
+   },
+   "alts": [],
+   "note": "去重客户编号，不含缺失（脏表里缺失写成'未登记'，不能算一个客户）"
+  },
+  "s03": {
+   "question": "平均每张发票的金额是多少英镑？",
+   "gold": {
+    "kind": "scalar",
+    "value": 376.36
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 482.44,
+     "why": "只算未取消的发票"
+    }
+   ],
+   "note": "每张发票金额求和后取平均，含取消发票（金额为负）"
+  },
+  "s04": {
+   "question": "英国以外的国家一共卖出了多少件商品？",
+   "gold": {
+    "kind": "scalar",
+    "value": 912621
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 927162,
+     "why": "去掉取消单"
+    }
+   ],
+   "note": "净数量；报表变体末尾有'合计'行（国家为空），按'国家≠英国'过滤会把合计行算进去"
+  },
+  "s05": {
+   "question": "有多少张被取消的发票？",
+   "gold": {
+    "kind": "scalar",
+    "value": 3836
+   },
+   "alts": [],
+   "note": "发票号以 C 开头的去重发票数（数据集说明的定义）；数量为负但非 C 开头的是库存调整，不是取消"
+  },
+  "s06": {
+   "question": "单价超过 100 英镑的记录有多少条？",
+   "gold": {
+    "kind": "scalar",
+    "value": 1036
+   },
+   "alts": [],
+   "note": "单价 > 100 的行数（含邮费/手工调整等特殊行）；报表变体有两行表头"
+  },
+  "s07": {
+   "question": "2011 年 12 月有哪些国家下过单？",
+   "gold": {
+    "kind": "list",
+    "value": [
+     "Austria",
+     "Belgium",
+     "Channel Islands",
+     "Cyprus",
+     "Denmark",
+     "EIRE",
+     "Finland",
+     "France",
+     "Germany",
+     "Greece",
+     "Iceland",
+     "Italy",
+     "Japan",
+     "Malta",
+     "Netherlands",
+     "Norway",
+     "Portugal",
+     "Spain",
+     "Sweden",
+     "USA",
+     "United Kingdom"
+    ],
+    "ordered": false
+   },
+   "alts": [
+    {
+     "kind": "list",
+     "value": [
+      "Austria",
+      "Belgium",
+      "Channel Islands",
+      "Denmark",
+      "EIRE",
+      "Finland",
+      "France",
+      "Germany",
+      "Greece",
+      "Iceland",
+      "Italy",
+      "Netherlands",
+      "Norway",
+      "Portugal",
+      "Spain",
+      "Sweden",
+      "USA",
+      "United Kingdom"
+     ],
+     "ordered": false,
+     "why": "不算只有取消单的国家"
+    }
+   ],
+   "note": "2011-12 出现过的国家（集合，不要求顺序）"
+  },
+  "s08": {
+   "question": "销售额最高的前 5 个国家是哪些？",
+   "gold": {
+    "kind": "list",
+    "value": [
+     "United Kingdom",
+     "Netherlands",
+     "EIRE",
+     "Germany",
+     "France"
+    ],
+    "ordered": true
+   },
+   "alts": [],
+   "note": "按净销售额排前 5；去掉取消单时前 5 及顺序相同"
+  },
+  "s09": {
+   "question": "实际卖出数量最多的商品是哪个？",
+   "gold": {
+    "kind": "label",
+    "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+   },
+   "alts": [
+    {
+     "kind": "label",
+     "value": "22197",
+     "why": "按商品编码汇总（同一编码有多个描述）"
+    },
+    {
+     "kind": "label",
+     "value": "POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    },
+    {
+     "kind": "label",
+     "value": "SMALL POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    }
+   ],
+   "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它"
+  },
+  "s10": {
+   "question": "哪个月的销售额最高？",
+   "gold": {
+    "kind": "label",
+    "value": "2011-11"
+   },
+   "alts": [],
+   "note": "按月净销售额最高的月份；去掉取消单结果相同"
+  },
+  "s11": {
+   "question": "2011 年每个季度的销售额分别是多少？",
+   "gold": {
+    "kind": "series",
+    "index": [
+     "1",
+     "2",
+     "3",
+     "4"
+    ],
+    "values": [
+     1741329.99,
+     1907663.75,
+     2383668.24,
+     2966128.93
+    ]
+   },
+   "alts": [
+    {
+     "kind": "series",
+     "index": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "values": [
+      1932635.81,
+      2070084.54,
+      2514825.62,
+      3303268.31
+     ],
+     "why": "去掉取消单"
+    }
+   ],
+   "note": "2011 年 Q1–Q4 净销售额"
+  },
+  "s12": {
+   "question": "没有客户编号的记录占全部记录的百分之几？",
+   "gold": {
+    "kind": "scalar",
+    "value": 24.93
+   },
+   "alts": [],
+   "percent_equiv": true,
+   "note": "缺失客户编号行数 / 总行数 × 100"
+  },
+  "s13": {
+   "question": "英国的销售额占总销售额的比例是多少？",
+   "gold": {
+    "kind": "scalar",
+    "value": 84.0
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 84.58,
+     "why": "去掉取消单"
+    }
+   ],
+   "percent_equiv": true,
+   "note": "英国净销售额 / 全部净销售额 × 100"
+  },
+  "s14": {
+   "question": "整体毛利率是多少？",
+   "gold": {
+    "kind": "refusal"
+   },
+   "alts": [],
+   "note": "没有成本/进价字段"
+  },
+  "s15": {
+   "question": "女性客户的消费总额是多少？",
+   "gold": {
+    "kind": "refusal"
+   },
+   "alts": [],
+   "note": "没有性别字段"
+  },
+  "m01": {
+   "question": "各个州（按客户所在州）的订单数分别是多少？",
+   "gold": {
+    "kind": "series",
+    "index": [
+     "AC",
+     "AL",
+     "AM",
+     "AP",
+     "BA",
+     "CE",
+     "DF",
+     "ES",
+     "GO",
+     "MA",
+     "MG",
+     "MS",
+     "MT",
+     "PA",
+     "PB",
+     "PE",
+     "PI",
+     "PR",
+     "RJ",
+     "RN",
+     "RO",
+     "RR",
+     "RS",
+     "SC",
+     "SE",
+     "SP",
+     "TO"
+    ],
+    "values": [
+     81.0,
+     413.0,
+     148.0,
+     68.0,
+     3380.0,
+     1336.0,
+     2140.0,
+     2033.0,
+     2020.0,
+     747.0,
+     11635.0,
+     715.0,
+     907.0,
+     975.0,
+     536.0,
+     1652.0,
+     495.0,
+     5045.0,
+     12852.0,
+     485.0,
+     253.0,
+     46.0,
+     5466.0,
+     3637.0,
+     350.0,
+     41746.0,
+     280.0
+    ]
+   },
+   "alts": [],
+   "note": "orders ⋈ customers（customer_id），按 customer_state 数订单"
+  },
+  "m02": {
+   "question": "SP 州的客户一共付了多少钱？",
+   "gold": {
+    "kind": "scalar",
+    "value": 5998226.96
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 5923688.9,
+     "why": "用 order_items 的商品价+运费代替实付"
+    }
+   ],
+   "note": "payments ⋈ orders ⋈ customers，SP 州 payment_value 合计（所有订单状态）"
+  },
+  "m03": {
+   "question": "按卖家所在州统计，各州卖出商品的平均单价是多少？",
+   "gold": {
+    "kind": "series",
+    "index": [
+     "AC",
+     "AM",
+     "BA",
+     "CE",
+     "DF",
+     "ES",
+     "GO",
+     "MA",
+     "MG",
+     "MS",
+     "MT",
+     "PA",
+     "PB",
+     "PE",
+     "PI",
+     "PR",
+     "RJ",
+     "RN",
+     "RO",
+     "RS",
+     "SC",
+     "SE",
+     "SP"
+    ],
+    "values": [
+     267.0,
+     392.33,
+     444.11,
+     215.33,
+     108.73,
+     128.2,
+     127.69,
+     89.9,
+     114.6,
+     171.03,
+     117.73,
+     154.75,
+     449.87,
+     204.23,
+     210.17,
+     145.53,
+     175.17,
+     178.44,
+     340.16,
+     172.15,
+     155.2,
+     160.62,
+     108.95
+    ]
+   },
+   "alts": [],
+   "note": "order_items ⋈ sellers（seller_id），按 seller_state 求 price 均值（每个订单行算一次）"
+  },
+  "m04": {
+   "question": "给了 1 星评价的订单，从下单到送达平均用了多少天？",
+   "gold": {
+    "kind": "scalar",
+    "value": 21.31
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 20.85,
+     "why": "按整天数（.dt.days）算"
+    }
+   ],
+   "note": "reviews(score=1) ⋈ orders，送达时间 - 下单时间，未送达的不计；按订单去重"
+  },
+  "m05": {
+   "question": "买过 health_beauty（健康美容）类商品的客户有多少个？",
+   "gold": {
+    "kind": "scalar",
+    "value": 8678
+   },
+   "alts": [
+    {
+     "kind": "scalar",
+     "value": 8836,
+     "why": "按 customer_id 数（Olist 每个订单一个 customer_id）"
+    }
+   ],
+   "note": "items ⋈ products ⋈ translation ⋈ orders ⋈ customers，去重 customer_unique_id"
+  },
+  "m06": {
+   "question": "2018 年 8 月下单但最终被取消的订单，一共涉及多少支付金额？",
+   "gold": {
+    "kind": "scalar",
+    "value": 23921.17
+   },
+   "alts": [],
+   "note": "2018-08 下单、status=canceled 的 84 个订单，payments.payment_value 合计"
+  },
+  "m07": {
+   "question": "销售额最高的 3 个商品类别是什么？用英文类别名。",
+   "gold": {
+    "kind": "list",
+    "value": [
+     "health_beauty",
+     "watches_gifts",
+     "bed_bath_table"
+    ],
+    "ordered": true
+   },
+   "alts": [],
+   "note": "按 price 合计排前 3；加上运费时前 3 及顺序相同"
+  },
+  "m08": {
+   "question": "订单数最多的 5 个城市（按客户所在城市）是哪些？",
+   "gold": {
+    "kind": "list",
+    "value": [
+     "sao paulo",
+     "rio de janeiro",
+     "belo horizonte",
+     "brasilia",
+     "curitiba"
+    ],
+    "ordered": true
+   },
+   "alts": [],
+   "note": "orders ⋈ customers，按 customer_city 数订单排前 5"
+  },
+  "m09": {
+   "question": "各个年龄段的客户分别贡献了多少销售额？",
+   "gold": {
+    "kind": "refusal"
+   },
+   "alts": [],
+   "note": "没有年龄字段"
+  },
+  "m10": {
+   "question": "各商品类别的利润分别是多少？",
+   "gold": {
+    "kind": "refusal"
+   },
+   "alts": [],
+   "note": "没有成本字段"
+  }
+ }
+}

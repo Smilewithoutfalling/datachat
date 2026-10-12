@@ -45,16 +45,25 @@ class DictRetriever:
         return [e for s, e in ranked[:k] if s > 0]
 
 
-def load_retriever(df_path: str):
-    """若存在同名 .dict.csv 则构建检索器，否则返回 None。"""
-    path = dict_path_for(df_path)
+def _entries(path: str, prefix: str = ""):
     if not os.path.exists(path):
-        return None
+        return []
     d = read_csv(path)
     if "field" not in d.columns or "description" not in d.columns:
-        return None
+        return []
     d = d.dropna(subset=["field", "description"])
-    entries = list(zip(d["field"].astype(str), d["description"].astype(str)))
+    return [(prefix + f, desc) for f, desc in zip(d["field"].astype(str), d["description"].astype(str))]
+
+
+def load_retriever(df_path):
+    """若存在同名 .dict.csv 则构建检索器，否则返回 None。
+    多表数据集（目录或路径列表）：合并每张表的 .dict.csv，字段写成"表名.字段"。"""
+    from app.tools.dataset import table_paths
+    tables = table_paths(df_path)
+    if tables is None:
+        entries = _entries(dict_path_for(os.fspath(df_path)))
+    else:
+        entries = [e for name, p in tables for e in _entries(dict_path_for(p), f"{name}.")]
     if not entries:
         return None
     return DictRetriever(entries)

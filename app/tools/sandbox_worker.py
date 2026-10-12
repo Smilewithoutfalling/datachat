@@ -200,7 +200,8 @@ def main():
         return _orig_savefig(chart_path, **kwargs)
 
     plt.savefig = _redirect_savefig
-    ns = {"__builtins__": make_safe_builtins(builtins), "df": df, "pd": pd, "np": np, "plt": plt,
+    data = {"dfs": df} if isinstance(df, dict) else {"df": df}   # 多表时只有 dfs
+    ns = {"__builtins__": make_safe_builtins(builtins), **data, "pd": pd, "np": np, "plt": plt,
           "chart_path": chart_path, "result": None, "__name__": "__sandbox__"}
 
     real_stdout = sys.stdout

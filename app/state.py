@@ -6,6 +6,8 @@ class AgentState(TypedDict, total=False):
     question: str        # 用户的自然语言问题（原样，不拼字典说明，B04）
     df_path: str         # 数据文件路径（CSV）
     schema: str          # 数据表结构描述（喂给模型）
+    data_access: str     # 代码里怎么拿数据（单表 df / 多表 dfs，阶段 3.5）
+    data_access_review: str  # 同上，reviewer prompt 的措辞
     field_notes: str     # 数据字典检索到的字段说明（已格式化，独立于 question，B04）
     plan: str            # Planner 产出的分析步骤
     code: str            # CodeGen / Reviewer 产出的 pandas 代码

@@ -46,7 +46,8 @@ def analyze(
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
-    dataset：CSV 路径（同目录下的同名 .dict.csv 会自动作为数据字典）。
+    dataset：CSV 路径（同目录下的同名 .dict.csv 会自动作为数据字典）；
+             或目录 / CSV 路径列表 = 多表数据集（代码里用 dfs['表名']，见 app/tools/dataset.py）。
     agent："workflow"（固定状态图，带 reviewer 纠错）或 "react"（模型自主调用工具）。
     llm_config：模型、Key、超时、重试配置；None 时从环境变量读取。
     chat_model：直接注入 LangChain ChatModel（测试/离线评测用），此时不需要 API Key。
@@ -62,8 +63,10 @@ def analyze(
         raise ValueError(f"未知 agent: {agent!r}，可选 {AGENTS}")
 
     t0 = time.perf_counter()
-    dataset = os.fspath(dataset)
-    res = AnalysisResult(agent=agent, dataset=dataset, question=question)
+    from app.tools.dataset import dataset_label
+    if not isinstance(dataset, (list, tuple)):
+        dataset = os.fspath(dataset)
+    res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question)
     tracker = UsageTracker()
 
     try:
@@ -78,25 +81,24 @@ def analyze(
             res.usage.retries = None     # ReAct 的重试在 openai SDK 内部完成，无法计数
     if log:
         from app.tools.persist import log_run
-        log_run({**res.to_record(), "df_path": dataset})
+        log_run({**res.to_record(), "df_path": res.dataset})
     return res
 
 
 def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, encoding):
-    from app.tools.csv_io import read_csv_with_encoding
+    from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
-    from app.tools.schema import describe_df
 
     # 1. 数据：只读一次
     t = time.perf_counter()
     try:
-        df, enc = read_csv_with_encoding(dataset, encoding)
+        df, load_desc = load_data(dataset, encoding)   # 单表 DataFrame 或多表 {表名: DataFrame}
     except Exception as e:  # noqa: BLE001  文件不存在 / 编码无法识别 / CSV 解析失败
         res.error, res.error_kind = f"数据集读取失败：{type(e).__name__}: {e}", "dataset"
         res.steps.append(Step("load", error=res.error))
         return
-    schema = describe_df(df)
+    schema = describe_data(df)
     notes = []
     if use_dictionary:
         try:
@@ -105,8 +107,7 @@ def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_
             res.steps.append(Step("dictionary", error=f"数据字典读取失败，已跳过：{e}"))
     res.field_notes = notes
     res.timings["load"] = round(time.perf_counter() - t, 4)
-    res.steps.append(Step("load", content=f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}；"
-                                          f"字典命中 {len(notes)} 条",
+    res.steps.append(Step("load", content=f"{load_desc}；字典命中 {len(notes)} 条",
                           duration_s=res.timings["load"]))
 
     # 2. 模型
@@ -129,8 +130,10 @@ def _run_workflow(res, tracker, cfg, chat_model, df, schema, notes_text, questio
                   max_attempts, exec_timeout):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
+    from app.tools.dataset import access_rule, dataset_label, review_access_rule
     state = {
-        "question": question, "df_path": dataset, "schema": schema,
+        "question": question, "df_path": dataset_label(dataset), "schema": schema,
+        "data_access": access_rule(df), "data_access_review": review_access_rule(df),
         "field_notes": notes_text, "attempts": 0, "max_attempts": max_attempts,
         "exec_timeout": exec_timeout,
     }

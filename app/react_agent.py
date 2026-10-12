@@ -13,11 +13,10 @@ from langgraph.prebuilt import create_react_agent
 
 from app.config import ensure_dirs
 from app.core.result import format_result
-from app.tools.csv_io import read_csv
+from app.tools.dataset import access_rule, copy_data, is_multi, load_data, describe_data
 from app.tools.persist import new_chart_path
 from app.tools.plotting import CHART_GUIDE
 from app.tools.sandbox import run_code
-from app.tools.schema import describe_df
 
 
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
@@ -29,12 +28,13 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
           （code / result 原始对象 / chart / error / duration_s），生成的图表追加到 sink["charts"]；
           analyze() 据此取最终结果，不必重新执行代码（B07）。
     model: 已配置好超时/重试的 ChatModel；None 时按环境变量构建（旧用法）。
-    df: 已读好的 DataFrame（每次执行用副本）；None 时读 df_path。
+    df: 已读好的 DataFrame 或 {表名: DataFrame}（多表，阶段 3.5）；每次执行用副本；None 时读 df_path。
     field_notes: 本轮问题检索到的字段说明（已格式化），放进系统提示而不是拼进用户问题（B04）。
     """
     if df is None:
-        df = read_csv(df_path)
-    schema = describe_df(df)
+        df = load_data(df_path)[0]
+    schema = describe_data(df)
+    multi = is_multi(df)
     ensure_dirs()
     if model is None:
         from app.llm import get_llm
@@ -52,7 +52,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         """
         chart_path = new_chart_path()
         t0 = time.perf_counter()
-        result, chart, error = run_code(code, df.copy(), chart_path, timeout=exec_timeout)
+        result, chart, error = run_code(code, copy_data(df), chart_path, timeout=exec_timeout)
         if sink is not None:
             sink.setdefault("execs", []).append({
                 "code": code, "result": None if error else result, "chart": chart,
@@ -67,9 +67,15 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
             msg += f"\n（已生成图表并保存到 {chart}）"
         return msg
 
+    if multi:
+        # 多表：工具说明里的 df 换成 dfs（单表时工具说明与阶段 3 逐字一致）
+        run_python_on_data.description = run_python_on_data.description.replace(
+            "在已加载的数据表 df（pandas DataFrame）上", "在已加载的多张数据表 dfs（dict：表名 → DataFrame）上"
+        ).replace("- df 已就绪，", "- dfs 已就绪（没有 df），")
     system = (
         "你是一个数据分析智能体，可以调用工具在真实数据上执行 pandas 代码。\n\n"
         f"数据表结构：\n{schema}\n\n"
+        + (f"取数约定：{access_rule(df)}\n\n" if multi else "") +
         f"与本轮问题相关的字段说明（来自数据字典）：\n{field_notes or '（无）'}\n\n"
         "工作方式：先想清分析思路，再用 run_python_on_data 执行代码来验证；"
         "若报错，读取错误信息、修正代码后重试，直到拿到正确结果。"

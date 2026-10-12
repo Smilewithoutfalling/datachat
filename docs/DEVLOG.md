@@ -327,7 +327,7 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 | B37 | P2 | 性能 | 每次执行多一次进程启动：Linux 约 0.5 s，Windows 预计 1–3 s（未测）；预启动能藏掉大部分。全量测试从约 10 s 变为约 2 分钟 | 3 |
 
 ### 假设与判断
-- 威胁模型按 plan.md：桌面单用户、本机数据、自带 Key，重点防恶意 CSV 经提示注入偷 Key、写文件。本条挡住的是 LLM 生成或被注入的常见手法；专门针对审计钩子的绕过（B34）留到容器沙箱。
+- 威胁模型按 docs/roadmap/plan.md（现见 docs/THREAT_MODEL.md）：桌面单用户、本机数据、自带 Key，重点防恶意 CSV 经提示注入偷 Key、写文件。本条挡住的是 LLM 生成或被注入的常见手法；专门针对审计钩子的绕过（B34）留到容器沙箱。
 - 内存上限 2048 MB：pandas + matplotlib 导入后约 300–600 MB 地址空间，余量够常规分析。Linux 上 RLIMIT_AS 管的是虚拟地址空间，偏保守。
 - 标准答案走本进程：它是仓库里的固定代码，不是模型输出；这样评测不多付一倍的进程开销。
 
@@ -456,9 +456,9 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 
 ### 下一步
 - S 再跑一次 `--agent react`（有字典 / 无字典），验证 B46 提示词收紧后 dict 形态是否减少、B47 改题后的效果；顺便看报告里有没有 git_sha_note。
-- 阶段 3 收尾后进入阶段 4（见 roadmap/plan.md）。
+- 阶段 3 收尾后进入阶段 4（见 docs/roadmap/plan.md）。
 
-## [9] 2026-10-10 · 阶段 3d ReAct 复跑收尾 · commit <待提交>
+## [9] 2026-10-10 · 阶段 3d ReAct 复跑收尾 · commit ec9ac0f（PR #9）
 
 ### 复跑（S 运行，分支 eval-3c fc5d567，docs/eval/phase3c/）
 - 代码 16d51c3，模型 Qwen3.5-397B-A17B（同一网关），temperature 0，130 题，n=1；只跑 react。
@@ -491,5 +491,45 @@ xfail 用 strict 模式：问题一旦修好，对应测试会"意外通过"并�
 ### 下一步
 - 下次正式跑评测时看 git_sha_note 的原始报错，定位 B53。
 - 剩下两类问题是 agent 能力问题：不去重（每次约 1 题）、result 形态违反契约（每次约 1 题）。留到阶段 4 之后用 n≥3 的重复运行来观察。
-- 进入阶段 4（见 roadmap/plan.md）。
+- 进入阶段 4（见 docs/roadmap/plan.md）。
+
+## [10] 2026-10-12 · 阶段 3.5 外部验证闸门（准备）+ M 系列审查落地 · commit <待提交>
+
+### 背景
+S 从"完整商业产品"角度提了 M01–M22（docs/roadmap/review-M-series.md），两轮讨论后的决定见 docs/roadmap/review-M-series-response.md。核心：阶段 0–3 证明的是"流水线自洽"，不是"真实数据上有用"，所以在阶段 4 之前插入阶段 3.5 外部验证闸门，阈值由 S 预登记（docs/roadmap/gate-phase35.md）。本条只做闸门的准备，真实运行由 S 用自己的 Key 跑。
+
+### 本阶段改动
+| ID | 级别 | 位置 | 问题与修复 |
+|---|---|---|---|
+| B54 | P1 | app/tools/dataset.py（新）、sandbox.py、sandbox_worker.py、service.py、react_agent.py、nodes/codegen.py、reviewer.py、executor.py、state.py、dictionary.py | 只支持单表（M10），闸门多表组照跑就是 0/10。dataset 可以是目录或 CSV 路径列表：每个 CSV 一张表，代码里用 `dfs['表名']`（没有 df）；schema 逐表输出、各自包进数据分隔块；字典合并为"表名.字段"；**不提示 join key**（闸门要测 schema 理解）。单表时所有 prompt 与阶段 3 逐字一致 |
+| B55 | P1 | app/eval/comparator.py、runner.py、report.py、rescore.py、run_eval.py | 比较器只给对错，看不出靠哪条放宽规则判对（M02）。新增 match_kind：strict / rounded / scaled / extras / relaxed，备选答案前缀 alt:，拒答题 refusal；报告逐题写 match，汇总写 match_kinds；重评输出 needs_audit（判对但不是 strict 的题）。对错仍以 results_equal 为准，阶段 3 报告重评结果逐题不变 |
+| B56 | P2 | app/eval/report.py | 报告没有评测集指纹，改题后无法判断两份报告能否比较（M04）。新增 evalset：题面代码（cases.py / cases_extra.py / case_model.py）+ gen_eval_data.py + 数据与字典文件的 sha256（CRLF 统一为 LF）；重评时指纹变了会提示 |
+| B57 | P2 | docs/ | 引用悬空（M12）：[7][8][9] 引用的 docs/eval/phase3*/ 只在 eval 分支上，plan.md 不在仓库里。eval-3 / 3b / 3c 的报告并入 master；plan.md 入库为 docs/roadmap/plan.md 并按审查修订（阶段 3.5、阶段 4/6 新增交付物、前端只走 HTTP 的约束）；[9] SHA 补为 ec9ac0f |
+| B58 | P2 | docs/THREAT_MODEL.md（新） | 原文档容易读成"keyring 上线 = 偷 Key 已解决"（M03）。写明各道防线挡什么、挡不住什么：keyring 只解决明文落盘，挡不住同用户下的沙箱逃逸（DPAPI 按用户加密）；T1/T2 在阶段 8 OS 级隔离之前不算解决；阶段 6–7 选 (a) 只分析自己的数据 |
+| B59 | P3 | docs/eval/FROZEN.md（新） | n=1 + 网关缓存 + 自造数据 + 比较器放宽 → 所有基线数字不得单独引用为准确率（M05） |
+| B60 | P3 | .gitignore | 补 .venv/、.pytest_cache/（M11）和 data/gate/ |
+
+### 闸门准备（scripts/gate/、docs/gate/）
+- 数据：S 没有可用的工作真表，按 gate-phase35.md §1 的替代方案。单表 = UCI Online Retail（541,909 行）只改呈现的脏表：中文列名、GB18030、Excel 风格日期字符串、缺失客户编号写成"未登记"；其中 3 题用"报表导出"变体（多一行合并表头 + 末尾合计行）。多表 = Olist 8 张表（固定 commit d9e4980）。数据不入库，build_gate_data.py 下载并校验 sha256。
+- 题目：questions.py 25 题（单表 15、多表 10，分布同预登记），由我起草（S 2026-10-12 授权）。
+- 标准答案：verify_gate.py 在**原始**文件上独立计算（不 import datachat、不读脏表），给出 gold + 备选口径与说明 → docs/gate/answers.json（入库）。真实数据里的陷阱举例：s09 按正数量算会选中被整单取消的 80,995 件；s04 报表变体的合计行国家为空，按"国家≠英国"过滤会把合计算进去。
+- 运行与结论：run_gate.py 跑模型并输出待人工判定的报告；`--verdict` 按预登记阈值（单表 11/15、8/15，多表 4/10）与失败分布规则出结论。补充两条规则（失败 <5 题不触发分布规则；2–3 类的中间区间前两类都列 P0），S 已同意。
+- 自检（tests/test_gate.py）：脏化逐值可还原；题目分布与预登记一致；answers.json 的题面哈希与 questions.py 一致（改题不重跑 verify 会失败）；判定规则四种情形；数据已下载时，25 题手写正确解在**脏表**上经沙箱执行后比较器全部判对（证明题目在 datachat 看到的数据上可解，不说明模型能答对）。
+
+### 判对层级的第一次统计（阶段 3 报告离线重评，对错不变）
+| 报告 | 判对 | strict | alt:strict / alt:rounded | refusal | 需抽审 |
+|---|---|---|---|---|---|
+| react 有字典（phase3c） | 128/130 | 72 | 3 / 1 | 9 | 43 |
+| react 无字典（phase3c） | 127/130 | 71（另 rounded 1） | 2 / 0 | 8 | 45 |
+| workflow 无字典（phase3） | 127/130 | 81 | 4 / 0 | 9 | 33 |
+| workflow 有字典（phase3） | 128/130 | 81 | 5 / 0 | 9 | 33 |
+
+约三分之一的判对不是 strict，抽审清单用 `python run_eval.py --rescore <报告>` 查看。
+
+### 指标快照
+- 单测：Linux Python 3.11 / 3.12 均 **424 passed**（含闸门数据已下载时的 25 个 oracle；CI 没有数据时为 399 passed + 25 skipped）。新增 tests/test_multitable.py（8）、tests/test_gate.py（5 + 25 个依赖数据的 oracle，CI 里跳过）。
+
+### 下一步
+- S：`pip install -r requirements-dev.txt` → `python scripts/gate/build_gate_data.py` → `python -m pytest tests/test_gate.py` → `python scripts/gate/run_gate.py --agent react`（建议 workflow 也跑一次）→ 人工判定 → `--verdict`。
+- 闸门结论出来后：重估工期（M18）、在闸门数据上定阶段 7 目标（M20），再进入阶段 4。
 

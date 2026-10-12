@@ -1,0 +1,36 @@
+# DataChat 产品化计划
+
+> 2026-10-12 入库（此前只在仓库外，DEVLOG 里的引用是悬空的，M12）。按 M 系列审查（docs/roadmap/review-M-series*.md）修订：插入阶段 3.5，阶段 4/6 补交付物，外壳约束写明。
+
+## 目标与前提
+- 做成产品：先出 Windows 桌面客户端（用户自己填 API Key），Web 服务器版后续再上。
+- 去掉 Streamlit，用 **React + TS 前端 + FastAPI 后端**。桌面端把后端作为本地 sidecar 进程，以后上服务器时同一套前后端直接复用。
+- 威胁模型（桌面阶段）：单用户、本机数据、自带 Key。目标是防"别人给的恶意 CSV 通过提示注入偷 Key / 写文件"，**但这个目标在阶段 8（OS 级隔离）之前不成立**；阶段 6–7 的产品定位是"只分析自己的数据"。详见 docs/THREAT_MODEL.md。多租户问题留到 Web 阶段。
+- 前端只通过 HTTP / SSE 调 FastAPI，**不使用 Tauri 的 invoke / IPC**：外壳（Tauri / Electron / 托盘）可替换，外壳 spike 失败不返工前端（M22）。
+
+## 计划表
+| 阶段 | 周期 | 交付物 | 验收标准 | 解决的问题 |
+|---|---|---|---|---|
+| 0 基线对齐 | 0.5 周 | 推送 2f67936；锁依赖版本；pytest 骨架；DEVLOG [1] | 远端 = 本地；`pytest` 能跑 | B03/B08 核对、B17 |
+| 1 内核重构 | 1 周 | `core/` 包：统一的 `analyze()` 服务函数；结构化结果；LLM 显式超时/重试/token 统计；修评测口径与 comparator；编码检测 | 4 个旧入口全部改走 `analyze()`；评测出第一组可信基线数字 | B04 B06 B07 B10 B11 B12 B14 B15 B16 |
+| 2 执行隔离 | 1 周 | 子进程沙箱：干净环境变量（不含 Key）、超时强杀、内存上限（Windows 用 Job Object）、工作目录隔离；结果通过 JSON/parquet + png 回传 | 三类逃逸用例写成测试，全部被挡；死循环 20 秒内被杀 | B01 B02 B03 |
+| 3 评测基线 | 1–2 周 | 评测集 100–150 题，多张表，含歧义题、应拒答题；两个 Agent 同场比较准确率、耗时、token；GitHub Actions 跑单测 | 出一份带 SHA 的评测报告 | B13 |
+| 3.5 外部验证闸门 | 3 天 | 非自造数据上的 25 题（单表 15：UCI Online Retail 改造的中文 GBK 脏表；多表 10：Olist 8 张表）；标准答案由独立脚本在原始数据上算出；最小多表支持（dfs）；报告逐题标判对层级、评测集指纹 | 按 docs/roadmap/gate-phase35.md 预登记的阈值与失败分布规则出结论 | M01 M02 M04 M05 M10(部分) M15 |
+| 4 后端 API | 1–2 周 | 第一步：API Key 进系统钥匙串（keyring）；`analyze_stream()` 逐步产出事件，`analyze()` 包一层（M09）。FastAPI：数据集上传（一个数据集可含多个文件，M10）、会话、消息（SSE 流式推送每一步）、设置；SQLite + SQLAlchemy（表结构兼容 PG，预留 user_id）；logging + trace id（会话 / 消息 id），runs.jsonl 换成数据库（M08 M14）；接口返回 png + 图表数据（M13）。最后：PyInstaller sidecar + 沙箱 worker 在 Actions Windows runner 上的 spike（B35 / M06） | 用 curl 走完"上传 → 提问 → 流式结果 → 历史可查"；重启后会话还在；spike 打出的 exe 能在干净 runner 上执行一次沙箱代码 | B18 B35 |
+| 5 前端 | 2–3 周 | React + Vite + TS：数据集面板、对话流（展示计划、代码、执行步骤）、图表、可展开的代码、👍👎 反馈、Key 设置页 | 不碰命令行就能完整用一遍 | — |
+| 6 桌面打包 | 1–2 周 | Tauri 2 外壳（前提见上：前端只走 HTTP）+ PyInstaller 后端 sidecar；Windows 安装包；自动更新；首次启动引导填 Key；依赖许可证审计 | 在一台干净的 Windows 上一键安装，可用；对外分发前代码签名、SmartScreen 不拦（M19）；对外分发前满足 THREAT_MODEL.md 的 (b) 条件 | — |
+| 7 准确率 | 2–4 周 | DuckDB 统一 CSV/Excel/SQL；YAML 语义模型（指标、口径、同义词）；枚举值召回；结果合理性校验；反馈沉淀为已验证问答对 | 在阶段 3.5 闸门数据上给出具体目标（闸门结论后定，M20）；自造集只作回归 | B05 B09 |
+| 8 Web 上线（后续） | 另定 | PostgreSQL、登录、任务队列、Docker/E2B 沙箱、Langfuse、服务器部署与 ICP 备案 | 另定 | 多租户 |
+
+阶段 1–7 原估合计约 10–15 周（一个人业余时间）。M18 认为实际可能 6–12 个月：**阶段 3.5 闸门结论出来后重估工期，必要时砍范围**。
+
+## 开发日志（docs/DEVLOG.md）
+- 每完成一个阶段或一次重要提交，追加一条记录，内容包括：
+  - commit SHA 和当前技术栈；
+  - **对照上一条的问题编号逐项写状态和证据**（文件:行、测试名或评测数字）；
+  - 当前已知问题表、指标快照和下一步。
+- 第 [0] 条已写好：基线 4e67c92，问题编号 B01–B18。
+
+## 已定 / 待定选择
+- 外壳：暂定 Tauri 2，构建放在 GitHub Actions Windows runner（本机不装 Rust）。前提是前端只走 HTTP（M22）；阶段 6 前用 spike 判 WebView2 兼容与自动更新，不行就换 Electron，前端不受影响。真正的难点是 PyInstaller 把 pandas + matplotlib + langchain（+ duckdb）打成 sidecar，所以 spike 提前到阶段 4 末。
+- 阶段 2 的内存上限：已用 ctypes Job Object 实现（app/tools/_winjob.py）。

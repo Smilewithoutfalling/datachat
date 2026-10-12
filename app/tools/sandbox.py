@@ -170,10 +170,11 @@ def _shutdown_spare():
         w.dispose()
 
 
-def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: float = 20, mem_mb: int | None = None):
+def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | None = None):
     """在子进程沙箱里执行模型生成的 pandas 代码。
 
-    约定：代码使用变量 df，把最终答案赋给 result；若画图则 plt.savefig(chart_path)（任何文件名都会落到 chart_path）。
+    df：DataFrame（单表，代码里叫 df）或 {表名: DataFrame}（多表，代码里叫 dfs，没有 df）。
+    约定：代码使用变量 df / dfs，把最终答案赋给 result；若画图则 plt.savefig(chart_path)（任何文件名都会落到 chart_path）。
     返回 (result, chart_path_or_None, error_or_None)。
     """
     mem_mb = DEFAULT_MEM_MB if mem_mb is None else mem_mb
@@ -183,7 +184,7 @@ def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: float = 20, 
         if not w.wait_ready(STARTUP_TIMEOUT):
             return None, None, ("SandboxError: 沙箱进程启动失败\n" + "".join(w.err_tail)[-2000:]).rstrip()
         workdir, proc = w.workdir, w.proc
-        df.to_pickle(os.path.join(workdir, "input.pkl"))
+        pd.to_pickle(df, os.path.join(workdir, "input.pkl"))
         with open(os.path.join(workdir, "job.json"), "w", encoding="utf-8") as f:
             json.dump({"code": code, "mem_mb": mem_mb}, f, ensure_ascii=False)
 
@@ -232,9 +233,14 @@ def run_code(code: str, df: pd.DataFrame, chart_path: str, timeout: float = 20, 
 _TRUSTED_LOCK = threading.Lock()
 
 
-def run_trusted(code: str, df: pd.DataFrame):
+def data_namespace(df) -> dict:
+    """单表 → {"df": df}；多表（dict）→ {"dfs": {...}}。"""
+    return {"dfs": df} if isinstance(df, dict) else {"df": df}
+
+
+def run_trusted(code: str, df):
     """在本进程执行可信代码（评测标准答案），返回 (result, error)。不画图、不隔离，勿用于模型代码。"""
-    ns = {"__builtins__": make_safe_builtins(builtins), "df": df, "pd": pd, "np": np, "plt": plt,
+    ns = {"__builtins__": make_safe_builtins(builtins), **data_namespace(df), "pd": pd, "np": np, "plt": plt,
           "chart_path": os.devnull, "result": None}
     with _TRUSTED_LOCK:
         try:
