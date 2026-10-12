@@ -104,6 +104,85 @@ def results_equal(actual, expected, float_tol=1e-4, *, ordered=None, percent_equ
     return False
 
 
+def match_kind(actual, expected, float_tol=1e-4, *, ordered=None, percent_equiv=False):
+    """判对时靠的是哪一层（M02：报告逐题标出，放宽层判对的题供人工抽审）。
+    返回 None（不相等）/ "strict"（形态与数值都直接相等；不要求顺序的题先按标签排序）/
+    "rounded"（同上，但实际值先舍入到期望的小数位）/ "scaled"（靠 ×100 或 ÷100，规则 12）/
+    "extras"（靠规则 20：答案裹在附加信息里）/ "relaxed"（靠规则 1–19 的其他放宽）。"""
+    if ordered is None:
+        ordered = looks_ranked(expected)
+    a, e = _py(actual), _py(expected)
+    for tier, rnd in (("strict", False), ("rounded", True)):
+        try:
+            if _strict_eq(_sorted(a, ordered), _sorted(e, ordered), float_tol, rnd):
+                return tier
+        except Exception:
+            pass
+    variants = [(a, None)]
+    if percent_equiv:
+        variants += [(v, "scaled") for v in (_scale(a, 100), _scale(a, 0.01)) if v is not None]
+    for v, tag in variants:
+        try:
+            if _eq(v, e, float_tol, ordered):
+                return tag or "relaxed"
+        except Exception:
+            pass
+        try:
+            if _extras_eq(v, e, float_tol, ordered):
+                return tag or "extras"
+        except Exception:
+            continue
+    return None
+
+
+def _sorted(x, ordered):
+    if ordered or not isinstance(x, (pd.Series, pd.DataFrame)):
+        return x
+    return x.sort_index(key=lambda idx: idx.map(lambda v: str(v)))
+
+
+def _strict_eq(a, e, tol, rnd=False) -> bool:
+    """最严口径：同一种形态，数值在容差内、标签逐字相同、顺序相同。"""
+    if isinstance(e, pd.DataFrame) or isinstance(e, pd.Series):
+        if type(a) is not type(e) or a.shape != e.shape:
+            return False
+        if [str(x) for x in a.index] != [str(x) for x in e.index]:
+            return False
+        if isinstance(e, pd.DataFrame):
+            if [str(x) for x in a.columns] != [str(x) for x in e.columns]:
+                return False
+            return all(_strict_values(a.iloc[:, i].tolist(), e.iloc[:, i].tolist(), tol, rnd)
+                       for i in range(e.shape[1]))
+        return _strict_values(a.tolist(), e.tolist(), tol, rnd)
+    if isinstance(e, dict):
+        return isinstance(a, dict) and [str(k) for k in a] == [str(k) for k in e] and \
+            _strict_values([_py(v) for v in a.values()], [_py(v) for v in e.values()], tol, rnd)
+    if isinstance(e, (list, tuple)):
+        return isinstance(a, (list, tuple)) and _strict_values([_py(v) for v in a], [_py(v) for v in e], tol, rnd)
+    return _strict_values([a], [e], tol, rnd)
+
+
+def _strict_values(xs, ys, tol, rnd=False) -> bool:
+    if len(xs) != len(ys):
+        return False
+    for x, y in zip(xs, ys):
+        x, y = _py(x), _py(y)
+        if isinstance(x, bool) or isinstance(y, bool):
+            if x != y:
+                return False
+        elif isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            if _is_nan(x) and _is_nan(y):
+                continue
+            if rnd and isinstance(y, float) and not _is_nan(x):
+                d = _decimals(y)
+                x = round(x, d) if d is not None else x
+            if not abs(x - y) <= tol * max(1.0, abs(y)):
+                return False
+        elif str(x).strip() != str(y).strip():
+            return False
+    return True
+
+
 # ------------------------------------------------------------------ 规则 20（B46）
 _NUM_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?![A-Za-z0-9_.])")
 _PCT_TOKEN_RE = re.compile(r"([-+]?\d+(?:\.\d+)?)\s*%")
