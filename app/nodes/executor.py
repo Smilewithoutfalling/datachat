@@ -1,7 +1,7 @@
 """执行节点。B07：result 保留结构化对象，另生成 result_text 预览；
 数据表由 analyze() 读一次后经 RunnableConfig 注入，每次执行用副本（不再每次重试都读 CSV）。"""
 from app.core.result import format_result
-from app.tools.csv_io import read_csv
+from app.tools.dataset import copy_data, load_data
 from app.tools.persist import new_chart_path
 from app.tools.sandbox import run_code
 
@@ -9,7 +9,7 @@ from app.tools.sandbox import run_code
 def _dataset(state, config):
     conf = (config or {}).get("configurable", {}) if isinstance(config, dict) else {}
     df = conf.get("df")
-    return df.copy() if df is not None else read_csv(state["df_path"])
+    return copy_data(df) if df is not None else load_data(state["df_path"])[0]
 
 
 def execute(state, config=None):
