@@ -113,7 +113,8 @@ def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_
     # 2. 模型
     cfg = llm_config or LLMConfig.from_env()
     if chat_model is None and not cfg.api_key:
-        res.error, res.error_kind = "未配置 API Key（DEEPSEEK_API_KEY），无法调用模型。", "llm"
+        res.error, res.error_kind = ("未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
+                                             "或设置环境变量 DEEPSEEK_API_KEY。"), "llm"
         return
 
     notes_text = format_notes(notes) if notes else ""
