@@ -160,7 +160,7 @@
    "match": "strict",
    "human_correct": false,
    "failure_class": 5,
-   "reason": "912621 与 gold 一致；但 answer 为空、error_kind=agent（触到步数上限），只出数值无叙述",
+   "reason": "912621 与 gold 一致；但 answer 为空、error_kind=agent（触到步数上限），只出数值无叙述；用户在产品里只会看到步数上限报错，按 result 契约判错（与 m09 同口径）",
    "guessing": false
   },
   {
@@ -218,7 +218,7 @@
    "match": "strict",
    "human_correct": true,
    "failure_class": null,
-   "reason": "1036 与 gold 一致,叙述编造，真值 84 单",
+   "reason": "1036 与 gold 一致",
    "guessing": false
   },
   {
@@ -583,7 +583,7 @@
    "match": null,
    "human_correct": false,
    "failure_class": 5,
-   "reason": "未执行成功：answer='{\"message\":\"prompt 必须包含字符串内容'，疑似网关/管线异常（非推理失败）。建议 --only s15 复跑甄别",
+   "reason": "未执行成功：answer='{\"message\":\"prompt 必须包含字符串内容'，疑似网关/管线异常（非推理失败）。--only s15 于 11:31 复跑 1 次正确拒答（gate_20261012_113135_react.json），非稳定复现；正式结果仍记错。另：网关报错被当作回答、error_kind=null，属管线 bug",
    "guessing": false
   },
   {
@@ -881,7 +881,7 @@
    "match": "strict",
    "human_correct": true,
    "failure_class": null,
-   "reason": "23921.17 与 gold 一致；但叙述称'1,061 单'与 gold 的 84 单不符——金额对、叙述疑为编造，建议核代码",
+   "reason": "23921.17 与 gold 一致；但叙述称'1,061 单 / 953 单有支付 / 108 单无支付'，原始数据核对真值为 84 单且全部有支付——金额对、叙述编造（代码已 print 真值），记为'叙述与证据不符'，不在 6 类内",
    "guessing": true
   },
   {
@@ -1011,7 +1011,7 @@
    "guessing": true
   }
  ],
- "annotator": "AI 预标注（锐，2026-10-12）；待 H 终审。采用则报告须如实标注判定人",
+ "annotator": "AI 预标注（锐）→ Hark 复核 → S 终审采用（2026-10-12）",
  "verdict": {
   "single": "12/15",
   "multi": "8/10",
