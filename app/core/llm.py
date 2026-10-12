@@ -37,10 +37,12 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, **overrides) -> "LLMConfig":
-        """从环境变量读取（.env 由入口脚本加载），再用 overrides 覆盖。"""
+        """从环境变量读取（.env 由入口脚本加载），再用 overrides 覆盖。
+        api_key：环境变量 DEEPSEEK_API_KEY 优先，没有时读系统钥匙串（阶段 4，app/core/keystore.py）。"""
+        from app.core.keystore import resolve_api_key
         env = {
             "model": os.getenv("DEEPSEEK_MODEL") or cls.model,
-            "api_key": os.getenv("DEEPSEEK_API_KEY"),
+            "api_key": resolve_api_key()[0],
             "base_url": os.getenv("DEEPSEEK_BASE_URL") or DEEPSEEK_BASE_URL,
         }
         if os.getenv("DATACHAT_LLM_TIMEOUT"):

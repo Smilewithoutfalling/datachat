@@ -35,3 +35,36 @@ def _isolate_outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(persist, "ensure_dirs", lambda: None)
     import app.react_agent
     monkeypatch.setattr(app.react_agent, "ensure_dirs", lambda: None)
+
+
+class MemoryKeyring:
+    """测试用的内存钥匙串：测试绝不读写开发机上真实的凭据管理器。"""
+    def __init__(self):
+        import keyring.backend
+
+        class _B(keyring.backend.KeyringBackend):
+            priority = 1
+            store = {}
+
+            def get_password(self, service, username):
+                return self.store.get((service, username))
+
+            def set_password(self, service, username, password):
+                self.store[(service, username)] = password
+
+            def delete_password(self, service, username):
+                import keyring.errors
+                if (service, username) not in self.store:
+                    raise keyring.errors.PasswordDeleteError("not found")
+                del self.store[(service, username)]
+        self.backend = _B()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    import keyring
+    mk = MemoryKeyring()
+    old = keyring.get_keyring()
+    keyring.set_keyring(mk.backend)
+    yield mk.backend
+    keyring.set_keyring(old)
