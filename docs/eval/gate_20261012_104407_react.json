@@ -158,8 +158,8 @@
    "tokens": 34673,
    "auto_correct": true,
    "match": "strict",
-   "human_correct": true,
-   "failure_class": null,
+   "human_correct": false,
+   "failure_class": 5,
    "reason": "912621 与 gold 一致；但 answer 为空、error_kind=agent（触到步数上限），只出数值无叙述",
    "guessing": false
   },
@@ -218,7 +218,7 @@
    "match": "strict",
    "human_correct": true,
    "failure_class": null,
-   "reason": "1036 与 gold 一致",
+   "reason": "1036 与 gold 一致,叙述编造，真值 84 单",
    "guessing": false
   },
   {
@@ -1013,18 +1013,18 @@
  ],
  "annotator": "AI 预标注（锐，2026-10-12）；待 H 终审。采用则报告须如实标注判定人",
  "verdict": {
-  "single": "13/15",
+  "single": "12/15",
   "multi": "8/10",
-  "failures": 4,
+  "failures": 5,
   "failure_distribution": {
    "2": 1,
-   "5": 1,
+   "5": 2,
    "6": 2
   },
   "execution_success": "24/25",
   "guessing": "2/25",
   "single_verdict": "可用，继续阶段 4",
   "multi_verdict": "有救，阶段 7 的 DuckDB 值得做",
-  "distribution_verdict": "失败 4 题 < 5，只记录分布，不触发分布规则"
+  "distribution_verdict": "中间区间（3 类，最大类 <60%）：第 5、6 类都列为 P0，方向不变"
  }
 }
