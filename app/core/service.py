@@ -253,10 +253,18 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
             else:
                 res.error, res.error_kind = f"ReAct 异常：{type(e).__name__}: {e}", "agent"
         # B62：网关以错误 JSON 充当回复（可能被截断）→ 整轮重跑
-        if rec_err is None and res.error is None and api_error_text(_final_text(messages)) is not None \
-                and attempt < retries:
+        # B69：一次代码都没执行、也没按契约拒答就收尾（回归 m09 只回了一个 'B'）→ 同样整轮重跑
+        final = _final_text(messages)
+        why = None
+        if rec_err is None and res.error is None:
+            if api_error_text(final) is not None:
+                why = f"接口返回错误内容：{api_error_text(final)}"
+            elif not sink["execs"] and refusal_from_answer(final) is None \
+                    and not final.strip().startswith("Sorry, need more steps"):
+                why = f"模型没有执行代码也没有按契约拒答：{final[:200]!r}"
+        if why and attempt < retries:
             tracker.add_retry()
-            res.steps.append(Step("retry", error=f"接口返回错误内容，重跑本轮：{api_error_text(_final_text(messages))}"))
+            res.steps.append(Step("retry", error=f"重跑本轮：{why}"))
             time.sleep(min(cfg.backoff_base * 2 ** attempt, cfg.backoff_max))
             continue
         break
@@ -344,6 +352,10 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         res.code = execs[-1]["code"]
         if res.error is None:
             res.error, res.error_kind = execs[-1]["error"], "execution"
+    elif res.error is None and memory is None:
+        # B69：单轮分析里没有执行结果、也不是拒答，不能算成功（多轮追问可以只用文字回答，不在此列）
+        res.error = f"ReAct 未执行任何代码也未按契约拒答（结论：{res.answer[:100]!r}）"
+        res.error_kind = "agent"
 
     if res.answer and refusal is None:
         res.unverified_numbers = unverified_numbers(res.answer, evidence)
