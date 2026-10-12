@@ -13,6 +13,7 @@ import os
 import platform
 import shutil
 import subprocess
+from collections import Counter
 from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
@@ -116,6 +117,32 @@ def run_metadata(llm_config=None, data_path: str | None = None) -> dict:
     if data_path and os.path.exists(data_path):
         meta["data_sha256"] = hashlib.sha256(open(data_path, "rb").read()).hexdigest()[:12]
     return meta
+
+
+EVALSET_FILES = ("app/eval/cases.py", "app/eval/cases_extra.py", "app/eval/case_model.py",
+                 "scripts/gen_eval_data.py")
+
+
+def evalset_fingerprint(datasets: dict | None = None) -> dict:
+    """M04：评测集指纹 = 题面代码 + 数据生成脚本 + 数据文件（含字典）。任何一处变了，sha256 就变，
+    两份报告只有 evalset.sha256 相同才可直接比较。CRLF 统一成 LF，Windows / Linux 算出同一个值。"""
+    if datasets is None:
+        from app.eval.cases import DATASETS
+        datasets = DATASETS
+    from app.tools.dictionary import dict_path_for
+    files = [os.path.join(_REPO, f) for f in EVALSET_FILES]
+    for path in datasets.values():
+        files += [path, dict_path_for(path)]
+    h, parts = hashlib.sha256(), {}
+    for f in sorted(set(files)):
+        if not os.path.exists(f):
+            continue
+        data = open(f, "rb").read().replace(b"\r\n", b"\n")
+        rel = os.path.relpath(f, _REPO).replace(os.sep, "/")
+        parts[rel] = hashlib.sha256(data).hexdigest()[:12]
+        h.update(rel.encode() + b"\0" + data + b"\0")
+    from app.eval.cases import ALL_CASES
+    return {"sha256": h.hexdigest()[:12], "n_cases": len(ALL_CASES), "files": parts}
 
 
 def datasets_metadata(datasets: dict) -> dict:
@@ -272,6 +299,8 @@ class EvalReport:
                 "infra_errors": self.infra_error_count(items),
                 "avg_duration_s": self.avg("duration_s", items),
                 "avg_tokens": self.avg("tokens", items),
+                # M02：判对的题各靠哪一层；非 strict 的都应人工抽审
+                "match_kinds": dict(Counter(r.get("match") for r in items if r.get("correct"))),
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         return {
@@ -279,6 +308,7 @@ class EvalReport:
             "git_sha": (sha := git_sha()),
             **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),
             "agent": agents[0] if len(agents) == 1 else agents,
+            "evalset": evalset_fingerprint(),
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
@@ -293,7 +323,7 @@ class EvalReport:
             rows.append({
                 "id": c.id, "category": c.category, "dataset": getattr(c, "dataset", "sales"),
                 "question": c.question,
-                "correct": r.get("correct"), "executed": r.get("executed"),
+                "correct": r.get("correct"), "match": r.get("match"), "executed": r.get("executed"),
                 "initial_error": r.get("initial_error"), "infra_error": r.get("infra_error"),
                 "error_kind": r.get("error_kind"), "error": r.get("error"),
                 "attempts": r.get("attempts"), "duration_s": r.get("duration_s"),
