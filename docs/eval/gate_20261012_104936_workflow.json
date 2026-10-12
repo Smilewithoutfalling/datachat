@@ -218,7 +218,7 @@
    "match": "strict",
    "human_correct": true,
    "failure_class": null,
-   "reason": "1036 与 gold 一致,叙述编造，真值 84 单",
+   "reason": "1036 与 gold 一致",
    "guessing": false
   },
   {
@@ -1011,7 +1011,7 @@
    "guessing": false
   }
  ],
- "annotator": "AI 预标注（锐，2026-10-12）；待 H 终审。采用则报告须如实标注判定人",
+ "annotator": "AI 预标注（锐）→ Hark 复核 → S 终审采用（2026-10-12）",
  "verdict": {
   "single": "11/15",
   "multi": "10/10",
