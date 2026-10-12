@@ -6,12 +6,14 @@
   差异会逐题列出，便于人工核对。
 """
 import json
+from collections import Counter
 
 from app.core.llm import api_error_text
 from app.core.result import refusal_from_answer
 from app.eval.cases import ALL_CASES
 from app.eval.report import load_obj
-from app.eval.runner import EvalRunner, score
+from app.eval.report import evalset_fingerprint
+from app.eval.runner import EvalRunner, score_detail
 
 
 def rescore(report_path: str, data_path: str | None = None) -> dict:
@@ -27,11 +29,12 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
         if case is not None and refusal is not None and not row.get("actual_obj"):
             # B40：ReAct 没调工具、直接在结论里按契约拒答，旧报告里 result 为空
             expected_list, err = runner.expected_all(case)
-            ok = (err is None) and score(refusal, case, expected_list)
+            kind = score_detail(refusal, case, expected_list) if err is None else None
+            ok = kind is not None
             if ok != row.get("correct"):
                 changed.append({"id": row["id"], "before": row.get("correct"), "after": ok})
             rows.append({"id": row["id"], "category": row["category"],
-                         "dataset": row.get("dataset"), "correct": ok})
+                         "dataset": row.get("dataset"), "correct": ok, "match": kind})
             continue
         if case is None or not row.get("executed"):
             rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"), "correct": False})
@@ -47,10 +50,12 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             skipped.append(row["id"])
             rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"), "correct": row.get("correct")})
             continue
-        ok = (err is None) and score(actual, case, expected_list)
+        kind = score_detail(actual, case, expected_list) if err is None else None
+        ok = kind is not None
         if ok != row.get("correct"):
             changed.append({"id": row["id"], "before": row.get("correct"), "after": ok})
-        rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"), "correct": ok})
+        rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"),
+                     "correct": ok, "match": kind})
     by_cat = {}
     for r in rows:
         b = by_cat.setdefault(r["category"], [0, 0])
@@ -67,4 +72,8 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             "correctness_rate": correct / n * 100 if n else None,
             "by_category": {k: {"correct": c, "n": t} for k, (c, t) in by_cat.items()},
             "by_dataset": {k: {"correct": c, "n": t} for k, (c, t) in by_ds.items()},
+            "match_kinds": dict(Counter(r.get("match") or "?" for r in rows if r["correct"])),
+            "needs_audit": [r["id"] for r in rows if r["correct"] and r.get("match") not in ("strict", "rounded", "refusal", "alt:strict", "alt:rounded")],
+            "evalset_now": evalset_fingerprint()["sha256"],
+            "evalset_report": (data.get("evalset") or {}).get("sha256"),
             "changed": changed, "skipped_no_obj": skipped, "infra_errors": infra}  # 无结构化结果或还原失败的题，沿用原判定
