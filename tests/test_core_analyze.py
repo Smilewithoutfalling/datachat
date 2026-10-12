@@ -204,7 +204,8 @@ def test_react_sorry_placeholder_is_error(sample_path):
 
 def test_react_gateway_error_json_is_llm_error(sample_path):
     """B45：网关返回 {"message": ...} 作为回复内容时，不是结论，按 LLM 基础设施失败记。"""
-    m = ScriptedChatModel(replies=['{"message":"prompt: A user\'s message must contain at least one image."}'],
+    # B62 起整轮会重跑 REACT_GATEWAY_RETRIES 次，持续返回错误内容才记失败
+    m = ScriptedChatModel(replies=['{"message":"prompt: A user\'s message must contain at least one image."}'] * 3,
                           calls=[])
     res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
     assert res.answer == "" and res.error_kind == "llm" and "gateway_error" in res.error

@@ -43,6 +43,8 @@ class AnalysisResult:
     executed: bool = False                      # 是否有代码执行成功并拿到结果
     error: Optional[str] = None                 # 最终错误（成功为 None）
     error_kind: Optional[str] = None            # dataset | llm | execution | agent
+    warnings: list = field(default_factory=list)  # 不算失败但要让用户知道的情况（如 ReAct 步数用完后强制收尾）
+    unverified_numbers: list = field(default_factory=list)  # 结论里在证据中找不到的数字（B64，只检测不改写）
     steps: list = field(default_factory=list)   # list[Step]
     timings: dict = field(default_factory=dict) # {"total": 秒, "planner": 秒, ...}
     usage: TokenUsage = field(default_factory=TokenUsage)

@@ -173,6 +173,9 @@ def _run_workflow(res, tracker, cfg, chat_model, df, schema, notes_text, questio
         res.charts = [res.chart_path] if res.chart_path else []
     if res.error is None and state.get("error"):
         res.error, res.error_kind = state["error"], "execution"
+    if res.answer and res.executed and refusal_from_answer(res.answer) is None:
+        from app.core.grounding import unverified_numbers
+        res.unverified_numbers = unverified_numbers(res.answer, [question, res.result_text])
 
 
 def _workflow_step(node, upd, dt) -> Step:
@@ -190,34 +193,73 @@ def _workflow_step(node, upd, dt) -> Step:
 
 
 # ------------------------------------------------------------------ ReAct 版
+REACT_GATEWAY_RETRIES = 2      # 网关以错误内容充当回复时，整轮重跑的次数（B62；带多轮记忆时不重跑）
+
+FINALIZE_PROMPT = (
+    "你是一个数据分析智能体。工具调用次数已经用完，不能再执行代码。"
+    "请只根据下面已经拿到的执行结果，用中文给出最终结论；结论里的数字必须来自这些结果，不要估算或编造。"
+    "如果这些结果不足以回答，或者数据里本来就没有所需的信息，结论第一行必须以'无法回答：'开头并说明原因。"
+)
+
+
+def _react_invoke(graph, question, config):
+    """流式执行，保留最后一个状态：撞上 GraphRecursionError 时也拿得到已有的消息（B61）。"""
+    from langgraph.errors import GraphRecursionError
+    messages, err = [], None
+    try:
+        for state in graph.stream({"messages": [("user", question)]}, config, stream_mode="values"):
+            messages = state.get("messages", messages)
+    except GraphRecursionError as e:
+        err = e
+    return messages, err
+
+
+def _final_text(messages):
+    from langchain_core.messages import AIMessage
+    for m in reversed(messages):
+        if isinstance(m, AIMessage) and not m.tool_calls:
+            return str(m.content or "")
+        if isinstance(m, AIMessage):
+            return ""
+    return ""
+
+
 def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                recursion_limit, exec_timeout, memory, thread_id):
-    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
 
+    from app.core.grounding import unverified_numbers
     from app.react_agent import build_react_agent
 
     model = chat_model if chat_model is not None else build_chat_model(cfg, sdk_retries=cfg.max_retries)
-    sink = {"execs": [], "charts": []}
-    graph = build_react_agent(dataset, checkpointer=memory, sink=sink, model=model, df=df,
-                              field_notes=notes_text, exec_timeout=exec_timeout)
     config = {"recursion_limit": recursion_limit, "callbacks": [UsageCallbackHandler(tracker)]}
     if memory is not None:
         config["configurable"] = {"thread_id": thread_id or "default"}
 
-    messages = []
-    try:
-        out = graph.invoke({"messages": [("user", question)]}, config)
-        messages = out["messages"]
-    except GraphRecursionError:
-        res.error = f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论"
-        res.error_kind = "agent"
-    except Exception as e:  # noqa: BLE001
-        kind, _ = classify_error(e)
-        if kind != "unknown":
-            res.error, res.error_kind = f"LLM 调用失败（{kind}）：{type(e).__name__}: {e}", "llm"
-        else:
-            res.error, res.error_kind = f"ReAct 异常：{type(e).__name__}: {e}", "agent"
+    retries = 0 if memory is not None else REACT_GATEWAY_RETRIES
+    for attempt in range(retries + 1):
+        sink = {"execs": [], "charts": []}
+        graph = build_react_agent(dataset, checkpointer=memory, sink=sink, model=model, df=df,
+                                  field_notes=notes_text, exec_timeout=exec_timeout)
+        messages, rec_err = [], None
+        res.error = res.error_kind = None
+        try:
+            messages, rec_err = _react_invoke(graph, question, config)
+        except Exception as e:  # noqa: BLE001
+            kind, _ = classify_error(e)
+            if kind != "unknown":
+                res.error, res.error_kind = f"LLM 调用失败（{kind}）：{type(e).__name__}: {e}", "llm"
+            else:
+                res.error, res.error_kind = f"ReAct 异常：{type(e).__name__}: {e}", "agent"
+        # B62：网关以错误 JSON 充当回复（可能被截断）→ 整轮重跑
+        if rec_err is None and res.error is None and api_error_text(_final_text(messages)) is not None \
+                and attempt < retries:
+            tracker.add_retry()
+            res.steps.append(Step("retry", error=f"接口返回错误内容，重跑本轮：{api_error_text(_final_text(messages))}"))
+            time.sleep(min(cfg.backoff_base * 2 ** attempt, cfg.backoff_max))
+            continue
+        break
 
     # 只看本轮：多轮记忆时 messages 包含历史，取最后一条用户消息之后的部分
     start = 0
@@ -226,6 +268,7 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
             start = i + 1
     execs = sink["execs"]
     obs_i = 0
+    evidence = [question]
     for m in messages[start:]:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
@@ -234,6 +277,8 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         elif isinstance(m, ToolMessage):
             e = execs[obs_i] if obs_i < len(execs) else {}
             obs_i += 1
+            evidence.append(str(m.content))
+            evidence.append(e.get("stdout") or "")
             res.steps.append(Step("observation", content=str(m.content)[:2000],
                                   error=e.get("error"), duration_s=e.get("duration_s")))
         elif isinstance(m, AIMessage):
@@ -241,15 +286,36 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
             res.answer = str(m.content)
     bad = api_error_text(res.answer)
     if bad is not None:
-        # 网关以错误 JSON 充当回复（B45）：不是答案，按 LLM 基础设施失败记
+        # 网关以错误 JSON 充当回复（B45 / B62）：不是答案，按 LLM 基础设施失败记
         res.answer = ""
         if res.error is None:
             res.error = f"LLM 调用失败（gateway_error）：接口返回错误内容：{bad}"
             res.error_kind = "llm"
-    if res.answer.strip().startswith("Sorry, need more steps"):
-        # langgraph 剩余步数不足时不抛 GraphRecursionError，而是塞一条英文占位答复（B39）
+
+    # B61：步数用完（GraphRecursionError，或 langgraph 塞进来的英文占位答复 B39）→ 不再只给一句报错，
+    # 用已有的执行结果强制收尾一次；收尾也失败才按 agent 错误记
+    out_of_steps = rec_err is not None or res.answer.strip().startswith("Sorry, need more steps")
+    if out_of_steps:
         res.answer = ""
+        forced = None
         if res.error is None:
+            obs = [t for t in evidence[1:] if t][-8:]
+            try:
+                msg = model.invoke(
+                    [SystemMessage(FINALIZE_PROMPT),
+                     HumanMessage(f"问题：{question}\n\n已经拿到的执行结果（按时间顺序，可能为空）：\n"
+                                  + ("\n\n---\n\n".join(obs) if obs else "（无）"))],
+                    config={"callbacks": [UsageCallbackHandler(tracker)]})
+                forced = str(getattr(msg, "content", "") or "")
+                if api_error_text(forced) is not None or not forced.strip():
+                    forced = None
+            except Exception:  # noqa: BLE001
+                forced = None
+        if forced:
+            res.answer = forced
+            res.steps.append(Step("forced_answer", content=forced))
+            res.warnings.append(f"ReAct 达到步数上限（recursion_limit={recursion_limit}），已根据已有执行结果强制收尾")
+        elif res.error is None:
             res.error = f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论"
             res.error_kind = "agent"
 
@@ -258,18 +324,26 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
     res.initial_error = execs[0]["error"] if execs and execs[0]["error"] else None
     res.charts = list(sink["charts"])
     res.timings["execution"] = round(sum(e["duration_s"] for e in execs), 4)
-    if ok:
+    refusal = refusal_from_answer(res.answer)
+    if out_of_steps and refusal is not None and res.error is None:
+        # 强制收尾判定为拒答：以拒答为准，不拿探索中途的 result（如 m09 的占位 'ok'）冒充答案
+        res.result = res.result_text = refusal
+        res.executed = True
+    elif ok:
         last = ok[-1]
         res.executed = True
         res.code = last["code"]
         res.result = last["result"]
         res.result_text = format_result(last["result"])
         res.chart_path = last["chart"] or (res.charts[-1] if res.charts else None)
-    elif refusal_from_answer(res.answer) is not None:
+    elif refusal is not None:
         # 模型没调用工具、直接在结论里按契约拒答（B40）
-        res.result = res.result_text = refusal_from_answer(res.answer)
+        res.result = res.result_text = refusal
         res.executed = True
     elif execs:
         res.code = execs[-1]["code"]
         if res.error is None:
             res.error, res.error_kind = execs[-1]["error"], "execution"
+
+    if res.answer and refusal is None:
+        res.unverified_numbers = unverified_numbers(res.answer, evidence)

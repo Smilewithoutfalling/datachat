@@ -19,6 +19,16 @@ from app.tools.plotting import CHART_GUIDE
 from app.tools.sandbox import run_code
 
 
+PRINT_CHARS = 2000          # 回给模型的 print 输出上限（字符）
+
+
+def _clip(text: str, n: int) -> str:
+    text = (text or "").rstrip()
+    if len(text) <= n:
+        return text
+    return text[: n // 2] + f"\n…（省略 {len(text) - n} 字符）…\n" + text[-n // 2:]
+
+
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
@@ -46,23 +56,29 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
 
         约定：
         - df 已就绪，不要重新读文件；pd、np、plt 已就绪，无需 import。
-        - 把要查看的结论赋值给变量 result。
+        - 把答案赋值给变量 result。
+        - print() 的输出也会返回给你（过长会截断），可以用来查看中间结果。
         - 需要图表时用 plt 绘制并调用 plt.savefig(chart_path) 保存。
         返回执行结果文本或报错信息（报错时请据此修正代码后重试）。
         """
         chart_path = new_chart_path()
         t0 = time.perf_counter()
-        result, chart, error = run_code(code, copy_data(df), chart_path, timeout=exec_timeout)
+        cap = {}
+        result, chart, error = run_code(code, copy_data(df), chart_path, timeout=exec_timeout, capture=cap)
+        printed = cap.get("stdout") or ""
         if sink is not None:
             sink.setdefault("execs", []).append({
                 "code": code, "result": None if error else result, "chart": chart,
-                "error": error, "duration_s": time.perf_counter() - t0,
+                "error": error, "duration_s": time.perf_counter() - t0, "stdout": printed,
             })
+        shown = _clip(printed, PRINT_CHARS)
         if error:
-            return f"执行出错：\n{error}"
+            return f"执行出错：\n{error}" + (f"\n\n出错前的 print 输出：\n{shown}" if shown else "")
         if chart and sink is not None:
             sink.setdefault("charts", []).append(chart)
         msg = f"执行成功。result = {format_result(result, max_chars=1500)}"
+        if shown:
+            msg += f"\n\nprint 输出：\n{shown}"
         if chart:
             msg += f"\n（已生成图表并保存到 {chart}）"
         return msg
@@ -87,12 +103,15 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "（这些写进最终结论）；口径有歧义时选一种最合理的作为 result，其他口径在结论里说明。"
         "不要用中间表或整张排序表收尾。"
         "如果数据回答不了（表里没有所需的字段或信息），不要编造或用别的字段凑："
+        "问题里的指标（如利润、毛利、成本、年龄、性别）在表里没有对应字段、也不能按通行定义由现有字段算出时，"
+        "就属于回答不了，不要自己给指标另下定义（例如把'售价−运费'当作利润），也不要用代理变量估算；"
         "仍然调用一次 run_python_on_data，代码为 result = '无法回答：<一句话原因>'（原因说明缺什么，"
         "如 '无法回答：数据中没有成本字段'），最终结论的第一行也必须原样以 '无法回答：' 开头"
         "（不要写成'无法直接回答''无法计算'等其他说法）。"
         "如果问题需要图表，请务必画图并保存。\n\n"
         f"{CHART_GUIDE}\n\n"
-        "最终用中文给出简洁、直接的结论；若已生成图表，说明图表展示了什么。"
+        "最终用中文给出简洁、直接的结论；结论里的数字必须来自工具返回的 result 或 print 输出，不要估算或编造；"
+        "若已生成图表，说明图表展示了什么。"
     )
 
     return create_react_agent(

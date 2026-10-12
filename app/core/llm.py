@@ -118,6 +118,7 @@ class LLMError(RuntimeError):
         self.cause = cause
 
 
+_TRUNCATED_ERROR_RE = re.compile(r'^\{\s*"(message|error|detail|msg)"\s*:\s*"([^"\\]*)"?\s*\}?$')
 _API_ERROR_KEYS = {"message", "error", "detail", "msg", "code", "status", "type", "param", "request_id"}
 
 
@@ -131,12 +132,15 @@ def api_error_text(text) -> Optional[str]:
     if not isinstance(text, str):
         return None
     t = text.strip()
-    if not (t.startswith("{") and t.endswith("}")):
+    if not t.startswith("{"):
         return None
     try:
         obj = json.loads(t)
     except Exception:
-        return None
+        # B62：网关的错误 JSON 可能被截断，如 '{"message":"prompt 必须包含字符串内容'（闸门 s15）。
+        # 整段只有一个错误键、值是没闭合的字符串时也认作错误。
+        m = _TRUNCATED_ERROR_RE.match(t)
+        return (m.group(2) or m.group(1)) if m else None
     if not isinstance(obj, dict) or not obj or not set(obj) <= _API_ERROR_KEYS:
         return None
     err = obj.get("error")

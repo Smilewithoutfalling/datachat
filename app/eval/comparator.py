@@ -48,6 +48,11 @@
         期望 Series 且索引是文字标签时，每个标签恰好对应一个"含该标签的键"且数值相等（'工作日平均销量' ↔ '工作日'）；
         嵌套 dict 里的标量不参与（{'口径A': {'复购率': …}, '口径B': {…}} 这种罗列口径的不算对）；
      c) 实际是一句话字符串、期望数值：句中恰好一个百分数（没有百分数时恰好一个数字）且等于期望。
+阶段 3.6（B66，来自阶段 3.5 闸门的 7 次形态漏判；只放宽"列表"形态，阶段 3 评测集不受影响）：
+ 21. a) 期望是标签集合（set/frozenset，表示"有哪些"、不计顺序）：实际是 list / 数组 / Series 值或索引 /
+        DataFrame 某一列，去重后与期望相同且没有重复项即对；
+     b) 期望是标签列表（按顺序的 Top-N）、实际是以这些标签为索引的 Series（值是销售额、订单数等）→ 索引按顺序相同即对；
+     c) pandas 的 ExtensionArray / Index（如 .unique() 返回的 ArrowStringArray）按 list 处理。
 阶段 3：应拒答题由 is_refusal() 判定（"无法回答：<原因>"，原因至少 2 个字），不经过上面的规则。
 """
 import math
@@ -159,6 +164,11 @@ def _strict_eq(a, e, tol, rnd=False) -> bool:
             _strict_values([_py(v) for v in a.values()], [_py(v) for v in e.values()], tol, rnd)
     if isinstance(e, (list, tuple)):
         return isinstance(a, (list, tuple)) and _strict_values([_py(v) for v in a], [_py(v) for v in e], tol, rnd)
+    if isinstance(e, (set, frozenset)):
+        if not isinstance(a, (list, tuple)):
+            return False
+        got = [_label(x) for x in a]
+        return len(got) == len(e) and set(got) == {_label(x) for x in e}
     return _strict_values([a], [e], tol, rnd)
 
 
@@ -296,6 +306,8 @@ def _py(v):
         return v.item()
     if isinstance(v, np.ndarray):
         return v.tolist()
+    if isinstance(v, (pd.Index, pd.api.extensions.ExtensionArray)) and not isinstance(v, pd.MultiIndex):
+        return [_py(x) for x in v]          # 规则 21c
     return v
 
 
@@ -453,6 +465,8 @@ def _eq(a, e, tol, ordered) -> bool:
 
 
 def _eq_core(a, e, tol, ordered) -> bool:
+    if isinstance(e, (set, frozenset)):
+        return _vs_label_set(a, e)
     if isinstance(e, pd.DataFrame):
         return _vs_frame(a, e, tol, ordered)
     if isinstance(e, pd.Series):
@@ -536,6 +550,10 @@ def _vs_sequence(a, e: list, tol) -> bool:
         labels = [_py(x) for x in a.values() if isinstance(_py(x), (str, pd.Timestamp, pd.Period))]
         if len(labels) == len(e):
             a = labels
+    if isinstance(a, pd.Series) and len(a) == len(e) and len(e) > 1 \
+            and all(isinstance(_py(x), str) and not _is_num(x) for x in e) \
+            and [_label(x) for x in a.index] == [_label(x) for x in e]:
+        return True                          # 规则 21b：Top-N 标签在索引上
     if isinstance(a, pd.Series):
         a = list(a.values)
     elif isinstance(a, dict):
@@ -545,6 +563,30 @@ def _vs_sequence(a, e: list, tol) -> bool:
     if not isinstance(a, (list, tuple)) or len(a) != len(e):
         return False
     return all(_eq(_py(x), _py(y), tol, ordered=True) for x, y in zip(a, e))
+
+
+def _label_columns(a):
+    """规则 21a：实际结果里可能装着"那一组标签"的各个一维序列。"""
+    a = _py(a)
+    if isinstance(a, (list, tuple)):
+        yield list(a)
+    elif isinstance(a, pd.Series):
+        yield list(a.values)
+        yield list(a.index)
+    elif isinstance(a, pd.DataFrame):
+        flat = _flatten(a)
+        for c in flat.columns:
+            yield list(flat[c].values)
+        yield list(a.index)
+
+
+def _vs_label_set(a, e) -> bool:
+    want = {_label(x) for x in e}
+    for col in _label_columns(a):
+        got = [_label(x) for x in col]
+        if len(got) == len(want) and set(got) == want:
+            return True
+    return False
 
 
 def _mapping_eq(a: dict, e: dict, tol, ordered) -> bool:

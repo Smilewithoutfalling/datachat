@@ -533,7 +533,7 @@ S 从"完整商业产品"角度提了 M01–M22（docs/roadmap/review-M-series.m
 - S：`pip install -r requirements-dev.txt` → `python scripts/gate/build_gate_data.py` → `python -m pytest tests/test_gate.py` → `python scripts/gate/run_gate.py --agent react`（建议 workflow 也跑一次）→ 人工判定 → `--verdict`。
 - 闸门结论出来后：重估工期（M18）、在闸门数据上定阶段 7 目标（M20），再进入阶段 4。
 
-## [11] 2026-10-12 · 阶段 3.5 外部验证闸门 · 结论 · commit <待提交>
+## [11] 2026-10-12 · 阶段 3.5 外部验证闸门 · 结论 · commit 1e93588（PR #11）
 
 ### 运行（S 运行，模型 Qwen3.5-397B-A17B，temperature 0，commit ebc4e7b）
 - 报告：docs/eval/gate_20261012_104407_react.json、gate_20261012_104936_workflow.json；s15 复跑 gate_20261012_113135_react.json。
@@ -580,3 +580,32 @@ S 从"完整商业产品"角度提了 M01–M22（docs/roadmap/review-M-series.m
 ### 下一步（待 S 决定）
 - 先修 B61–B64（P0 两类 + 叙述编造），用闸门 25 题做回归，再进入阶段 4 正式内容。
 - 重估工期（M18）；定阶段 7 目标与留出集（M20）。
+
+## [12] 2026-10-12 · 阶段 3.6 闸门问题修复（B61–B64、B66、B67）· commit <待提交>
+
+### 先说根因
+复查闸门轨迹时发现：**沙箱一直丢弃模型代码的 print 输出**（sandbox_worker 把 stdout 重定向到一个不回传的 StringIO），而 ReAct 模型探索数据时大量用 print。于是：
+- s04：print 了合计行想看，什么也没看到，反复试探直到步数用完；
+- m09：`print(...)` 后 `result = 'ok'`，看不到输出，继续兜圈子直到步数用完；
+- m06：代码 print 了真值（84 单），模型看不到，结论里的"1,061 单 / 953 单"只能是编的。
+工作流版一次生成代码、只看 result，不受影响——这也解释了为什么 ⑤⑥ 只出现在 ReAct 上。
+
+### 本阶段修复
+| ID | 级别 | 位置 | 问题与修复 |
+|---|---|---|---|
+| B61 | P1 | app/tools/sandbox_worker.py、sandbox.py、app/react_agent.py、app/core/service.py | ① print 输出回传：run_code 新增 capture 参数，回传 stdout（上限 8000 字符，保留头尾；报错时也回传出错前的输出）；ReAct 的工具结果附上 print 输出（上限 2000 字符），工具说明写明"print 的输出也会返回给你"。② 步数用完不再只给一句报错：改为流式执行保留最后状态，撞上 GraphRecursionError 或 langgraph 的英文占位答复时，用已有执行结果再调一次模型（不带工具）强制收尾，结果记 warnings；收尾判定拒答时以拒答为准，不拿中途的占位 result 冒充答案；收尾也失败才记 agent 错误 |
+| B62 | P1 | app/core/llm.py、service.py | 网关错误 JSON 被截断（`{"message":"prompt 必须包含字符串内容`）时 api_error_text 认不出，被当成回答。现在单个错误键 + 未闭合字符串也认作错误；ReAct 遇到网关错误内容时整轮重跑（最多 2 次，带多轮记忆时不重跑以免污染历史），仍失败记 llm 错误 |
+| B63 | P1 | app/react_agent.py | 拒答契约补一句：指标在表里没有对应字段、也不能按通行定义由现有字段算出时属于回答不了，不要自己给指标另下定义（例如把"售价−运费"当利润），不要用代理变量估算 |
+| B64 | P1 | app/core/grounding.py（新）、result.py、service.py、run_gate.py | 叙述与证据不符：结论里有分量的数字（带小数、%/万/亿、或 ≥100 的整数，年份除外）逐个到证据（问题 + 工具 result + print 输出；工作流为 result 文本）里找，按结论写出的精度匹配（82.2 万 ≈ 822,023.63；24.93% ≈ 0.2493）。找不到的记入 AnalysisResult.unverified_numbers，**只检测不改写**；闸门报告逐题记录。ReAct 系统提示加"结论里的数字必须来自工具返回的 result 或 print 输出" |
+| B66 | P2 | app/eval/comparator.py、scripts/gate/run_gate.py | 比较器规则 21：无序标签集合（gold 用 frozenset）与 list / 数组 / Series / 表的某一列按集合比（不许重复）；Top-N 标签列表与"以这些标签为索引的 Series"按索引顺序比；ExtensionArray / Index 按 list 处理。run_gate 的有序列表改用 list、无序改用 frozenset，序列索引里的数字字符串还原为整数（s11）。阶段 3 评测集不出现 frozenset，其判分不受影响 |
+| B67 | P3 | scripts/gate/run_gate.py | git_sha 带"?"时写 git_sha_note；报告逐题记录 warnings 与 unverified_numbers |
+
+B65（缺失哨兵、合计行）不在本阶段，留给阶段 7 的列画像。
+
+### 指标快照
+- 新增 tests/test_phase36.py（19 个），每条对应一道闸门失败题；test_core_analyze 的网关错误用例按重跑次数调整。
+- 闸门 7 次形态漏判用重建的结果对象复核：规则 21 下全部判对，打乱顺序、缺项、多重复项、错标签仍判错。
+
+### 下一步
+- S 用闸门 25 题重跑 react（建议 workflow 也跑），只作**回归**：看 ⑤⑥ 是否归零、其余题有无退步、unverified_numbers 有多少。
+- 然后进入阶段 4；M18 重估工期、M20 阶段 7 目标与留出集。
