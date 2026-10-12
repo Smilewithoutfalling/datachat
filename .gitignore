@@ -9,3 +9,10 @@ __pycache__/
 # 编辑器
 .vscode/
 .idea/
+
+# Python 环境与缓存（M11）
+.venv/
+.pytest_cache/
+
+# 阶段 3.5 闸门的外部数据（scripts/gate/build_gate_data.py 下载，约 110 MB）
+data/gate/
