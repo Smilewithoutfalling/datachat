@@ -44,9 +44,12 @@ def to_obj(ans):
     if k == "label":
         return ans["value"]
     if k == "list":
-        return pd.Series(ans["value"]) if ans.get("ordered") else list(ans["value"])
+        # 有序（Top-N）→ list，按顺序比；无序（"有哪些"）→ frozenset，按集合比（比较器规则 21，B66）
+        return list(ans["value"]) if ans.get("ordered") else frozenset(ans["value"])
     if k == "series":
-        return pd.Series(ans["values"], index=ans["index"])
+        # answers.json 里的索引是字符串（JSON 键），季度/月份序号还原成整数，与阶段 3 的写法一致（B66：s11）
+        idx = [int(i) if isinstance(i, str) and i.isdigit() else i for i in ans["index"]]
+        return pd.Series(ans["values"], index=idx)
     return None
 
 
@@ -71,7 +74,7 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
     from app.core import analyze
     from app.core.llm import LLMConfig
     from app.core.result import format_result
-    from app.eval.report import git_sha, run_metadata
+    from app.eval.report import git_sha, git_sha_note, run_metadata
     from questions import QUESTIONS
 
     answers = json.load(open(ANSWERS, encoding="utf-8"))
@@ -94,16 +97,20 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
             "code": res.code, "attempts": res.attempts, "duration_s": round(time.perf_counter() - t0, 2),
             "tokens": res.usage.total_tokens if res.usage.reported else None,
             "auto_correct": match is not None, "match": match,
+            "warnings": res.warnings, "unverified_numbers": res.unverified_numbers,
             "human_correct": None, "failure_class": None, "reason": "", "guessing": None,
         })
         mark = "✓" if match else ("✗" if res.executed else "!")
         print(f"{mark} {q['id']} {q['question'][:30]}  match={match}  {res.error_kind or ''}")
     out = {
-        "time": datetime.now().isoformat(timespec="seconds"), "git_sha": git_sha(), "agent": agent,
+        "time": datetime.now().isoformat(timespec="seconds"), "git_sha": (sha := git_sha()),
+        **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),   # B67
+        "agent": agent,
         "use_dictionary": use_dictionary, **run_metadata(cfg),
         "questions_sha256": answers["questions_sha256"], "sources": answers["sources"],
         "n": len(rows), "execution_success": sum(r["executed"] for r in rows),
         "auto_correct": sum(r["auto_correct"] for r in rows),
+        "unverified_numbers": sum(bool(r["unverified_numbers"]) for r in rows),
         "note": "auto_correct 只是比较器参考；结论以人工 human_correct 为准（--verdict）。",
         "cases": rows,
     }
