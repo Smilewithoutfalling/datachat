@@ -170,13 +170,17 @@ def _shutdown_spare():
         w.dispose()
 
 
-def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | None = None):
+def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | None = None,
+             capture: dict | None = None):
     """在子进程沙箱里执行模型生成的 pandas 代码。
 
     df：DataFrame（单表，代码里叫 df）或 {表名: DataFrame}（多表，代码里叫 dfs，没有 df）。
     约定：代码使用变量 df / dfs，把最终答案赋给 result；若画图则 plt.savefig(chart_path)（任何文件名都会落到 chart_path）。
     返回 (result, chart_path_or_None, error_or_None)。
+    capture：可选 dict；传入时把代码的 print 输出写进 capture["stdout"]（报错时也写，超时/崩溃时为空串）。
     """
+    if capture is not None:
+        capture["stdout"] = ""
     mem_mb = DEFAULT_MEM_MB if mem_mb is None else mem_mb
     w = None
     try:
@@ -213,6 +217,8 @@ def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | 
                                 f"可能超出内存上限 {mem_mb} MB\n" + "".join(w.err_tail)[-1000:]).rstrip()
         with open(out_path, encoding="utf-8") as f:
             out = json.load(f)
+        if capture is not None:
+            capture["stdout"] = out.get("stdout") or ""
         if out.get("error"):
             return None, None, out["error"]
         result = wire.decode(out.get("result"))
