@@ -751,5 +751,24 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 
 ### 结果
 - 源码环境（Linux 沙箱）用一个包装脚本当 exe：自检 8/8 通过，冒烟测试全过，启动约 1 秒。
-- 沙箱里没有 objdump，Linux 打包没法试；**Windows 上的打包结果以 runner 为准**，待填。
+- 沙箱里没有 objdump，Linux 打包没法试；Windows 上的打包结果以 runner 为准：
+
+**Windows runner 结果**（windows-latest，Python 3.11.9，PyInstaller 6.22.3）
+
+| | 第一次 run 38339431396 | 第二次 run 38340194855 |
+|---|---|---|
+| 打包耗时 | 45 s | 67 s |
+| onedir | 1761 个文件，230.7 MB | 同左 |
+| zip | 109 MB | 109 MB |
+| selftest | **7/8，plot 失败** | 8/8（10.99 s，含逐项起 worker） |
+| 后端启动 / 重启 | 1.29 s / 1.26 s | 1.54 s / 1.46 s |
+| SSE（无 Key） | error → done | error → done |
+| 重启后历史 | user ok + assistant error | 同左 |
+
+- **第一次失败是 B35 的真问题之一**：PyInstaller 6 把纯 Python 模块的 PYZ 归档附在 exe 自身里，worker 画图时延迟导入要读 `datachat-sidecar.exe`，被审计钩子当成越界读文件拦下。修法：打包环境下把 `sys.executable` 和 `sys._MEIPASS` 加入可读根（`sandbox_worker._read_roots`）。读自己的 exe 和 `_internal` 不扩大攻击面（都是只读的程序文件）。
+- **同一次 run 里 blocked_read 是假通过**：它被拦的同样是读 exe（pandas 延迟导入），根本没走到 win.ini。selftest 现在要求报错里出现目标路径才算过；第二次 run 报错为 `沙箱禁止读文件：C:/Windows/win.ini`，确认拦的是对的东西。
+- memory 项：1.49 GiB 分配失败，runner 有 16 GB 内存，说明 Job Object 2048 MB 上限在打包后照样生效。keyring 后端 = WinVaultKeyring。
+- 体积大头：pyarrow 78.5 MB、jieba 29.6 MB、numpy.libs 20 MB、matplotlib 13.7 MB、pandas 12.1 MB、PIL 10.7 MB。pyarrow 来自 streamlit 传递依赖；**暂不排除**：pandas 3.0 装了 pyarrow 时默认字符串后端用它，排除会让打包版与开发版的 str dtype 后端不一致，留到阶段 6 一并决定（要么开发环境也去掉 pyarrow，要么保留）。
+- PyInstaller 警告只有 SQLAlchemy 方言的 hidden import 缺失（pysqlite2 / MySQLdb / psycopg2），都是不用的驱动，可忽略。
+- spike 结论：**B35 关闭**；PyInstaller onedir 路线可行，冷启动 ~1.5 s，体积约 110 MB zip。
 
