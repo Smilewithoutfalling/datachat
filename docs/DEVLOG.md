@@ -715,7 +715,7 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 
 ---
 
-## [17] 2026-10-13 · 阶段 4：ReAct 多轮上下文从 messages 表重建（S 选 B 方案）· commit <待提交>
+## [17] 2026-10-13 · 阶段 4：ReAct 多轮上下文从 messages 表重建（S 选 B 方案）· commit 132788a
 
 ### 改动
 - `analyze` / `analyze_stream` 新增参数 `history=[(问题, 结论), ...]`：作为 user / assistant 消息交替放在本轮问题前面。
@@ -735,4 +735,21 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 - test_stream：history 的截断、本轮步骤不混进历史、与 memory 互斥、带 history 的纯文字追问不重跑。
 - test_server：同一会话第二轮带上了第一轮的问答；**重启后**第三轮仍然带着前两轮。
 - 全量 481 通过（3.11 / 3.12）。
+
+---
+
+## [18] 2026-10-13 · 阶段 4 spike：PyInstaller sidecar + Windows runner（B35）· commit <待提交>
+
+### 改动
+- `app/sidecar.py`：统一入口。默认启动后端；`--sandbox-worker <目录>` 分派到 sandbox_worker.main()；`--selftest` 输出 JSON 自检（不需要 Key）。
+- B35：`app/tools/sandbox.py` 新增 `worker_cmd()`。打包后（sys.frozen）改用 `<exe> --sandbox-worker <目录>`，源码环境不变。
+- 自检 8 项：计算、画图、print 回传、读工作目录外文件被**审计钩子**拦截（绕开受限 builtins，用 pd.read_csv 测）、import subprocess 被拦、超时强杀、**操作系统层**内存上限（512 MB 下申请 1.6 GB）、关键依赖导入 + create_app + jieba + keyring 后端名。
+- `packaging/build_sidecar.py`（onedir；按名字收 app / uvicorn 子模块、jieba 词典、keyring 元数据；排除 streamlit 等）；`packaging/requirements-build.txt`（pyinstaller 6.22.3）。
+- `packaging/smoke_sidecar.py`（只用标准库）：exe 自检 → 起后端 → 上传 → 建会话 → 提问（无 Key 应得 error → done）→ 重启 → 会话还在。报告写 JSON。
+  - 请求一律不走代理：沙箱里 http_proxy 把 127.0.0.1 的请求转给代理，返回了 404。S 的机器也常配代理，**前端访问 sidecar 同样必须绕过系统代理**（记为阶段 6 的注意事项）。
+- `.github/workflows/sidecar.yml`：windows-latest、Python 3.11 打包 → 冒烟。产物 zip 保留 7 天，报告（大小、最大的目录、smoke.json、PyInstaller 警告）保留 30 天。只在相关路径改动或手动触发时运行。
+
+### 结果
+- 源码环境（Linux 沙箱）用一个包装脚本当 exe：自检 8/8 通过，冒烟测试全过，启动约 1 秒。
+- 沙箱里没有 objdump，Linux 打包没法试；**Windows 上的打包结果以 runner 为准**，待填。
 
