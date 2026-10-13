@@ -3,9 +3,9 @@
 两种 Agent 的处理方式不同，原因如下：
 - 工作流版：节点通过 LLMClient.invoke 调模型。底层 ChatOpenAI 设 max_retries=0，
   重试完全由本模块控制（指数退避 + 抖动，只重试超时/限流/连接/5xx），每次重试记入 usage.retries。
-- ReAct 版：create_react_agent 只接受 ChatModel 或 bind_tools 后的 RunnableBinding，
-  包不进外层重试（RunnableRetry 会被拒绝），所以把同一份 LLMConfig 的 timeout/max_retries
-  显式交给 openai SDK，由 SDK 做指数退避；token 通过回调 UsageCallbackHandler 统计。
+- ReAct 版：自己的 StateGraph 循环（app/react_agent.py，B20）在 agent 节点里按同一份 LLMConfig
+  重试（同样只重试超时/限流/连接/5xx），SDK max_retries=0，每次重试记入 usage.retries（B21）；
+  token 通过回调 UsageCallbackHandler 统计。
 """
 from __future__ import annotations
 
