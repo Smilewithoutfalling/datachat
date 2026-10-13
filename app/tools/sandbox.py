@@ -44,6 +44,14 @@ _ENV_KEEP = {
 }
 
 
+def worker_cmd(workdir: str) -> list:
+    """B35：PyInstaller 打包后 sys.executable 是应用本身（不是 python），改用 `<exe> --sandbox-worker <目录>`，
+    由 app/sidecar.py 分派到 sandbox_worker.main()。"""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--sandbox-worker", workdir]
+    return [sys.executable, "-I", "-B", "-X", "utf8", _WORKER, workdir]
+
+
 def _child_env(workdir: str, mpl_cache: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k.upper() in _ENV_KEEP}
     env.update({
@@ -92,8 +100,7 @@ class _Worker:
     def __init__(self):
         self.workdir = tempfile.mkdtemp(prefix="datachat-sbx-")
         mpl_cache = _mpl_cache_dir()
-        # 打包成 exe（阶段 6，PyInstaller）后 sys.executable 是应用本身，需要改成 `<exe> --sandbox-worker`
-        cmd = [sys.executable, "-I", "-B", "-X", "utf8", _WORKER, self.workdir]
+        cmd = worker_cmd(self.workdir)
         kwargs = dict(cwd=self.workdir, env=_child_env(self.workdir, mpl_cache), stdin=subprocess.PIPE,
                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                       errors="replace")
