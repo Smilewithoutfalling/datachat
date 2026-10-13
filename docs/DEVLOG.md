@@ -659,7 +659,7 @@ tests/test_keystore.py 新增 9 个（含参数化）；全量 455 通过（3.11
 
 ---
 
-## [15] 2026-10-13 · 阶段 4：analyze_stream() + trace id（M09、M14 部分）· commit <待提交>
+## [15] 2026-10-13 · 阶段 4：analyze_stream() + trace id（M09、M14 部分）· commit 9f9771c
 
 ### 改动
 - `analyze_stream()`（app/core/service.py）是生成器，按发生顺序产出事件；`analyze()` 只是把它跑完、取 done 里的结果。两者走同一条代码路径，没有线程。`res.steps` 的内容和顺序不变，评测与报告不受影响（test_analyze_equals_stream_done 逐字段比对）。
@@ -677,3 +677,38 @@ tests/test_stream.py 新增 11 个；全量 466 通过（3.11 / 3.12）。
 
 ### 下一步
 FastAPI + SSE（数据集上传、会话、消息、设置）+ SQLite。
+
+---
+
+## [16] 2026-10-13 · 阶段 4：本地后端 FastAPI + SSE + SQLite（B18 大部分、M08、M10、M14）· commit <待提交>
+
+### 改动
+- 新包 app/server：`create_app(home, token)` 和 `python -m app.server [--port] [--home] [--token]`。接口列表在 app/server/app.py 顶部：数据集、会话、消息（SSE）、图表、设置、API Key。
+- **SSE**：`POST /sessions/{id}/messages` 返回 text/event-stream，逐条转发 analyze_stream 事件（`id: seq`、`event: type`、`data: Event.to_dict()`）。助手消息 id = trace_id，放在响应头 X-Message-Id。图表本地路径换成 `/charts/<文件名>`，结果里的数据集绝对路径不外发。
+  - 请求用 POST（要带 body 和 token），浏览器原生 EventSource 用不了，前端用 fetch 读流。
+- **SQLite**（app/server/db.py，SQLAlchemy 2.0，只用通用类型，以后换 PG 不改模型；各表预留 user_id）：datasets、dataset_files、sessions、messages、events、settings。
+  - 每个事件（done 除外）存进 events 表，完整结果存在 messages.result_json，所以历史可以完整回放步骤。
+  - 服务端不再写 runs.jsonl（M14：DB 替代）；命令行入口照旧写。
+- **数据集**：一次上传多个 CSV（M10）。*.dict.csv 作字典；单表直接传文件路径（字典自动生效），多表传目录。
+  - 文件名只保留 basename，只收 .csv，单文件上限 1 GB，最多 50 个文件；落在 `<home>/datasets/<id>/` 下，算 sha256。删除数据集时级联删除会话并删掉文件。
+- **设置**：模型名、base_url 存 settings 表，覆盖环境变量。API Key 只走钥匙串（PUT/DELETE /settings/api-key），GET 只返回 configured 和 source，**从不返回 Key**。
+- **本机安全**（写进了 app.py 文档字符串，THREAT_MODEL 待补一节）：
+  - 只绑定 127.0.0.1；
+  - TrustedHost 只认 localhost / 127.0.0.1，挡 DNS rebinding；
+  - 每次启动生成随机 token，挡本机网页对 localhost 的跨站请求；图表另接受 ?token= 给 `<img>` 用；
+  - 不开 CORS，阶段 6 外壳确定后只放行外壳的源。
+- **并发与中断**：同一会话已有一条在分析时返回 409。客户端断开时生成器被关闭，消息标为 cancelled。后端被杀后重启，遗留的 running 一律标成 cancelled。
+- 日志：`python -m app.server` 把 logging 输出到 `<home>/server.log` 和 stderr，analyze 日志带 trace。
+- 依赖：fastapi 0.143.0、annotated-doc、SQLAlchemy 2.1.4。starlette / uvicorn / python-multipart 原先已是传递依赖，这次显式锁定；dev 加 httpx（TestClient 需要）。四种平台/版本组合都 compile 通过。
+
+### 已知限制
+- **ReAct 多轮记忆在进程内**（MemorySaver）：重启后历史可查，但模型不再记得之前几轮。要做到重启后接着聊，需要 langgraph 的 SQLite checkpointer（多一个依赖），或者用 messages 表重建上下文。留到接前端时再定。
+- M13 的"图表数据"目前只有 png 和结果文本（result_text）。结构化的图表数据（给前端自己画）要等前端确定图表库后再定格式。
+
+### 验收（plan.md 阶段 4，前两条）
+- "用 curl 走完 上传 → 提问 → 流式结果 → 历史可查"：沙箱里真起了 `python -m app.server --port 0`，用 curl 走通（没有 Key，走的是 error → done 路径）；带假模型的完整路径见 tests/test_server.py。
+- "重启后会话还在"：test_full_flow_workflow_and_restart 用同一数据目录新建 app，会话、消息、事件、结果都在。
+- 第三条（PyInstaller spike）还没做。
+
+### 测试
+tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过（3.11 / 3.12）。
