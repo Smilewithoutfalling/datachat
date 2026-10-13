@@ -78,6 +78,10 @@ python run.py data/sample.csv "各产品的平均单价是多少？画柱状图�
 python run_react.py
 python run_react.py data/sample.csv "各地区各产品的销量分布，画图说明。"
 
+# 3b'. 本地后端（阶段 4，FastAPI + SSE；只监听 127.0.0.1）
+python -m app.server --port 8765     # 第一行输出 {"port", "token", "home"}；请求头带 Authorization: Bearer <token>
+# 接口列表见 app/server/app.py 顶部；数据（SQLite、上传文件、图表、server.log）默认在 %LOCALAPPDATA%\datachat
+
 # 3c. 评测（--agent react 测 ReAct 版；--oracle 不需要 Key，用标准答案自检评测流水线）
 python run_eval.py
 python run_eval.py --oracle

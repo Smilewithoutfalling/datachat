@@ -5,3 +5,5 @@ httpx2==2.13.1
 # 阶段 3.5 闸门：scripts/gate/ 读 UCI 的 xlsx 原件
 openpyxl==3.1.5
 et-xmlfile==2.0.0
+# 阶段 4：fastapi.testclient 需要 httpx（版本与现有传递依赖一致）
+httpx==0.28.1
