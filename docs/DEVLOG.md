@@ -738,7 +738,7 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 
 ---
 
-## [18] 2026-10-13 · 阶段 4 spike：PyInstaller sidecar + Windows runner（B35）· commit <待提交>
+## [18] 2026-10-13 · 阶段 4 spike：PyInstaller sidecar + Windows runner（B35）· commit 3ca793a（PR #18）
 
 ### 改动
 - `app/sidecar.py`：统一入口。默认启动后端；`--sandbox-worker <目录>` 分派到 sandbox_worker.main()；`--selftest` 输出 JSON 自检（不需要 Key）。
@@ -772,3 +772,54 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 - PyInstaller 警告只有 SQLAlchemy 方言的 hidden import 缺失（pysqlite2 / MySQLdb / psycopg2），都是不用的驱动，可忽略。
 - spike 结论：**B35 关闭**；PyInstaller onedir 路线可行，冷启动 ~1.5 s，体积约 110 MB zip。
 
+
+---
+
+## [19] 2026-10-13 · 阶段 4 收尾：问题总表、本机后端威胁模型、重估 · commit <待提交>
+
+### 改动
+- **问题总表**（下文）：B01–B69 逐条对照当前代码核对。以前每条记录只写"同 [n]，加/去掉 …"，未关问题要倒推好几条才能拼出来；从这条起**只维护这一张表**，后面的记录写"相对 [19] 的增减"。
+- docs/THREAT_MODEL.md 补 §2.1 本机后端（T4–T8：只监听 127.0.0.1、TrustedHost 挡 DNS rebinding、启动随机 token、不开 CORS、从不返回 Key）和 §2.2 打包后的沙箱（可读根多出 exe 与 `_internal`）；keyring 一行从"待做"改为已上线。[16] 里欠的那一节补上了。
+- B70（新，已修）：`auth()` 对**所有**接口都接受 `?token=`，和文档"只有图表接受"不符，token 会跟着 URL 进浏览器历史、Referer 和访问日志。现在只有 `/charts/*` 认 `?token=`；uvicorn 访问日志里 `token=` 的值写成 `***`。测试：tests/test_server.py 的 `?token=` 访问 /sessions → 401、test_access_log_redacts_token。
+- docs/roadmap/plan.md：新增"进度与重估"一节（M18）；M13 顺延为阶段 5 第一件事；pyarrow 去留写进阶段 6。
+- CI：sidecar.yml 的 upload-artifact v4 → v7（v4 跑在已弃用的 Node 20 上，runner 每次报警告）。
+- [18] SHA 补为 3ca793a。
+
+### 本次正式关闭（早就修好、但一直没在表里关）
+| 编号 | 证据 |
+|---|---|
+| B13 | 评测集 130 题 / 4 张表 / 应拒答 / 歧义（[6]），外加闸门 25 题非自造数据（[10]） |
+| B17 | CI：tests.yml，Linux + Windows × 3.11 / 3.12（[6]）；日志：logger `datachat.analyze` 带 trace（[15]），服务端写 server.log（[16]）。命令行入口的 print 是给人看的输出，保留 |
+| B18 | FastAPI + SQLite：会话、消息、事件持久化，重启后可查（[16]），重启后可接着聊（[17]）。Streamlit 两个页面阶段 5 删除 |
+| B33 | "Sorry, need more steps" 记为 agent 错误、上限 12→25（B39，[7]）；触顶时强制收尾出结论（B61，[12]） |
+| B35 | PyInstaller 打包 + `--sandbox-worker`，Windows runner 自检 8/8（[18]） |
+| B36 | Windows 路径由 CI windows-latest 每次覆盖（tests.yml），打包版也在 runner 上过了内存上限（[18]） |
+| B37 | Windows runner 实测：打包版每次起 worker 约 0.7–0.9 s（selftest 的 compute 0.89 s、stdout 0.77 s、blocked_import 0.74 s，含执行），比原估 1–3 s 好；预启动不急，阶段 5 若体感慢再做 |
+
+### 当前未关问题（唯一的总表）
+| 编号 | 严重度 | 位置 | 描述 | 计划阶段 |
+|---|---|---|---|---|
+| B04 | P1 | schema.py / dictionary.py | 提示注入只做了截断 + 数据分隔块缓解，不是边界 | 8（与 T1 一起，见 THREAT_MODEL） |
+| B34 | P1 | tools/sandbox_worker.py | 审计钩子不是安全边界（C 扩展开文件、`sys._getframe`） | 8（OS 级隔离） |
+| B05 | P1 | graph.py _route_after_exec | 工作流只在报错时修，答错不修 | 7（结果合理性校验） |
+| B09 | P1 | schema.py | 没有枚举值、范围、空值率 | 7（列画像） |
+| B64 | P1 | core/grounding.py | 叙述数字与证据不符：已能检测（unverified_numbers），生成侧未约束 | 7 |
+| B20 | P2 | app/react_agent.py | `create_react_agent` 已弃用 | **4 收尾（下一个 PR）** |
+| B21 | P2 | core/service.py ReAct 路径 | ReAct 重试次数记为 None | 4 收尾，随 B20 一起看能否计数 |
+| B44 | P2 | sandbox / 前端 | 图表失败时整段代码算失败，已算出的 result 丢掉；要不要保留并提示"图没画出来" | 5（前端怎么展示一起定） |
+| B23 | P2 | — | 没有 token 预算上限、限流、模型降级；桌面版烧的是用户自己的额度 | 6（设置页加每条消息的 token 上限） |
+| B12 | P2 | eval/comparator.py | 规则 1–21 之外的形态仍判错；needs_audit 标出非严格匹配 | 7（新留出集一起复核） |
+| B26 | P2 | eval | ReAct 结论文字不参与打分（只看 result） | 7 |
+| B31 | P2 | 评测方法 | 网关对 temperature 0 可能缓存，`--repeat` 不独立 | 7 |
+| B65 | P2 | schema 摘要 | 缺失哨兵（"未登记"）、合计行没识别 | 7（列画像） |
+| B22 | P3 | tools/csv_io.py | Big5 可能被 gb18030 误解码成错字（已写进文档，可显式传 encoding） | 7（DuckDB 读入时再看） |
+| M13 | — | 接口 | 只有 png + 结果文本，没有给前端自己画的结构化图表数据 | 5 第一件事 |
+
+不在表里的 B 编号都已解决，证据在各自的记录里。
+
+### 测试
+tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量见 PR 的 CI。
+
+### 下一步
+1. B20：迁移 `create_react_agent`（单独 PR），迁完 S 重跑闸门 25 题做回归。
+2. 阶段 5：先定图表库和 M13 的数据格式。
