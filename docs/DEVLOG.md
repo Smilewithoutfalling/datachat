@@ -715,7 +715,7 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 
 ---
 
-## [17] 2026-10-13 · 阶段 4：ReAct 多轮上下文从 messages 表重建（S 选 B 方案）· commit <待提交>
+## [17] 2026-10-13 · 阶段 4：ReAct 多轮上下文从 messages 表重建（S 选 B 方案）· commit 132788a
 
 ### 改动
 - `analyze` / `analyze_stream` 新增参数 `history=[(问题, 结论), ...]`：作为 user / assistant 消息交替放在本轮问题前面。
@@ -735,4 +735,40 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 - test_stream：history 的截断、本轮步骤不混进历史、与 memory 互斥、带 history 的纯文字追问不重跑。
 - test_server：同一会话第二轮带上了第一轮的问答；**重启后**第三轮仍然带着前两轮。
 - 全量 481 通过（3.11 / 3.12）。
+
+---
+
+## [18] 2026-10-13 · 阶段 4 spike：PyInstaller sidecar + Windows runner（B35）· commit <待提交>
+
+### 改动
+- `app/sidecar.py`：统一入口。默认启动后端；`--sandbox-worker <目录>` 分派到 sandbox_worker.main()；`--selftest` 输出 JSON 自检（不需要 Key）。
+- B35：`app/tools/sandbox.py` 新增 `worker_cmd()`。打包后（sys.frozen）改用 `<exe> --sandbox-worker <目录>`，源码环境不变。
+- 自检 8 项：计算、画图、print 回传、读工作目录外文件被**审计钩子**拦截（绕开受限 builtins，用 pd.read_csv 测）、import subprocess 被拦、超时强杀、**操作系统层**内存上限（512 MB 下申请 1.6 GB）、关键依赖导入 + create_app + jieba + keyring 后端名。
+- `packaging/build_sidecar.py`（onedir；按名字收 app / uvicorn 子模块、jieba 词典、keyring 元数据；排除 streamlit 等）；`packaging/requirements-build.txt`（pyinstaller 6.22.3）。
+- `packaging/smoke_sidecar.py`（只用标准库）：exe 自检 → 起后端 → 上传 → 建会话 → 提问（无 Key 应得 error → done）→ 重启 → 会话还在。报告写 JSON。
+  - 请求一律不走代理：沙箱里 http_proxy 把 127.0.0.1 的请求转给代理，返回了 404。S 的机器也常配代理，**前端访问 sidecar 同样必须绕过系统代理**（记为阶段 6 的注意事项）。
+- `.github/workflows/sidecar.yml`：windows-latest、Python 3.11 打包 → 冒烟。产物 zip 保留 7 天，报告（大小、最大的目录、smoke.json、PyInstaller 警告）保留 30 天。只在相关路径改动或手动触发时运行。
+
+### 结果
+- 源码环境（Linux 沙箱）用一个包装脚本当 exe：自检 8/8 通过，冒烟测试全过，启动约 1 秒。
+- 沙箱里没有 objdump，Linux 打包没法试；Windows 上的打包结果以 runner 为准：
+
+**Windows runner 结果**（windows-latest，Python 3.11.9，PyInstaller 6.22.3）
+
+| | 第一次 run 38339431396 | 第二次 run 38340194855 |
+|---|---|---|
+| 打包耗时 | 45 s | 67 s |
+| onedir | 1761 个文件，230.7 MB | 同左 |
+| zip | 109 MB | 109 MB |
+| selftest | **7/8，plot 失败** | 8/8（10.99 s，含逐项起 worker） |
+| 后端启动 / 重启 | 1.29 s / 1.26 s | 1.54 s / 1.46 s |
+| SSE（无 Key） | error → done | error → done |
+| 重启后历史 | user ok + assistant error | 同左 |
+
+- **第一次失败是 B35 的真问题之一**：PyInstaller 6 把纯 Python 模块的 PYZ 归档附在 exe 自身里，worker 画图时延迟导入要读 `datachat-sidecar.exe`，被审计钩子当成越界读文件拦下。修法：打包环境下把 `sys.executable` 和 `sys._MEIPASS` 加入可读根（`sandbox_worker._read_roots`）。读自己的 exe 和 `_internal` 不扩大攻击面（都是只读的程序文件）。
+- **同一次 run 里 blocked_read 是假通过**：它被拦的同样是读 exe（pandas 延迟导入），根本没走到 win.ini。selftest 现在要求报错里出现目标路径才算过；第二次 run 报错为 `沙箱禁止读文件：C:/Windows/win.ini`，确认拦的是对的东西。
+- memory 项：1.49 GiB 分配失败，runner 有 16 GB 内存，说明 Job Object 2048 MB 上限在打包后照样生效。keyring 后端 = WinVaultKeyring。
+- 体积大头：pyarrow 78.5 MB、jieba 29.6 MB、numpy.libs 20 MB、matplotlib 13.7 MB、pandas 12.1 MB、PIL 10.7 MB。pyarrow 来自 streamlit 传递依赖；**暂不排除**：pandas 3.0 装了 pyarrow 时默认字符串后端用它，排除会让打包版与开发版的 str dtype 后端不一致，留到阶段 6 一并决定（要么开发环境也去掉 pyarrow，要么保留）。
+- PyInstaller 警告只有 SQLAlchemy 方言的 hidden import 缺失（pysqlite2 / MySQLdb / psycopg2），都是不用的驱动，可忽略。
+- spike 结论：**B35 关闭**；PyInstaller onedir 路线可行，冷启动 ~1.5 s，体积约 110 MB zip。
 
