@@ -99,7 +99,14 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
 
     def auth(request: Request):
         h = request.headers.get("authorization", "")
-        given = h[7:] if h.lower().startswith("bearer ") else request.query_params.get("token", "")
+        if h.lower().startswith("bearer "):
+            given = h[7:]
+        elif request.url.path.startswith("/charts/"):
+            # 只有图表接受 ?token=（<img src> 带不了请求头）；其他接口一律要请求头，
+            # 免得 token 跟着 URL 进浏览器历史、Referer 和访问日志
+            given = request.query_params.get("token", "")
+        else:
+            given = ""
         if not secrets.compare_digest(given.encode(), token.encode()):
             raise HTTPException(401, "token 无效")
 

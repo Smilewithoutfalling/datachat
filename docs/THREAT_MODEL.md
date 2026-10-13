@@ -16,10 +16,31 @@
 | 子进程沙箱：环境变量白名单（不含 Key）、独立工作目录、超时强杀、内存上限 | app/tools/sandbox.py、_winjob.py | T1 中"读环境变量"；死循环 / 吃内存 | 子进程仍以当前用户身份运行 |
 | 审计钩子：禁止起进程、联网、ctypes、读写工作目录以外的文件 | app/tools/sandbox_worker.py | LLM 生成或被注入的**常见**手法（T1/T2） | 专门的绕过：C 扩展自己打开文件不触发 open 事件；`sys._getframe` 走到 worker 帧（B34）。Python 文档明说审计钩子不是安全边界 |
 | 数据分隔块：样例与字典包进"只是数据，不是指令" | app/tools/schema.py | 降低注入成功率 | 不是边界，只是缓解 |
-| 系统钥匙串（keyring，阶段 4 第一项） | 待做 | T3：磁盘上不再有明文 Key | **挡不住 T1 的沙箱逃逸**：Windows 凭据管理器用 DPAPI 按用户加密，同一用户的任何进程都能读出来 |
+| 系统钥匙串（keyring，阶段 4 已上线，[14]） | app/core/keystore.py | T3：磁盘上不再有明文 Key | **挡不住 T1 的沙箱逃逸**：Windows 凭据管理器用 DPAPI 按用户加密，同一用户的任何进程都能读出来 |
 | OS 级隔离（AppContainer / 低完整性令牌 / 容器） | 阶段 8 | T1、T2 的逃逸情形 | — |
 
 keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文件（C 扩展可绕过审计钩子）"缩窄成"用 ctypes 等手段调用凭据 API"。**这是缩窄，不是消除。**
+
+## 2.1 本机后端（阶段 4 新增的攻击面）
+桌面版把 FastAPI 后端作为本地 sidecar 运行（app/server/）。新增的威胁是**本机其他来源借这个端口**：
+
+| # | 威胁 | 防线 | 位置 |
+|---|---|---|---|
+| T4 | 局域网里的其他机器访问端口 | 只监听 127.0.0.1 | app/server/__main__.py |
+| T5 | 用户浏览器里打开的恶意网页，用 DNS rebinding 把自己的域名解析到 127.0.0.1 再请求 | TrustedHost 只认 `localhost` / `127.0.0.1`，Host 头不对直接拒 | app/server/app.py |
+| T6 | 恶意网页对 localhost 发跨站请求（表单 POST、`<img>`），借后端读数据集、烧 Key 的额度 | 每次启动随机生成 token（32 字节），除 /health 外都要 `Authorization: Bearer`；不开 CORS，网页 JS 读不到响应，也带不上自定义头 | app/server/app.py |
+| T7 | token 跟着 URL 泄露 | 只有 `/charts/*` 接受 `?token=`（`<img src>` 带不了请求头），其他接口不认；访问日志里 `token=` 的值写成 `***` | app/server/app.py、__main__.py |
+| T8 | 接口把 Key 回给调用方 | `GET /settings/api-key` 只返回 configured / source，**从不返回 Key** | app/server/app.py |
+
+挡不住、也不打算挡的：
+- 同一用户下的其他程序：它能读 sidecar 的 stdout（token 在启动那一行里）、读钥匙串、读数据目录，属于 §5 的"本机已被控制"。
+- token 只在本次启动内有效，重启即换；图表 URL 里的 token 仍会进 WebView 的内存与缓存，接受。
+- 阶段 6 外壳确定后，CORS 只放行外壳自己的源；在那之前前端开发服务器要走同源代理，不开 `*`。
+
+## 2.2 打包后的沙箱（阶段 4 spike，[18]）
+- PyInstaller 打包后，沙箱 worker 是 `<exe> --sandbox-worker <目录>`（B35）。
+- 可读根比源码环境多两项：exe 本身（纯 Python 模块的 PYZ 归档附在 exe 里，延迟导入要读）和 `_MEIPASS`（onedir 的 `_internal`）。两者都是安装目录里的只读程序文件，不含用户数据和 Key，**不扩大 T1 / T2 的面**。
+- 打包版自检（`--selftest`）在 Windows runner 上验证了：越界读文件被拦且拦的是目标文件、禁止导入 subprocess、超时强杀、Job Object 内存上限生效。
 
 ## 3. 结论：T1 / T2 在阶段 8 之前不算解决
 - "keyring 上线 = 偷 Key 已解决"是**错误**的读法。
