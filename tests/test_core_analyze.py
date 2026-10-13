@@ -142,7 +142,7 @@ def test_react_happy_path(sample_path):
     assert res.ok and res.executed and res.result == 1685 and res.answer == "总销量 1685 件"
     assert res.code == "result = int(df['units'].sum())"
     assert [s.name for s in res.steps] == ["load", "tool_call", "observation", "answer"]
-    assert res.usage.calls == 2 and res.usage.total_tokens == 30 and res.usage.retries is None
+    assert res.usage.calls == 2 and res.usage.total_tokens == 30 and res.usage.retries == 0
     system = prompt_text(m.calls[0][:1])
     assert "region：销售地区" in system            # 字段说明在系统提示里，不在用户问题里（B04）
     assert m.calls[0][-1].content == "哪个地区卖得最好"

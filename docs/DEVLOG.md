@@ -775,7 +775,7 @@ tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过�
 
 ---
 
-## [19] 2026-10-13 · 阶段 4 收尾：问题总表、本机后端威胁模型、重估 · commit <待提交>
+## [19] 2026-10-13 · 阶段 4 收尾：问题总表、本机后端威胁模型、重估 · commit 86bba0a（PR #19）
 
 ### 改动
 - **问题总表**（下文）：B01–B69 逐条对照当前代码核对。以前每条记录只写"同 [n]，加/去掉 …"，未关问题要倒推好几条才能拼出来；从这条起**只维护这一张表**，后面的记录写"相对 [19] 的增减"。
@@ -823,3 +823,25 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 1. B20：迁移 `create_react_agent`（单独 PR），迁完 S 重跑闸门 25 题做回归。
 2. 阶段 5：先定图表库和 M13 的数据格式。
+
+---
+
+## [20] 2026-10-13 · 阶段 4 收尾：ReAct 主循环自建，替代已弃用的 create_react_agent（B20、B21）· commit <待提交>
+
+### 改动
+- B20：app/react_agent.py 不再 import `langgraph.prebuilt`。`build_loop()` 用 StateGraph 搭"agent → tools → agent"循环（约 60 行），不新增依赖（没有选 langchain 1.x 的 `create_agent`，见 [19] 之后与 S 的讨论：多一个依赖要锁版本、进打包体积和许可证审计，且重试仍在 SDK 里）。
+  - 与原来一致：系统提示在每次调用时放在最前，不进状态（多轮记忆里只有用户 / 助手 / 工具消息）；状态 messages 用 add_messages 合并，可接 checkpointer；步数仍由 recursion_limit 控制，一轮 = agent + tools 两步，用完抛 GraphRecursionError，由 service 强制收尾（B61）；一次多个工具调用按顺序执行，ToolMessage 顺序与 sink["execs"] 一致；未知工具名、参数缺失把错误作为工具结果回给模型（原 ToolNode 的行为）。
+  - 不同：原来步数快用完时 prebuilt 会塞一条 "Sorry, need more steps…" 当回复，现在不会了，统一走 GraphRecursionError。service 对这句话的判断（B39）保留，无害。
+- B21：模型调用的重试从 openai SDK 挪到 agent 节点（只重试超时 / 限流 / 连接 / 5xx，按 LLMConfig 的 max_retries 与指数退避），SDK 的 max_retries 改为 0，每次重试记进 usage.retries。ReAct 的 retries 不再是 None。B62 / B69 的整轮重跑照旧，也计入 retries。
+- 文档：core/llm.py 文件头关于两种 Agent 重试方式的说明同步更新。
+
+### 相对 [19] 总表的变化
+- 关闭 B20、B21。其余不变。
+
+### 测试
+- 新增 tests/test_react_loop.py 7 项：不再 import prebuilt；超时 + 限流各重试一次计 2；重试用完记 llm 错误且调用 3 次；鉴权错误不重试；未知工具 / 缺参数回给模型后能改对；一次两个工具调用按顺序；多轮记忆里系统提示只有一条且在最前。
+- test_core_analyze 的 ReAct 用例 retries 断言由 None 改为 0。
+- 全量 489 passed（Linux Python 3.12）；pytest 警告从 175 条降到 1 条（原来大部分是 create_react_agent 的弃用警告）。
+
+### 需要 S 做
+- 主循环换了实现，按约定重跑闸门 25 题做回归：`python scripts/gate/run_gate.py --agent react`。对照 [13] 的回归结果（react 14/15 + 8/10）；预期持平，若出现 ⑤（步数用完无结论）类失败要先看是不是"Sorry"占位消失带来的差异。

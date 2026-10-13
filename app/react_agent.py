@@ -5,11 +5,20 @@
 控制流由模型的工具调用驱动，而不是预先写死的图。
 
 阶段 1 起由 app/core/service.py 的 analyze() 装配调用：模型、数据表、字段说明都由调用方传入。
+
+B20（阶段 4 收尾）：不再用已弃用的 langgraph.prebuilt.create_react_agent，改为自己用 StateGraph 搭
+"模型 → 工具 → 模型"的循环（build_loop）。行为与原来一致：系统提示在调用时放在最前、不进状态；
+状态是 messages（add_messages 合并），可接 checkpointer；步数上限仍由 recursion_limit 控制，
+用完抛 GraphRecursionError，由 service 强制收尾（B61）。不同点：模型调用的重试在这里做
+（只重试超时 / 限流 / 连接 / 5xx，指数退避），每次重试记进 tracker，ReAct 的重试次数不再是 None（B21）。
 """
 import time
+from typing import Annotated, TypedDict
 
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 
 from app.config import ensure_dirs
 from app.core.result import format_result
@@ -29,8 +38,70 @@ def _clip(text: str, n: int) -> str:
     return text[: n // 2] + f"\n…（省略 {len(text) - n} 字符）…\n" + text[-n // 2:]
 
 
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+
+
+def _invoke_with_retry(model, messages, config, llm_config, tracker, sleep):
+    """调一次模型；超时 / 限流 / 连接 / 5xx 按 llm_config 重试（指数退避），其他错误直接抛。"""
+    from app.core.llm import classify_error
+    max_retries = llm_config.max_retries if llm_config is not None else 0
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return model.invoke(messages, config)
+        except Exception as e:  # noqa: BLE001
+            _, retryable = classify_error(e)
+            if not retryable or attempts > max_retries:
+                raise
+            if tracker is not None:
+                tracker.add_retry()
+            sleep(min(llm_config.backoff_max, llm_config.backoff_base * 2 ** (attempts - 1)))
+
+
+def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None, tracker=None,
+               sleep=time.sleep):
+    """ReAct 主循环：agent 节点调模型；有工具调用就进 tools 节点逐个执行，再回 agent；没有就结束。"""
+    bound = model.bind_tools(tools)
+    by_name = {t.name: t for t in tools}
+
+    def agent(state: AgentState, config):
+        msg = _invoke_with_retry(bound, [SystemMessage(system)] + list(state["messages"]), config,
+                                 llm_config, tracker, sleep)
+        return {"messages": [msg]}
+
+    def run_tools(state: AgentState, config):
+        last = state["messages"][-1]
+        out = []
+        for tc in last.tool_calls:
+            t = by_name.get(tc.get("name"))
+            if t is None:
+                content = f"错误：没有名为 {tc.get('name')!r} 的工具，可用的只有 {sorted(by_name)}。"
+            else:
+                try:
+                    content = str(t.invoke(tc.get("args") or {}, config))
+                except Exception as e:  # noqa: BLE001  参数不对等：把错误回给模型让它改，和原 ToolNode 一样
+                    content = f"错误：{type(e).__name__}: {e}\n请修正后重试。"
+            out.append(ToolMessage(content=content, tool_call_id=tc.get("id") or "", name=tc.get("name") or ""))
+        return {"messages": out}
+
+    def route(state: AgentState):
+        last = state["messages"][-1]
+        return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
+
+    g = StateGraph(AgentState)
+    g.add_node("agent", agent)
+    g.add_node("tools", run_tools)
+    g.add_edge(START, "agent")
+    g.add_conditional_edges("agent", route, ["tools", END])
+    g.add_edge("tools", "agent")
+    return g.compile(checkpointer=checkpointer)
+
+
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
-                      df=None, field_notes: str = "", exec_timeout: int = 20):
+                      df=None, field_notes: str = "", exec_timeout: int = 20,
+                      llm_config=None, tracker=None, sleep=time.sleep):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -40,6 +111,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
     model: 已配置好超时/重试的 ChatModel；None 时按环境变量构建（旧用法）。
     df: 已读好的 DataFrame 或 {表名: DataFrame}（多表，阶段 3.5）；每次执行用副本；None 时读 df_path。
     field_notes: 本轮问题检索到的字段说明（已格式化），放进系统提示而不是拼进用户问题（B04）。
+    llm_config / tracker: 模型调用的重试参数与重试计数（B21）；llm_config 为 None 时不重试。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -114,6 +186,5 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "若已生成图表，说明图表展示了什么。"
     )
 
-    return create_react_agent(
-        model, [run_python_on_data], prompt=system, checkpointer=checkpointer
-    )
+    return build_loop(model, [run_python_on_data], system, checkpointer,
+                      llm_config=llm_config, tracker=tracker, sleep=sleep)
