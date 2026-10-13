@@ -30,6 +30,7 @@ class AnalysisResult:
     agent: str                                  # "workflow" | "react"
     dataset: str                                # 数据文件路径
     question: str                               # 用户原始问题（不含字典注入，B04）
+    trace_id: str = ""                          # 本次分析的追踪 id（阶段 4；事件、日志、runs.jsonl 共用）
     answer: str = ""                            # 自然语言结论
     result: Any = None                          # 最终代码执行的结构化结果（未截断）
     result_text: str = ""                       # 结果的文本预览（给模型/界面用）
