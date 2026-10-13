@@ -132,8 +132,6 @@ def analyze_stream(
     finally:
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
-        if agent == "react":
-            res.usage.retries = None     # ReAct 的重试在 openai SDK 内部完成，无法计数
     if log:
         from app.tools.persist import log_run
         log_run({**res.to_record(), "df_path": res.dataset})
@@ -348,7 +346,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     from app.core.grounding import unverified_numbers
     from app.react_agent import build_react_agent
 
-    model = chat_model if chat_model is not None else build_chat_model(cfg, sdk_retries=cfg.max_retries)
+    # 重试由 ReAct 循环自己做并计数（B21），SDK 不再重试
+    model = chat_model if chat_model is not None else build_chat_model(cfg, sdk_retries=0)
     config = {"recursion_limit": recursion_limit, "callbacks": [UsageCallbackHandler(tracker)]}
     if memory is not None:
         config["configurable"] = {"thread_id": thread_id or "default"}
@@ -357,7 +356,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     for attempt in range(retries + 1):
         sink = {"execs": [], "charts": []}
         graph = build_react_agent(dataset, checkpointer=memory, sink=sink, model=model, df=df,
-                                  field_notes=notes_text, exec_timeout=exec_timeout)
+                                  field_notes=notes_text, exec_timeout=exec_timeout,
+                                  llm_config=cfg, tracker=tracker)
         messages, rec_err = [], None
         res.error = res.error_kind = None
         out = {}
