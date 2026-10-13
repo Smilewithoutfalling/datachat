@@ -50,6 +50,7 @@ def analyze(
     use_dictionary: bool = True,
     memory=None,
     thread_id: str | None = None,
+    history=None,
     encoding: str | None = None,
     log: bool = False,
     trace_id: str | None = None,
@@ -66,6 +67,9 @@ def analyze(
     recursion_limit：ReAct 版最多走多少步（每次模型调用或工具调用算一步）。
     use_dictionary：是否启用数据字典检索（评测时可关掉，单独衡量 RAG 增益）。
     memory / thread_id：ReAct 多轮对话的 checkpointer（如 MemorySaver）与会话 id。
+    history：ReAct 多轮对话的另一种方式：之前各轮的 [(问题, 结论), ...]，按时间顺序（阶段 4，后端从
+             messages 表重建，重启不丢）。只带问答，不带中间的工具调用与输出；只取最近 MAX_HISTORY_TURNS 轮。
+             与 memory 互斥。工作流版忽略。
     encoding：显式指定 CSV 编码；None 时自动检测（失败会报错，不会静默乱码）。
     log：是否把本次记录追加到 outputs/runs.jsonl。
     trace_id：本次分析的追踪 id（以后由 API 传入消息 id）；None 时生成一个。
@@ -74,7 +78,7 @@ def analyze(
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
                              max_attempts=max_attempts, exec_timeout=exec_timeout,
                              recursion_limit=recursion_limit, use_dictionary=use_dictionary,
-                             memory=memory, thread_id=thread_id, encoding=encoding, log=log,
+                             memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
                              trace_id=trace_id):
         if ev.type == "done":
             res = ev.result
@@ -94,6 +98,7 @@ def analyze_stream(
     use_dictionary: bool = True,
     memory=None,
     thread_id: str | None = None,
+    history=None,
     encoding: str | None = None,
     log: bool = False,
     trace_id: str | None = None,
@@ -106,6 +111,8 @@ def analyze_stream(
     """
     if agent not in AGENTS:
         raise ValueError(f"未知 agent: {agent!r}，可选 {AGENTS}")
+    if memory is not None and history:
+        raise ValueError("memory 与 history 只能二选一")
 
     trace_id = trace_id or uuid.uuid4().hex
     em = Emitter(trace_id)
@@ -121,7 +128,7 @@ def analyze_stream(
         yield from _run(em, res, tracker, dataset, question, agent=agent, llm_config=llm_config,
                         chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
                         recursion_limit=recursion_limit, use_dictionary=use_dictionary,
-                        memory=memory, thread_id=thread_id, encoding=encoding)
+                        memory=memory, thread_id=thread_id, history=history, encoding=encoding)
     finally:
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
@@ -138,7 +145,7 @@ def analyze_stream(
 
 
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
-         exec_timeout, recursion_limit, use_dictionary, memory, thread_id, encoding):
+         exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -176,7 +183,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
                       dataset, max_attempts, exec_timeout)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-                   recursion_limit, exec_timeout, memory, thread_id)
+                   recursion_limit, exec_timeout, memory, thread_id, history)
 
 
 # ------------------------------------------------------------------ 工作流版
@@ -273,7 +280,23 @@ FINALIZE_PROMPT = (
 )
 
 
-def _react_invoke(graph, question, config, em, sink, attempt, out):
+MAX_HISTORY_TURNS = 10
+MAX_HISTORY_ANSWER_CHARS = 2000
+
+
+def _head(text: str, n: int) -> str:
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def history_messages(history) -> list:
+    """[(问题, 结论), ...] → 交替的 user / assistant 消息，只留最近 MAX_HISTORY_TURNS 轮，结论截断。"""
+    out = []
+    for q, a in list(history or [])[-MAX_HISTORY_TURNS:]:
+        out += [("user", str(q)), ("assistant", _head(str(a), MAX_HISTORY_ANSWER_CHARS))]
+    return out
+
+
+def _react_invoke(graph, question, config, em, sink, attempt, out, history=None):
     """流式执行，保留最后一个状态：撞上 GraphRecursionError 时也拿得到已有的消息（B61）。
     边跑边把本轮新增的工具调用 / 执行结果作为 code / exec 事件产出；结论在收尾判定后才产出
     （它可能被判为网关错误或步数占位而作废）。结果写进 out["messages"] / out["err"]。"""
@@ -281,7 +304,8 @@ def _react_invoke(graph, question, config, em, sink, attempt, out):
     from langgraph.errors import GraphRecursionError
     messages, err, seen, n_tool = [], None, 0, 0
     try:
-        for state in graph.stream({"messages": [("user", question)]}, config, stream_mode="values"):
+        for state in graph.stream({"messages": history_messages(history) + [("user", question)]}, config,
+                                  stream_mode="values"):
             messages = state.get("messages", messages)
             start = 0
             for i, m in enumerate(messages):
@@ -317,7 +341,7 @@ def _final_text(messages):
 
 
 def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-               recursion_limit, exec_timeout, memory, thread_id):
+               recursion_limit, exec_timeout, memory, thread_id, history=None):
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
 
@@ -338,7 +362,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.error = res.error_kind = None
         out = {}
         try:
-            yield from _react_invoke(graph, question, config, em, sink, attempt, out)
+            yield from _react_invoke(graph, question, config, em, sink, attempt, out, history)
             messages, rec_err = out["messages"], out["err"]
         except Exception as e:  # noqa: BLE001
             kind, _ = classify_error(e)
@@ -353,7 +377,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         if rec_err is None and res.error is None:
             if api_error_text(final) is not None:
                 why = f"接口返回错误内容：{api_error_text(final)}"
-            elif not sink["execs"] and refusal_from_answer(final) is None \
+            # 带 history 时追问可以只凭上下文作答（"解释一下上面的结果"），不按 B69 判为异常
+            elif not history and not sink["execs"] and refusal_from_answer(final) is None \
                     and not final.strip().startswith("Sorry, need more steps"):
                 why = f"模型没有执行代码也没有按契约拒答：{final[:200]!r}"
         if why and attempt < retries:
@@ -447,7 +472,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.code = execs[-1]["code"]
         if res.error is None:
             res.error, res.error_kind = execs[-1]["error"], "execution"
-    elif res.error is None and memory is None:
+    elif res.error is None and memory is None and not history:
         # B69：单轮分析里没有执行结果、也不是拒答，不能算成功（多轮追问可以只用文字回答，不在此列）
         res.error = f"ReAct 未执行任何代码也未按契约拒答（结论：{res.answer[:100]!r}）"
         res.error_kind = "agent"

@@ -86,7 +86,6 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     persist.CHART_DIR = os.path.join(home, "charts")
     Session = make_sessionmaker(os.path.join(home, "datachat.db"))
     token = token or secrets.token_urlsafe(32)
-    memories: dict = {}             # session_id → MemorySaver（ReAct 多轮记忆，进程内；重启后只保留可查的历史）
 
     # 上次进程被杀时还在跑的消息，标成 cancelled
     with Session() as db:
@@ -163,6 +162,15 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def session_out(s: ChatSession):
         return {"id": s.id, "dataset_id": s.dataset_id, "agent": s.agent, "title": s.title,
                 "created_at": s.created_at, "updated_at": s.updated_at}
+
+    def turn_history(messages):
+        """ReAct 多轮上下文从 messages 表重建（重启不丢）：只取成功的轮次（user + 紧跟的 ok 助手消息）；
+        失败 / 取消的轮次不进上下文——用户通常会换个说法重问。"""
+        out = []
+        for q, a in zip(messages, messages[1:]):
+            if q.role == "user" and a.role == "assistant" and a.status == "ok":
+                out.append((q.content, a.content))
+        return out
 
     def llm_config():
         with Session() as db:
@@ -250,7 +258,6 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def delete_session(session_id: str, db=Depends(db_dep)):
         db.delete(get_or_404(db, ChatSession, session_id))
         db.commit()
-        memories.pop(session_id, None)
         return {"ok": True}
 
     @app.post("/sessions/{session_id}/messages", dependencies=[Depends(auth)])
@@ -260,6 +267,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(409, "这个会话还有一条消息在分析中")
         target = dataset_target(get_or_404(db, Dataset, s.dataset_id))
         agent = s.agent
+        history = turn_history(s.messages) if agent == "react" else None
         q = Message(session_id=session_id, role="user", content=body.content, created_at=now())
         a = Message(session_id=session_id, role="assistant", status="running", created_at=now())
         db.add_all([q, a])
@@ -274,10 +282,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             kwargs["chat_model"] = chat_model_factory()
         else:
             kwargs["llm_config"] = llm_config()
-        if agent == "react":
-            from langgraph.checkpoint.memory import MemorySaver
-            kwargs["memory"] = memories.setdefault(session_id, MemorySaver())
-            kwargs["thread_id"] = session_id
+        if history:
+            kwargs["history"] = history
 
         def stream():
             status, content, result_json = "cancelled", "已取消", None

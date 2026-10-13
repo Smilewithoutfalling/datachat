@@ -1,5 +1,6 @@
 """阶段 4：analyze_stream() 事件流（M09）。全部用脚本化假模型。"""
 import json
+import pytest
 
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -117,3 +118,28 @@ def test_trace_id_in_runs_log(sample_path, tmp_path, monkeypatch):
     monkeypatch.setattr(persist, "RUNS_LOG", str(log))
     res = analyze(sample_path, "q", chat_model=wf_model(["result = 1"]), llm_config=FAST, log=True)
     assert len(res.trace_id) == 32 and json.loads(log.read_text(encoding="utf-8"))["trace_id"] == res.trace_id
+
+
+# ---------------------------------------------------------------- history（阶段 4，B 方案）
+def test_history_rebuilds_context_and_steps_are_this_turn_only(sample_path):
+    from app.core.service import MAX_HISTORY_TURNS
+    m = ScriptedChatModel(replies=[tool_call("result = 2"), "本轮结论"], calls=[])
+    hist = [(f"问{i}", f"答{i}") for i in range(MAX_HISTORY_TURNS + 2)]
+    res = analyze(sample_path, "现在呢", agent="react", chat_model=m, history=hist)
+    sent = str(m.calls[0])
+    assert "'问0'" not in sent and "'问1'" not in sent and "'问2'" in sent and "答11" in sent and "现在呢" in sent
+    assert res.ok and res.answer == "本轮结论"
+    assert [s.name for s in res.steps if s.name == "tool_call"] == ["tool_call"]
+
+
+def test_history_and_memory_are_exclusive(sample_path):
+    from langgraph.checkpoint.memory import MemorySaver
+    with pytest.raises(ValueError):
+        analyze(sample_path, "q", agent="react", chat_model=ScriptedChatModel(replies=["x"]),
+                memory=MemorySaver(), history=[("a", "b")])
+
+
+def test_history_followup_without_code_is_not_retried(sample_path):
+    m = ScriptedChatModel(replies=["上一轮的 1685 是全部订单的件数之和"], calls=[])
+    res = analyze(sample_path, "解释一下", agent="react", chat_model=m, history=[("总销量", "1685")])
+    assert res.ok and len(m.calls) == 1 and not any(s.name == "retry" for s in res.steps)

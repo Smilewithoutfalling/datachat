@@ -99,7 +99,13 @@ def test_react_multi_turn_memory_and_chart(home, sample_path):
     assert c.get("/charts/..%2Fdatachat.db", headers=H).status_code == 404
     e2 = sse(c.post(f"/sessions/{s['id']}/messages", json={"content": "接着说"}, headers=H).text)
     assert e2[-1][1]["data"]["result"]["answer"] == "第二轮"
-    assert "画图" in str(m.calls[-1])                                  # 同一会话带记忆
+    assert "画图" in str(m.calls[-1]) and "第一轮" in str(m.calls[-1])  # 同一会话带上下文
+
+    m.replies.append("第三轮")                                         # 重启后上下文仍在（从 messages 表重建）
+    c2 = client(home, lambda: m)
+    sse(c2.post(f"/sessions/{s['id']}/messages", json={"content": "再来"}, headers=H).text)
+    last = str(m.calls[-1])
+    assert all(x in last for x in ("画图", "第一轮", "接着说", "第二轮", "再来"))
 
 
 def test_multi_table_dataset(home, tmp_path):
