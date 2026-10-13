@@ -1,7 +1,7 @@
 """离线用的脚本化假模型：单元测试与评测自检（run_eval.py --oracle）共用，不访问网络。
 
 ScriptedChatModel 是真正的 LangChain ChatModel：能被 LLMClient 调用，也能交给
-create_react_agent（bind_tools 返回自身），回调里能拿到 usage_metadata，所以 token 统计链路也被覆盖。
+ReAct 循环（bind_tools 返回自身），回调里能拿到 usage_metadata，所以 token 统计链路也被覆盖。
 """
 from __future__ import annotations
 
