@@ -7,8 +7,23 @@ import argparse
 import json
 import logging
 import os
+import re
 import socket
 import sys
+
+
+_TOKEN_QS = re.compile(r"([?&]token=)[^&\s]*")
+
+
+class RedactToken(logging.Filter):
+    """访问日志里把 ?token= 的值换成 ***（图表 URL 带 token，不让它落进 server.log）。"""
+
+    def filter(self, record):
+        if isinstance(record.args, tuple):
+            record.args = tuple(_TOKEN_QS.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.msg, str):
+            record.msg = _TOKEN_QS.sub(r"\1***", record.msg)
+        return True
 
 
 def main(argv=None):
@@ -27,6 +42,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s",
                         handlers=[logging.FileHandler(os.path.join(app.state.home, "server.log"), encoding="utf-8"),
                                   logging.StreamHandler(sys.stderr)])
+    logging.getLogger("uvicorn.access").addFilter(RedactToken())
     sock = socket.socket()
     sock.bind(("127.0.0.1", a.port))
     port = sock.getsockname()[1]
