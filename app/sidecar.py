@@ -57,7 +57,9 @@ def selftest() -> int:
     def blocked_read():
         # 绕开受限 builtins（没有 open），直接测审计钩子这一层：用 pandas 去读工作目录以外的文件
         r, _, err = run_code(f"result = pd.read_csv({win_ini!r}).shape", df, chart)
-        return err is not None and "NameError" not in err, err
+        # 必须是因为读目标文件被拦；被拦在别处（例如延迟导入读不到 exe）不算通过——第一次 runner 就是这样假通过的
+        target = os.path.normcase(os.path.realpath(win_ini))
+        return err is not None and "沙箱禁止读文件" in err and target in os.path.normcase(err), err
 
     def blocked_import():
         r, _, err = run_code("import subprocess; result = 1", df, chart)
