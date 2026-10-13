@@ -96,6 +96,7 @@ def test_react_multi_turn_memory_and_chart(home, sample_path):
     assert chart.startswith("/charts/chart_")
     assert c.get(chart, headers=H).headers["content-type"] == "image/png"
     assert c.get(chart + f"?token={TOKEN}").status_code == 200        # <img src> 用
+    assert c.get(f"/sessions?token={TOKEN}").status_code == 401       # 其他接口不认 ?token=
     assert c.get("/charts/..%2Fdatachat.db", headers=H).status_code == 404
     e2 = sse(c.post(f"/sessions/{s['id']}/messages", json={"content": "接着说"}, headers=H).text)
     assert e2[-1][1]["data"]["result"]["answer"] == "第二轮"
@@ -169,3 +170,13 @@ def test_delete_dataset_cascades(home, sample_path):
     assert c.delete(f"/datasets/{ds['id']}", headers=H).json() == {"ok": True}
     assert c.get(f"/sessions/{s['id']}", headers=H).status_code == 404
     assert not os.path.exists(os.path.join(home, "datasets", ds["id"]))
+
+
+def test_access_log_redacts_token():
+    import logging
+    from app.server.__main__ import RedactToken
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("127.0.0.1:5", "GET", f"/charts/chart_1_abcdef.png?token={TOKEN}&x=1", "1.1", 200), None)
+    RedactToken().filter(rec)
+    msg = rec.getMessage()
+    assert TOKEN not in msg and "?token=***&x=1" in msg
