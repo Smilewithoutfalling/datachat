@@ -638,7 +638,7 @@ m10 是提示词遵从问题，继续在这 25 题上调提示词就是对着测
 
 ---
 
-## [14] 2026-10-12 · 阶段 4 第一步：API Key 进系统钥匙串 · commit <待提交>
+## [14] 2026-10-12 · 阶段 4 第一步：API Key 进系统钥匙串 · commit cf277ed（PR #14）
 
 ### 改动
 - 新增 app/core/keystore.py：Key 存在系统钥匙串（Windows 凭据管理器；service `datachat`，账户 `llm_api_key`）。`LLMConfig.from_env` 改调 `resolve_api_key()`：**环境变量 DEEPSEEK_API_KEY 显式设置时优先**（开发、CI、临时覆盖），否则读钥匙串。钥匙串没有后端（无桌面的 Linux / CI）时按"未配置"处理，不抛异常。
@@ -656,3 +656,24 @@ tests/test_keystore.py 新增 9 个（含参数化）；全量 455 通过（3.11
 
 ### 下一步
 `analyze_stream()` + trace id → FastAPI + SSE → 会话持久化 → PyInstaller spike。
+
+---
+
+## [15] 2026-10-13 · 阶段 4：analyze_stream() + trace id（M09、M14 部分）· commit <待提交>
+
+### 改动
+- `analyze_stream()`（app/core/service.py）是生成器，按发生顺序产出事件；`analyze()` 只是把它跑完、取 done 里的结果。两者走同一条代码路径，没有线程。`res.steps` 的内容和顺序不变，评测与报告不受影响（test_analyze_equals_stream_done 逐字段比对）。
+- 事件定义在 app/core/events.py：`plan / code / exec / answer / error / done`，每个都带 trace_id、seq、ts。
+  - 比 10-12 提议的五类**多了 done**：SSE 需要一个必有且唯一的终止事件来携带完整结果，"answer"在失败时没有，不能当终止符。
+  - error 分两种：fatal=False 是过程中可恢复的情况（数据字典读取失败已跳过；ReAct 整轮重跑），fatal=True 只在 done 前出现一次，与结果里的 error 相同。
+- **ReAct 是真流式**：code / exec 事件在图执行过程中逐条产出（test_react_events_arrive_before_run_finishes：第一个事件出来时模型只被调用过一次）。answer 要等收尾判定后才发，因为最后一条消息可能是网关错误或 "Sorry, need more steps" 占位，会被作废或强制收尾。所以 answer 每次最多一个，强制收尾得到的带 forced=True。
+- 整轮重跑时，上一轮已发出的 code / exec 作废，以 error（"重跑本轮…"）为界。前端按这个界限清掉之前的步骤。
+- 多轮记忆：第二轮只产出本轮的新事件，不重放历史。
+- 调用方中途停止迭代（SSE 客户端断开）会关闭生成器，图执行随之停止；此时没有 done，也不写 runs.jsonl。
+- trace_id：可由调用方传入（以后用消息 id），否则生成 uuid4 hex。写进 AnalysisResult.trace_id → runs.jsonl；`logging.getLogger("datachat.analyze")` 的开始/结束/失败日志都带 trace。logging 的配置（输出到哪里）留到 FastAPI 那一步统一做。
+
+### 测试
+tests/test_stream.py 新增 11 个；全量 466 通过（3.11 / 3.12）。
+
+### 下一步
+FastAPI + SSE（数据集上传、会话、消息、设置）+ SQLite。

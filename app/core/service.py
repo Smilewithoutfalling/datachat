@@ -7,19 +7,28 @@
 - 分析过程中的失败（读不了数据、LLM 超时、代码执行失败、ReAct 超步数）不抛异常，
   而是写进结果的 error / error_kind；只有调用参数错误（如未知 agent）才抛 ValueError。
 - 数据表只读一次，执行时用副本；question 保持原样，字典说明作为独立的 field_notes（B04）。
+
+阶段 4（M09）：真正的实现是生成器 analyze_stream()，边跑边产出事件（app/core/events.py）；
+analyze() 只是把它跑完、取 done 事件里的结果。两者走同一条代码路径，评测数字不受影响。
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
+import uuid
 from collections import defaultdict
 from functools import lru_cache
 
 from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
+from app.core.events import Emitter, Event
 from app.core.result import AnalysisResult, Step, format_result, refusal_from_answer
 
 AGENTS = ("workflow", "react")
+EVENT_TEXT_CHARS = 2000        # 事件里结果/输出文本的截断长度（完整结果在 done 事件里）
+
+logger = logging.getLogger("datachat.analyze")
 
 
 @lru_cache(maxsize=1)
@@ -43,6 +52,7 @@ def analyze(
     thread_id: str | None = None,
     encoding: str | None = None,
     log: bool = False,
+    trace_id: str | None = None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -58,22 +68,60 @@ def analyze(
     memory / thread_id：ReAct 多轮对话的 checkpointer（如 MemorySaver）与会话 id。
     encoding：显式指定 CSV 编码；None 时自动检测（失败会报错，不会静默乱码）。
     log：是否把本次记录追加到 outputs/runs.jsonl。
+    trace_id：本次分析的追踪 id（以后由 API 传入消息 id）；None 时生成一个。
+    """
+    res = None
+    for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
+                             max_attempts=max_attempts, exec_timeout=exec_timeout,
+                             recursion_limit=recursion_limit, use_dictionary=use_dictionary,
+                             memory=memory, thread_id=thread_id, encoding=encoding, log=log,
+                             trace_id=trace_id):
+        if ev.type == "done":
+            res = ev.result
+    return res
+
+
+def analyze_stream(
+    dataset,
+    question: str,
+    *,
+    agent: str = "workflow",
+    llm_config: LLMConfig | None = None,
+    chat_model=None,
+    max_attempts: int = 3,
+    exec_timeout: int = 20,
+    recursion_limit: int = 25,
+    use_dictionary: bool = True,
+    memory=None,
+    thread_id: str | None = None,
+    encoding: str | None = None,
+    log: bool = False,
+    trace_id: str | None = None,
+):
+    """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
+
+    参数与 analyze() 相同。最后一个事件一定是 done（携带完整 AnalysisResult，见 Event.result）；
+    分析失败时 done 之前有一个 fatal=True 的 error 事件。调用方中途停止迭代（如 SSE 客户端断开）
+    会关闭生成器，正在进行的图执行随之停止，此时没有 done 事件、也不写 runs.jsonl。
     """
     if agent not in AGENTS:
         raise ValueError(f"未知 agent: {agent!r}，可选 {AGENTS}")
 
+    trace_id = trace_id or uuid.uuid4().hex
+    em = Emitter(trace_id)
     t0 = time.perf_counter()
     from app.tools.dataset import dataset_label
     if not isinstance(dataset, (list, tuple)):
         dataset = os.fspath(dataset)
-    res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question)
+    res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question, trace_id=trace_id)
     tracker = UsageTracker()
+    logger.info("analyze start trace=%s agent=%s dataset=%s", trace_id, agent, res.dataset)
 
     try:
-        _run(res, tracker, dataset, question, agent=agent, llm_config=llm_config,
-             chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
-             recursion_limit=recursion_limit, use_dictionary=use_dictionary,
-             memory=memory, thread_id=thread_id, encoding=encoding)
+        yield from _run(em, res, tracker, dataset, question, agent=agent, llm_config=llm_config,
+                        chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
+                        recursion_limit=recursion_limit, use_dictionary=use_dictionary,
+                        memory=memory, thread_id=thread_id, encoding=encoding)
     finally:
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
@@ -82,10 +130,14 @@ def analyze(
     if log:
         from app.tools.persist import log_run
         log_run({**res.to_record(), "df_path": res.dataset})
-    return res
+    if res.error is not None:
+        logger.warning("analyze failed trace=%s kind=%s: %s", trace_id, res.error_kind, res.error[:300])
+        yield em.error(res.error, res.error_kind, fatal=True)
+    logger.info("analyze done trace=%s ok=%s total=%.2fs", trace_id, res.ok, res.timings["total"])
+    yield em.done(res)
 
 
-def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
+def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, encoding):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
@@ -105,6 +157,7 @@ def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_
             notes = retrieve_notes(question, load_retriever(dataset))
         except Exception as e:  # noqa: BLE001  字典坏了不影响主流程，但要留痕
             res.steps.append(Step("dictionary", error=f"数据字典读取失败，已跳过：{e}"))
+            yield em.error(res.steps[-1].error, "dataset", fatal=False)
     res.field_notes = notes
     res.timings["load"] = round(time.perf_counter() - t, 4)
     res.steps.append(Step("load", content=f"{load_desc}；字典命中 {len(notes)} 条",
@@ -119,15 +172,15 @@ def _run(res, tracker, dataset, question, *, agent, llm_config, chat_model, max_
 
     notes_text = format_notes(notes) if notes else ""
     if agent == "workflow":
-        _run_workflow(res, tracker, cfg, chat_model, df, schema, notes_text, question,
+        yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
                       dataset, max_attempts, exec_timeout)
     else:
-        _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
+        yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id)
 
 
 # ------------------------------------------------------------------ 工作流版
-def _run_workflow(res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
+def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
                   max_attempts, exec_timeout):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
@@ -156,6 +209,9 @@ def _run_workflow(res, tracker, cfg, chat_model, df, schema, notes_text, questio
                 res.steps.append(_workflow_step(node, upd, dt))
                 if node == "executor":
                     res.executed = not upd.get("error")
+                ev = _workflow_event(em, node, upd, dt, state)
+                if ev is not None:
+                    yield ev
     except LLMError as e:
         res.error, res.error_kind = str(e), "llm"
     except Exception as e:  # noqa: BLE001
@@ -193,6 +249,20 @@ def _workflow_step(node, upd, dt) -> Step:
     return s
 
 
+def _workflow_event(em, node, upd, dt, state) -> Event | None:
+    if node == "planner":
+        return em.plan(upd.get("plan", ""))
+    if node in ("codegen", "reviewer"):
+        return em.code(upd.get("code", ""), source=node, attempt=state.get("attempts", 0))
+    if node == "executor":
+        err = upd.get("error") or None
+        return em.exec(ok=err is None, result_text=(upd.get("result_text") or "")[:EVENT_TEXT_CHARS],
+                       error=err, duration_s=round(dt, 4), chart=None if err else (upd.get("chart_path") or None))
+    if node == "summarizer":
+        return em.answer(upd.get("answer", ""))
+    return None
+
+
 # ------------------------------------------------------------------ ReAct 版
 REACT_GATEWAY_RETRIES = 2      # 网关以错误内容充当回复时，整轮重跑的次数（B62；带多轮记忆时不重跑）
 
@@ -203,16 +273,37 @@ FINALIZE_PROMPT = (
 )
 
 
-def _react_invoke(graph, question, config):
-    """流式执行，保留最后一个状态：撞上 GraphRecursionError 时也拿得到已有的消息（B61）。"""
+def _react_invoke(graph, question, config, em, sink, attempt, out):
+    """流式执行，保留最后一个状态：撞上 GraphRecursionError 时也拿得到已有的消息（B61）。
+    边跑边把本轮新增的工具调用 / 执行结果作为 code / exec 事件产出；结论在收尾判定后才产出
+    （它可能被判为网关错误或步数占位而作废）。结果写进 out["messages"] / out["err"]。"""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
-    messages, err = [], None
+    messages, err, seen, n_tool = [], None, 0, 0
     try:
         for state in graph.stream({"messages": [("user", question)]}, config, stream_mode="values"):
             messages = state.get("messages", messages)
+            start = 0
+            for i, m in enumerate(messages):
+                if isinstance(m, HumanMessage):
+                    start = i + 1
+            for m in messages[max(start, seen):]:
+                if isinstance(m, AIMessage) and m.tool_calls:
+                    for tc in m.tool_calls:
+                        yield em.code((tc.get("args") or {}).get("code", ""), source="tool_call",
+                                      attempt=attempt, thought=str(m.content or ""))
+                elif isinstance(m, ToolMessage):
+                    execs = sink.get("execs", [])
+                    e = execs[n_tool] if n_tool < len(execs) else {}
+                    n_tool += 1
+                    yield em.exec(ok=not e.get("error"), result_text=str(m.content)[:EVENT_TEXT_CHARS],
+                                  error=e.get("error"), duration_s=e.get("duration_s"),
+                                  chart=e.get("chart"), stdout=(e.get("stdout") or "")[:EVENT_TEXT_CHARS],
+                                  attempt=attempt)
+            seen = len(messages)
     except GraphRecursionError as e:
         err = e
-    return messages, err
+    out["messages"], out["err"] = messages, err
 
 
 def _final_text(messages):
@@ -225,7 +316,7 @@ def _final_text(messages):
     return ""
 
 
-def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
+def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                recursion_limit, exec_timeout, memory, thread_id):
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
@@ -245,8 +336,10 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                                   field_notes=notes_text, exec_timeout=exec_timeout)
         messages, rec_err = [], None
         res.error = res.error_kind = None
+        out = {}
         try:
-            messages, rec_err = _react_invoke(graph, question, config)
+            yield from _react_invoke(graph, question, config, em, sink, attempt, out)
+            messages, rec_err = out["messages"], out["err"]
         except Exception as e:  # noqa: BLE001
             kind, _ = classify_error(e)
             if kind != "unknown":
@@ -266,6 +359,7 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
         if why and attempt < retries:
             tracker.add_retry()
             res.steps.append(Step("retry", error=f"重跑本轮：{why}"))
+            yield em.error(res.steps[-1].error, "llm" if why.startswith("接口") else "agent", fatal=False)
             time.sleep(min(cfg.backoff_base * 2 ** attempt, cfg.backoff_max))
             continue
         break
@@ -360,3 +454,5 @@ def _run_react(res, tracker, cfg, chat_model, df, notes_text, question, dataset,
 
     if res.answer and refusal is None:
         res.unverified_numbers = unverified_numbers(res.answer, evidence)
+    if res.answer:
+        yield em.answer(res.answer, forced=bool(out_of_steps and res.answer))
