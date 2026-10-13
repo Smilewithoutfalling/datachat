@@ -120,6 +120,11 @@ def _read_roots(workdir, extra):
               os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")):
         if p and os.path.isdir(p):
             roots.add(p)
+    if getattr(sys, "frozen", False):
+        # B35：PyInstaller 打包后，纯 Python 模块在 exe 自身附带的 PYZ 归档里，延迟导入（如画图时）要读 exe；
+        # 数据文件与扩展模块在 _MEIPASS（onedir 的 _internal）下
+        roots.add(sys.executable)
+        roots.add(getattr(sys, "_MEIPASS", sys.prefix))
     roots.update(extra or [])
     return roots
 
