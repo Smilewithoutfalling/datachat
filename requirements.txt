@@ -25,3 +25,10 @@ SecretStorage==3.5.0; sys_platform == "linux"
 cryptography==50.0.2; sys_platform == "linux"
 cffi==2.1.1; sys_platform == "linux"
 pycparser==3.11; sys_platform == "linux"
+# 阶段 4：本地后端 app/server（FastAPI + SSE + SQLite）。starlette / uvicorn / python-multipart 原先已作为传递依赖装上，这里显式锁定
+fastapi==0.143.0
+annotated-doc==0.0.5
+starlette==1.7.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+SQLAlchemy==2.1.4
