@@ -680,7 +680,7 @@ FastAPI + SSE（数据集上传、会话、消息、设置）+ SQLite。
 
 ---
 
-## [16] 2026-10-13 · 阶段 4：本地后端 FastAPI + SSE + SQLite（B18 大部分、M08、M10、M14）· commit <待提交>
+## [16] 2026-10-13 · 阶段 4：本地后端 FastAPI + SSE + SQLite（B18 大部分、M08、M10、M14）· commit 667e0e8
 
 ### 改动
 - 新包 app/server：`create_app(home, token)` 和 `python -m app.server [--port] [--home] [--token]`。接口列表在 app/server/app.py 顶部：数据集、会话、消息（SSE）、图表、设置、API Key。
@@ -712,3 +712,27 @@ FastAPI + SSE（数据集上传、会话、消息、设置）+ SQLite。
 
 ### 测试
 tests/test_server.py 新增 12 个（含参数化 4 个）；全量 478 通过（3.11 / 3.12）。
+
+---
+
+## [17] 2026-10-13 · 阶段 4：ReAct 多轮上下文从 messages 表重建（S 选 B 方案）· commit <待提交>
+
+### 改动
+- `analyze` / `analyze_stream` 新增参数 `history=[(问题, 结论), ...]`：作为 user / assistant 消息交替放在本轮问题前面。
+  - 只取最近 10 轮（MAX_HISTORY_TURNS），每条结论截断到 2000 字。
+  - 与 memory 互斥，同时传会报 ValueError；工作流版忽略这个参数。
+- 后端不再用 MemorySaver。每次提问时从 messages 表取本会话**成功**的轮次（user + 紧跟的 ok 助手消息），交给 history。
+  - 失败和取消的轮次不进上下文，因为用户通常会换个说法重问。
+  - 上下文只有 DB 这一份来源，重启后照样接得上。
+- 整轮重跑：不再传 memory，B62（网关错误内容）的整轮重跑在后端也开始生效，之前带 memory 时这个重跑是关掉的。
+  - B69（"没执行代码也没按契约拒答"→重跑，最后仍是这样就判失败）在带 history 时**两处都不触发**，与原来带 memory 时一致：追问可以只凭上下文作答（比如"解释一下上面的结果"）。这个是第一版测试暴露出来的问题，已补测试。
+
+### 与 MemorySaver 的语义差别
+- history 只带问答，**不带**中间的工具调用和代码输出。追问"换成按月"时，模型要重新写代码（它本来也得重新算），但看不到上一轮的代码原文。
+- 如果以后发现追问质量明显下降，再考虑把上一轮的最后一段代码放进 history。这一点要等前端可用后，用真实追问来验证。
+
+### 测试
+- test_stream：history 的截断、本轮步骤不混进历史、与 memory 互斥、带 history 的纯文字追问不重跑。
+- test_server：同一会话第二轮带上了第一轮的问答；**重启后**第三轮仍然带着前两轮。
+- 全量 481 通过（3.11 / 3.12）。
+
