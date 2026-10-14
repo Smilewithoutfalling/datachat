@@ -23,7 +23,8 @@ from functools import lru_cache
 from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
 from app.core.events import Emitter, Event
-from app.core.result import AnalysisResult, Step, format_result, refusal_from_answer
+from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, format_result, last_png,
+                             refusal_from_answer)
 
 AGENTS = ("workflow", "react")
 EVENT_TEXT_CHARS = 2000        # 事件里结果/输出文本的截断长度（完整结果在 done 事件里）
@@ -214,6 +215,7 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 res.steps.append(_workflow_step(node, upd, dt))
                 if node == "executor":
                     res.executed = not upd.get("error")
+                    _tally_charts(res, upd)
                 ev = _workflow_event(em, node, upd, dt, state)
                 if ev is not None:
                     yield ev
@@ -232,12 +234,29 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         res.result = state.get("result")
         res.result_text = state.get("result_text", "")
         res.chart_path = state.get("chart_path") or None
-        res.charts = [res.chart_path] if res.chart_path else []
+        res.charts = chart_items(res.chart_path, state.get("chart_options") or [])
+    res.warnings += chart_warnings(res, (state.get("chart_warnings") or []) if res.executed else [])
     if res.error is None and state.get("error"):
         res.error, res.error_kind = state["error"], "execution"
     if res.answer and res.executed and refusal_from_answer(res.answer) is None:
         from app.core.grounding import unverified_numbers
         res.unverified_numbers = unverified_numbers(res.answer, [question, res.result_text])
+
+
+def _tally_charts(res, e: dict):
+    """把一次执行的 chart() 统计累加进结果（工作流 executor 的 update 或 ReAct 的 exec 记录，字段名相同）。"""
+    res.chart_calls += e.get("chart_calls") or 0
+    res.chart_errors += e.get("chart_errors") or []
+    res.charts_discarded += e.get("charts_discarded") or 0
+    internal = e.get("chart_internal_errors") or []
+    if internal:
+        res.chart_internal_errors += internal
+        logger.error("chart() 内部错误（必须清零）trace=%s %s", res.trace_id, internal)
+
+
+def _chart_event_fields(e: dict) -> dict:
+    return {"options": e.get("chart_options") or [], "chart_errors": e.get("chart_errors") or [],
+            "charts_discarded": e.get("charts_discarded") or 0}
 
 
 def _workflow_step(node, upd, dt) -> Step:
@@ -262,7 +281,8 @@ def _workflow_event(em, node, upd, dt, state) -> Event | None:
     if node == "executor":
         err = upd.get("error") or None
         return em.exec(ok=err is None, result_text=(upd.get("result_text") or "")[:EVENT_TEXT_CHARS],
-                       error=err, duration_s=round(dt, 4), chart=None if err else (upd.get("chart_path") or None))
+                       error=err, duration_s=round(dt, 4), chart=None if err else (upd.get("chart_path") or None),
+                       **_chart_event_fields(upd))
     if node == "summarizer":
         return em.answer(upd.get("answer", ""))
     return None
@@ -321,7 +341,7 @@ def _react_invoke(graph, question, config, em, sink, attempt, out, history=None)
                     yield em.exec(ok=not e.get("error"), result_text=str(m.content)[:EVENT_TEXT_CHARS],
                                   error=e.get("error"), duration_s=e.get("duration_s"),
                                   chart=e.get("chart"), stdout=(e.get("stdout") or "")[:EVENT_TEXT_CHARS],
-                                  attempt=attempt)
+                                  attempt=attempt, **_chart_event_fields(e))
             seen = len(messages)
     except GraphRecursionError as e:
         err = e
@@ -451,6 +471,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     res.attempts = sum(1 for e in execs if e["error"])
     res.initial_error = execs[0]["error"] if execs and execs[0]["error"] else None
     res.charts = list(sink["charts"])
+    for e in execs:
+        _tally_charts(res, e)
     res.timings["execution"] = round(sum(e["duration_s"] for e in execs), 4)
     refusal = refusal_from_answer(res.answer)
     if out_of_steps and refusal is not None and res.error is None:
@@ -463,7 +485,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.code = last["code"]
         res.result = last["result"]
         res.result_text = format_result(last["result"])
-        res.chart_path = last["chart"] or (res.charts[-1] if res.charts else None)
+        res.chart_path = last["chart"] or last_png(res.charts)
     elif refusal is not None:
         # 模型没调用工具、直接在结论里按契约拒答（B40）
         res.result = res.result_text = refusal
@@ -477,6 +499,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.error = f"ReAct 未执行任何代码也未按契约拒答（结论：{res.answer[:100]!r}）"
         res.error_kind = "agent"
 
+    res.warnings += chart_warnings(res, [w for e in ok for w in e.get("chart_warnings") or []])
     if res.answer and refusal is None:
         res.unverified_numbers = unverified_numbers(res.answer, evidence)
     if res.answer:
