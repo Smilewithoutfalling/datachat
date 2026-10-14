@@ -8,7 +8,8 @@ python scripts/gate/verify_gate.py          # 在原始数据上独立算标准�
 python -m pytest tests/test_gate.py         # 自检：脏化只改呈现、题目分布、答案冻结、判定规则、25 题在脏表上可解
 python scripts/gate/run_gate.py --agent react      # 跑模型 → docs/eval/gate_<时间>_react.json
 #   人工逐题填 human_correct / failure_class / reason / guessing
-python scripts/gate/run_gate.py --verdict docs/eval/gate_<时间>_react.json
+python scripts/gate/run_gate.py --verdict docs/eval/gate_<时间>_react.json --profile m13
+#   门槛在 docs/gate/thresholds.json：phase35 = 阶段 3.5 原判，m13 = 阶段 5 改 CHART_GUIDE 后的回归（DEVLOG [25]）
 ```
 
 数据来源与许可：
