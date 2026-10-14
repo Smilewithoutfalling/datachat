@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.config import ensure_dirs
-from app.core.result import format_result
+from app.core.result import chart_items, format_result
 from app.tools.dataset import access_rule, copy_data, is_multi, load_data, describe_data
 from app.tools.persist import new_chart_path
 from app.tools.plotting import CHART_GUIDE
@@ -106,7 +106,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
     sink: 可选 dict。每次工具执行都把记录追加到 sink["execs"]
-          （code / result 原始对象 / chart / error / duration_s），生成的图表追加到 sink["charts"]；
+          （code / result 原始对象 / chart / error / duration_s / stdout，以及 chart() 的 chart_options 等字段），
+          成功执行产出的图表以 {"png", "option"} 条目追加到 sink["charts"]（[26]）；
           analyze() 据此取最终结果，不必重新执行代码（B07）。
     model: 已配置好超时/重试的 ChatModel；None 时按环境变量构建（旧用法）。
     df: 已读好的 DataFrame 或 {表名: DataFrame}（多表，阶段 3.5）；每次执行用副本；None 时读 df_path。
@@ -138,21 +139,30 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         cap = {}
         result, chart, error = run_code(code, copy_data(df), chart_path, timeout=exec_timeout, capture=cap)
         printed = cap.get("stdout") or ""
+        options = cap.get("charts") or []
+        chart_errs = cap.get("chart_errors") or []
         if sink is not None:
             sink.setdefault("execs", []).append({
                 "code": code, "result": None if error else result, "chart": chart,
                 "error": error, "duration_s": time.perf_counter() - t0, "stdout": printed,
+                "chart_options": options, "chart_calls": cap.get("chart_calls", 0), "chart_errors": chart_errs,
+                "chart_internal_errors": cap.get("chart_internal_errors") or [],
+                "charts_discarded": cap.get("charts_discarded", 0), "chart_warnings": cap.get("chart_warnings") or [],
             })
         shown = _clip(printed, PRINT_CHARS)
         if error:
             return f"执行出错：\n{error}" + (f"\n\n出错前的 print 输出：\n{shown}" if shown else "")
-        if chart and sink is not None:
-            sink.setdefault("charts", []).append(chart)
+        if sink is not None:
+            sink.setdefault("charts", []).extend(chart_items(chart, options))
         msg = f"执行成功。result = {format_result(result, max_chars=1500)}"
         if shown:
             msg += f"\n\nprint 输出：\n{shown}"
         if chart:
             msg += f"\n（已生成图表并保存到 {chart}）"
+        if options:
+            msg += f"\n（chart() 已生成 {len(options)} 张图表）"
+        if chart_errs:
+            msg += "\nchart() 未出图：" + "；".join(chart_errs[:4])
         return msg
 
     if multi:
