@@ -29,6 +29,7 @@ matplotlib.use("Agg")          # 无界面后端，服务器/脚本下也能出�
 import matplotlib.pyplot as plt
 
 from app.tools import wire
+from app.tools.charts import accept_worker_charts
 from app.tools.plotting import apply_style
 from app.tools.sandbox_policy import make_safe_builtins
 
@@ -184,10 +185,14 @@ def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | 
     df：DataFrame（单表，代码里叫 df）或 {表名: DataFrame}（多表，代码里叫 dfs，没有 df）。
     约定：代码使用变量 df / dfs，把最终答案赋给 result；若画图则 plt.savefig(chart_path)（任何文件名都会落到 chart_path）。
     返回 (result, chart_path_or_None, error_or_None)。
-    capture：可选 dict；传入时把代码的 print 输出写进 capture["stdout"]（报错时也写，超时/崩溃时为空串）。
+    capture：可选 dict；传入时把代码的 print 输出写进 capture["stdout"]（报错时也写，超时/崩溃时为空串），
+        并写入 chart() 的结构化图表字段（[26]，主进程复检过）：charts（spec 列表，exec 失败时为空）、chart_calls、
+        chart_errors（ChartError，模型参数问题）、chart_internal_errors（我们的 bug）、charts_discarded（exec 失败
+        丢掉的张数）、chart_warnings（truncated 等）。
     """
     if capture is not None:
         capture["stdout"] = ""
+        capture.update(accept_worker_charts({}))
     mem_mb = DEFAULT_MEM_MB if mem_mb is None else mem_mb
     w = None
     try:
@@ -226,6 +231,9 @@ def run_code(code: str, df, chart_path: str, timeout: float = 20, mem_mb: int | 
             out = json.load(f)
         if capture is not None:
             capture["stdout"] = out.get("stdout") or ""
+            capture.update(accept_worker_charts(out))
+            if out.get("error"):
+                capture["charts"] = []        # 双保险：exec 失败不回传任何图
         if out.get("error"):
             return None, None, out["error"]
         result = wire.decode(out.get("result"))
