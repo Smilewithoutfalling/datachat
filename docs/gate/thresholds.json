@@ -1,0 +1,29 @@
+{
+ "_note": "闸门判定门槛。run_gate.py --verdict 必须用 --profile 指定其一；所用 profile 原文与本文件 sha256 前 12 位写进报告的 verdict 段。改门槛只能新增 profile，不改旧的。",
+ "phase35": {
+  "kind": "phase35",
+  "source": "docs/roadmap/gate-phase35.md §4（S 2026-10-12 定；DEVLOG [10]/[11]）",
+  "single_pass": 11,
+  "single_rethink": 8,
+  "multi_pass": 4,
+  "dist_min_failures": 5,
+  "dist_dominant": 0.6,
+  "dist_scatter_classes": 4
+ },
+ "m13": {
+  "kind": "regression",
+  "source": "DEVLOG [24] 预登记，[25] 修正（S 2026-10-14 复核）：阶段 5 改 CHART_GUIDE 后的回归",
+  "rule": "错题必须全部落在 allowed_fail 里，否则逐题列为回归；allowed_fail 里的题若答对，列为意外答对，记录但不改门槛",
+  "agents": {
+   "react": {
+    "single": {"allowed_fail": ["s02"], "why": {"s02": "② 缺失哨兵（B65，阶段 7）"}},
+    "multi": {"allowed_fail": ["m10"], "why": {"m10": "⑥ 拒答失当（B63），模型波动"}}
+   },
+   "workflow": {
+    "single": {"allowed_fail": ["s02", "s04", "s09", "s12"],
+               "why": {"s02": "② 缺失哨兵", "s04": "② 合计行", "s09": "③ 取消单未冲减", "s12": "② 缺失哨兵"}},
+    "multi": {"allowed_fail": [], "why": {}}
+   }
+  }
+ }
+}
