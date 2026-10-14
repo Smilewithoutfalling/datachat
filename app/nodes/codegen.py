@@ -17,7 +17,7 @@ _PROMPT = """根据分析计划写一段 pandas 代码。
 
 严格遵守以下约定：
 - {data_access}
-- pd（pandas）、np（numpy）、plt（matplotlib.pyplot）已就绪，无需 import；不要导入其他库。
+- pd（pandas）、np（numpy）、plt（matplotlib.pyplot）、chart（出图函数，见绘图要求）已就绪，无需 import；不要导入其他库。
 - 把最终答案赋值给变量 result（可以是 DataFrame / Series / 数值 / 字符串 / dict），result 必须直接回答问题：
   问"哪个/哪一个"：result 只放标签本身（如 '华南'、'A'、'2024-06'），不要拼接说明文字或数值；
   问"多少/是多少"：给数值；问"各…/每…"：给以分组键为索引的 Series 或表；问"哪些/哪条记录"：给筛选出的行（DataFrame）；
