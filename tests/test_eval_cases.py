@@ -166,6 +166,9 @@ def test_report_json(tmp_path):
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["overall"]["n"] == 3 and data["git_sha"] and len(data["cases"]) == 3
     assert all("answer" in c and c["actual_obj"] and c["expected_obj"] for c in data["cases"])
+    cs = data["chart_smoke"]                                          # [27]：图表冒烟与准确率分开报
+    assert set(cs) >= {"出图率", "chart_option", "has_chart", "internal_errors"}
+    assert all("chart" in c for c in data["cases"])
 
 
 def test_report_metadata_records_model_and_data():
