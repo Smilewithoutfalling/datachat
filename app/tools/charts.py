@@ -5,7 +5,9 @@
   数据层（xAxis.data / series[].data）全部由 build_option 从 df 生成，模型写不进数字。
 - v1 图型：bar / line / area / pie / scatter。横向、堆叠、平滑、数值标签等是前端开关，不在这里。
 - 不产出 dataset；不产出任何函数、formatter 模板、link、graphic；产出必须是严格 JSON（无 NaN / Infinity）。
-- build_option 是纯函数，失败抛 ChartError；chart()（沙箱里的薄包装，第 2 步接入）负责吞异常、记 chart_error。
+- build_option 是纯函数，参数问题抛 ChartError；产物没过白名单（builder 自身的 bug）抛 ChartBugError。
+- ChartSlot 是沙箱里注入给模型的 chart()（第 2 步，[26]）：永不抛异常，ChartError 记 chart_errors，
+  其他异常记 chart_internal_errors（我们的 bug，必须清零）；exec 结束后 finish() 对槽位里的 spec 独立复检。
 - validate_spec 是丢弃式白名单之前的最后一道：未知键、禁用键、非法类型、超量数据 → 整图拒绝并给出原因。
 
 返回的 spec 结构（v1）：
@@ -13,6 +15,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import re
@@ -40,6 +43,10 @@ _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 class ChartError(ValueError):
     """builder 无法按给定参数出图（列不存在、类型不符、参数冲突等）。消息给模型和用户看，用中文。"""
+
+
+class ChartBugError(RuntimeError):
+    """builder 自己的产物没过白名单：是我们的 bug，不是模型的错（chart_option 链路里单列报警，[23]）。"""
 
 
 # ------------------------------------------------------------------ 值转换
@@ -198,7 +205,7 @@ def build_option(kind, df, *, x=None, y=None, series=None, title=None) -> dict:
     spec = {"v": SPEC_VERSION, "kind": kind, "truncated": truncated, "option": option}
     problems = validate_spec(spec)
     if problems:                                  # builder 自身的 bug 也不能放出去
-        raise ChartError("图表未通过校验：" + "；".join(problems[:3]))
+        raise ChartBugError("图表未通过校验：" + "；".join(problems[:3]))
     return spec
 
 
@@ -486,3 +493,123 @@ def validate_spec(spec) -> list[str]:
     except (TypeError, ValueError) as e:
         problems.append(f"不是严格 JSON：{e}")
     return problems
+
+
+# ------------------------------------------------------------------ 沙箱里的 chart()（第 2 步，[26]）
+MAX_CHARTS = 4                     # 每次执行最多几张结构化图
+
+
+def _spec_title(spec) -> str:
+    try:
+        return spec["option"]["title"]["text"]
+    except (KeyError, TypeError):
+        return ""
+
+
+def _chart_signature(kind=None, df=None, x=None, y=None, series=None, title=None):
+    pass
+
+
+_CHART_SIG = inspect.signature(_chart_signature)
+
+
+class ChartSlot:
+    """注入沙箱命名空间的 chart(kind, df, x=None, y=None, series=None, title=None)。
+
+    - 永不抛异常、返回 None：模型拿不到 option，也就改不了数据层（v1 的安全边界是这个签名）。
+      连参数个数都不对（TypeError 发生在绑定参数时）也一样吞掉，所以用 *args / **kwargs 自己绑定。
+    - 每次执行最多 MAX_CHARTS 张，超出的记 chart_errors。
+    - 模型能拿到这个对象本身（chart.specs），所以 exec 结束后 finish() 对槽位里的每个 spec 独立复检，
+      不信任 exec 期间的任何状态；复检不过的按内部错误记、整图丢弃。
+    """
+
+    def __init__(self):
+        self.specs: list = []
+        self.calls = 0
+        self.errors: list = []         # ChartError：模型参数问题（计入 chart_option 链路的未通过）
+        self.internal: list = []       # 其他异常：我们的 bug，单列报警
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        try:
+            spec = self._build(*args, **kwargs)
+            if len(self.specs) >= MAX_CHARTS:
+                raise ChartError(f"每次执行最多 {MAX_CHARTS} 张图，第 {self.calls} 次 chart() 未出图")
+            self.specs.append(spec)
+        except ChartError as e:
+            self.errors.append(str(e))
+        except Exception as e:  # noqa: BLE001
+            self.internal.append(f"{type(e).__name__}: {_clean_str(str(e), 300)}")
+        return None
+
+    _USAGE = "用法：chart(kind, df, x=列名, y=列名或列名列表, series=分组列, title=标题)"
+
+    @staticmethod
+    def _build(*args, **kwargs):
+        try:                                   # 参数个数 / 名字不对是模型的用法问题，记 ChartError
+            b = _CHART_SIG.bind(*args, **kwargs)
+        except TypeError as e:
+            raise ChartError(f"{ChartSlot._USAGE}（{e}）") from None
+        a = {**{k: None for k in _CHART_SIG.parameters}, **b.arguments}
+        if a["kind"] is None or a["df"] is None:
+            raise ChartError(ChartSlot._USAGE)
+        return build_option(a["kind"], a["df"], x=a["x"], y=a["y"], series=a["series"], title=a["title"])
+
+    def finish(self, exec_ok: bool) -> dict:
+        """worker 在 exec 结束后调用（独立 try，不影响 result）。exec 失败时槽位里的图一律丢弃（[23]）。
+        注意：这里仍在沙箱进程里，模型代码可能改过本对象甚至本模块，所以输出只是"候选"，
+        主进程用 accept_worker_charts() 重新校验，那一道才算数。"""
+        out = {"charts": [], "chart_calls": 0, "chart_errors": [], "chart_internal_errors": [],
+               "charts_discarded": 0}
+        try:
+            specs = list(self.specs)
+            out["chart_calls"] = int(self.calls)
+            out["chart_errors"] = list(self.errors)
+            out["chart_internal_errors"] = list(self.internal)
+            if exec_ok:
+                out["charts"] = specs
+            else:
+                out["charts_discarded"] = len(specs)
+        except Exception as e:  # noqa: BLE001
+            out["chart_internal_errors"] = [f"finish 异常：{type(e).__name__}"]
+        return out
+
+
+_MSG_MAX = 500
+
+
+def _msgs(v) -> list:
+    if not isinstance(v, list):
+        return []
+    return [_clean_str(m if isinstance(m, str) else repr(m), _MSG_MAX) for m in v[:20]]
+
+
+def _int(v) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 10 ** 6 else 0
+
+
+def accept_worker_charts(out: dict) -> dict:
+    """主进程（可信）对沙箱回传的图表字段做最终校验。沙箱进程整体视为不可信：
+    条数上限、每个 spec 过 validate_spec、消息清洗限长、truncated 警告由这里生成。永不抛异常。"""
+    res = {"charts": [], "chart_calls": _int(out.get("chart_calls")),
+           "chart_errors": _msgs(out.get("chart_errors")),
+           "chart_internal_errors": _msgs(out.get("chart_internal_errors")),
+           "charts_discarded": _int(out.get("charts_discarded")), "chart_warnings": []}
+    raw = out.get("charts")
+    if not isinstance(raw, list):
+        raw = []
+    if len(raw) > MAX_CHARTS:
+        res["chart_internal_errors"].append(f"回传了 {len(raw)} 张图，超过上限 {MAX_CHARTS}，多出的丢弃")
+    for spec in raw[:MAX_CHARTS]:
+        try:
+            problems = validate_spec(spec)
+        except Exception as e:  # noqa: BLE001
+            problems = [f"校验异常：{type(e).__name__}"]
+        if problems:
+            res["chart_internal_errors"].append("主进程复检未通过：" + "；".join(problems[:3]))
+            continue
+        res["charts"].append(spec)
+        if spec["truncated"]:
+            name = _clean_str(_spec_title(spec), TITLE_MAX) or spec["kind"]
+            res["chart_warnings"].append(f"图表「{name}」数据点超过 {MAX_POINTS}，只显示了前面的部分")
+    return res
