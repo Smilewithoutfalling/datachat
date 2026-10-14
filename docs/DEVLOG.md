@@ -1002,7 +1002,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 - 第 2 步：worker 注入 chart()、option 槽位、chart_error；exec 失败丢弃 option 并写 charts_discarded + warnings；truncated 进 warnings；result.charts → [{png, option}]，改 result.to_record 和 server/app.py。
 
-## [25] 2026-10-14 · 闸门判定机制修复：门槛进配置、基线报告补标注（S 复核 [24]）· commit <待提交>
+## [25] 2026-10-14 · 闸门判定机制修复：门槛进配置、基线报告补标注（S 复核 [24]）· commit ffe92c8（PR #25）
 
 ### S 复核 [24] 指出的问题（均核实属实）
 1. react 多表门槛抄了 [22] 的旧值 8/10。[21] 的最新基线是 9/10（只错 m10），门槛比基线松一题。
@@ -1040,3 +1040,35 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 - S 终审两份基线标注、确认 workflow 多表 10/10；（建议）在当前 master 上重跑两个 Agent 作新基线。
 - 然后第 2 步：worker 注入 chart()（charts_discarded 同时进 warnings），再第 3 步改 CHART_GUIDE。
+
+## [26] 2026-10-14 · 阶段 5 第 2 步：沙箱 chart()、option 槽位、丢弃与告警、charts 条目化 · commit <待提交>
+
+### 做了什么（不改提示词，模型此时还不知道 chart() 存在；第 3 步才改 CHART_GUIDE）
+- app/tools/charts.py
+  - ChartSlot：注入沙箱命名空间的 `chart(kind, df, x=, y=, series=, title=)`。**永不抛异常、返回 None**（B44）；参数绑定也在 try 里做（参数个数 / 名字不对 → ChartError，不是 TypeError 冒出去）。每次执行最多 4 张，超出记 ChartError。
+  - 错误分两类（[23] 口径）：ChartError（模型参数问题）→ chart_errors；其他异常 → chart_internal_errors（我们的 bug，logger.error 报警，必须清零）。
+  - 新增 ChartBugError：build_option 自己的产物没过白名单时抛它，不再抛 ChartError——那是 builder 的 bug，不能记成模型的错。
+  - accept_worker_charts：**主进程**对沙箱回传的图表字段做最终校验。模型能拿到 chart 对象本身（`chart.specs`），理论上也能改沙箱里的模块，所以 worker 里的一切只算候选：主进程限条数、每个 spec 重跑 validate_spec、消息清控制字符并限长、计数只收合法整数，truncated 警告也在这里生成。用例钉住"在沙箱里给 spec 塞 formatter → 主进程拒绝"。
+- app/tools/sandbox_worker.py：exec 结束后在独立 try 里收尾槽位；exec 失败（含 result 无法回传）→ 槽位里的图全部丢弃、记 charts_discarded。
+- app/tools/sandbox.py：run_code 返回值不变（仍是三元组），图表字段经 capture 回传：charts、chart_calls、chart_errors、chart_internal_errors、charts_discarded、chart_warnings；exec 失败时 charts 强制为空（双保险）。
+- 结果与事件
+  - AnalysisResult.charts 改为条目列表 `[{"png": 路径或 None, "option": spec 或 None}]`：同一次执行里 chart() 的图在前、matplotlib 的 PNG 在后（前端优先用 option，PNG 是退路）。chart_path 仍是最后一张 PNG。
+  - 新增字段 chart_calls、chart_errors、chart_internal_errors、charts_discarded（chart_option 链路的分子分母从这里取）。
+  - exec 事件新增 options、chart_errors、charts_discarded。
+  - warnings（S 在 [24] 的补充：流式事件不一定被看到）：
+    - truncated → "图表「标题」数据点超过 5000，只显示了前面的部分"；
+    - 有丢弃 → "有代码执行失败，失败那次用 chart() 画的 N 张图已丢弃，不展示"，后来成功出过图的再加"，展示的是成功那次执行的图"，免得用户以为最终的图也有问题；
+    - 调了 chart() 却一张 option 都没出 → "图表未生成：<最后一条 ChartError>"；
+    - 有内部错误 → "图表生成遇到内部错误，已记录"（细节只进日志）。
+  - ReAct 工具返回给模型的文本：出了图加"（chart() 已生成 N 张图表）"，ChartError 加"chart() 未出图：<原因>"，让模型能改；**没用 chart() 时文本与之前逐字一致**（有用例钉住），所以这一步对闸门零影响。
+- app/server/app.py：对外的 charts 也是条目，png 换成 URL；[26] 之前存进库的记录是路径字符串，按 PNG 条目兼容读出。
+
+### 测试
+- 新增 tests/test_chart_slot.py 17 项：chart() 永不抛 / 用法错误归 ChartError / 内部错误单列 / builder bug 不算 ChartError / 4 张上限 / exec 失败丢弃 / 主进程拒绝篡改与脏输入 / truncated 警告；沙箱子进程里的成功、ChartError 不影响 result、exec 失败丢弃（含 PNG）、篡改被主进程拒绝；工作流条目化、重试前失败那次的丢弃进事件与 warnings；ReAct 的 ChartError 回给模型并进 warnings、option 与 PNG 混合、没用 chart() 时工具文本不变。
+- test_core_analyze 的 PNG 用例改为条目断言。全量见提交说明。
+
+### 相对 [19] 总表的变化
+- B44（chart() 不得因图表失败让整次分析失败）：结构化图这一半已做；matplotlib 在 exec 里报错仍按执行失败处理（与 [22] 的决定一致，不修）。
+
+### 下一步
+- 第 3 步：改 CHART_GUIDE（优先 chart()，五类以外走 plt；直方图先分箱再 chart('bar')），按 [25] 的 m13 门槛重跑闸门，图表两条另报。改之前，建议 S 先在当前 master 上重跑两个 Agent 作新基线（[25]）。

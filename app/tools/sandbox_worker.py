@@ -2,7 +2,8 @@
 
 流程：导入 pandas/matplotlib、设好绘图样式 → 向 stdout 写 READY（主进程可以预启动一个备用进程）
 → 等主进程写好 job.json 与 input.pkl（主进程写的，可信）、Windows 上把本进程放进 Job Object，再在 stdin 发 go
-→ 读任务、设内存上限、装审计钩子 → exec 模型代码 → 结果用 JSON（app/tools/wire.py）写到 out.json，图存成 chart.png。
+→ 读任务、设内存上限、装审计钩子 → exec 模型代码 → 结果用 JSON（app/tools/wire.py）写到 out.json，图存成 chart.png；
+chart() 出的结构化图（ECharts spec）作为候选写进 out.json 的 charts，exec 失败时丢弃并记 charts_discarded。
 
 隔离层次：
 1. 进程：与主进程分开，环境变量只留白名单（不含 API Key）；超时由主进程强杀；内存上限（Linux RLIMIT_AS、
@@ -179,6 +180,7 @@ def main():
     import matplotlib.pyplot as plt
     from app.tools.plotting import apply_style
     from app.tools import wire
+    from app.tools.charts import ChartSlot
     from app.tools.sandbox_policy import make_safe_builtins
 
     apply_style()
@@ -208,8 +210,10 @@ def main():
 
     plt.savefig = _redirect_savefig
     data = {"dfs": df} if isinstance(df, dict) else {"df": df}   # 多表时只有 dfs
+    slot = ChartSlot()                        # M13：chart() 出结构化图，永不抛异常、返回 None（[26]）
+    finish = ChartSlot.finish                 # exec 之前取好引用；回传的图仍由主进程 accept_worker_charts 复检
     ns = {"__builtins__": make_safe_builtins(builtins), **data, "pd": pd, "np": np, "plt": plt,
-          "chart_path": chart_path, "result": None, "__name__": "__sandbox__"}
+          "chart_path": chart_path, "chart": slot, "result": None, "__name__": "__sandbox__"}
 
     real_stdout = sys.stdout
     printed = io.StringIO()
@@ -235,6 +239,10 @@ def main():
             out["error"] = "结果无法回传：" + _format_error(sys.exc_info()[1])
     plt.close("all")
     out["chart"] = os.path.exists(chart_path)
+    try:                                      # 独立 try：图表出问题不影响 result / error（B44）
+        out.update(finish(slot, out["error"] is None))
+    except Exception as e:  # noqa: BLE001
+        out["chart_internal_errors"] = [f"chart 收尾异常：{type(e).__name__}"]
     text = printed.getvalue()
     if len(text) > STDOUT_MAX:                # 只留头尾，中间标明截断
         text = text[:STDOUT_MAX // 2] + f"\n…（print 输出过长，省略 {len(text) - STDOUT_MAX} 字符）…\n" + text[-STDOUT_MAX // 2:]

@@ -92,7 +92,8 @@ def test_workflow_llm_timeout_is_captured_not_raised(sample_path):
 def test_workflow_chart(sample_path):
     code = "df.groupby('region')['units'].sum().plot.bar()\nplt.savefig('x.png')\nresult = 1"
     res = analyze(sample_path, "画图", chat_model=wf_model([code]), llm_config=FAST)
-    assert res.chart_path and os.path.exists(res.chart_path) and res.charts == [res.chart_path]
+    assert res.chart_path and os.path.exists(res.chart_path)
+    assert res.charts == [{"png": res.chart_path, "option": None}]          # [26]：条目化
 
 
 def test_max_attempts_beyond_default_recursion_limit(sample_path):

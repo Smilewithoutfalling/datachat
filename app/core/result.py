@@ -35,8 +35,12 @@ class AnalysisResult:
     result: Any = None                          # 最终代码执行的结构化结果（未截断）
     result_text: str = ""                       # 结果的文本预览（给模型/界面用）
     code: str = ""                              # 最终执行成功（或最后一次尝试）的代码
-    chart_path: Optional[str] = None            # 最后生成的图表
-    charts: list = field(default_factory=list)  # 本次生成的全部图表
+    chart_path: Optional[str] = None            # 最后生成的 PNG 图表（matplotlib）
+    charts: list = field(default_factory=list)  # 本次的全部图表：[{"png": 路径或 None, "option": spec 或 None}]（[26]）
+    chart_calls: int = 0                        # chart() 被调用的次数（chart_option 链路的分母口径，[23]）
+    chart_errors: list = field(default_factory=list)  # ChartError：模型参数问题，计为未通过
+    chart_internal_errors: list = field(default_factory=list)  # 非 ChartError：我们的 bug，单列报警，必须清零
+    charts_discarded: int = 0                   # exec 失败时丢弃的结构化图张数（[23]）
     plan: str = ""                              # 工作流版的分析计划
     field_notes: list = field(default_factory=list)  # 数据字典命中的 (field, description)
     attempts: int = 0                           # 修复/重试次数（工作流：reviewer 次数；ReAct：报错的执行次数）
@@ -70,6 +74,35 @@ class AnalysisResult:
             d[f.name] = v
         d["ok"] = self.ok
         return d
+
+
+def chart_items(png: Optional[str], options: list) -> list:
+    """一次成功执行产出的图表条目：chart() 的结构化图在前（前端优先），matplotlib 的 PNG 在后（退路）。"""
+    items = [{"png": None, "option": o} for o in options or []]
+    if png:
+        items.append({"png": png, "option": None})
+    return items
+
+
+def last_png(charts: list) -> Optional[str]:
+    for c in reversed(charts or []):
+        if isinstance(c, dict) and c.get("png"):
+            return c["png"]
+    return None
+
+
+def chart_warnings(res: "AnalysisResult", truncation: list) -> list:
+    """图表相关、不算失败但必须让用户看到的情况（[23]/[24]：不允许静默截断、静默丢弃）。"""
+    out = list(dict.fromkeys(truncation))
+    has_option = any(isinstance(c, dict) and c.get("option") for c in res.charts)
+    if res.charts_discarded:
+        tail = "，展示的是成功那次执行的图" if res.executed and res.charts else ""
+        out.append(f"有代码执行失败，失败那次用 chart() 画的 {res.charts_discarded} 张图已丢弃，不展示{tail}")
+    if res.chart_errors and not has_option:
+        out.append(f"图表未生成：{res.chart_errors[-1]}")
+    if res.chart_internal_errors:
+        out.append("图表生成遇到内部错误，已记录")
+    return out
 
 
 def format_result(result: Any, max_chars: int = 3000, max_rows: int = 60) -> str:

@@ -132,10 +132,16 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             data["result"] = public_result(data["result"])
         return d
 
+    def public_chart(c) -> dict:
+        """图表条目对外：{"png": URL 或 None, "option": spec 或 None}。[26] 之前存的记录是 PNG 路径字符串，按 PNG 处理。"""
+        if isinstance(c, str):
+            return {"png": chart_url(c), "option": None}
+        return {"png": chart_url(c.get("png")), "option": c.get("option")}
+
     def public_result(r: dict) -> dict:
         r = dict(r)
         r["chart_path"] = chart_url(r.get("chart_path"))
-        r["charts"] = [chart_url(p) for p in r.get("charts") or []]
+        r["charts"] = [public_chart(c) for c in r.get("charts") or []]
         r.pop("dataset", None)          # 本地绝对路径不外发
         return r
 
