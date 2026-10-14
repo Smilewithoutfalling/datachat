@@ -846,7 +846,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 需要 S 做
 - 主循环换了实现，按约定重跑闸门 25 题做回归：`python scripts/gate/run_gate.py --agent react`。对照 [13] 的回归结果（react 14/15 + 8/10）；预期持平，若出现 ⑤（步数用完无结论）类失败要先看是不是"Sorry"占位消失带来的差异。
 
-## [21] 2026-10-14 · B20 之后的闸门回归（25 题，仅回归）· commit <待提交>
+## [21] 2026-10-14 · B20 之后的闸门回归（25 题，仅回归）· commit 98c9087（PR #21）
 
 ### 结果
 - 正式回归：docs/eval/gate_20261013_153017_react.json（git_sha cdaf0f6，Qwen3.5-397B-A17B，公司网关，questions_sha256 75a559642e4e）。执行成功 25/25，比较器 23/25；人工判定 react **14/15 + 9/10**，对照 [13] 的 14/15 + 8/10，不低于基线。
@@ -864,4 +864,39 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ### 下一步
 - 阶段 5 开始：先定图表库与 M13 结构化图表数据格式。
+
+## [22] 2026-10-14 · 阶段 5 第 1 步：M13 图表格式、白名单、builder，静态覆盖率 · commit <待提交>
+
+### 决定（S 的 M13 方案 v3，与 H 两轮讨论后定稿）
+- 不引入 pyecharts。前端用 ECharts；后端只产出 option JSON，样式（主题、开关、面板 DIY）全在前端。
+- v1 唯一入口是 builder：模型只选图型、列和标题，数据层（xAxis.data / series[].data）全部从 df 生成，模型写不进数字；不产出 dataset。v1 图型 bar / line / area / pie / scatter，其他图型走 matplotlib PNG 退路；覆盖不足时加图型，不开放自由 option 字典。
+- option 分数据层 / 样式层；轴范围、visualMap 分段、排序只允许用户手动改。层 2（一句话改样式）放 v2，用丢弃式白名单。
+- 安全：前端统一 tooltip.renderMode = 'richText'，不开 dataView，aria 保持关闭；白名单禁 title.link / sublink / graphic / formatter / dataset / 函数值；字符串限长 + 清控制字符；校验不过整图拒绝并给原因。注入实测放第 5 步，结果写进 THREAT_MODEL。
+- B44：chart() 不抛异常、返回 None（option 记在 worker 槽位，最多 4 张），chart_error 与 error 分开；exec 内模型自己的 matplotlib 异常不修。result.charts 升级为 [{png, option}]。
+- 回归门槛（改提示词后）：单表 ≥ 14/15、多表 ≥ 8/10，m10 波动不计；图表冒烟两条：出图率（调了 chart() 或 plt 的题里每轮至多 1 题无图）、chart_option 链路（调了 chart() 的题全部产出合格 option），外加 cases.py 3 道 has_chart 题全部产出。不改闸门题面。
+- 阶段归属：后端三步记在阶段 5，plan.md 第一件事已改写，阶段 5 重估 1–2 周 → 1.5–3 周。
+
+### 改动
+- 新增 app/tools/charts.py：
+  - `build_option(kind, df, *, x=None, y=None, series=None, title=None)` 纯函数，返回 `{"v": 1, "kind", "truncated", "option"}`。df 可为 DataFrame 或 Series（Series 的索引作默认 x）；y 为一列或列表（宽表），series 为分组列（长表，按 x 首次出现顺序透视，同一 (x, series) 多行要求先聚合）；y 不给时若只有一个数值列就用它。NaN / ±inf → null，numpy 标量转原生，时间 → ISO；每图最多 5000 点（超出截断并置 truncated），最多 20 个系列，饼图最多 50 个扇区且不能为负。失败抛 ChartError（中文原因，给模型看）。
+  - `validate_spec(spec)`：键白名单 + 叶子类型 + 枚举值（tooltip.trigger、series.type 等）+ 颜色必须 #RRGGBB + 按图型校验 data 形状和长度 + 点数上限 + `json.dumps(allow_nan=False)`；返回问题列表，非空即整图拒绝。builder 出口也过一遍。
+  - 默认样式层：主色与 plotting.PALETTE 相同，标题居中，多系列才显示图例，grid containLabel。
+- 新增 scripts/chart_coverage.py：静态扫描 docs/eval 下所有报告的 code，按 plt.x / ax.x / df.plot(kind=) / df.plot.x() 三种写法归类图型和结构（twinx、多子图、堆叠）。
+- 尚未接入沙箱和接口（第 2、3 步）。
+
+### 静态覆盖率（方向性，正则判断，不重放）
+- 35 份报告、955 份画图代码（同一题跨多轮重复很多；去重后 109 道题）。
+- 按样本：五类完整覆盖 899/955 = 94%；按题（多数票）：98/109 = 90%。两种口径都达到 ≥ 90%，v1 就做这五类。
+- 缺口：直方图 6 题（8 份）；散点 + 趋势线混画 4 题（corr_004 等，v1 一次只出一种图型）；双轴 2 题（ts_010、ord_020）；热力图（相关矩阵）少数几次。
+- 处理：直方图不加图型，提示词里写"先 pd.cut / np.histogram 分箱，再 chart('bar')"；双轴、热力图、散点加趋势线走 plt 退路。第 4 步重跑闸门时看实际情况。
+- 局限：样本全部来自自造评测集和闸门，题型分布不代表真实用户；正则可能误判 stacked（如 subplots_adjust(bottom=)），不影响覆盖判定。
+
+### 测试
+- 新增 tests/test_charts.py 45 项：五种图型、宽表 / 长表、Series 输入、NaN / inf / 时间转换、不改输入、截断、控制字符与长度清洗、HTML 载荷按纯文本保留、各类报错，以及白名单拒绝（link / sublink / graphic / dataset / formatter / renderMode / aria / toolbox / visualMap / yAxis.min / 非法 data / 非法颜色 / 控制字符 / 函数值 / 点数超限）。
+
+### 相对 [19] 总表的变化
+- M13 进行中（第 1 步完成）。其余不变。
+
+### 下一步
+- 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位，result.charts 升级为 [{png, option}]（改 result.to_record 与 server/app.py 的消费点）。
 
