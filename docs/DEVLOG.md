@@ -826,7 +826,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ---
 
-## [20] 2026-10-13 · 阶段 4 收尾：ReAct 主循环自建，替代已弃用的 create_react_agent（B20、B21）· commit <待提交>
+## [20] 2026-10-13 · 阶段 4 收尾：ReAct 主循环自建，替代已弃用的 create_react_agent（B20、B21）· commit cdaf0f6（PR #20）
 
 ### 改动
 - B20：app/react_agent.py 不再 import `langgraph.prebuilt`。`build_loop()` 用 StateGraph 搭"agent → tools → agent"循环（约 60 行），不新增依赖（没有选 langchain 1.x 的 `create_agent`，见 [19] 之后与 S 的讨论：多一个依赖要锁版本、进打包体积和许可证审计，且重试仍在 SDK 里）。
@@ -845,3 +845,23 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ### 需要 S 做
 - 主循环换了实现，按约定重跑闸门 25 题做回归：`python scripts/gate/run_gate.py --agent react`。对照 [13] 的回归结果（react 14/15 + 8/10）；预期持平，若出现 ⑤（步数用完无结论）类失败要先看是不是"Sorry"占位消失带来的差异。
+
+## [21] 2026-10-14 · B20 之后的闸门回归（25 题，仅回归）· commit <待提交>
+
+### 结果
+- 正式回归：docs/eval/gate_20261013_153017_react.json（git_sha cdaf0f6，Qwen3.5-397B-A17B，公司网关，questions_sha256 75a559642e4e）。执行成功 25/25，比较器 23/25；人工判定 react **14/15 + 9/10**，对照 [13] 的 14/15 + 8/10，不低于基线。
+- 两道错题都是老问题，不是 B20 引入的：
+  - s02：4373，正确答案 4372（与同日旧代码结果相同；脏数据口径，B65 一类）。
+  - m10：没有以「无法回答：」拒答，拿「售价 + 运费」当利润给出 73 个类别的表（⑥，B63 一类）。[13] 回归里 m10 同样错过，系统提示和工具说明这次没改，判为模型波动。
+- [20] 担心的 ⑤（步数用完无结论，"Sorry" 占位消失带来的差异）：本次 0 例。
+- 同日对照：docs/eval/gate_20261013_151425_react.json 在 S 本地旧代码（git_sha cf277ed）上跑，比较器 24/25，唯一差别是 m10 那次拒答正确。总耗时 295 s → 349 s、tokens 266k → 281k，多出的主要是 m10（15 s → 36 s）；单次运行，不作为性能结论。
+
+### 作废的报告
+- gate_20261013_145244_react.json、gate_20261013_145442_react.json 已删除：S 的 .env 整份被注释，DEEPSEEK_MODEL / DEEPSEEK_BASE_URL 回退到默认的 deepseek-chat + api.deepseek.com，用公司网关的 Key 每题都是 llm 错误（0/25）。Key 放钥匙串时，.env 里 Key 那行可以注释，模型和地址两行不能注释。
+
+### 相对 [19] 总表的变化
+- 无新增、无关闭。B63（拒答时自拟口径）仍开着，m10 是它的复现。
+
+### 下一步
+- 阶段 5 开始：先定图表库与 M13 结构化图表数据格式。
+
