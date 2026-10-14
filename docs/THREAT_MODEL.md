@@ -42,6 +42,24 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 - 可读根比源码环境多两项：exe 本身（纯 Python 模块的 PYZ 归档附在 exe 里，延迟导入要读）和 `_MEIPASS`（onedir 的 `_internal`）。两者都是安装目录里的只读程序文件，不含用户数据和 Key，**不扩大 T1 / T2 的面**。
 - 打包版自检（`--selftest`）在 Windows runner 上验证了：越界读文件被拦且拦的是目标文件、禁止导入 subprocess、超时强杀、Job Object 内存上限生效。
 
+## 2.3 前端渲染：用户数据里的字符串（阶段 5，M13，[22]–[23]）
+| # | 威胁 | 例子 |
+|---|---|---|
+| T9 | 数据里的字符串（列名、类目、单元格）带 HTML / JS，被前端当 HTML 渲染，在 WebView 里执行，进而带着 token 调本机后端 | 列名 `<img src=x onerror=…>`；模型传错列名时它原样进错误消息 |
+
+**规则：后端不转义，渲染边界转义。** 后端（builder、错误、警告、结论、日志）一律保留原字符串，只清控制字符、限长；HTML 转义只在前端把文本放进 DOM 的那一步做，避免双重转义和"某一层忘了"的漏洞。按面列出：
+
+| 面 | 怎么兜 | 状态 |
+|---|---|---|
+| 图表（标题、坐标轴、图例、类目、系列名） | 画在 canvas 上，不进 DOM | 结构性 |
+| 图表 tooltip | 前端统一 `tooltip.renderMode = 'richText'`（画在 canvas）；白名单禁 `formatter` | 结构性 |
+| 图表的 DOM 通道 | 白名单禁 `title.link` / `sublink` / `graphic` / `aria` / `toolbox`（含 dataView） | 白名单 |
+| 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 第 5 步 |
+| 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 第 5 步 |
+| 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 第 5 步 |
+
+验证（第 5 步）：用注入载荷逐字段喂，**断言打在渲染后的 DOM 上**（无新增元素、无事件属性、无可执行 href），至少测三个面：tooltip、错误消息、结论文本。字段清单：title.text、title.link/sublink、series[].name、series[].label.formatter、xAxis.data[]、legend.formatter、tooltip.formatter、aria.label/description。tests/test_charts.py 里的 HTML 用例只证明载荷能原样到达前端，那是攻击的前提，不是防御。
+
 ## 3. 结论：T1 / T2 在阶段 8 之前不算解决
 - "keyring 上线 = 偷 Key 已解决"是**错误**的读法。
 - 阶段 4 做完 keyring 后，T3 解决；T1 / T2 对**常见注入手法**有防护，对**专门针对审计钩子的绕过**没有防护，直到阶段 8 的 OS 级隔离。

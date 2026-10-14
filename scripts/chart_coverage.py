@@ -1,7 +1,16 @@
 """M13 第 1 步：静态统计历史画图代码里的图型，估计 v1 builder 五类（bar/line/area/pie/scatter）的覆盖率。
 
 只看代码文本（正则），不重放；样本是 docs/eval 下所有报告里的 code 字段。结论只作方向性判断。
-用法：python scripts/chart_coverage.py [--json out.json] [--show]
+用法：python scripts/chart_coverage.py [--by-case] [--show] [--json out.json]
+
+判定（每份代码一个）：
+  covered            五类之一，单图
+  multi_figure       多张独立的图（plt.figure / subplots / close 分段），每张都是五类之一 → v1 每次最多 4 张，算覆盖
+  degraded           折线 + 少量 scatter 高亮点（列表字面量或 zorder）→ 主图可出，高亮点丢失，算覆盖但降级
+  overlay            同一张图叠两种图型（如散点 + 趋势线）→ 未覆盖
+  uncovered_kind     有五类以外的图型（hist / heatmap / box）
+  uncovered_layout   双轴或多子图
+  unknown            认不出图型
 """
 import argparse
 import glob
@@ -31,8 +40,12 @@ STRUCT = {
     "twinx":    [r"\.twinx\(", r"\.twiny\(", r"secondary_y\s*="],
     "subplots": [r"subplots\(\s*(?:nrows\s*=\s*)?[2-9]", r"subplots\(\s*1\s*,\s*[2-9]", r"\.subplot\(\s*\d",
                  r"ncols\s*=\s*[2-9]", r"nrows\s*=\s*[2-9]", r"subplots\s*=\s*True"],
+    # 只统计，不参与判定：堆叠是前端开关，builder 出多系列即可
     "stacked":  [r"stacked\s*=\s*True", r"bottom\s*=", r"\.stackplot\("],
 }
+COVERED = {"covered", "multi_figure", "degraded"}
+_FIG_SPLIT = re.compile(r"plt\.figure\(|plt\.subplots\(|plt\.close\(")
+_MARKER_SCATTER = re.compile(r"\.scatter\(\s*\[|\.scatter\([^\n]*zorder")
 V1 = {"bar", "barh", "line", "area", "pie", "scatter"}   # barh = bar + 前端横向开关
 DRAW_HINT = re.compile(r"\bplt\.|\.plot\b|savefig|\bax\w*\.")
 
@@ -47,11 +60,26 @@ def _bare_plot(code):
     return False
 
 
-def classify(code):
+def _kinds(code):
     kinds = {k for k, pats in PATTERNS.items() if any(re.search(p, code) for p in pats)}
     if _bare_plot(code):
         kinds.add("line")
+    return kinds
+
+
+def _norm(kinds):
+    return {"bar" if k == "barh" else k for k in kinds}
+
+
+def classify(code):
+    kinds = _kinds(code)
     struct = {k for k, pats in STRUCT.items() if any(re.search(p, code) for p in pats)}
+    segs = [_norm(_kinds(seg)) for seg in _FIG_SPLIT.split(code)]
+    segs = [k for k in segs if k]
+    if len(segs) > 1 and all(len(k) == 1 for k in segs):
+        struct.add("multi_figure")
+    if {"line", "scatter"} <= kinds and _MARKER_SCATTER.search(code):
+        struct.add("marker_scatter")
     return kinds, struct
 
 
@@ -96,15 +124,20 @@ def verdict(r):
         return "uncovered_kind"
     if "twinx" in s or "subplots" in s:
         return "uncovered_layout"
-    if len(k - {"barh"} | ({"bar"} if "barh" in k else set())) > 1:
-        return "mixed"                # 一张图里混了两种图型（如柱 + 折线）：v1 builder 一次只出一种
+    if len(_norm(k)) > 1:
+        if "multi_figure" in s:
+            return "multi_figure"
+        if _norm(k) == {"line", "scatter"} and "marker_scatter" in s:
+            return "degraded"
+        return "overlay"
     return "covered"
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--json")
-    ap.add_argument("--show", action="store_true")
+    ap.add_argument("--show", action="store_true", help="列出未覆盖的样本")
+    ap.add_argument("--by-case", action="store_true", help="按题（多数票）统计并列出未覆盖的题")
     a = ap.parse_args(argv)
     paths = sorted(glob.glob(os.path.join(ROOT, "docs", "eval", "**", "*.json"), recursive=True))
     rows = collect(paths)
@@ -116,9 +149,28 @@ def main(argv=None):
     struct = Counter(s for r in rows for s in r["struct"])
     n = len(rows)
     print(f"报告文件 {len(paths)} 个；画图代码样本 {n} 份（按 题×图型 去重后 {len(uniq)} 种）")
-    print("判定：" + "，".join(f"{k} {c}" for k, c in v.most_common()))
+    print("按样本判定：" + "，".join(f"{k} {c}" for k, c in v.most_common()))
     if n:
-        print(f"v1 五类完整覆盖：{v['covered']}/{n} = {v['covered'] / n:.0%}")
+        cov = sum(v[k] for k in COVERED)
+        print(f"按样本覆盖：严格 {v['covered']}/{n} = {v['covered'] / n:.0%}；"
+              f"含多图与降级 {cov}/{n} = {cov / n:.0%}")
+    if a.by_case:
+        by = {}
+        for r in rows:
+            by.setdefault(r["case"], Counter())[r["verdict"]] += 1
+        maj = {}
+        for case, cnt in by.items():
+            top = cnt.most_common()
+            maj[case] = "tie" if len(top) > 1 and top[0][1] == top[1][1] else top[0][0]
+        m = Counter(maj.values())
+        nc = len(by)
+        strict = m["covered"]
+        cov = sum(m[k] for k in COVERED)
+        print(f"按题（多数票，{nc} 题）：" + "，".join(f"{k} {c}" for k, c in m.most_common()))
+        print(f"按题覆盖：严格 {strict}/{nc} = {strict / nc:.0%}；含多图与降级 {cov}/{nc} = {cov / nc:.0%}")
+        for case in sorted(maj, key=lambda c: (maj[c], str(c))):
+            if maj[case] not in ("covered",):
+                print(f"  {maj[case]:<17} {case!s:<10} " + "，".join(f"{k} {c}" for k, c in by[case].most_common()))
     print("图型出现次数：" + "，".join(f"{k} {c}" for k, c in kinds.most_common()))
     print("结构：" + ("，".join(f"{k} {c}" for k, c in struct.most_common()) or "无"))
     if a.show:

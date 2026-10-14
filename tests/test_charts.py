@@ -131,8 +131,9 @@ def test_control_chars_and_length_cleaned():
     assert len(o["series"][0]["name"]) <= 100
 
 
-def test_html_payload_is_kept_as_plain_text_not_rejected():
-    # 字符串照原样当纯文本（canvas 渲染 + 前端 tooltip richText，见 THREAT_MODEL）；builder 不做 HTML 转义，避免双重转义
+def test_builder_passes_html_payload_through_unescaped():
+    # 只证明 builder 不转义、不拒绝（转义在渲染边界做，避免双重转义）——这是攻击的前提，不是防御。
+    # 防御的断言在第 5 步：对渲染后的 DOM 测 tooltip / 错误消息 / 结论文本三个面（THREAT_MODEL）。
     s = pd.Series([1], index=["<img src=x onerror=alert(1)>"], name="v")
     spec = build_option("bar", s)
     assert spec["option"]["xAxis"]["data"] == ["<img src=x onerror=alert(1)>"]
@@ -165,7 +166,10 @@ def test_builder_output_passes_validation():
     (lambda o: o["tooltip"].__setitem__("renderMode", "html"), "禁用键"),
     (lambda o: o.__setitem__("aria", {"enabled": True}), "禁用键"),
     (lambda o: o.__setitem__("toolbox", {"feature": {"dataView": {}}}), "禁用键"),
-    (lambda o: o["series"][0].__setitem__("label", {"show": True, "formatter": "{c}"}), "禁用键"),
+    (lambda o: o["series"][0].__setitem__("formatter", "{c}"), "禁用键"),
+    (lambda o: o["series"][0].__setitem__("label", {"show": True}), "不在白名单"),
+    (lambda o: o["series"][0].__setitem__("type", "line"), "不一致"),
+    (lambda o: o["series"][0].__setitem__("areaStyle", {}), "不一致"),
     (lambda o: o.__setitem__("visualMap", {"pieces": []}), "不在白名单"),
     (lambda o: o["yAxis"].__setitem__("min", 0), "不在白名单"),
     (lambda o: o["series"][0].__setitem__("data", [1, "2"]), "数值或 null"),
@@ -203,3 +207,60 @@ def test_too_many_points_rejected():
 
 def test_banned_keys_cover_dom_channels():
     assert {"link", "sublink", "graphic", "formatter", "dataset", "aria", "toolbox", "renderMode"} <= BANNED_KEYS
+
+
+def test_kind_mismatch_rejected():
+    spec = copy.deepcopy(_ok_spec())
+    spec["kind"] = "pie"
+    assert any("不一致" in p for p in validate_spec(spec))
+
+
+# ---------------------------------------------------------------- 脏数据（闸门 class 2 的坑回流到单测）
+def test_missing_category_shown_as_missing_not_fake_value():
+    # pd.NA / NaN / None 类目不得变成 '<NA>' / 'nan' 这种看似真实的取值
+    for miss in (pd.NA, np.nan, None):
+        o = build_option("bar", pd.Series([1, 2], index=pd.Index(["a", miss], dtype=object)))["option"]
+        assert o["xAxis"]["data"] == ["a", "（缺失）"], miss
+
+
+def test_nullable_dtypes():
+    df = pd.DataFrame({"地区": pd.array(["华东", pd.NA, "华北"], dtype="string"),
+                       "销量": pd.array([1, pd.NA, 3], dtype="Int64")})
+    o = build_option("bar", df, x="地区", y="销量")["option"]
+    assert o["xAxis"]["data"] == ["华东", "（缺失）", "华北"] and o["series"][0]["data"] == [1, None, 3]
+    o = build_option("pie", df, x="地区", y="销量")["option"]
+    assert [d["name"] for d in o["series"][0]["data"]] == ["华东", "华北"]      # 缺失值的扇区不画
+    long = pd.DataFrame({"x": ["a", "a"], "s": pd.array(["u", pd.NA], dtype="string"), "y": [1, 2]})
+    o = build_option("bar", long, x="x", y="y", series="s")["option"]
+    assert [s["name"] for s in o["series"]] == ["u", "（缺失）"]
+
+
+def test_error_message_keeps_column_names_raw_but_without_control_chars():
+    df = pd.DataFrame({"<img src=x onerror=alert(1)>": [1], "a\x00b": [2]})
+    with pytest.raises(ChartError) as e:
+        build_option("bar", df, x="不存在")
+    msg = str(e.value)
+    assert "<img src=x onerror=alert(1)>" in msg and "\x00" not in msg   # 转义归渲染边界，见 THREAT_MODEL
+
+
+def test_chinese_columns_from_gbk_csv(tmp_path):
+    from app.tools.csv_io import read_csv
+    p = tmp_path / "gbk.csv"
+    p.write_bytes("门店,销售额\n南京店,10\n苏州店,20\n".encode("gbk"))
+    df = read_csv(str(p))
+    o = build_option("bar", df, x="门店", y="销售额", title="各门店销售额")["option"]
+    assert o["xAxis"]["data"] == ["南京店", "苏州店"] and o["series"][0]["name"] == "销售额"
+
+
+def test_merged_header_multiindex_columns_rejected():
+    df = pd.DataFrame([[1, 2]], columns=pd.MultiIndex.from_tuples([("销售", "数量"), ("销售", "金额")]))
+    with pytest.raises(ChartError, match="多级列名"):
+        build_option("bar", df)
+
+
+def test_total_and_sentinel_rows_pass_through_unchanged():
+    # builder 不猜“合计”“未登记”是不是脏行：同名的真实类目也可能存在。清洗归数据层（B65），
+    # 这里把现状钉住：原样出图，不静默删行——删不删由上游代码显式决定。
+    s = pd.Series([10, 20, 30, 60], index=["南京", "未登记", "苏州", "合计"], name="销量")
+    o = build_option("bar", s)["option"]
+    assert o["xAxis"]["data"] == ["南京", "未登记", "苏州", "合计"] and o["series"][0]["data"] == [10, 20, 30, 60]
