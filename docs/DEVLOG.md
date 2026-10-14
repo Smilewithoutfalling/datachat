@@ -954,7 +954,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 - 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位、按上面的语义丢弃或告警；result.charts 升级为 [{png, option}]，同时改 result.to_record 和 server/app.py:137-138。
 
-## [24] 2026-10-14 · 阶段 5 第 1 步二次复核（S 复核 [23]）+ 第 4 步闸门重跑预登记 · commit <待提交>
+## [24] 2026-10-14 · 阶段 5 第 1 步二次复核（S 复核 [23]）+ 第 4 步闸门重跑预登记 · commit 8350e58（PR #24）
 
 ### 采纳 [23] 的两条待定（S 确认）
 - exec 失败丢弃 option：S 核过 sandbox_worker.py，exec 出错时 savefig 被 `if out["error"] is None` 守卫跳过、本来就不返回 PNG，丢 option 是对齐现状。**补充（S）**：丢弃数量除了进 exec 事件的 `charts_discarded`，也写进 warnings（"本次执行失败，丢弃了 N 张图"），因为流式事件不一定被看到。
@@ -1001,3 +1001,42 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ### 下一步
 - 第 2 步：worker 注入 chart()、option 槽位、chart_error；exec 失败丢弃 option 并写 charts_discarded + warnings；truncated 进 warnings；result.charts → [{png, option}]，改 result.to_record 和 server/app.py。
+
+## [25] 2026-10-14 · 闸门判定机制修复：门槛进配置、基线报告补标注（S 复核 [24]）· commit <待提交>
+
+### S 复核 [24] 指出的问题（均核实属实）
+1. react 多表门槛抄了 [22] 的旧值 8/10。[21] 的最新基线是 9/10（只错 m10），门槛比基线松一题。
+2. 门槛没有代码化：run_gate.py 的 `--verdict` 仍用阶段 3.5 的常量 11 / 8 / 4，重跑后会把 react 11/15 判成"可用"；verdict 段也不记录用的是哪套门槛，事后无法从 JSON 反查。
+3. 基线报告没有人工判定：gate_20261013_153017_react（[21] 的正式回归）、gate_20261012_142736_workflow（[12] 的 workflow 回归）human_correct 都是 0/25，[21] 的 14/15 + 9/10 和 [24] 的预期失败表只存在于 DEVLOG 文字里，`--verdict` 对它们直接退出。
+4. [24] 的 SHA 未回填（按惯例在本次提交填：8350e58）。
+
+### 改动
+- 新增 docs/gate/thresholds.json，门槛只从这里读，分两套 profile：
+  - phase35：阶段 3.5 原判（11 / 8 / 4 + 分布规则），从 run_gate.py 的常量原样搬出。tests 用 10-12 两份终审报告验证：用 phase35 重出结论，与报告里存的 verdict 逐项一致。
+  - m13：阶段 5 改 CHART_GUIDE 后的回归。规则是错题必须全部落在 allowed_fail 里，之外的错题逐题列为回归；allowed_fail 里的题若答对，列为"意外答对"，只记录，不改门槛。
+    - react：单表只允许 s02 错（≥ 14/15）；多表只允许 m10 错（≥ 9/10，**修正 [24] 的 8/10**）。
+    - workflow：单表只允许 s02 / s04 / s09 / s12 错（≥ 11/15）；多表不允许错（10/10）。**这条比 [24] 写的 ≥ 9/10 严**：[24] 同时写了"上表之外的任何新错题都算回归"，两句矛盾，9/10 的那 1 题容差实际不可用。按"错题必须在名单里"统一口径，[12] 的 workflow 多表基线是 10/10。请 S 确认。
+- scripts/gate/run_gate.py：
+  - `--verdict` 必须带 `--profile`，不给就退出，不再有默认门槛。
+  - verdict 段写入 profile 名、门槛原文、thresholds.json 的 sha256 前 12 位、labeled_by；m13 下再写每组的 min、regressions、unexpected_pass 和总的 regression_verdict。
+  - labeled_by 含"待 S 终审"时 verdict 写 labels_final=false，表示结论建立在预标注上。
+  - 改门槛只能在 thresholds.json 新增 profile，不改旧的（文件头注明）。
+- 基线报告补标注（labeled_by："Hark 预标注……待 S 终审"），并用 `--profile m13` 出了 verdict：
+  - gate_20261013_153017_react（cdaf0f6）：14/15 + 9/10。错题 s02（②，4373）、m10（⑥，首句说无法计算利润，但随后给出"售价 + 运费"的 73 类收入表，result 不是拒答）。逐题看过比较器判 relaxed / scaled 的 s07、s08、s13、m08，都与 gold 一致。m13 结论：无回归。
+  - gate_20261012_142736_workflow（9430354）：11/15 + 10/10。错题 s02（②）、s04（②，6,089,071 = 912,621 + 合计行 5,176,450）、s09（③）、s12（②，答 0%）；s07 是比较器漏判（B68，已修），实为对。与 [12] 正文一致。m13 结论：无回归。
+  - S 终审后把 labeled_by 改成"S 终审"，重跑 `--verdict … --profile m13`。
+- docs/gate/README.md、docs/roadmap/gate-phase35.md 的用法同步。
+- tests/test_gate.py +4 项：m13 回归判定（无回归 / 有回归 / 意外答对 / workflow 名单）、未知 profile 退出、phase35 复现 10-12 两份终审结论（2 项）。
+
+### 仍不对称（记下，不在本条解决）
+- react 基线是 cdaf0f6（B20 之后），workflow 基线是 9430354（阶段 3.6），中间隔了阶段 4 和 B20，不是单变量对照。建议：改 CHART_GUIDE **之前**，S 在当前 master 上把两个 Agent 各跑一次闸门，作为第 4 步的新基线；新基线若与 m13 名单不符，名单不改，在下一条 DEVLOG 写明差异，由 S 定是否新增 profile。
+
+### 测试
+- tests/test_gate.py 34 passed（沙箱 3.12）；全量见提交说明，CI 结论以 PR 的 tests workflow 为准。
+
+### 相对 [19] 总表的变化
+- 无新增、无关闭。
+
+### 下一步
+- S 终审两份基线标注、确认 workflow 多表 10/10；（建议）在当前 master 上重跑两个 Agent 作新基线。
+- 然后第 2 步：worker 注入 chart()（charts_discarded 同时进 warnings），再第 3 步改 CHART_GUIDE。
