@@ -128,7 +128,7 @@ def test_verdict_rules(tmp_path):
                          "failure_class": None if ok else next(fails)})
         p = tmp_path / f"r{single_ok}_{multi_ok}.json"
         p.write_text(json.dumps({"cases": rows}), encoding="utf-8")
-        return run_gate.verdict(str(p))
+        return run_gate.verdict(str(p), "phase35")
 
     v = report(13, 8, [1, 2, 3, 4])                       # 4 题失败、散落 4 类：不足 5 题，不触发分布规则
     assert v["single_verdict"].startswith("可用") and "只记录分布" in v["distribution_verdict"]
@@ -139,6 +139,52 @@ def test_verdict_rules(tmp_path):
     assert v["single_verdict"].startswith("暂停阶段 4") and "系统性" in v["distribution_verdict"]
     v = report(7, 4, [1, 1, 1, 1, 2, 2, 2, 2, 1, 2, 2, 2, 1, 1])   # 2 类、最大类 <60% → 中间区间
     assert v["single_verdict"].startswith("路线重估") and "中间区间" in v["distribution_verdict"]
+
+
+def _labeled_report(tmp_path, agent, wrong, name="r.json"):
+    rows = [{"id": f"s{i:02d}", "group": "single", "executed": True} for i in range(1, 16)]
+    rows += [{"id": f"m{i:02d}", "group": "multi", "executed": True} for i in range(1, 11)]
+    for r in rows:
+        r["human_correct"] = r["id"] not in wrong
+        r["failure_class"] = None if r["human_correct"] else 2
+    p = tmp_path / name
+    p.write_text(json.dumps({"agent": agent, "labeled_by": "Hark 预标注，待 S 终审", "cases": rows}),
+                 encoding="utf-8")
+    return str(p)
+
+
+def test_verdict_regression_profile(tmp_path):
+    """[25]：m13 回归门槛——错题必须落在 allowed_fail 里；门槛原文与文件哈希写进 verdict。"""
+    v = run_gate.verdict(_labeled_report(tmp_path, "react", {"s02", "m10"}), "m13")
+    assert v["regression_verdict"] == "无回归" and v["single_min"] == "14/15" and v["multi_min"] == "9/10"
+    assert v["profile"] == "m13" and len(v["thresholds_sha256"]) == 12 and v["thresholds"]["kind"] == "regression"
+    assert v["labels_final"] is False                                      # 预标注
+    v = run_gate.verdict(_labeled_report(tmp_path, "react", {"s02", "s04", "m01", "m10"}), "m13")
+    assert v["single_regressions"] == ["s04"] and v["multi_regressions"] == ["m01"]
+    assert v["regression_verdict"].startswith("有回归")
+    v = run_gate.verdict(_labeled_report(tmp_path, "react", set()), "m13")   # 预期失败的题答对：记录，不算回归
+    assert v["single_unexpected_pass"] == ["s02"] and v["regression_verdict"] == "无回归"
+    v = run_gate.verdict(_labeled_report(tmp_path, "workflow", {"s02", "s04", "s09", "s12"}), "m13")
+    assert v["regression_verdict"] == "无回归" and v["single_min"] == "11/15" and v["multi_min"] == "10/10"
+    v = run_gate.verdict(_labeled_report(tmp_path, "workflow", {"s02", "m03"}), "m13")
+    assert v["multi_regressions"] == ["m03"]
+
+
+def test_verdict_requires_known_profile(tmp_path):
+    p = _labeled_report(tmp_path, "react", {"s02"})
+    with pytest.raises(SystemExit):
+        run_gate.verdict(p, "nope")
+
+
+@pytest.mark.parametrize("name", ["gate_20261012_104407_react.json", "gate_20261012_104936_workflow.json"])
+def test_phase35_profile_reproduces_final_verdict(tmp_path, name):
+    """阈值从常量移到 thresholds.json 后，10-12 两份终审报告的结论不变。"""
+    src = json.load(open(os.path.join(ROOT, "docs", "eval", name), encoding="utf-8"))
+    p = tmp_path / name
+    p.write_text(json.dumps(src, ensure_ascii=False), encoding="utf-8")
+    v = run_gate.verdict(str(p), "phase35")
+    for k in ("single", "multi", "single_verdict", "multi_verdict", "distribution_verdict", "failure_distribution"):
+        assert v[k] == src["verdict"][k], k
 
 
 # ------------------------------------------------------------------ 3. 真实数据上的 oracle
