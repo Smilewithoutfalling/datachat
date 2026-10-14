@@ -900,7 +900,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 - 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位，result.charts 升级为 [{png, option}]（改 result.to_record 与 server/app.py 的消费点）。
 
-## [23] 2026-10-14 · 阶段 5 第 1 步复核修正（S 复核 [22]）· commit <待提交>
+## [23] 2026-10-14 · 阶段 5 第 1 步复核修正（S 复核 [22]）· commit 9c42819（PR #23）
 
 ### 复核结论（S 实跑脚本）
 - 955 / 899 / 94%、45 项测试、plan.md 改动、docs/eval 已在主干：属实。
@@ -949,8 +949,55 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 - builder 不识别"合计""未登记"这类行：同名的真实类目可能存在，猜错会静默删数据。清洗归上游代码 / 数据层（B65）。单测钉住的是"原样出图、不删行"。
 
 ### 测试
-- 3.12 全量通过（见下次提交说明）；沙箱里没有 3.11，S 本地跑 tests/test_charts.py 和 tests/test_chart_coverage.py。
+- CI 通过：PR #23 的 tests workflow run 38506506126（Linux / Windows × Python 3.11 / 3.12 全量 pytest）。另：本地沙箱 3.12 全量 547 passed。
 
 ### 下一步
 - 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位、按上面的语义丢弃或告警；result.charts 升级为 [{png, option}]，同时改 result.to_record 和 server/app.py:137-138。
 
+## [24] 2026-10-14 · 阶段 5 第 1 步二次复核（S 复核 [23]）+ 第 4 步闸门重跑预登记 · commit <待提交>
+
+### 采纳 [23] 的两条待定（S 确认）
+- exec 失败丢弃 option：S 核过 sandbox_worker.py，exec 出错时 savefig 被 `if out["error"] is None` 守卫跳过、本来就不返回 PNG，丢 option 是对齐现状。**补充（S）**：丢弃数量除了进 exec 事件的 `charts_discarded`，也写进 warnings（"本次执行失败，丢弃了 N 张图"），因为流式事件不一定被看到。
+- builder 不识别"合计""未登记"：清洗归 read / clean 层（B65，阶段 7 列画像）。后果见下面的预登记。
+
+### 改动
+- docs/THREAT_MODEL.md §2.3：
+  - 表格每行注明 v1 / v2 是否生效。v1 挡 T9 的是 chart() 签名 + 前端渲染（canvas、richText、纯文本）；白名单禁 formatter / link / sublink / graphic / aria / toolbox 在 v1 是不可达路径，v2 层 2 才生效。原表把它们列成防线，与 charts.py 注释"validate_spec 不是 v1 的安全边界"矛盾，已改。
+  - 验证字段清单拆成"v1 可达"（title.text、series[].name、类目、轴名、错误消息里的列名）和"仅 v2 可达"（formatter 系、link/sublink、aria），后者放到层 2 再测。
+  - 写明 renderMode 的矛盾：它在 BANNED_KEYS 里，前端又在校验之后统一加 richText，最终渲染产物必然不过白名单。规则：白名单只校验 builder 输出（v2 起含 patch），最终产物永不回验；回灌流程只传样式差量、重新走 builder，渲染端重新注入 richText；**不得从 BANNED_KEYS 删 renderMode**。charts.py 在 BANNED_KEYS 旁同样注明；tests/test_charts.py 原有用例已钉住 renderMode 在禁用集里。
+- scripts/chart_coverage.py：uncovered_layout 拆开。多子图（subplots(r, c)，r×c ≤ 4，每格五类之一）新判 multi_panel，可拆成 N 次 chart()，与 multi_figure 同口径算进宽口径；双轴、子图 > 4 格或格数认不出，仍为 uncovered_layout。tests/test_chart_coverage.py +1 项（1×2 → multi_panel；2×3 → 未覆盖；子图里有双轴 → 未覆盖）。
+
+### 覆盖率（更新 [23]）
+- 原 uncovered_layout 15 份 = 双轴 13 份（ts_010 10、ord_020 3）+ 多子图 2 份（都是 corr_007，1×2 两张柱状图）。拆开后按样本：严格 899/955 = 94% 不变，宽口径 909 → 911/955 = 95%；按题不变（corr_007 本来就按多数票算覆盖）：严格 98/109 = 90%，宽口径 100/109 = 92%。
+- 这些数都是**下界**：正则只认得出写法，认不出"能否改写成五类"。例如 overlay 里的趋势线可以去掉，tie 的 ord_016 有一次画的就是柱状图。缺口清单同样按下界读。
+- **ts_010 是 10 : 9 接近平票**（双轴 10 份、单图 9 份），分类脆弱：再多一份单图就翻成覆盖。它不改变 ≥ 90% 的结论。
+- 覆盖率脚本不在 CI 里跑，数字是方向性判断，不是 CI 验证的结果（局限同 [22]）。
+
+### 第 4 步闸门重跑：预登记（在改提示词之前写下）
+第 3 步会改 CHART_GUIDE（react_agent.py 和 workflow 的 codegen / reviewer 都用它），所以两个 Agent 都要重跑 25 题。M13 改的是画图，对 class ②（脏数据：缺失哨兵、合计行）的贡献上限是 0；B65 是 P2、阶段 7 列画像才修。下面这些失败**预期原样复现，复现不算回归，也不算 M13 的失败**：
+
+| 题 | Agent | 类 | 已知原因 | 最近一次 |
+|---|---|---|---|---|
+| s02 | react、workflow | ② | "未登记"当成一个客户（4373 vs 4372） | [21] react 仍错；[12] workflow 仍错 |
+| s04 | workflow | ② | 报表变体的合计行算进"非英国" | [12] workflow 仍错 |
+| s12 | workflow | ② | 没认出"未登记"是缺失，答 0.0% | [12] workflow 仍错 |
+| s09 | workflow | ③ | 按正数量汇总，选中被整单取消的 80,995 件 | [12] workflow 仍错 |
+| m10 | react | ⑥ | 应拒答，自拟利润口径（B63，波动） | [21] 错，[13] 错，151425 对照对 |
+
+注意（更正 S 原文的一处）：s04、s12 的 class ② 失败**只在 workflow**。react 上 s04 自 [12] 起是对的（912,621），s12 一直是对的；react 若在 s04 / s12 失败，**算回归**。
+
+判定（沿用 [22] 的门槛，口径写死）：
+- react：单表 ≥ 14/15，且唯一允许的错题是 s02；多表 ≥ 8/10（原文照抄 [22]），m10 错不计入回归判断，即 m10 之外最多再错 1 题。
+- workflow：单表 ≥ 11/15，错题只能落在 s02 / s04 / s09 / s12；多表 ≥ 9/10（[12] 是 10/10，单次运行，留 1 题波动）。workflow 的门槛是本条新定的，[22] 只给了 react 的。
+- 上表之外的任何新错题都算回归，先看是否与提示词改动有关再下结论。
+- 预期失败的题若**意外答对**，记录但不改门槛（多半是波动，参考 m10）。
+- 图表两条（出图率、chart_option 链路）按 [22] / [23] 的口径另算，与准确率分开报。
+
+### 测试
+- tests/test_chart_coverage.py 3 → 4 项；全量见提交说明。
+
+### 相对 [19] 总表的变化
+- 无新增、无关闭。B65 维持 P2 / 阶段 7，本条把它在闸门上的影响写成预登记。
+
+### 下一步
+- 第 2 步：worker 注入 chart()、option 槽位、chart_error；exec 失败丢弃 option 并写 charts_discarded + warnings；truncated 进 warnings；result.charts → [{png, option}]，改 result.to_record 和 server/app.py。

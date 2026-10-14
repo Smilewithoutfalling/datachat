@@ -49,16 +49,27 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 
 **规则：后端不转义，渲染边界转义。** 后端（builder、错误、警告、结论、日志）一律保留原字符串，只清控制字符、限长；HTML 转义只在前端把文本放进 DOM 的那一步做，避免双重转义和"某一层忘了"的漏洞。按面列出：
 
-| 面 | 怎么兜 | 状态 |
-|---|---|---|
-| 图表（标题、坐标轴、图例、类目、系列名） | 画在 canvas 上，不进 DOM | 结构性 |
-| 图表 tooltip | 前端统一 `tooltip.renderMode = 'richText'`（画在 canvas）；白名单禁 `formatter` | 结构性 |
-| 图表的 DOM 通道 | 白名单禁 `title.link` / `sublink` / `graphic` / `aria` / `toolbox`（含 dataView） | 白名单 |
-| 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 第 5 步 |
-| 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 第 5 步 |
-| 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 第 5 步 |
+**v1 挡 T9 的是什么。** v1 里模型拿不到 option：`chart()` 返回 None，模型只能传图型、列名和标题字符串，option 全部由 builder 生成，所以 v1 的边界是 `chart()` 的签名加上前端渲染。`validate_spec` 白名单在 v1 只防 builder 自己的 bug（多出键、漏掉 NaN），**不是 v1 的安全边界**；它第一次面对外部输入是 v2 层 2（自然语言改样式的 patch）。下表每行注明在哪一版起作用，免得读成"v1 的 DOM 通道已被白名单挡住"。
 
-验证（第 5 步）：用注入载荷逐字段喂，**断言打在渲染后的 DOM 上**（无新增元素、无事件属性、无可执行 href），至少测三个面：tooltip、错误消息、结论文本。字段清单：title.text、title.link/sublink、series[].name、series[].label.formatter、xAxis.data[]、legend.formatter、tooltip.formatter、aria.label/description。tests/test_charts.py 里的 HTML 用例只证明载荷能原样到达前端，那是攻击的前提，不是防御。
+| 面 | 怎么兜 | v1（builder-only） | v2（层 2 patch） |
+|---|---|---|---|
+| 图表（标题、坐标轴、图例、类目、系列名） | 画在 canvas 上，不进 DOM | 生效 | 生效 |
+| 图表 tooltip | 前端统一 `tooltip.renderMode = 'richText'`（画在 canvas） | 生效（主防线） | 生效（主防线） |
+| tooltip / label / legend 的 `formatter` | 白名单禁 `formatter` | 不可达：builder 不产出，模型改不到 | 生效 |
+| 图表的 DOM 通道 | 白名单禁 `title.link` / `sublink` / `graphic` / `aria` / `toolbox`（含 dataView） | 不可达：同上 | 生效 |
+| 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 生效（第 5 步实现） | 生效 |
+| 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 生效（第 5 步实现） | 生效 |
+| 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 生效（第 5 步实现） | 生效 |
+
+**白名单只校验 builder 的输出（以及 v2 的 patch），最终渲染产物永不回验。** 前端在校验之后才加 `tooltip.renderMode = 'richText'`，而 `renderMode` 同时在 `BANNED_KEYS` 里，所以最终交给 ECharts 的 option 必然不过白名单。这是有意的：`BANNED_KEYS` 禁的是"由后端 / 模型决定这个键"，不是"渲染时不许出现"。将来任何把前端 option 回灌后端的流程（"保存我的风格"、服务端重绘导出 PNG 等）必须：
+- 只回传样式层的差量（v2 patch 的形状），在后端重新走 builder + 白名单，不回传整份 option；
+- 由渲染端重新注入 `renderMode = 'richText'`，不信任回传值；
+- **不得从 `BANNED_KEYS` 删掉 `renderMode`** 来让回灌通过。删它等于让后端 / 模型能把 tooltip 改回 HTML 模式，正好拆掉 T9 在 tooltip 上的主防线。tests/test_charts.py 有用例钉住 `renderMode` 在禁用集里。
+
+验证（第 5 步）：用注入载荷逐字段喂，**断言打在渲染后的 DOM 上**（无新增元素、无事件属性、无可执行 href），至少测三个面：tooltip、错误消息、结论文本。
+- v1 可达的字段：title.text、series[].name、xAxis.data[]（类目）、yAxis.name / xAxis.name（列名），以及错误消息、警告里的列名。
+- 只在 v2 才可达、v1 测的是不可达路径的字段（放到层 2 时再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
+- tests/test_charts.py 里的 HTML 用例只证明载荷能原样到达前端，那是攻击的前提，不是防御。
 
 ## 3. 结论：T1 / T2 在阶段 8 之前不算解决
 - "keyring 上线 = 偷 Key 已解决"是**错误**的读法。

@@ -337,6 +337,9 @@ _ALLOWED = {
     }},
 }
 # 明确禁止（即使将来放宽白名单也不许出现）：会进 DOM 或执行代码的通道，以及数据层绕过面
+# 禁的是"由后端 / 模型决定这个键"。前端在校验之后自己加 tooltip.renderMode='richText'，所以最终渲染产物
+# 必然不过本白名单——这是有意的：白名单只校验 builder 输出（v2 起含 patch），最终产物永不回验。
+# 将来回灌前端 option 的流程只回传样式差量重新走 builder；不得为了让回灌通过而删 renderMode（THREAT_MODEL §2.3）。
 BANNED_KEYS = {"link", "sublink", "graphic", "formatter", "renderItem", "dataset", "aria", "toolbox",
                "rich", "renderMode", "extraCssText", "target", "sublinkTarget"}
 _ENUMS = {

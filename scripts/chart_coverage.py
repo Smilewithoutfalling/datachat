@@ -9,7 +9,8 @@
   degraded           折线 + 少量 scatter 高亮点（列表字面量或 zorder）→ 主图可出，高亮点丢失，算覆盖但降级
   overlay            同一张图叠两种图型（如散点 + 趋势线）→ 未覆盖
   uncovered_kind     有五类以外的图型（hist / heatmap / box）
-  uncovered_layout   双轴或多子图
+  multi_panel        多子图（subplots，≤4 格）且每格都是五类之一 → 可拆成 N 次 chart()，算覆盖（与 multi_figure 同口径）
+  uncovered_layout   双轴（twinx / secondary_y），或子图超过 4 格 / 格数认不出
   unknown            认不出图型
 """
 import argparse
@@ -43,7 +44,8 @@ STRUCT = {
     # 只统计，不参与判定：堆叠是前端开关，builder 出多系列即可
     "stacked":  [r"stacked\s*=\s*True", r"bottom\s*=", r"\.stackplot\("],
 }
-COVERED = {"covered", "multi_figure", "degraded"}
+COVERED = {"covered", "multi_figure", "multi_panel", "degraded"}
+MAX_CHARTS = 4                                   # v1 每次分析最多 4 张
 _FIG_SPLIT = re.compile(r"plt\.figure\(|plt\.subplots\(|plt\.close\(")
 _MARKER_SCATTER = re.compile(r"\.scatter\(\s*\[|\.scatter\([^\n]*zorder")
 V1 = {"bar", "barh", "line", "area", "pie", "scatter"}   # barh = bar + 前端横向开关
@@ -112,8 +114,17 @@ def collect(paths):
             if not kinds and not re.search(r"savefig|plt\.|\.plot\b", code):
                 continue
             rows.append({"file": os.path.relpath(path, ROOT), "case": cid, "kinds": sorted(kinds),
-                         "struct": sorted(struct)})
+                         "struct": sorted(struct), "panels": _panels(code)})
     return rows
+
+
+_GRID = re.compile(r"subplots\(\s*(?:nrows\s*=\s*)?(\d)\s*,\s*(?:ncols\s*=\s*)?(\d)")
+
+
+def _panels(code):
+    """subplots(r, c) 的格数；认不出返回 None（按未覆盖处理）。"""
+    m = _GRID.search(code or "")
+    return int(m.group(1)) * int(m.group(2)) if m else None
 
 
 def verdict(r):
@@ -122,8 +133,11 @@ def verdict(r):
         return "unknown"
     if not k <= V1:
         return "uncovered_kind"
-    if "twinx" in s or "subplots" in s:
+    if "twinx" in s:
         return "uncovered_layout"
+    if "subplots" in s:
+        n = r.get("panels")
+        return "multi_panel" if n is not None and n <= MAX_CHARTS else "uncovered_layout"
     if len(_norm(k)) > 1:
         if "multi_figure" in s:
             return "multi_figure"
