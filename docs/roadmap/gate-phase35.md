@@ -99,7 +99,7 @@
 |---|---|
 | §2 A 独立核算脚本，不 import datachat | scripts/gate/verify_gate.py：在**原始** xlsx / Olist 原表上算，不读脏表 → docs/gate/answers.json（入库、冻结） |
 | §3 预登记题目 | scripts/gate/questions.py（25 题，分布同 §3）；answers.json 里存题面哈希，tests/test_gate.py 校验，改题不重跑 verify 会让测试失败 |
-| §4 阈值与分布规则 | scripts/gate/run_gate.py `--verdict`，规则写成常量；tests/test_gate.py::test_verdict_rules 覆盖四种情形 |
+| §4 阈值与分布规则 | scripts/gate/run_gate.py `--verdict --profile phase35`，阈值在 docs/gate/thresholds.json（[25] 起从常量移出）；tests/test_gate.py::test_verdict_rules 覆盖四种情形 |
 | §5 记录格式 | run_gate.py 输出 docs/eval/gate_<时间>_<agent>.json：每题模型答案、代码、比较器参考判定（match 层级），人工字段 human_correct / failure_class / reason / guessing 留空 |
 | 每题在 datachat 看得到的脏数据上确实可解 | tests/test_gate.py::test_oracle_solvable_on_dirty_data：手写正确解经沙箱执行后比较器判对（25/25；数据未下载时跳过） |
 | §2 B 公开答案交叉核对 | 未做。人工判定时可挑 ≥5 题与 Kaggle 上的公开 notebook 核对 |
