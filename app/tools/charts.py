@@ -26,6 +26,7 @@ KINDS = ("bar", "line", "area", "pie", "scatter")
 MAX_POINTS = 5000          # 每张图的数据点上限（类目数 × 系列数）
 MAX_SERIES = 20
 MAX_PIE_SLICES = 50
+MISSING_LABEL = "（缺失）"   # 缺失类目的显示名：明示缺失，不冒充真实取值（不出现 'nan' / '<NA>'）
 TITLE_MAX = 100
 NAME_MAX = 100             # 系列名、坐标轴名
 CATEGORY_MAX = 200         # 单个类目名
@@ -69,14 +70,24 @@ def _num(v):
     raise ChartError(f"数值列里有非数值：{_clean_str(repr(v), 40)}")
 
 
+def _cat(v) -> str:
+    """类目标签，缺失显示为 MISSING_LABEL。"""
+    lab = _label(v)
+    return MISSING_LABEL if lab is None else lab
+
+
 def _label(v) -> str | None:
-    """类目 → 字符串；时间 → ISO；缺失 → None。"""
-    if v is None or v is pd.NaT:
+    """类目 → 字符串；时间 → ISO；缺失（None / NaN / NaT / pd.NA）→ None，由调用方显示为 MISSING_LABEL。"""
+    if v is None or v is pd.NaT or v is pd.NA:
         return None
     if isinstance(v, np.generic):
         v = v.item()
-    if isinstance(v, float) and math.isnan(v):
-        return None
+    if not isinstance(v, (str, tuple)):
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
     if isinstance(v, pd.Timestamp):
         return v.isoformat() if (v.hour or v.minute or v.second or v.microsecond) else v.date().isoformat()
     if isinstance(v, (datetime, date)):
@@ -118,8 +129,9 @@ def _as_frame(df):
 
 def _col(df: pd.DataFrame, name, what: str) -> pd.Series:
     if name not in df.columns:
-        cols = "、".join(map(str, list(df.columns)[:20]))
-        raise ChartError(f"{what}列 {name!r} 不存在；可用列：{cols}")
+        # 列名来自用户数据，原样（仅清控制字符、限长）进消息；HTML 转义在渲染边界做（THREAT_MODEL §图表）
+        cols = "、".join(_clean_str(c, NAME_MAX) for c in list(df.columns)[:20])
+        raise ChartError(f"{what}列 {_clean_str(repr(name), NAME_MAX)} 不存在；可用列：{cols}")
     return df[name]
 
 
@@ -193,10 +205,11 @@ def build_option(kind, df, *, x=None, y=None, series=None, title=None) -> dict:
 def _wide(frame, xs, ys, series_col):
     """统一成 (类目标签列表, [(系列名, 数值列表)])。长表按 series 透视，保留 x 的首次出现顺序。"""
     if series_col is None:
-        cats = [_label(v) for v in xs]
+        cats = [_cat(v) for v in xs]
         return cats, [(_clean_str(c, NAME_MAX), [_num(v) for v in frame[c]]) for c in ys]
     ycol = ys[0]
-    tmp = pd.DataFrame({"_x": [_label(v) for v in xs], "_s": frame[series_col].map(_label), "_y": frame[ycol]})
+    tmp = pd.DataFrame({"_x": [_cat(v) for v in xs], "_s": [_cat(v) for v in frame[series_col]],
+                        "_y": list(frame[ycol])})
     if tmp.duplicated(["_x", "_s"]).any():
         raise ChartError("长表里同一 (x, series) 出现多行，请先 groupby 聚合")
     cats = list(dict.fromkeys(tmp["_x"]))
@@ -204,7 +217,7 @@ def _wide(frame, xs, ys, series_col):
     if len(groups) > MAX_SERIES:
         raise ChartError(f"series 分组太多（{len(groups)}），最多 {MAX_SERIES} 个；先筛选或合并为'其他'")
     pv = tmp.pivot(index="_x", columns="_s", values="_y").reindex(index=cats, columns=groups)
-    return cats, [(_clean_str("（空）" if g is None else g, NAME_MAX), [_num(v) for v in pv[g]]) for g in groups]
+    return cats, [(_clean_str(g, NAME_MAX), [_num(v) for v in pv[g]]) for g in groups]
 
 
 def _truncate(cats, sers):
@@ -233,7 +246,7 @@ def _cartesian(kind, frame, xs, ys, series_col):
         "tooltip": {"trigger": "axis"},
         "legend": {"show": multi, "top": "bottom"},
         "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if multi else 30, "containLabel": True},
-        "xAxis": {"type": "category", "name": x_name, "data": ["" if c is None else c for c in cats],
+        "xAxis": {"type": "category", "name": x_name, "data": cats,
                   "boundaryGap": kind == "bar"},
         "yAxis": {"type": "value", "name": y_name},
         "series": out_series,
@@ -249,7 +262,7 @@ def _pie(frame, xs, ys, series_col):
     vals = [_num(v) for v in frame[ys[0]]]
     if any(v is not None and v < 0 for v in vals):
         raise ChartError("饼图的数值不能为负")
-    items = [{"name": "（空）" if (lab := _label(c)) is None else lab, "value": v}
+    items = [{"name": _cat(c), "value": v}
              for c, v in zip(xs, vals) if v is not None]
     if len(items) > MAX_PIE_SLICES:
         raise ChartError(f"饼图扇区太多（{len(items)}），最多 {MAX_PIE_SLICES} 个；先取 Top-N 并合并为'其他'")
@@ -271,13 +284,13 @@ def _scatter(frame, xs, ys, series_col):
             groups.append((_clean_str(c, NAME_MAX), list(zip(xs, frame[c]))))
     else:
         ycol = ys[0]
-        keys = frame[series_col].map(_label)
+        keys = pd.Series([_cat(v) for v in frame[series_col]], index=frame.index)
         order = list(dict.fromkeys(keys))
         if len(order) > MAX_SERIES:
             raise ChartError(f"series 分组太多（{len(order)}），最多 {MAX_SERIES} 个")
         for g in order:
             m = (keys == g).to_numpy()
-            groups.append((_clean_str("（空）" if g is None else g, NAME_MAX), list(zip(xs[m], frame[ycol][m]))))
+            groups.append((_clean_str(g, NAME_MAX), list(zip(xs[m], frame[ycol][m]))))
     total = sum(len(p) for _, p in groups)
     truncated = total > MAX_POINTS
     if truncated:
@@ -301,25 +314,26 @@ def _scatter(frame, xs, ys, series_col):
 
 # ------------------------------------------------------------------ 白名单校验
 # 结构：dict 的值是子结构；类型元组表示叶子允许的 Python 类型。"*" 表示数组元素结构。
+# 只收 builder 实际产出的键（无人产出的键不预留）；前端样式层的 patch 有了消费方再加。
+#
+# 定位（别误读成安全边界）：v1 里 validate_spec 只校验 builder 自己的产出——模型拿不到 option
+# （chart() 返回 None），v1 真正的边界是 chart() 的签名：模型只能传图型、列名和标题字符串。
+# 这里防的是 builder 自身的 bug（漏掉 NaN、多出键、长度不一致）；v2 层 2 的 patch 才是它的第一个外部输入。
 _STR, _NUM, _BOOL = (str,), (int, float), (bool,)
 _POS = (str, int, float)                         # "3%" / 60 / "center"
-_STYLE_TEXT = {"color": _STR, "fontSize": _NUM, "fontWeight": (str, int)}
 _ALLOWED = {
     "color": {"*": _STR},
-    "title": {"text": _STR, "left": _POS, "top": _POS, "textStyle": _STYLE_TEXT},
+    "title": {"text": _STR, "left": _POS},
     "tooltip": {"trigger": _STR},
     "legend": {"show": _BOOL, "type": _STR, "top": _POS, "left": _POS, "orient": _STR},
     "grid": {"left": _POS, "right": _POS, "top": _POS, "bottom": _POS, "containLabel": _BOOL},
     "xAxis": {"type": _STR, "name": _STR, "data": {"*": _STR}, "boundaryGap": _BOOL, "scale": _BOOL,
-              "axisLabel": {"hideOverlap": _BOOL, "rotate": _NUM}},
+              "axisLabel": {"hideOverlap": _BOOL}},
     "yAxis": {"type": _STR, "name": _STR, "scale": _BOOL},
     "series": {"*": {
         "name": _STR, "type": _STR, "data": None,          # data 单独按图型校验
-        "areaStyle": {"opacity": _NUM}, "showSymbol": _BOOL, "symbolSize": _NUM,
-        "stack": _STR, "smooth": _BOOL,
-        "label": {"show": _BOOL, "position": _STR},
-        "itemStyle": {"color": _STR, "borderRadius": _NUM},
-        "radius": {"*": _STR}, "center": {"*": _STR},
+        "areaStyle": {}, "showSymbol": _BOOL, "symbolSize": _NUM,
+        "radius": {"*": _STR}, "center": {"*": _STR},             # 饼图
     }},
 }
 # 明确禁止（即使将来放宽白名单也不许出现）：会进 DOM 或执行代码的通道，以及数据层绕过面
@@ -332,7 +346,6 @@ _ENUMS = {
     ("xAxis", "type"): {"category", "value"},
     ("yAxis", "type"): {"value"},
     ("series", "type"): {"bar", "line", "pie", "scatter"},
-    ("series", "label", "position"): {"top", "inside", "outside", "insideTop", "right"},
 }
 
 
@@ -396,10 +409,21 @@ def _check_enums(option, problems):
     for i, c in enumerate(option.get("color") or []):
         if isinstance(c, str) and not _HEX.match(c):
             problems.append(f"color.{i} 必须是 #RRGGBB")
+
+
+_KIND_SERIES_TYPE = {"bar": "bar", "line": "line", "area": "line", "pie": "pie", "scatter": "scatter"}
+
+
+def _check_kind(kind, option, problems):
+    """spec.kind 与每个 series.type 一致（area = line + areaStyle）；前端“换图型”读 spec.kind。"""
+    want = _KIND_SERIES_TYPE.get(kind)
     for i, s in enumerate(option.get("series") or []):
-        c = (s.get("itemStyle") or {}).get("color") if isinstance(s, dict) else None
-        if isinstance(c, str) and not _HEX.match(c):
-            problems.append(f"series.{i}.itemStyle.color 必须是 #RRGGBB")
+        if not isinstance(s, dict):
+            continue
+        if want and s.get("type") != want:
+            problems.append(f"series.{i}.type {s.get('type')!r} 与 kind {kind!r} 不一致")
+        if (kind == "area") != ("areaStyle" in s):
+            problems.append(f"series.{i}.areaStyle 与 kind {kind!r} 不一致")
 
 
 def _is_num(v):
@@ -451,6 +475,7 @@ def validate_spec(spec) -> list[str]:
     if not isinstance(option, dict) or not isinstance(option.get("series"), list) or not option["series"]:
         return problems + ["option.series 应为非空数组"]
     _walk(option, _ALLOWED, [], problems)
+    _check_kind(spec["kind"], option, problems)
     _check_enums(option, problems)
     _check_data(option, problems)
     try:
