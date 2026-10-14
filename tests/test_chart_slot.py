@@ -148,12 +148,63 @@ def test_react_mixed_png_and_option(sample_path):
     res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
     assert [bool(c["option"]) for c in res.charts] == [True, False]
     assert res.chart_path == res.charts[1]["png"]
-    assert "chart() 已生成 1 张图表" in str(m.calls[-1][-1].content)
+    assert "（已生成 1 张图表：销量）" in str(m.calls[-1][-1].content)
 
 
-def test_prompt_unchanged_when_chart_unused(sample_path):
-    """第 2 步不改提示词：没用 chart() 时工具返回给模型的文本与之前一致（第 3 步才改 CHART_GUIDE）。"""
+def test_tool_text_unchanged_when_chart_unused(sample_path):
+    """没用 chart() 时工具返回给模型的文本与 [26] 之前逐字一致。"""
     m = ScriptedChatModel(replies=[tool_call("result = 1"), "好"], calls=[])
     analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
     assert str(m.calls[-1][-1].content) == "执行成功。result = 1"
-    assert "chart(" not in str(m.calls[0])
+
+
+# ------------------------------------------------------------------ 第 3 步：提示词与图表冒烟（[27]）
+def test_guide_reaches_both_agents(sample_path):
+    m = ScriptedChatModel(replies=[tool_call("result = 1"), "好"], calls=[])
+    analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    system = str(m.calls[0][0].content)
+    assert "chart(kind, df" in system and "plt.savefig(chart_path)" in system
+    wf = wf_model(["result = 1"])
+    analyze(sample_path, "q", chat_model=wf, llm_config=FAST)
+    from app.core.testing import prompt_text
+    codegen = [prompt_text(c) for c in wf.calls if "写一段 pandas 代码" in prompt_text(c)][0]
+    assert "chart（出图函数" in codegen and "chart(kind, df" in codegen
+
+
+def test_summarizer_sees_chart_titles(sample_path):
+    code = "s = df.groupby('region', as_index=False)['units'].sum()\nchart('bar', s, x='region', y='units', title='各地区销量')\nresult = 1"
+    wf = wf_model([code])
+    analyze(sample_path, "画图", chat_model=wf, llm_config=FAST)
+    from app.core.testing import prompt_text
+    assert "已生成 1 张图表：各地区销量" in prompt_text(wf.calls[-1])
+
+
+def test_react_tool_text_names_chart_titles(sample_path):
+    code = "s = df.groupby('region')['units'].sum()\nchart('pie', s, title='占比')\nresult = 1"
+    m = ScriptedChatModel(replies=[tool_call(code), "好"], calls=[])
+    analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
+    assert "（已生成 1 张图表：占比）" in str(m.calls[-1][-1].content)
+
+
+def test_chart_smoke_summary():
+    from app.eval.chart_smoke import summarize
+    def row(calls=0, plt=False, opt=0, png=0, internal=()):
+        return {"chart": {"chart_calls": calls, "used_plt": plt, "drew": bool(calls or plt), "options": opt,
+                          "pngs": png, "chart_errors": [], "chart_internal_errors": list(internal),
+                          "charts_discarded": 0}}
+    rows = [row(), row(calls=1, opt=1), row(plt=True, png=1), row(calls=1), row(plt=True), {"chart": None}]
+    s = summarize(rows, list("abcdef"))
+    assert s["出图率"] == {"drew": 4, "no_chart": ["d", "e"], "pass": False, "rule": s["出图率"]["rule"]}
+    assert s["chart_option"]["called"] == 2 and s["chart_option"]["fail"] == ["d"] and not s["chart_option"]["pass"]
+    s = summarize([row(calls=1, opt=1, internal=["x"])], ["a"])
+    assert s["出图率"]["pass"] and not s["chart_option"]["pass"] and s["internal_errors"] == ["a"]
+    s = summarize([row()], ["a"])                                  # 分母为 0：无样本
+    assert s["出图率"]["pass"] is None and s["chart_option"]["pass"] is None
+
+
+def test_chart_row_detects_plt_in_any_attempt(sample_path):
+    from app.eval.chart_smoke import chart_row
+    bad = "plt.bar([1], [1])\nresult = df['nope']"
+    res = analyze(sample_path, "q", chat_model=wf_model([bad], fixes=["result = 1"]), llm_config=FAST)
+    c = chart_row(res)
+    assert c["used_plt"] and c["drew"] and c["pngs"] == 0 and c["chart_calls"] == 0
