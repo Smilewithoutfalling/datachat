@@ -15,8 +15,9 @@ def _dataset(state, config):
 def execute(state, config=None):
     chart_path = new_chart_path()
     df = _dataset(state, config)
+    cap = {}
     result, chart, error = run_code(
-        state["code"], df, chart_path, timeout=state.get("exec_timeout", 20)
+        state["code"], df, chart_path, timeout=state.get("exec_timeout", 20), capture=cap
     )
 
     update = {
@@ -24,6 +25,13 @@ def execute(state, config=None):
         "result_text": "" if error else format_result(result),
         "chart_path": chart or "",
         "error": error or "",
+        # M13（[26]）：chart() 的结构化图与统计，字段含义见 sandbox.run_code 的 capture
+        "chart_options": cap.get("charts") or [],
+        "chart_calls": cap.get("chart_calls", 0),
+        "chart_errors": cap.get("chart_errors") or [],
+        "chart_internal_errors": cap.get("chart_internal_errors") or [],
+        "charts_discarded": cap.get("charts_discarded", 0),
+        "chart_warnings": cap.get("chart_warnings") or [],
     }
     # 只记第一次执行的报错，用来区分"一次写对"与"reviewer 修好"
     if error and not state.get("initial_error") and state.get("attempts", 0) == 0:
