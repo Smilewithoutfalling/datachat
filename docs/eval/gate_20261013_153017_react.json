@@ -63,10 +63,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s02",
@@ -94,10 +94,10 @@
    "match": null,
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 2,
+   "reason": "答 4373，gold 4372：把缺失哨兵'未登记'当成一个客户（B65）",
+   "guessing": false
   },
   {
    "id": "s03",
@@ -133,10 +133,10 @@
    "unverified_numbers": [
     "5,940"
    ],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s04",
@@ -170,10 +170,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "912,621 与 gold 一致；同时给了不含退货单的 927,162 并说明口径，主结论明确",
+   "guessing": false
   },
   {
    "id": "s05",
@@ -201,10 +201,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s06",
@@ -234,10 +234,10 @@
    "unverified_numbers": [
     "541,911"
    ],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s07",
@@ -314,10 +314,10 @@
    "match": "relaxed",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "21 国集合与 gold 一致（比较器 relaxed：Series 索引）",
+   "guessing": false
   },
   {
    "id": "s08",
@@ -352,10 +352,10 @@
    "match": "relaxed",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "前 5 国家及顺序与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "s09",
@@ -399,10 +399,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s10",
@@ -430,10 +430,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s11",
@@ -491,10 +491,10 @@
    "unverified_numbers": [
     "70%"
    ],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s12",
@@ -522,10 +522,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "24.93% 与 gold 一致，识别了'未登记'是缺失",
+   "guessing": false
   },
   {
    "id": "s13",
@@ -559,10 +559,10 @@
    "match": "scaled",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "84.0% 与 gold 一致（比较器 scaled：返回 0.84 比例）",
+   "guessing": false
   },
   {
    "id": "s14",
@@ -589,10 +589,10 @@
    "match": "refusal",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "s15",
@@ -619,10 +619,10 @@
    "match": "refusal",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "m01",
@@ -712,10 +712,10 @@
     "11.7%",
     "66.6%"
    ],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m02",
@@ -749,10 +749,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m03",
@@ -829,10 +829,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m04",
@@ -866,10 +866,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m05",
@@ -903,10 +903,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m06",
@@ -934,10 +934,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m07",
@@ -970,10 +970,10 @@
    "match": "strict",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m08",
@@ -1010,10 +1010,10 @@
    "unverified_numbers": [
     "2.3"
    ],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "前 5 城市及顺序与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "m09",
@@ -1040,10 +1040,10 @@
    "match": "refusal",
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "m10",
@@ -1070,10 +1070,78 @@
    "match": null,
    "warnings": [],
    "unverified_numbers": [],
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 6,
+   "reason": "应拒答（无成本字段）。首句说明无法计算利润，但随后按'售价+运费'给出 73 类收入表，result 不是拒答（⑥，B63；预注册口径判错）",
+   "guessing": false
   }
- ]
+ ],
+ "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+ "verdict": {
+  "single": "14/15",
+  "multi": "9/10",
+  "failures": 2,
+  "failure_distribution": {
+   "2": 1,
+   "6": 1
+  },
+  "execution_success": "25/25",
+  "guessing": "0/25",
+  "profile": "m13",
+  "thresholds": {
+   "kind": "regression",
+   "source": "DEVLOG [24] 预登记，[25] 修正（S 2026-10-14 复核）：阶段 5 改 CHART_GUIDE 后的回归",
+   "rule": "错题必须全部落在 allowed_fail 里，否则逐题列为回归；allowed_fail 里的题若答对，列为意外答对，记录但不改门槛",
+   "agents": {
+    "react": {
+     "single": {
+      "allowed_fail": [
+       "s02"
+      ],
+      "why": {
+       "s02": "② 缺失哨兵（B65，阶段 7）"
+      }
+     },
+     "multi": {
+      "allowed_fail": [
+       "m10"
+      ],
+      "why": {
+       "m10": "⑥ 拒答失当（B63），模型波动"
+      }
+     }
+    },
+    "workflow": {
+     "single": {
+      "allowed_fail": [
+       "s02",
+       "s04",
+       "s09",
+       "s12"
+      ],
+      "why": {
+       "s02": "② 缺失哨兵",
+       "s04": "② 合计行",
+       "s09": "③ 取消单未冲减",
+       "s12": "② 缺失哨兵"
+      }
+     },
+     "multi": {
+      "allowed_fail": [],
+      "why": {}
+     }
+    }
+   }
+  },
+  "thresholds_sha256": "4992a4016355",
+  "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+  "labels_final": false,
+  "single_min": "14/15",
+  "single_regressions": [],
+  "single_unexpected_pass": [],
+  "multi_min": "9/10",
+  "multi_regressions": [],
+  "multi_unexpected_pass": [],
+  "regression_verdict": "无回归"
+ }
 }
