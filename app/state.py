@@ -16,6 +16,12 @@ class AgentState(TypedDict, total=False):
     error: str           # Executor 的报错信息（空字符串表示成功）
     initial_error: str   # 第一次执行的报错（用于统计 reviewer 修复率）
     chart_path: str      # 若生成图表，保存路径
+    chart_options: list  # chart() 出的结构化图（ECharts spec，[26]）；以下 chart_* 见 sandbox.run_code 的 capture
+    chart_calls: int
+    chart_errors: list
+    chart_internal_errors: list
+    charts_discarded: int
+    chart_warnings: list
     answer: str          # Summarizer 产出的自然语言结论
     attempts: int        # 已重试次数
     max_attempts: int    # 最大重试次数
