@@ -865,7 +865,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 下一步
 - 阶段 5 开始：先定图表库与 M13 结构化图表数据格式。
 
-## [22] 2026-10-14 · 阶段 5 第 1 步：M13 图表格式、白名单、builder，静态覆盖率 · commit <待提交>
+## [22] 2026-10-14 · 阶段 5 第 1 步：M13 图表格式、白名单、builder，静态覆盖率 · commit 89a9b05（PR #22）
 
 ### 决定（S 的 M13 方案 v3，与 H 两轮讨论后定稿）
 - 不引入 pyecharts。前端用 ECharts；后端只产出 option JSON，样式（主题、开关、面板 DIY）全在前端。
@@ -887,7 +887,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 ### 静态覆盖率（方向性，正则判断，不重放）
 - 35 份报告、955 份画图代码（同一题跨多轮重复很多；去重后 109 道题）。
 - 按样本：五类完整覆盖 899/955 = 94%；按题（多数票）：98/109 = 90%。两种口径都达到 ≥ 90%，v1 就做这五类。
-- 缺口：直方图 6 题（8 份）；散点 + 趋势线混画 4 题（corr_004 等，v1 一次只出一种图型）；双轴 2 题（ts_010、ord_020）；热力图（相关矩阵）少数几次。
+- 缺口（口径有误，把"份"当"题"报了，以 [23] 为准）：直方图 6 题（8 份）；散点 + 趋势线混画 4 题（corr_004 等，v1 一次只出一种图型）；双轴 2 题（ts_010、ord_020）；热力图（相关矩阵）少数几次。
 - 处理：直方图不加图型，提示词里写"先 pd.cut / np.histogram 分箱，再 chart('bar')"；双轴、热力图、散点加趋势线走 plt 退路。第 4 步重跑闸门时看实际情况。
 - 局限：样本全部来自自造评测集和闸门，题型分布不代表真实用户；正则可能误判 stacked（如 subplots_adjust(bottom=)），不影响覆盖判定。
 
@@ -899,4 +899,58 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ### 下一步
 - 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位，result.charts 升级为 [{png, option}]（改 result.to_record 与 server/app.py 的消费点）。
+
+## [23] 2026-10-14 · 阶段 5 第 1 步复核修正（S 复核 [22]）· commit <待提交>
+
+### 复核结论（S 实跑脚本）
+- 955 / 899 / 94%、45 项测试、plan.md 改动、docs/eval 已在主干：属实。
+- [22] 的头条"98/109"用仓库里的脚本复现不出来（脚本只打印按样本的数字）；缺口数字把"份"当"题"报了。均已修，见下。
+
+### 改动
+- scripts/chart_coverage.py
+  - 加 `--by-case`：按题多数票统计并列出未覆盖的题，平票单列 tie。
+  - 原来的 mixed 拆成三类（S 指出混了两件事，人工看过后实际是三件）：multi_figure（多张独立的图，按 plt.figure / subplots / close 分段判定，v1 每次最多 4 张 → 覆盖）、degraded（折线 + 少量 scatter 高亮点，列表字面量或 zorder → 主图能出、高亮点丢 → 覆盖但降级）、overlay（同一张图叠两种图型，如散点 + 趋势线 → 未覆盖）。
+  - stacked 注明只统计、不参与判定（堆叠是前端开关）。
+  - tests/test_chart_coverage.py 3 项钉住判定规则。
+- app/tools/charts.py
+  - 缺失类目（pd.NA / NaN / None / NaT）统一显示为"（缺失）"。原来 pd.NA 会变成字符串 '<NA>'，被当成一个真实类目，和闸门 class 2 抓到的"缺失值被当有效取值"是同一类问题。饼图跳过缺失值的扇区。
+  - 错误消息里的列名只清控制字符、限长，不转义（规则见 THREAT_MODEL §2.3）。
+  - 白名单只保留 builder 实际产出的键：删了 stack / smooth / label / itemStyle / title.textStyle / axisLabel.rotate / areaStyle.opacity，等有消费方再加。radius / center 是饼图在用的，保留。
+  - 新增 spec.kind 与 series[].type、areaStyle 的一致性校验（area = line + areaStyle）。
+  - 注释写明 validate_spec 的定位：v1 里只校验 builder 自己的产出，防的是 builder 的 bug。**它不是 v1 的安全边界**：模型拿不到 option（chart() 返回 None），v1 的边界是 chart() 的签名（只能传图型、列名和标题字符串）；v2 层 2 的 patch 才是它的第一个外部输入。[22] 里把白名单写成安全措施，说法过头了。
+- tests/test_charts.py 45 → 55 项：
+  - 脏数据：pd.NA / NaN / None 类目、nullable string / Int64、GBK 中文列名（经 csv_io.read_csv 读入）、合并表头（多级列名报错）、合计行和"未登记"原样出图。
+  - kind 不一致。
+  - 错误消息里的列名：原样保留，但去掉控制字符。
+  - HTML 用例改名为 test_builder_passes_html_payload_through_unescaped，注释写明它只证明载荷能到达前端。
+- docs/THREAT_MODEL.md 新增 §2.3（T9）：后端不转义，渲染边界转义；逐个面写明怎么兜（canvas / richText / 白名单 / 错误、警告、结论、日志在 UI 层按纯文本渲染），第 5 步的断言打在渲染后的 DOM 上，至少测 tooltip、错误消息、结论文本三个面。
+
+### 覆盖率（更正 [22]，`python scripts/chart_coverage.py --by-case` 可复现）
+- 按样本：严格 899/955 = 94%；算上多图和降级 909/955 = 95%。
+- 按题（109 题，多数票）：严格 98/109 = 90%；算上多图和降级 100/109 = 92%。
+- 未覆盖 9 题：
+  - 直方图 5 题：emp_004、emp_012、emp_025、inv_024、ord_028。
+  - 散点 + 趋势线 2 题：corr_004、emp_015。
+  - 双轴 1 题：ts_010。ord_020 按多数票算覆盖。
+  - 平票 1 题：ord_016（柱状图 1 次，热力图 1 次）。
+- 降级 2 题：inv_008、inv_018（折线 + 高亮点）。S 原先算进"散点 + 趋势线 4 题"，看代码后发现是折线加 scatter 标点。
+- 仍然达到 ≥ 90%，v1 就做五类。处理方式不变：直方图写进提示词（先分箱，再画 bar）；散点 + 趋势线、双轴、热力图走 plt。
+
+### 已定语义（第 2 步照此实现）
+- **exec 失败时，槽位里已有的 option 一律丢弃，不随结果返回。** S 的建议是保留并标 exec_failed、前端降级显示，我没有采纳。理由：
+  - 与现状一致。sandbox.py:229-230 在 exec 出错时已经不返回 PNG，option 也应该同样处理。
+  - 和 S 已经接受的论证同构："exec 内失败，保留可能不完整的产物比丢弃更危险"，图是最强的视觉背书。
+  - ReAct 失败后会重跑，图会在成功的那次重新出来。
+  - 丢弃的张数写进 exec 事件（charts_discarded），可追溯。
+- **truncated = True 必须在 UI 可见。** worker 写进 warnings（"图表只显示前 N 个点"），前端在图上加角标。不做静默降级。
+- **chart_option 链路的口径**（删掉 v3 §8.3 的括号）：分母是调了 chart() 的题，分子是产出合格 option 的题。ChartError（模型选错列、参数冲突）单独列出，计为未通过；非 ChartError 的异常（我们自己的 bug）单列并报警，不算模型的错，但必须清零。
+
+### 不做的（S 建议过，理由记下）
+- builder 不识别"合计""未登记"这类行：同名的真实类目可能存在，猜错会静默删数据。清洗归上游代码 / 数据层（B65）。单测钉住的是"原样出图、不删行"。
+
+### 测试
+- 3.12 全量通过（见下次提交说明）；沙箱里没有 3.11，S 本地跑 tests/test_charts.py 和 tests/test_chart_coverage.py。
+
+### 下一步
+- 第 2 步：worker 注入 chart()、out 加 chart_error 与 option 槽位、按上面的语义丢弃或告警；result.charts 升级为 [{png, option}]，同时改 result.to_record 和 server/app.py:137-138。
 
