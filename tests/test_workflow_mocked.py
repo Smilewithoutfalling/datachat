@@ -74,4 +74,4 @@ def test_reviewer_prompt_has_plan_and_chart_guide(sample_path):
     _run(sample_path, client)
     review = [t for t in seen if "请修正它" in t][0]
     assert "计划：按地区求和后画柱状图" in review
-    assert "绘图要求" in review and "ax.set_title" in review
+    assert "绘图要求" in review and "chart(kind, df" in review and "plt.savefig(chart_path)" in review

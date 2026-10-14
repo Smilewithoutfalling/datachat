@@ -313,7 +313,19 @@ class EvalReport:
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
             "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
+            "chart_smoke": self.chart_smoke(),
         }
+
+    def chart_smoke(self) -> dict:
+        """M13 图表两条 + has_chart 题全部出图（[27]），与准确率分开报。"""
+        from app.eval.chart_smoke import summarize
+        ids = [r["case"].id for r in self.results]
+        out = summarize([{"chart": r.get("chart_info")} for r in self.results], ids)
+        miss = [r["case"].id for r in self.results if r["case"].has_chart and not (
+            (c := r.get("chart_info")) and (c["options"] or c["pngs"]))]
+        n = sum(1 for r in self.results if r["case"].has_chart)
+        out["has_chart"] = {"n": n, "missing": miss, "pass": not miss}
+        return out
 
     def to_json(self, path: str, extra: dict | None = None) -> None:
         """写出带 SHA 的报告：汇总 + 每题明细（结果对象只存文本预览）。"""
@@ -330,6 +342,7 @@ class EvalReport:
                 "tokens": r.get("tokens"), "code": r.get("code"),
                 "expected": str(r.get("expected"))[:500], "actual": str(r.get("actual"))[:500],
                 "answer": (r.get("answer") or "")[:2000],
+                "chart": r.get("chart_info"),
                 # 可还原的结构化结果：比较器改了之后可以用 run_eval.py --rescore 离线重新打分（B26）
                 "expected_obj": dump_obj(r.get("expected")),
                 "actual_obj": dump_obj(r.get("actual")) if r.get("executed") else None,
@@ -367,6 +380,12 @@ class EvalReport:
             print(f"  平均耗时: {o['avg_duration_s']:.2f} 秒/题")
         tok = o["avg_tokens"]
         print(f"  平均 token: {'N/A' if tok is None else format(tok, '.0f')}")
+        cs = s["chart_smoke"]
+        ok = lambda b: "无样本" if b is None else ("✓" if b else "✗")
+        print(f"  图表 出图率 {ok(cs['出图率']['pass'])}  无图 {cs['出图率']['no_chart']}（画图 {cs['出图率']['drew']} 题）"
+              f"   chart_option {ok(cs['chart_option']['pass'])}  {cs['chart_option']['ok']}/{cs['chart_option']['called']}"
+              f"   has_chart {ok(cs['has_chart']['pass'])}  缺 {cs['has_chart']['missing']}"
+              + (f"   ⚠ 内部错误 {cs['internal_errors']}" if cs["internal_errors"] else ""))
 
         print("\n  📂 分类指标")
         print(f"  {'分类':<10} {'用例数':<6} {'正确率':<9} {'执行成功率':<11} {'修复率':<8}")

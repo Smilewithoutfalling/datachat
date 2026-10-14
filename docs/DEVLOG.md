@@ -1041,7 +1041,7 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 - S 终审两份基线标注、确认 workflow 多表 10/10；（建议）在当前 master 上重跑两个 Agent 作新基线。
 - 然后第 2 步：worker 注入 chart()（charts_discarded 同时进 warnings），再第 3 步改 CHART_GUIDE。
 
-## [26] 2026-10-14 · 阶段 5 第 2 步：沙箱 chart()、option 槽位、丢弃与告警、charts 条目化 · commit <待提交>
+## [26] 2026-10-14 · 阶段 5 第 2 步：沙箱 chart()、option 槽位、丢弃与告警、charts 条目化 · commit 7d21d63（PR #26）
 
 ### 做了什么（不改提示词，模型此时还不知道 chart() 存在；第 3 步才改 CHART_GUIDE）
 - app/tools/charts.py
@@ -1072,3 +1072,31 @@ tests/test_server.py 13 项通过（新增 1 项、加 1 条断言）。全量�
 
 ### 下一步
 - 第 3 步：改 CHART_GUIDE（优先 chart()，五类以外走 plt；直方图先分箱再 chart('bar')），按 [25] 的 m13 门槛重跑闸门，图表两条另报。改之前，建议 S 先在当前 master 上重跑两个 Agent 作新基线（[25]）。
+
+## [27] 2026-10-14 · 阶段 5 第 3 步：绘图提示词改为优先 chart()，图表冒烟进报告 · commit <待提交>
+
+S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提示词。归因依据仍是 153017（react）与 142736（workflow）两份历史报告：[22]–[26] 没有改过提示词，它们和当前 master 改提示词之前的行为等价，区别只在网关与模型本身的波动。
+
+### 提示词改动（这是本条唯一影响闸门的部分）
+- CHART_GUIDE（app/tools/plotting.py）重写：
+  - 优先 `chart(kind, df, x=, y=, series=, title=)`，列出五种 kind 各自的用途；df 传算好的汇总表；排序、Top-N、分箱都先用 pandas 做好；直方图先 pd.cut 分箱计数，再用 'bar'；多列对比用 y 列表，长表用 series（先 groupby 聚合）；title 写清指标与单位；配色、横向、堆叠、标签归界面；chart() 无返回值、出错不打断代码、每次最多 4 张。
+  - 五种图型表达不了时（双轴、箱线、热力、多子图）才用 plt，旧版的 plt 要求压缩成一条保留（中文标题/轴标签、数值标注、按位置标注字符串横轴、savefig(chart_path)）。
+  - 同一张图不要既用 chart() 又用 plt。
+- 工作流 codegen / reviewer："pd、np、plt 已就绪"加上 chart；reviewer 的"原代码若画了图"注明 chart() 或 plt。
+- ReAct：工具说明的出图一行改成优先 chart()；系统提示"请务必画图并保存"→"请务必出图"。
+- summarizer 与 ReAct 工具返回：chart() 出了图时告诉模型"已生成 N 张图表：<标题>"，让结论能说明图表展示了什么（之前只认 PNG 路径）。
+
+### 图表冒烟进报告（与准确率分开，不影响 regression_verdict）
+- 新增 app/eval/chart_smoke.py：
+  - chart_row(res)：单题的 chart_calls、used_plt（静态扫描本次所有尝试过的代码）、options / pngs 张数、chart_errors、chart_internal_errors、charts_discarded。
+  - summarize(rows)：出图率（调了 chart() 或 plt 的题里无图的题，≤1 为通过）、chart_option 链路（调了 chart() 的题都要产出合格 option，内部错误必须为 0）。
+- scripts/gate/run_gate.py：每题写 `chart`，报告顶层写 `chart_smoke`，跑完打印一行；`--verdict` 对有 chart 字段的报告附 `chart_smoke`（旧报告没有就不附）。
+- run_eval：每题写 `chart`，汇总里加 `chart_smoke`，并加上 has_chart 三题（agg_006 等）是否全部出图；print_summary 打印一行。
+
+### 需要 S 跑的（预登记）
+- 两个 Agent 各跑一次闸门：`python scripts/gate/run_gate.py --agent react` / `--agent workflow`，人工标注后用 `--verdict … --profile m13` 判定。门槛与允许失败名单按 [25] 的 thresholds.json，不因本次改动调整。
+- 图表另报：闸门题没有要求画图的题，所以两条的分母可能很小甚至为 0，分母为 0 时这两条记"无样本"，不算通过也不算失败；has_chart 三题用 `python run_eval.py` 跑（两个 Agent 各一次），三题必须全部出图。
+- 名单外出现新错题时，先看那题的代码有没有调用 chart() 或受提示词影响，再决定是回退提示词，还是记作波动。
+
+### 测试
+- tests/test_chart_slot.py 加 6 项：两个 Agent 都拿到新 CHART_GUIDE、summarizer 看得到图表标题、ReAct 工具文本带标题、冒烟汇总口径、plt 在失败尝试里也算"画过图"、没用 chart() 时工具文本不变。test_workflow_mocked / test_eval_cases 断言随之更新。

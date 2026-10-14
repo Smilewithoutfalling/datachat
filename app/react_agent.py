@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.config import ensure_dirs
-from app.core.result import chart_items, format_result
+from app.core.result import chart_items, chart_note, format_result
 from app.tools.dataset import access_rule, copy_data, is_multi, load_data, describe_data
 from app.tools.persist import new_chart_path
 from app.tools.plotting import CHART_GUIDE
@@ -128,10 +128,10 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         """在已加载的数据表 df（pandas DataFrame）上执行 Python/pandas 代码并返回结果。
 
         约定：
-        - df 已就绪，不要重新读文件；pd、np、plt 已就绪，无需 import。
+        - df 已就绪，不要重新读文件；pd、np、plt、chart 已就绪，无需 import。
         - 把答案赋值给变量 result。
         - print() 的输出也会返回给你（过长会截断），可以用来查看中间结果。
-        - 需要图表时用 plt 绘制并调用 plt.savefig(chart_path) 保存。
+        - 需要图表时优先用 chart(kind, df, x=, y=, series=, title=) 出图；五种图型以外才用 plt 并 plt.savefig(chart_path)。
         返回执行结果文本或报错信息（报错时请据此修正代码后重试）。
         """
         chart_path = new_chart_path()
@@ -160,7 +160,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         if chart:
             msg += f"\n（已生成图表并保存到 {chart}）"
         if options:
-            msg += f"\n（chart() 已生成 {len(options)} 张图表）"
+            msg += "\n" + chart_note(None, options)
         if chart_errs:
             msg += "\nchart() 未出图：" + "；".join(chart_errs[:4])
         return msg
@@ -190,7 +190,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "仍然调用一次 run_python_on_data，代码为 result = '无法回答：<一句话原因>'（原因说明缺什么，"
         "如 '无法回答：数据中没有成本字段'），最终结论的第一行也必须原样以 '无法回答：' 开头"
         "（不要写成'无法直接回答''无法计算'等其他说法）。"
-        "如果问题需要图表，请务必画图并保存。\n\n"
+        "如果问题需要图表，请务必出图。\n\n"
         f"{CHART_GUIDE}\n\n"
         "最终用中文给出简洁、直接的结论；结论里的数字必须来自工具返回的 result 或 print 输出，不要估算或编造；"
         "若已生成图表，说明图表展示了什么。"

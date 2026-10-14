@@ -1,4 +1,5 @@
 from app.core.llm import node_llm
+from app.core.result import chart_note
 
 _OK_PROMPT = """根据分析结果，用中文简洁、直接地回答用户问题。
 
@@ -23,7 +24,7 @@ def summarize(state, config=None):
     if state.get("error"):
         msg = _FAIL_PROMPT.format(question=state["question"], error=state["error"])
     else:
-        note = f"（已生成图表 {state['chart_path']}）" if state.get("chart_path") else ""
+        note = chart_note(state.get("chart_path"), state.get("chart_options") or [])
         text = state.get("result_text")
         if text is None:
             text = str(state.get("result"))

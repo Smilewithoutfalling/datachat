@@ -6,6 +6,7 @@
 - 每题记录耗时与 token；LLM/基础设施失败（error_kind="llm"）单独计数，不与"代码写错"混在一起。
 """
 from app.core import analyze
+from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, results_equal
 from app.tools.csv_io import read_csv
@@ -94,7 +95,7 @@ class EvalRunner:
             "initial_error": res.initial_error is not None,
             "infra_error": res.error_kind in ("llm", "dataset"),
             "error": res.error, "error_kind": res.error_kind,
-            "chart": res.chart_path, "duration_s": res.timings.get("total"),
+            "chart": res.chart_path, "chart_info": chart_row(res), "duration_s": res.timings.get("total"),
             "tokens": res.usage.total_tokens if res.usage.reported else None,
         })
 

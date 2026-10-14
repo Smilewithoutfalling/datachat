@@ -84,6 +84,22 @@ def chart_items(png: Optional[str], options: list) -> list:
     return items
 
 
+def chart_note(png: Optional[str], options: list) -> str:
+    """给 summarizer 的图表提示：PNG 路径，以及 chart() 出的图的标题（没有标题时写图型）。"""
+    parts = []
+    names = []
+    for o in options or []:
+        try:
+            names.append(o["option"]["title"]["text"])
+        except (KeyError, TypeError):
+            names.append(str(o.get("kind", "图表")) if isinstance(o, dict) else "图表")
+    if names:
+        parts.append(f"已生成 {len(names)} 张图表：" + "、".join(names))
+    if png:
+        parts.append(f"已生成图表 {png}")
+    return "（" + "；".join(parts) + "）" if parts else ""
+
+
 def last_png(charts: list) -> Optional[str]:
     for c in reversed(charts or []):
         if isinstance(c, dict) and c.get("png"):
