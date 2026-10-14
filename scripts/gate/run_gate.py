@@ -78,6 +78,7 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
     from app.core import analyze
     from app.core.llm import LLMConfig
     from app.core.result import format_result
+    from app.eval.chart_smoke import chart_row, summarize as chart_summary
     from app.eval.report import git_sha, git_sha_note, run_metadata
     from questions import QUESTIONS
 
@@ -102,6 +103,7 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
             "tokens": res.usage.total_tokens if res.usage.reported else None,
             "auto_correct": match is not None, "match": match,
             "warnings": res.warnings, "unverified_numbers": res.unverified_numbers,
+            "chart": chart_row(res),
             "human_correct": None, "failure_class": None, "reason": "", "guessing": None,
         })
         mark = "✓" if match else ("✗" if res.executed else "!")
@@ -116,12 +118,16 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
         "auto_correct": sum(r["auto_correct"] for r in rows),
         "unverified_numbers": sum(bool(r["unverified_numbers"]) for r in rows),
         "note": "auto_correct 只是比较器参考；结论以人工 human_correct 为准（--verdict）。",
+        "chart_smoke": chart_summary(rows, [r["id"] for r in rows]),   # M13 图表两条，与准确率分开报
         "cases": rows,
     }
     path = os.path.join(ROOT, "docs", "eval", f"gate_{datetime.now():%Y%m%d_%H%M%S}_{agent}.json")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(out, f, ensure_ascii=False, indent=1, default=str)
     print(f"\n执行成功 {out['execution_success']}/{out['n']}，比较器参考判对 {out['auto_correct']}/{out['n']}")
+    cs = out["chart_smoke"]
+    print(f"图表：出图率 无图 {cs['出图率']['no_chart']}/{cs['出图率']['drew']} 题画图；"
+          f"chart_option {cs['chart_option']['ok']}/{cs['chart_option']['called']}；内部错误 {cs['internal_errors']}")
     print(f"报告：{os.path.relpath(path, ROOT)}  —— 下一步人工填 human_correct / failure_class / reason")
     return path
 
@@ -157,6 +163,9 @@ def verdict(path: str, profile: str) -> dict:
         out.update(_verdict_phase35(prof, s_ok, s_n, m_ok, m_n, fails, dist))
     else:
         out.update(_verdict_regression(prof, data.get("agent"), rows))
+    if any(r.get("chart") for r in rows):             # [27] 起的报告才有；与准确率判定分开，不影响 regression_verdict
+        from app.eval.chart_smoke import summarize as chart_summary
+        out["chart_smoke"] = chart_summary(rows, [r["id"] for r in rows])
     data["verdict"] = out
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, ensure_ascii=False, indent=1, default=str)
