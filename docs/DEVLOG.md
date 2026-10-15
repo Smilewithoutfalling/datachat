@@ -1155,7 +1155,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - 留痕：workflow 多表门槛由 [24] 预登记的 ≥9/10 收严到 10/10（`thresholds.json` 的 `m13.agents.workflow.multi.allowed_fail=[]`，[25] 实现、S 10-14 确认），依据 [28] 实测 10/10。[24] 正文不改，以本条为准。
 - 未做（等 S 定案）：A1 的"名单外错题自动复跑 2 次，2 次都对记波动、有 1 次错记回归"规则。现行 `m13` 的 `allowed_fail` 是逐题登记的，`m09`/`m10` 这类会翻的题会让参照基线自己报"有回归"。S 不同意放宽名单（会把 B70 的效果盖掉），改走自动复跑 —— 规则定下来后随下一个闸门 PR 落地。S 已定（10-15）：该规则**取代** [28] 的 ≥4/5；复跑报告存原始 answer / result_text 并人工标注，不只存布尔（B68 前车之鉴）；超时、网关错误归为无效复跑，最多补跑 1 次，不计答错；verdict 注明假阴性率 ≤25%（真错误率 p=0.5 时）。
 
-## [31] 2026-10-15 · 阶段 5 F0：前端骨架、同源托管、token 流转、CSP、feedback 表、CI · commit <待提交>
+## [31] 2026-10-15 · 阶段 5 F0：前端骨架、同源托管、token 流转、CSP、feedback 表、CI · commit 4beb924（PR #32）
 
 当前阶段：**阶段 5 前端，F0 完成，下一步 F1**（数据集含预览、会话、设置）。方案：`docs/roadmap/phase5-frontend.md`（v2.1，随本条入库）。[30] 的 SHA 已回填 4497d2b。
 
@@ -1179,3 +1179,31 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 验证：pytest 587 passed（3.12；[30] 后 578 + test_web 9）；`tests/test_web.py` 9 条；vitest 12；Playwright 5（沙箱本地跑通）。
 
 未做 / 下一步：F1 的 `GET /datasets/{id}/preview`；F2 的 cancel（按 v2.1：CAS + finally CAS + `done_seen` + 分流 cancelled）和 `gen_ui_types.py`。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
+
+## [32] 2026-10-15 · 阶段 5 F1：数据集预览、会话、设置 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F1 完成，下一步 F2**（SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types）。[31] 的 SHA 已回填 4beb924（PR #32，CI tests 38694679388 含 web job、sidecar 38694679138 均绿）。
+
+后端（`app/server/app.py`）：
+1. **`GET /datasets/{id}/preview?rows=20`**：rows ∈ 1–100（越界 400）。每个非字典文件一张表，按文件名排序；用与分析时**同一个** `read_csv_with_encoding`（同一编码探测、同一 read_csv），即"用户看到的就是模型拿到的"。返回 `{name, filename, encoding, total_rows, total_columns, columns, dtypes, rows}`；单元格缺失 → `null`，其余 `str()` 后超 200 字截断加"…"，不做 HTML 处理（前端按文本渲染，T9）。一张表读失败只在该表返回 `error`，不影响其他表；字典文件列在 `dicts`。
+   - 已知代价：预览读整表再取 head（与详情接口一样），大文件会慢；量到再说（可加按 sha256 的缓存或 nrows 只读头部——后者会让编码探测和 dtype 与分析时不一致，不默认采用）。
+2. **`PATCH /sessions/{id}` `{title}`**：≤200 字（422），清控制字符与双向文本控制符后截到 120 字。
+3. **设置加 `timeout`**（单次请求超时，秒，5–600，越界 422）：存 Setting 表，`llm_config()` 转 float；库里的坏值退回环境变量 / 默认 60，不让分析整个起不来。`GET /settings` 返回生效值。`SettingsIn` 的 model / base_url 加长度上限。PUT 里空串 = 清除，回到环境变量 / 默认（原行为）。
+
+前端（`ui/web/src`）：
+- `types.ts`（接口形状；F2 起事件类型改由 gen_ui_types 生成）、`client.ts`（各接口薄封装，全部经 `Api`）。
+- `views/Shell.tsx`：左栏 上传（多选 CSV，可带 *.dict.csv）、数据集列表、会话列表、设置；没设 Key 时首屏直接进设置页，其他页顶部提示。
+- `views/DatasetView.tsx` + `PreviewTable.tsx`：摘要、文件与大小、字典文件、多表切换、前 20 行预览（表头带 dtype；缺失值显示灰色"空"，与字符串 "null" 区分）；选工作流 / ReAct 新建会话；删除。
+- `views/SessionView.tsx`：标题就地改名（回车 / 失焦提交）、删除、历史消息纯文本 + 状态徽标（失败 / 已取消 / 分析中）。事件流、图表、提问、停止、👍👎 是 F2 / F3。
+- `views/SettingsView.tsx`：Key 只写不读（password 输入，保存后立即清空；显示来源 环境变量 / 钥匙串；env 优先时给说明；只有钥匙串来源才给删除）；model、base_url、超时（前端先拦 5–600，后端再拦）。
+- 删除一律"点两次确认"（不用 window.confirm：WebView 与 Playwright 对原生对话框处理不一致）。
+- 样式 `styles.css`（基础样式；4 套主题在 F3）。
+
+测试：
+- `tests/test_web_f1.py` 7 条：预览与 `read_csv` 逐格一致；rows 边界 / 401 / 404；GBK + 缺失 + 注入串原样 + 超长截断；多表 + 字典 + 一张空文件只坏一张；改名清控制字符 / 422 / 404 / 401；超时设置与越界、只改 model 不动 timeout；库里坏值回退 60。
+- vitest 17（+5）：`views/views.test.tsx` 预览与消息里的注入串只作文本（无 img、`window.__pwned` 未定义）、"空"与 "null" 区分、改名走 PATCH 并刷新左栏、无 Key 进设置页且保存后输入清空、页面文本不含 Key、超时越界不发请求、删除要点两次；`fakeBackend.ts` 测试用路由。
+- Playwright 6（+1）`e2e/f1.spec.ts`：在后端托管的 dist（带 CSP）上走 设置超时 → 上传含注入串的 CSV + 字典 → 预览按文本渲染、tbody 无 img → 建 ReAct 会话 → 改名 → 刷新后会话名与超时都在；全程无 CSP 违规。
+
+验证：pytest 594 passed（3.12；587 + test_web_f1 7）；vitest 17；Playwright 6（沙箱本地）；lint、build（check-dist 0 内联）通过。
+
+未做 / 下一步：F2。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
