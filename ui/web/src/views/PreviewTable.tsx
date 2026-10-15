@@ -14,6 +14,8 @@ export function PreviewTable({ table }: { table: T }) {
       <p className="muted">
         {table.filename}：共 {table.total_rows} 行 × {table.total_columns} 列，编码 {table.encoding}
         {table.rows.length < table.total_rows ? `，显示前 ${table.rows.length} 行` : ""}
+        {table.truncated_cells > 0 ? `；${table.truncated_cells} 个单元格超 200 字，已截断（末尾带 …）` : ""}
+        {table.bidi_stripped > 0 ? `；${table.bidi_stripped} 处方向控制符已从预览中去掉（不影响分析）` : ""}
       </p>
       <div className="table-scroll">
         <table>
