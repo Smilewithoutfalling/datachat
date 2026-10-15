@@ -89,10 +89,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s02",
@@ -130,10 +130,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 2,
+   "reason": "答 4373，gold 4372：'未登记'当成一个客户（B65）（与基线报告同答）",
+   "guessing": false
   },
   {
    "id": "s03",
@@ -177,10 +177,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s04",
@@ -224,10 +224,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 2,
+   "reason": "答 6,089,071 = 非英国净数量 912,621 + 合计行 5,176,450：合计行当数据行（B65）（与基线报告同答）",
+   "guessing": false
   },
   {
    "id": "s05",
@@ -265,10 +265,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s06",
@@ -306,10 +306,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 2,
+   "reason": "答 4951，gold 1036：两行表头被模型手工改名，把'Unnamed: 3'（数量）当成单价；142736 同题用 df.iloc[0] 作表头答对。代码未出图，与 CHART_GUIDE 无直接关系，倾向模型波动。归因复跑（S，2026-10-14，同一 commit 063f242 单题重跑）：通过，按预登记记为波动",
+   "guessing": true
   },
   {
    "id": "s07",
@@ -396,10 +396,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s08",
@@ -444,10 +444,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "s09",
@@ -501,10 +501,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 3,
+   "reason": "答 PAPER CRAFT , LITTLE BIRDIE：80,995 件整单取消未冲减（与基线报告同答）",
+   "guessing": false
   },
   {
    "id": "s10",
@@ -542,10 +542,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s11",
@@ -611,10 +611,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "s12",
@@ -652,10 +652,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
-   "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "human_correct": false,
+   "failure_class": 2,
+   "reason": "答 0%：没认出'未登记'是缺失（B65）（与基线报告同答）",
+   "guessing": false
   },
   {
    "id": "s13",
@@ -699,10 +699,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "s14",
@@ -739,10 +739,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "s15",
@@ -779,10 +779,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "m01",
@@ -877,10 +877,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m02",
@@ -924,10 +924,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m03",
@@ -1014,10 +1014,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "m04",
@@ -1061,10 +1061,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 alt:rounded）",
+   "guessing": false
   },
   {
    "id": "m05",
@@ -1108,10 +1108,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m06",
@@ -1149,10 +1149,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m07",
@@ -1195,10 +1195,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 strict）",
+   "guessing": false
   },
   {
    "id": "m08",
@@ -1243,10 +1243,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 relaxed）",
+   "guessing": false
   },
   {
    "id": "m09",
@@ -1283,10 +1283,10 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   },
   {
    "id": "m10",
@@ -1323,10 +1323,96 @@
     "chart_internal_errors": [],
     "charts_discarded": 0
    },
-   "human_correct": null,
+   "human_correct": true,
    "failure_class": null,
-   "reason": "",
-   "guessing": null
+   "reason": "与 gold 一致（比较器 refusal）",
+   "guessing": false
   }
- ]
+ ],
+ "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+ "verdict": {
+  "single": "10/15",
+  "multi": "10/10",
+  "failures": 5,
+  "failure_distribution": {
+   "2": 4,
+   "3": 1
+  },
+  "execution_success": "25/25",
+  "guessing": "1/25",
+  "profile": "m13",
+  "thresholds": {
+   "kind": "regression",
+   "source": "DEVLOG [24] 预登记，[25] 修正（S 2026-10-14 复核）：阶段 5 改 CHART_GUIDE 后的回归",
+   "rule": "错题必须全部落在 allowed_fail 里，否则逐题列为回归；allowed_fail 里的题若答对，列为意外答对，记录但不改门槛",
+   "agents": {
+    "react": {
+     "single": {
+      "allowed_fail": [
+       "s02"
+      ],
+      "why": {
+       "s02": "② 缺失哨兵（B65，阶段 7）"
+      }
+     },
+     "multi": {
+      "allowed_fail": [
+       "m10"
+      ],
+      "why": {
+       "m10": "⑥ 拒答失当（B63），模型波动"
+      }
+     }
+    },
+    "workflow": {
+     "single": {
+      "allowed_fail": [
+       "s02",
+       "s04",
+       "s09",
+       "s12"
+      ],
+      "why": {
+       "s02": "② 缺失哨兵",
+       "s04": "② 合计行",
+       "s09": "③ 取消单未冲减",
+       "s12": "② 缺失哨兵"
+      }
+     },
+     "multi": {
+      "allowed_fail": [],
+      "why": {}
+     }
+    }
+   }
+  },
+  "thresholds_sha256": "4992a4016355",
+  "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+  "labels_final": false,
+  "single_min": "11/15",
+  "single_regressions": [
+   "s06"
+  ],
+  "single_unexpected_pass": [],
+  "multi_min": "10/10",
+  "multi_regressions": [],
+  "multi_unexpected_pass": [],
+  "regression_verdict": "有回归：先看是否与本次改动有关，再下结论",
+  "chart_smoke": {
+   "出图率": {
+    "drew": 7,
+    "no_chart": [],
+    "pass": true,
+    "rule": "调了 chart() 或 plt 的题里，每轮至多 1 题无图"
+   },
+   "chart_option": {
+    "called": 7,
+    "ok": 7,
+    "fail": [],
+    "pass": true,
+    "rule": "调了 chart() 的题全部产出合格 option；内部错误必须为 0"
+   },
+   "internal_errors": []
+  }
+ }
 }
