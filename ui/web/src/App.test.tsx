@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import App from "./App";
 import { Api } from "./api";
+import { fakeBackend } from "./fakeBackend";
 
 const res = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -16,6 +17,11 @@ test("没有 token → 会话已失效页", async () => {
 });
 
 test("token 有效 → 已连接", async () => {
-  render(<App api={new Api("ok", async () => res({ configured: true, source: "keyring" }))} />);
+  const { fetchImpl } = fakeBackend({
+    "GET /settings/api-key": { configured: true, source: "keyring" },
+    "GET /datasets": [],
+    "GET /sessions": [],
+  });
+  render(<App api={new Api("ok", fetchImpl)} />);
   expect(await screen.findByTestId("ready")).toBeTruthy();
 });
