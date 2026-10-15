@@ -191,7 +191,7 @@ def test_react_refusal_in_answer_without_tool(sample_path):
 
 
 def test_react_non_contract_refusal_not_rescued(sample_path):
-    m = ScriptedChatModel(replies=["无法直接回答，因为没有成本字段。"] * 3, calls=[])   # B69 起会整轮重跑
+    m = ScriptedChatModel(replies=["无法直接回答，因为没有成本字段。"] * 6, calls=[])   # B69 整轮重跑 × B70 每轮提醒一次
     res = analyze(sample_path, "毛利率是多少", agent="react", chat_model=m, llm_config=FAST)
     assert res.result is None and not res.executed
 

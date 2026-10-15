@@ -15,7 +15,7 @@ B20（阶段 4 收尾）：不再用已弃用的 langgraph.prebuilt.create_react
 import time
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -29,6 +29,15 @@ from app.tools.sandbox import run_code
 
 
 PRINT_CHARS = 2000          # 回给模型的 print 输出上限（字符）
+
+# B70：单轮分析里模型没调工具、也没按契约拒答就收尾时，在同一会话里提醒一次（只提醒一次）。
+# B69 的整轮重跑是同样的输入（temperature 0 下常复现同样的输出，见 [28] m09），提醒改变了输入。
+NUDGE_NO_EXEC = (
+    "你还没有调用 run_python_on_data 执行任何代码就结束了，这不符合约定。"
+    "请调用 run_python_on_data 执行代码来回答问题；如果数据回答不了，"
+    "就调用一次 run_python_on_data，代码为 result = '无法回答：<一句话原因>'，"
+    "最终结论第一行原样以 '无法回答：' 开头。"
+)
 
 
 def _clip(text: str, n: int) -> str:
@@ -60,9 +69,33 @@ def _invoke_with_retry(model, messages, config, llm_config, tracker, sleep):
             sleep(min(llm_config.backoff_max, llm_config.backoff_base * 2 ** (attempts - 1)))
 
 
+def _needs_nudge(messages, nudge: str) -> bool:
+    """最后一条是不带工具调用的结论，本轮（最后一条真实用户消息之后）没执行过工具、没提醒过，
+    结论也不是契约拒答 / 网关错误内容 / 步数占位（这几种另有处理：B40、B62、B39）。"""
+    from app.core.llm import api_error_text
+    from app.core.result import refusal_from_answer
+    if not messages or not isinstance(messages[-1], AIMessage) or messages[-1].tool_calls:
+        return False
+    start = 0
+    for i, m in enumerate(messages):
+        if isinstance(m, HumanMessage) and m.content != nudge:
+            start = i + 1
+    turn = messages[start:]
+    if any(isinstance(m, ToolMessage) for m in turn):
+        return False
+    if any(isinstance(m, HumanMessage) and m.content == nudge for m in turn):
+        return False
+    final = str(messages[-1].content or "")
+    if refusal_from_answer(final) is not None or api_error_text(final) is not None:
+        return False
+    return not final.strip().startswith("Sorry, need more steps")
+
+
 def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None, tracker=None,
-               sleep=time.sleep):
-    """ReAct 主循环：agent 节点调模型；有工具调用就进 tools 节点逐个执行，再回 agent；没有就结束。"""
+               sleep=time.sleep, nudge: str | None = None, on_nudge=None):
+    """ReAct 主循环：agent 节点调模型；有工具调用就进 tools 节点逐个执行，再回 agent；没有就结束。
+    nudge 非空时（只用于单轮分析，B70）：没执行代码也没按契约拒答就要结束 → 把 nudge 作为用户消息补上、
+    回 agent 再来一次（只一次）；on_nudge() 用来记录发生过提醒。"""
     bound = model.bind_tools(tools)
     by_name = {t.name: t for t in tools}
 
@@ -86,22 +119,33 @@ def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None,
             out.append(ToolMessage(content=content, tool_call_id=tc.get("id") or "", name=tc.get("name") or ""))
         return {"messages": out}
 
+    def remind(state: AgentState):
+        if on_nudge is not None:
+            on_nudge()
+        return {"messages": [HumanMessage(nudge)]}
+
     def route(state: AgentState):
         last = state["messages"][-1]
-        return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
+        if isinstance(last, AIMessage) and last.tool_calls:
+            return "tools"
+        if nudge and _needs_nudge(state["messages"], nudge):
+            return "nudge"
+        return END
 
     g = StateGraph(AgentState)
     g.add_node("agent", agent)
     g.add_node("tools", run_tools)
+    g.add_node("nudge", remind)
     g.add_edge(START, "agent")
-    g.add_conditional_edges("agent", route, ["tools", END])
+    g.add_conditional_edges("agent", route, ["tools", "nudge", END])
     g.add_edge("tools", "agent")
+    g.add_edge("nudge", "agent")
     return g.compile(checkpointer=checkpointer)
 
 
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20,
-                      llm_config=None, tracker=None, sleep=time.sleep):
+                      llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -113,6 +157,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
     df: 已读好的 DataFrame 或 {表名: DataFrame}（多表，阶段 3.5）；每次执行用副本；None 时读 df_path。
     field_notes: 本轮问题检索到的字段说明（已格式化），放进系统提示而不是拼进用户问题（B04）。
     llm_config / tracker: 模型调用的重试参数与重试计数（B21）；llm_config 为 None 时不重试。
+    nudge_no_exec: 单轮分析时为 True：没执行代码也没按契约拒答就要结束时提醒一次（B70），
+          提醒次数记进 sink["nudges"]。多轮追问可以只凭上下文作答，不开。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -196,5 +242,10 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "若已生成图表，说明图表展示了什么。"
     )
 
+    def _count_nudge():
+        if sink is not None:
+            sink["nudges"] = sink.get("nudges", 0) + 1
+
     return build_loop(model, [run_python_on_data], system, checkpointer,
-                      llm_config=llm_config, tracker=tracker, sleep=sleep)
+                      llm_config=llm_config, tracker=tracker, sleep=sleep,
+                      nudge=NUDGE_NO_EXEC if nudge_no_exec else None, on_nudge=_count_nudge)
