@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Client, errText } from "../client";
-import type { Agent, Dataset, KeyStatus, Session } from "../types";
+import type { Agent, Dataset, DatasetDetail, KeyStatus, Session } from "../types";
 import { DatasetView } from "./DatasetView";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
@@ -13,6 +13,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
   const [view, setView] = useState<View>(initialKey.configured ? { kind: "home" } : { kind: "settings" });
   const [key, setKey] = useState(initialKey);
   const [error, setError] = useState("");
+  const [uploaded, setUploaded] = useState<DatasetDetail | undefined>(); // 上传响应（带预览）
 
   const reload = useCallback(
     () =>
@@ -39,7 +40,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
         <h1>datachat</h1>
         <Upload
           c={c}
-          onDone={(d) => (setDatasets((xs) => [d, ...xs]), setView({ kind: "dataset", id: d.id }))}
+          onDone={(d) => (setUploaded(d), setDatasets((xs) => [d, ...xs]), setView({ kind: "dataset", id: d.id }))}
           onError={setError}
         />
         <nav aria-label="数据集">
@@ -60,7 +61,9 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
           </ul>
         </nav>
         <nav aria-label="会话">
-          <h2>会话</h2>
+          <h2>
+            会话 <span className="hint">按最近分析时间排序</span>
+          </h2>
           {sessions.length === 0 && <p className="muted">还没有会话</p>}
           <ul>
             {sessions.map((s) => (
@@ -109,6 +112,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
             key={view.id}
             c={c}
             id={view.id}
+            initial={uploaded}
             onNewSession={newSession}
             onDeleted={() => (setView({ kind: "home" }), reload())}
           />
@@ -129,7 +133,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
   );
 }
 
-function Upload({ c, onDone, onError }: { c: Client; onDone: (d: Dataset) => void; onError: (m: string) => void }) {
+function Upload({ c, onDone, onError }: { c: Client; onDone: (d: DatasetDetail) => void; onError: (m: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);

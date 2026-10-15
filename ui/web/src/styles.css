@@ -36,6 +36,8 @@ input, select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 
 .nav:hover { background: #f0f2f5; }
 .nav.active { background: #e7efff; }
 .nav .small { display: block; font-size: 11px; }
+.small { font-size: 11px; }
+.sidebar h2 .hint { font-weight: normal; margin-left: 4px; }
 .settings-link { margin-top: auto; }
 .upload { display: flex; flex-direction: column; gap: 6px; }
 .upload input[type="file"] { border: none; padding: 0; max-width: 100%; }

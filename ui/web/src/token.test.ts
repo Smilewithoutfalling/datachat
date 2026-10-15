@@ -37,3 +37,26 @@ test("新 token 覆盖旧的（后端重启后重新 --open）", () => {
   expect(takeToken(f.loc, f.hist, f.store)).toBe("new");
   expect(f.data.get(TOKEN_KEY)).toBe("new");
 });
+
+test("sessionStorage 写入抛异常：仍返回 token（只在内存），地址栏照样抹掉，不冒到顶层", () => {
+  const calls: string[] = [];
+  const loc = { hash: "#token=mem-only", pathname: "/", search: "" };
+  const hist = { replaceState: (_s: unknown, _t: string, url?: string | URL | null) => void calls.push(String(url)) };
+  const store = {
+    getItem: () => null,
+    setItem: () => {
+      throw new DOMException("quota", "QuotaExceededError");
+    },
+  };
+  expect(takeToken(loc, hist, store)).toBe("mem-only");
+  expect(calls).toEqual(["/"]);
+});
+
+test("先存后抹：replaceState 时 token 已经在 sessionStorage 里", () => {
+  const data = new Map<string, string>();
+  let storedAtReplace: string | undefined;
+  const store = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+  const hist = { replaceState: () => void (storedAtReplace = data.get(TOKEN_KEY)) };
+  takeToken({ hash: "#token=t1", pathname: "/", search: "" }, hist, store);
+  expect(storedAtReplace).toBe("t1");
+});
