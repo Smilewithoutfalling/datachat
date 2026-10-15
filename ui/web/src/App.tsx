@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Api } from "./api";
+import { client } from "./client";
+import type { KeyStatus } from "./types";
+import { Shell } from "./views/Shell";
 
-type State = { kind: "checking" } | { kind: "ready"; keyConfigured: boolean } | { kind: "expired" } | { kind: "error"; message: string };
+type State = { kind: "checking" } | { kind: "ready"; key: KeyStatus } | { kind: "expired" } | { kind: "error"; message: string };
 
 export function ExpiredPage() {
   return (
@@ -17,19 +20,19 @@ export function ExpiredPage() {
 
 export default function App({ api }: { api: Api }) {
   const [state, setState] = useState<State>({ kind: "checking" });
+  const c = useMemo(() => client(api), [api]);
 
   useEffect(() => {
     const off = api.onUnauthorized(() => setState({ kind: "expired" }));
-    api
-      .json<{ configured: boolean }>("/settings/api-key")
-      .then((r) => setState({ kind: "ready", keyConfigured: r.configured }))
+    c.keyStatus()
+      .then((key) => setState({ kind: "ready", key }))
       .catch((e: unknown) => {
         if (e instanceof Error && e.name !== "Unauthorized") setState({ kind: "error", message: e.message });
       });
     return () => {
       off();
     };
-  }, [api]);
+  }, [api, c]);
 
   switch (state.kind) {
     case "expired":
@@ -39,11 +42,6 @@ export default function App({ api }: { api: Api }) {
     case "error":
       return <main role="alert">连接后端失败：{state.message}</main>;
     case "ready":
-      return (
-        <main data-testid="ready">
-          <h1>datachat</h1>
-          <p>已连接后端。{state.keyConfigured ? "" : "还没有设置 API Key。"}</p>
-        </main>
-      );
+      return <Shell c={c} initialKey={state.key} />;
   }
 }
