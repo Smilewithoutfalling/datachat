@@ -1,37 +1,41 @@
 import { useEffect, useState } from "react";
 import { type Client, errText, formatSize } from "../client";
-import type { Agent, DatasetDetail, Preview } from "../types";
+import type { Agent, DatasetDetail } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
 import { PreviewTable } from "./PreviewTable";
 
 type Props = {
   c: Client;
   id: string;
+  initial?: DatasetDetail; // 上传响应已带预览时直接用，省一次整表读取
   onDeleted: () => void;
   onNewSession: (datasetId: string, agent: Agent) => void;
 };
 
-export function DatasetView({ c, id, onDeleted, onNewSession }: Props) {
-  const [detail, setDetail] = useState<DatasetDetail | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+export function DatasetView({ c, id, initial, onDeleted, onNewSession }: Props) {
+  // Shell 按 id 设了 key，换数据集会重新挂载，这里不用手动复位状态
+  const [detail, setDetail] = useState<DatasetDetail | null>(initial?.id === id && initial.preview ? initial : null);
   const [tab, setTab] = useState(0);
   const [agent, setAgent] = useState<Agent>("workflow");
   const [error, setError] = useState("");
+  const have = detail !== null;
 
   useEffect(() => {
-    // Shell 按 id 设了 key，换数据集会重新挂载，这里不用手动复位状态
+    if (have) return;
     let live = true;
-    Promise.all([c.dataset(id), c.preview(id)])
-      .then(([d, p]) => live && (setDetail(d), setPreview(p)))
+    c.dataset(id) // 详情 + 预览一个请求（F1.1）
+      .then((d) => live && setDetail(d))
       .catch((e) => live && setError(errText(e)));
     return () => {
       live = false;
     };
-  }, [c, id]);
+  }, [c, id, have]);
 
   if (error) return <section className="view" role="alert">加载数据集失败：{error}</section>;
-  if (!detail || !preview) return <section className="view" aria-busy="true">加载中…</section>;
+  if (!detail) return <section className="view" aria-busy="true">加载中…</section>;
 
+  const preview = detail.preview ?? { rows: 0, tables: [], dicts: [] };
+  const multi = preview.tables.length > 1;
   const current = preview.tables[Math.min(tab, preview.tables.length - 1)];
   return (
     <section className="view" data-testid="dataset-view">
@@ -52,10 +56,12 @@ export function DatasetView({ c, id, onDeleted, onNewSession }: Props) {
           />
         </div>
       </header>
-      <p className="muted">
-        {detail.summary ?? ""}
-        {detail.error ? <span className="warn">（读取出错：{detail.error}）</span> : null}
-      </p>
+      {/* 行列数与编码在预览提示行和多表 tab 上；summary 不再单列（单表时与提示行重复） */}
+      {detail.error && (
+        <p className="warn" role="alert">
+          有表读取失败，分析会失败：{detail.error}
+        </p>
+      )}
       <ul className="files">
         {detail.files.map((f) => (
           <li key={f.filename}>
@@ -64,11 +70,14 @@ export function DatasetView({ c, id, onDeleted, onNewSession }: Props) {
         ))}
       </ul>
       {preview.dicts.length > 0 && <p className="muted">字典文件：{preview.dicts.join("、")}</p>}
-      {preview.tables.length > 1 && (
+      {multi && (
         <div className="tabs" role="tablist">
           {preview.tables.map((t, i) => (
             <button key={t.name} type="button" role="tab" aria-selected={i === tab} onClick={() => setTab(i)}>
               {t.name}
+              <span className="muted small">
+                {t.error !== undefined ? " 读取失败" : ` ${t.total_rows}×${t.total_columns} · ${t.encoding}`}
+              </span>
             </button>
           ))}
         </div>
