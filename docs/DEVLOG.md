@@ -1101,9 +1101,9 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 ### 测试
 - tests/test_chart_slot.py 加 6 项：两个 Agent 都拿到新 CHART_GUIDE、summarizer 看得到图表标题、ReAct 工具文本带标题、冒烟汇总口径、plt 在失败尝试里也算"画过图"、没用 chart() 时工具文本不变。test_workflow_mocked / test_eval_cases 断言随之更新。
 
-## [28] 2026-10-14 · 第 3 步闸门结果：通过（两题名单外错题经复跑记为波动） · commit <待提交>
+## [28] 2026-10-14 · 第 3 步闸门结果：通过（两题名单外错题经复跑记为波动） · commit be5cfa8（PR #28）
 
-报告：docs/eval/gate_20261014_162428_react.json、gate_20261014_163133_workflow.json（S 在 063f242 上跑，78de005 推送）。标注为 Hark 预标注，待 S 终审；判定 `--profile m13`。
+报告：docs/eval/gate_20261014_162428_react.json、gate_20261014_163133_workflow.json（S 在 063f242 上跑，78de005 推送）。标注为 Hark 预标注，S 已于 2026-10-15 终审通过；判定 `--profile m13`。
 
 | Agent | 单表 | 多表 | 名单外错题 | 意外答对 |
 |---|---|---|---|---|
