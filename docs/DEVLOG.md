@@ -1110,7 +1110,14 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 | react | 14/15（s02 ②，同基线） | 9/10 | m09 ⑤：未调工具，结论是网关吐出的英文 `[Assistant reasoning summary]` 推理摘要，未按契约拒答 | m10 |
 | workflow | 10/15（s02 s04 s09 s12 同基线逐字一致） | 10/10 | s06 ②：两行表头，把 `Unnamed: 3`（数量）当单价 | — |
 
-- 归因（预登记：同一 commit 单题重跑，答对 ≥4/5 记波动，否则对旧提示词 7d21d63 做 A/B）：S 复跑 m09、s06 均通过 → 记为波动，第 3 步不回退提示词。
+- 归因（预登记：同一 commit 单题重跑，答对 ≥4/5 记波动，否则对旧提示词 7d21d63 做 A/B）：S 复跑 m09、s06 均通过 → 记为波动，第 3 步不回退提示词。复跑报告见下（[30] 已把它们提交进仓库）：
+
+  | 题号 | Agent | 报告 | 结论 |
+  |---|---|---|---|
+  | m09 | react | `docs/eval/gate_20261014_165504_react.json` | ✅ 正确拒答（无客户年龄字段） |
+  | m09 | react | `docs/eval/gate_20261014_165536_react.json` | ✅ 正确拒答（无客户年龄字段） |
+  | s06 | workflow | `docs/eval/gate_20261014_165312_workflow.json` | ✅ 1036 条（与 gold 一致） |
+  | s06 | workflow | `docs/eval/gate_20261014_165603_workflow.json` | ✅ 1036 条（与 gold 一致） |
 - 图表另报：react 9 题出图，全部 chart()，option 9/9，0 plt；workflow 7 题，option 7/7，0 plt；内部错误均为 0。出图率、chart_option 两条通过；has_chart 三题 S 报告通过。
 - token 与基线持平（react +2.5%，workflow +0.1%）。
 
@@ -1118,7 +1125,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - m09 暴露 ReAct 收尾缺口：B69 的整轮重跑（输入不变）3 轮都没救回来。改为在同一会话里先提醒一次，见 [29]（B70）。（更正：本条原写"目前直接记 agent 错误"，不对，B69 已经会重跑。）
 - s06 归入真实数据适配（多行表头）既有问题，不在 M13 修。
 
-## [29] 2026-10-15 · B70：ReAct 没执行代码也没拒答就收尾 → 同一会话里提醒一次 · commit <待提交>
+## [29] 2026-10-15 · B70：ReAct 没执行代码也没拒答就收尾 → 同一会话里提醒一次 · commit 513f6e1
 
 起因：[28] 的 react m09 用了 13351 token（同组正常拒答约 9.3k，单轮约 4.4k），说明 B69 的整轮重跑 3 轮全部失败。重跑的输入跟原来逐字相同，temperature 0 下很容易复现同样的输出（这次是网关吐出的英文 `[Assistant reasoning summary]`）。
 
@@ -1129,3 +1136,16 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - 测试：test_phase36 里 B69 的两条改写，新增"只提醒一次后走 B69""拒答、网关错误、带 history 的追问都不提醒"两条；test_core_analyze 非契约拒答用例的脚本回复从 3 条改成 6 条。
 
 影响：只改变原本会被 B69 判失败或重跑的路径，正常路径的输入和调用次数都不变，闸门门槛不变。闸门是否重跑由 S 决定；若重跑，看点是 m09 的 steps 里有没有 nudge。
+
+## [30] 2026-10-15 · 闸门工具修复：labels_final 双向、门槛哈希与行尾无关、复跑证据入库 · commit <待提交>
+
+来源：阶段 5 前端方案 v1 评审（`docs/roadmap/review-phase5-frontend-v1.md`）附录 A。S 复核后指定在 F0 之前单独提这个 PR —— 前端改动不碰提示词，所以这些不挡 F0，但挡"下一次闸门能不能信"。
+
+- `scripts/gate/run_gate.py`
+  - `load_profile` 读门槛文件时先把 CRLF 规范化成 LF 再算 sha256。原来直接哈希原始字节，而本仓库 `core.autocrlf=true`（工作区 CRLF、git 对象 LF）→ 本机 `--verdict` 写出 `8703d010bbe3`，两份基线记的却是 `4992a4016355`（实测复现）。哈希的用途是证明"这次用的是哪一版门槛"，这样一来就失效了。同目录 `verify_gate.questions_sha256` 一直是规范化过的，这次对齐。
+  - `labels_final` 改成显式写 True/False。原来只有 `if "待 S 终审" in labeled_by: out["labels_final"] = False`，没有 else → 这个字段永远只能是 False，"已终审"没法表达。实测把 `labeled_by` 改成"S 终审通过"后重跑，键会**整个消失**，于是被手改成终审态的报告里仍留着上一轮的 False（10-14 两份基线即此状态）。
+- `.gitattributes`：加 `docs/gate/*.json text eol=lf`。和上一条哈希规范化两道都做，工作区签出即 LF。
+- 证据入库：10-14 那 4 份单题复跑报告（m09 ×2、s06 ×2）提交进仓库，`[28]` 补一张复跑结果表。原来"复跑记波动"这个结论只依赖工作区里几个未跟踪文件，不可独立复核。
+- `tests/test_gate.py` 新增 2 条：`labels_final` 双向（`test_labels_final_is_written_both_ways`）；门槛哈希不随行尾变（`test_thresholds_hash_is_line_ending_agnostic`，本机 CRLF 时额外断言规范化确实生效，避免这条测试在 LF 环境下变成恒真）。
+- 两份基线 `gate_20261014_162428_react.json` / `gate_20261014_163133_workflow.json` 用新代码重跑 `--verdict --profile m13`，`thresholds_sha256` 与 `labels_final` 落到终态。
+- 未做（等 S 定案）：A1 的"名单外错题自动复跑 2 次，2 次都对记波动、有 1 次错记回归"规则。现行 `m13` 的 `allowed_fail` 是逐题登记的，`m09`/`m10` 这类会翻的题会让参照基线自己报"有回归"。S 不同意放宽名单（会把 B70 的效果盖掉），改走自动复跑 —— 规则定下来后随下一个闸门 PR 落地。

@@ -1,2 +1,4 @@
 # 评测数据按 LF 存储（scripts/gen_eval_data.py --check 逐字节对比）
 data/eval/*.csv text eol=lf
+# 门槛文件按 LF 存储：run_gate.load_profile 会对它算 sha256 写进 verdict 段（[30]）
+docs/gate/*.json text eol=lf

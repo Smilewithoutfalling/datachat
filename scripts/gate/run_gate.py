@@ -32,9 +32,14 @@ THRESHOLDS = os.path.join(ROOT, "docs", "gate", "thresholds.json")
 
 
 def load_profile(name: str) -> tuple[dict, str]:
-    """门槛只从 docs/gate/thresholds.json 读（[25]）：返回 (profile, 文件 sha256 前 12 位)。"""
+    """门槛只从 docs/gate/thresholds.json 读（[25]）：返回 (profile, 文件 sha256 前 12 位)。
+
+    哈希前把 CRLF 规范化成 LF：本仓库 core.autocrlf=true，工作区签出是 CRLF，而 git 对象是 LF。
+    不规范化的话同一个文件在本机算出的哈希和报告里记的不一样（同目录的 verify_gate.questions_sha256
+    一直是这么做的，这里对齐）。
+    """
     import hashlib
-    raw = open(THRESHOLDS, "rb").read()
+    raw = open(THRESHOLDS, "rb").read().replace(b"\r\n", b"\n")
     profiles = json.loads(raw.decode("utf-8"))
     if name not in profiles or name.startswith("_"):
         sys.exit(f"未知门槛 profile：{name}；可选：{[k for k in profiles if not k.startswith('_')]}")
@@ -157,8 +162,9 @@ def verdict(path: str, profile: str) -> dict:
            "guessing": f"{sum(bool(r.get('guessing')) for r in rows)}/{len(rows)}"}
     out.update({"profile": profile, "thresholds": prof, "thresholds_sha256": th_sha,
                 "labeled_by": data.get("labeled_by", "")})
-    if "待 S 终审" in out["labeled_by"]:
-        out["labels_final"] = False                    # 预标注出的结论只作参考
+    # 显式写 True/False（[30]）：只写 False 的写法让"已终审"没法用这个字段表达，
+    # 结果就是 labeled_by 改成"S 终审通过"之后 keys 里仍留着上一轮的 False。
+    out["labels_final"] = "待 S 终审" not in out["labeled_by"]
     if prof["kind"] == "phase35":
         out.update(_verdict_phase35(prof, s_ok, s_n, m_ok, m_n, fails, dist))
     else:

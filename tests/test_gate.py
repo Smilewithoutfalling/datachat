@@ -176,6 +176,44 @@ def test_verdict_requires_known_profile(tmp_path):
         run_gate.verdict(p, "nope")
 
 
+def _all_correct_report(tmp_path, labeled_by, name):
+    rows = [{"id": f"s{i:02d}", "group": "single", "executed": True, "human_correct": True,
+             "failure_class": None} for i in range(1, 16)]
+    rows += [{"id": f"m{i:02d}", "group": "multi", "executed": True, "human_correct": True,
+              "failure_class": None} for i in range(1, 11)]
+    p = tmp_path / name
+    p.write_text(json.dumps({"agent": "react", "labeled_by": labeled_by, "cases": rows}), encoding="utf-8")
+    return str(p)
+
+
+def test_labels_final_is_written_both_ways(tmp_path):
+    """[30]：labels_final 必须显式写 True/False。
+
+    只写 False（原来只有 `if "待 S 终审" in ...`）时"已终审"没法用这个字段表达 —— 实测把
+    labeled_by 改成"S 终审通过"后重跑，键会整个消失，然后被手改成终审态的报告里仍留着上一轮的
+    False（10-14 两份基线就是这个状态）。
+    """
+    assert run_gate.verdict(_all_correct_report(tmp_path, "Hark 预标注，待 S 终审", "pre.json"),
+                            "m13")["labels_final"] is False
+    assert run_gate.verdict(_all_correct_report(tmp_path, "Hark 预标注；S 终审通过（2026-10-15）", "final.json"),
+                            "m13")["labels_final"] is True
+
+
+def test_thresholds_hash_is_line_ending_agnostic():
+    """[30]：门槛哈希不能随工作区签出行尾变。
+
+    本仓库 core.autocrlf=true → 工作区是 CRLF、git 对象是 LF。不规范化的话本机跑
+    `--verdict` 写出的哈希和基线报告里记的对不上（实测 8703d010bbe3 vs 4992a4016355），
+    哈希本来要证明"用的是哪一版门槛"，这样一来就失效了。
+    """
+    import hashlib
+    raw = open(run_gate.THRESHOLDS, "rb").read()
+    _, sha = run_gate.load_profile("m13")
+    assert sha == hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()[:12]
+    if b"\r\n" in raw:      # 本机（Windows）：再证明这个断言真的在测规范化
+        assert sha != hashlib.sha256(raw).hexdigest()[:12]
+
+
 @pytest.mark.parametrize("name", ["gate_20261012_104407_react.json", "gate_20261012_104936_workflow.json"])
 def test_phase35_profile_reproduces_final_verdict(tmp_path, name):
     """阈值从常量移到 thresholds.json 后，10-12 两份终审报告的结论不变。"""
