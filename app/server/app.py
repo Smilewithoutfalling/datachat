@@ -5,9 +5,11 @@
     POST   /datasets                     multipart：files（一个或多个 CSV，可含 *.dict.csv 字典）、name
     GET    /datasets                     列表
     GET    /datasets/{id}                详情（含文件与每张表的列）
+    GET    /datasets/{id}/preview?rows=20  每张表前 N 行（1–100），单元格一律字符串或 null（阶段 5 F1）
     DELETE /datasets/{id}
     POST   /sessions                     {"dataset_id", "agent": "workflow"|"react", "title"?}
     GET    /sessions                     列表（按更新时间倒序）
+    PATCH  /sessions/{id}                {"title"} 改名（阶段 5 F1）
     GET    /sessions/{id}                会话 + 全部消息（每条助手消息带事件与结果）——"历史可查"
     DELETE /sessions/{id}
     POST   /sessions/{id}/messages       {"content"} → text/event-stream，逐条转发 analyze_stream 事件
@@ -15,7 +17,7 @@
     PUT    /messages/{id}/feedback       {"rating": "up"|"down"|null, "note"?}（只限已结束的助手消息）
     GET    /  、/assets/*                前端（ui/web 构建产物）。不要 token——页面本身不含机密，token 由
                                          URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
-    GET    /settings  PUT /settings      非机密设置：model、base_url
+    GET    /settings  PUT /settings      非机密设置：model、base_url、timeout（单次请求超时，秒）
     GET    /settings/api-key             {"configured", "source"}——从不返回 Key 本身
     PUT    /settings/api-key             {"api_key"} → 存进系统钥匙串
     DELETE /settings/api-key
@@ -45,7 +47,10 @@ from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback,
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
 MAX_FILES = 50
-SETTING_KEYS = ("model", "base_url")
+SETTING_KEYS = ("model", "base_url", "timeout")
+TIMEOUT_RANGE = (5.0, 600.0)
+PREVIEW_MAX_ROWS = 100
+PREVIEW_CELL_MAX = 200       # 单元格超长截断（按文本渲染，T9）
 CHART_NAME = re.compile(r"^chart_[0-9_]+_[0-9a-f]{6}\.png$")
 FEEDBACK_NOTE_MAX = 1000
 # 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）
@@ -70,13 +75,18 @@ class SessionIn(BaseModel):
     title: str = ""
 
 
+class SessionPatch(BaseModel):
+    title: str = Field(max_length=200)
+
+
 class MessageIn(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
 class SettingsIn(BaseModel):
-    model: Optional[str] = None
-    base_url: Optional[str] = None
+    model: Optional[str] = Field(None, max_length=200)
+    base_url: Optional[str] = Field(None, max_length=500)
+    timeout: Optional[float] = Field(None, ge=TIMEOUT_RANGE[0], le=TIMEOUT_RANGE[1])
 
 
 class FeedbackIn(BaseModel):
@@ -217,7 +227,24 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def llm_config():
         with Session() as db:
             st = {r.key: r.value for r in db.scalars(select(Setting))}
-        return LLMConfig.from_env(**{k: v for k, v in st.items() if k in SETTING_KEYS and v})
+        over = {k: v for k, v in st.items() if k in SETTING_KEYS and v}
+        if "timeout" in over:
+            try:
+                over["timeout"] = float(over["timeout"])
+            except ValueError:
+                over.pop("timeout")          # 库里的坏值不让分析整个起不来，退回环境变量 / 默认
+        return LLMConfig.from_env(**over)
+
+    def preview_cell(v):
+        """预览单元格：缺失 → None；其余转字符串并截断。前端按文本渲染（THREAT_MODEL T9）。"""
+        import pandas as pd
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):     # 列表之类的非标量
+            pass
+        s = str(v)
+        return s if len(s) <= PREVIEW_CELL_MAX else s[:PREVIEW_CELL_MAX] + "…"
 
     # ------------------------------------------------------------------ 路由
     @app.get("/health")
@@ -269,6 +296,33 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def get_dataset(dataset_id: str, db=Depends(db_dep)):
         return dataset_out(get_or_404(db, Dataset, dataset_id), detail=True)
 
+    @app.get("/datasets/{dataset_id}/preview", dependencies=[Depends(auth)])
+    def preview_dataset(dataset_id: str, rows: int = 20, db=Depends(db_dep)):
+        """每张表前 rows 行。读法与分析时一致（同一个编码探测和 read_csv），用户看到的就是模型拿到的。"""
+        from app.tools.csv_io import read_csv_with_encoding
+        from app.tools.dataset import is_dict_file
+        if not 1 <= rows <= PREVIEW_MAX_ROWS:
+            raise HTTPException(400, f"rows 需在 1–{PREVIEW_MAX_ROWS}")
+        ds = get_or_404(db, Dataset, dataset_id)
+        tables, dicts = [], []
+        for f in sorted(ds.files, key=lambda f: f.filename.lower()):
+            if is_dict_file(f.filename):
+                dicts.append(f.filename)
+                continue
+            name = os.path.splitext(f.filename)[0]
+            try:
+                df, enc = read_csv_with_encoding(f.path)
+            except Exception as e:  # noqa: BLE001 —— 一张表读坏不影响其他表的预览
+                tables.append({"name": name, "filename": f.filename, "error": f"{type(e).__name__}: {e}"})
+                continue
+            head = df.head(rows)
+            tables.append({"name": name, "filename": f.filename, "encoding": enc,
+                           "total_rows": int(len(df)), "total_columns": int(len(df.columns)),
+                           "columns": [preview_cell(c) or "" for c in df.columns],
+                           "dtypes": [str(t) for t in df.dtypes],
+                           "rows": [[preview_cell(v) for v in r] for r in head.itertuples(index=False, name=None)]})
+        return {"dataset_id": ds.id, "rows": rows, "tables": tables, "dicts": dicts}
+
     @app.delete("/datasets/{dataset_id}", dependencies=[Depends(auth)])
     def delete_dataset(dataset_id: str, db=Depends(db_dep)):
         ds = get_or_404(db, Dataset, dataset_id)
@@ -295,6 +349,13 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def get_session(session_id: str, db=Depends(db_dep)):
         s = get_or_404(db, ChatSession, session_id)
         return {**session_out(s), "messages": [message_out(m) for m in s.messages]}
+
+    @app.patch("/sessions/{session_id}", dependencies=[Depends(auth)])
+    def rename_session(session_id: str, body: SessionPatch, db=Depends(db_dep)):
+        s = get_or_404(db, ChatSession, session_id)
+        s.title = _CONTROL_CHARS.sub("", body.title).strip()[:120]
+        db.commit()
+        return session_out(s)
 
     @app.delete("/sessions/{session_id}", dependencies=[Depends(auth)])
     def delete_session(session_id: str, db=Depends(db_dep)):
@@ -380,16 +441,18 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def get_settings(db=Depends(db_dep)):
         st = {r.key: r.value for r in db.scalars(select(Setting))}
         cfg = llm_config()
-        return {"model": st.get("model") or cfg.model, "base_url": st.get("base_url") or cfg.base_url}
+        return {"model": st.get("model") or cfg.model, "base_url": st.get("base_url") or cfg.base_url,
+                "timeout": cfg.timeout}
 
     @app.put("/settings", dependencies=[Depends(auth)])
     def put_settings(body: SettingsIn, db=Depends(db_dep)):
         for k, v in body.model_dump(exclude_none=True).items():
+            v = str(v).strip()               # 空串 = 清除，回到环境变量 / 默认
             row = db.get(Setting, k)
             if row is None:
-                db.add(Setting(key=k, value=v.strip()))
+                db.add(Setting(key=k, value=v))
             else:
-                row.value = v.strip()
+                row.value = v
         db.commit()
         return get_settings(db)
 
