@@ -191,27 +191,32 @@ def test_labels_final_is_written_both_ways(tmp_path):
 
     只写 False（原来只有 `if "待 S 终审" in ...`）时"已终审"没法用这个字段表达 —— 实测把
     labeled_by 改成"S 终审通过"后重跑，键会整个消失，然后被手改成终审态的报告里仍留着上一轮的
-    False（10-14 两份基线就是这个状态）。
+    False（10-14 两份基线就是这个状态）。labeled_by 为空时不写这个键：没人署名不算终审。
     """
     assert run_gate.verdict(_all_correct_report(tmp_path, "Hark 预标注，待 S 终审", "pre.json"),
                             "m13")["labels_final"] is False
     assert run_gate.verdict(_all_correct_report(tmp_path, "Hark 预标注；S 终审通过（2026-10-15）", "final.json"),
                             "m13")["labels_final"] is True
+    assert "labels_final" not in run_gate.verdict(_all_correct_report(tmp_path, "", "anon.json"), "m13")
 
 
-def test_thresholds_hash_is_line_ending_agnostic():
+def test_thresholds_hash_is_line_ending_agnostic(tmp_path, monkeypatch):
     """[30]：门槛哈希不能随工作区签出行尾变。
 
     本仓库 core.autocrlf=true → 工作区是 CRLF、git 对象是 LF。不规范化的话本机跑
     `--verdict` 写出的哈希和基线报告里记的对不上（实测 8703d010bbe3 vs 4992a4016355），
     哈希本来要证明"用的是哪一版门槛"，这样一来就失效了。
+    同一份内容各写一个 LF、一个 CRLF 文件分别算，在哪个系统上跑都真的在测规范化（CI 是 LF）。
     """
-    import hashlib
-    raw = open(run_gate.THRESHOLDS, "rb").read()
-    _, sha = run_gate.load_profile("m13")
-    assert sha == hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()[:12]
-    if b"\r\n" in raw:      # 本机（Windows）：再证明这个断言真的在测规范化
-        assert sha != hashlib.sha256(raw).hexdigest()[:12]
+    lf = open(run_gate.THRESHOLDS, "rb").read().replace(b"\r\n", b"\n")
+    assert b"\n" in lf
+    shas = []
+    for name, data in (("lf.json", lf), ("crlf.json", lf.replace(b"\n", b"\r\n"))):
+        p = tmp_path / name
+        p.write_bytes(data)
+        monkeypatch.setattr(run_gate, "THRESHOLDS", str(p))
+        shas.append(run_gate.load_profile("m13")[1])
+    assert shas[0] == shas[1]
 
 
 @pytest.mark.parametrize("name", ["gate_20261012_104407_react.json", "gate_20261012_104936_workflow.json"])
