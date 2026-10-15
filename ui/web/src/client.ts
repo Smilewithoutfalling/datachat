@@ -1,6 +1,6 @@
 // 各接口的薄封装。全部经过 Api（统一 Bearer 与 401 处理）。
 import type { Api } from "./api";
-import type { Agent, Dataset, DatasetDetail, KeyStatus, Preview, Session, SessionDetail, Settings } from "./types";
+import type { Agent, Dataset, DatasetDetail, KeyStatus, Session, SessionDetail, Settings } from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
   method,
@@ -13,9 +13,8 @@ export const PREVIEW_ROWS = 20;
 export function client(api: Api) {
   return {
     datasets: () => api.json<Dataset[]>("/datasets"),
-    dataset: (id: string) => api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}`),
-    preview: (id: string, rows = PREVIEW_ROWS) =>
-      api.json<Preview>(`/datasets/${encodeURIComponent(id)}/preview?rows=${rows}`),
+    dataset: (id: string, rows = PREVIEW_ROWS) =>
+      api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}?rows=${rows}`),
     upload: (files: File[], name: string) => {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f, f.name));
