@@ -377,7 +377,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         sink = {"execs": [], "charts": []}
         graph = build_react_agent(dataset, checkpointer=memory, sink=sink, model=model, df=df,
                                   field_notes=notes_text, exec_timeout=exec_timeout,
-                                  llm_config=cfg, tracker=tracker)
+                                  llm_config=cfg, tracker=tracker,
+                                  nudge_no_exec=memory is None and not history)
         messages, rec_err = [], None
         res.error = res.error_kind = None
         out = {}
@@ -390,6 +391,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                 res.error, res.error_kind = f"LLM 调用失败（{kind}）：{type(e).__name__}: {e}", "llm"
             else:
                 res.error, res.error_kind = f"ReAct 异常：{type(e).__name__}: {e}", "agent"
+        if sink.get("nudges"):
+            res.steps.append(Step("nudge", content="模型没执行代码也没按契约拒答就要结束，已提醒一次（B70）"))
         # B62：网关以错误 JSON 充当回复（可能被截断）→ 整轮重跑
         # B69：一次代码都没执行、也没按契约拒答就收尾（回归 m09 只回了一个 'B'）→ 同样整轮重跑
         final = _final_text(messages)
