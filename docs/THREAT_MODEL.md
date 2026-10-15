@@ -64,7 +64,7 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 生效（第 5 步实现） | 生效 |
 | 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 生效（第 5 步实现） | 生效 |
 | 👍👎 的 note（用户输入，阶段 5 F0） | 后端清控制字符和双向文本控制符、限 1000 字；前端按纯文本渲染 | 生效 | 生效 |
-| 数据集预览单元格（F1） | 后端一律转字符串原样返回；前端按纯文本渲染 | F1 实现 | 生效 |
+| 数据集预览单元格与表头（F1） | 后端一律转字符串原样返回（超 200 字截断），缺失为 null；前端按纯文本渲染 | tests/test_web_f1.py、views.test.tsx（注入串不成元素）、e2e/f1.spec.ts（托管 dist 上 tbody 无 img、无 CSP 违规） | 生效 |
 | Markdown 里的 `img` / 链接 | 链接 `rel="noreferrer noopener"`；`javascript:` 由渲染器过滤（测试钉版本）；外链图片由 CSP `img-src 'self' data: blob:` 拦下 | F2 实现 | 生效 |
 
 **白名单只校验 builder 的输出（以及 v2 的 patch），最终渲染产物永不回验。** 前端在校验之后才加 `tooltip.renderMode = 'richText'`，而 `renderMode` 同时在 `BANNED_KEYS` 里，所以最终交给 ECharts 的 option 必然不过白名单。这是有意的：`BANNED_KEYS` 禁的是"由后端 / 模型决定这个键"，不是"渲染时不许出现"。将来任何把前端 option 回灌后端的流程（"保存我的风格"、服务端重绘导出 PNG 等）必须：
