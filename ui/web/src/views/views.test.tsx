@@ -8,7 +8,6 @@ import { Shell } from "./Shell";
 const INJECT = '<img src=x onerror="window.__pwned=1">';
 const DS = { id: "d1", name: "销量", created_at: "t", files: [{ filename: "sales.csv", size: 2048, sha256: "h" }] };
 const PREVIEW = {
-  dataset_id: "d1",
   rows: 20,
   dicts: ["sales.dict.csv"],
   tables: [
@@ -24,6 +23,8 @@ const PREVIEW = {
         ["苹果", INJECT, null],
         ["null", "b", "3.0"],
       ],
+      bidi_stripped: 2,
+      truncated_cells: 1,
     },
   ],
 };
@@ -33,8 +34,7 @@ function setup(extra: Record<string, unknown> = {}, key: KeyStatus = { configure
   const be = fakeBackend({
     "GET /datasets": [DS],
     "GET /sessions": [SESSION],
-    "GET /datasets/d1": { ...DS, summary: "100 行 × 3 列，编码 gbk" },
-    "GET /datasets/d1/preview?rows=20": PREVIEW,
+    "GET /datasets/d1?rows=20": { ...DS, summary: "100 行 × 3 列，编码 gbk", tables: {}, preview: PREVIEW },
     "GET /sessions/s1": {
       ...SESSION,
       messages: [
@@ -68,6 +68,46 @@ test("预览：表头、单元格按文本渲染，注入串不变成元素；�
   expect(within(view).getByText("空").className).toBe("na");
   expect(within(view).getByText("null").className).toBe("");
   expect(within(view).getByText("字典文件：sales.dict.csv")).toBeTruthy();
+  const hint = within(view).getByText("共 100 行", { exact: false }).textContent ?? "";
+  expect(hint).toContain("1 个单元格超 200 字，已截断");
+  expect(hint).toContain("2 处方向控制符已从预览中去掉");
+});
+
+test("详情与预览只发一个请求；上传后直接用响应里的预览，不再请求", async () => {
+  const be = setup({
+    "POST /datasets": { ...DS, id: "d2", name: "新上传", tables: {}, preview: PREVIEW },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  await screen.findByTestId("dataset-view");
+  expect(be.calls.filter((x) => x.path.startsWith("/datasets/d1")).map((x) => x.path)).toEqual(["/datasets/d1?rows=20"]);
+
+  const file = new File(["a,b\n1,2\n"], "x.csv", { type: "text/csv" });
+  fireEvent.change(screen.getByLabelText("选择 CSV 文件"), { target: { files: [file] } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "上传" })));
+  expect(await screen.findByRole("heading", { name: "新上传" })).toBeTruthy();
+  expect(be.calls.some((x) => x.path.startsWith("/datasets/d2"))).toBe(false);
+});
+
+test("多表：tab 上带行列数与编码，读坏的表标出；顶层 error 提示分析会失败", async () => {
+  setup({
+    "GET /datasets/d1?rows=20": {
+      ...DS,
+      error: "users.csv：EmptyDataError",
+      preview: {
+        rows: 20,
+        dicts: [],
+        tables: [PREVIEW.tables[0], { name: "users", filename: "users.csv", error: "EmptyDataError" }],
+      },
+    },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  const view = await screen.findByTestId("dataset-view");
+  expect(within(view).getByRole("tab", { name: /sales\s*100×3 · gbk/ })).toBeTruthy();
+  fireEvent.click(within(view).getByRole("tab", { name: /users\s*读取失败/ }));
+  expect(within(view).getAllByRole("alert").map((x) => x.textContent)).toEqual([
+    "有表读取失败，分析会失败：users.csv：EmptyDataError",
+    "users.csv 读取失败：EmptyDataError",
+  ]);
 });
 
 test("会话：消息按文本渲染；改名走 PATCH 并更新左栏", async () => {
