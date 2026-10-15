@@ -4,7 +4,8 @@
 
 1. <exe> --selftest：沙箱各项限制在打包后是否仍然生效（B35）；
 2. 启动后端：测启动耗时，走 上传 → 建会话 → 提问（没有 Key，应得到 error → done）→ 查历史；
-3. 重启后端（同一数据目录）：会话还在。
+3. 前端：GET / 不带 token 返回 200、带 CSP 头，index.html 引用的 /assets/*.js 能取到（阶段 5 F0）；
+4. 重启后端（同一数据目录）：会话还在。
 退出码非 0 = 有一项失败。报告写成 JSON。
 """
 import json
@@ -49,6 +50,20 @@ def req(base, token, method, path, body=None, ctype="application/json"):
         return json.loads(raw) if resp.headers.get_content_type() == "application/json" else raw
 
 
+def check_web(base):
+    """前端由后端同源托管：/ 和 /assets/* 不要 token；index.html 必须带 CSP。"""
+    import re
+    with OPENER.open(base + "/", timeout=30) as resp:
+        html, csp = resp.read().decode("utf-8"), resp.headers.get("Content-Security-Policy", "")
+    assets = re.findall(r'src="(/assets/[^"]+\.js)"', html)
+    asset_ok = bool(assets)
+    for a in assets:
+        with OPENER.open(base + a, timeout=30) as r:
+            asset_ok &= r.status == 200 and len(r.read()) > 0
+    return {"csp": csp, "assets": assets,
+            "ok": "script-src 'self'" in csp and "frame-ancestors 'none'" in csp and asset_ok}
+
+
 def multipart(path):
     b = uuid.uuid4().hex
     with open(path, "rb") as f:
@@ -73,6 +88,7 @@ def main(exe, out_path):
     steps = {}
     try:
         p, base, token, steps["startup_seconds"] = start(exe, home)
+        steps["web"] = check_web(base)
         body, ctype = multipart(os.path.join(HERE, "data", "sample.csv"))
         ds = req(base, token, "POST", "/datasets", body, ctype)
         steps["dataset_tables"] = ds.get("tables")
@@ -87,7 +103,8 @@ def main(exe, out_path):
         p.terminate()
         p.wait(timeout=30)
         ok &= bool(steps["dataset_tables"]) and steps["sse_events"] == ["error", "done"] \
-            and steps["after_restart_messages"] == [["user", "ok"], ["assistant", "error"]]
+            and steps["after_restart_messages"] == [["user", "ok"], ["assistant", "error"]] \
+            and steps["web"]["ok"]
     except Exception as e:  # noqa: BLE001
         steps["exception"] = f"{type(e).__name__}: {e}"
         ok = False
