@@ -31,6 +31,9 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | T6 | 恶意网页对 localhost 发跨站请求（表单 POST、`<img>`），借后端读数据集、烧 Key 的额度 | 每次启动随机生成 token（32 字节），除 /health 外都要 `Authorization: Bearer`；不开 CORS，网页 JS 读不到响应，也带不上自定义头 | app/server/app.py |
 | T7 | token 跟着 URL 泄露 | 只有 `/charts/*` 接受 `?token=`（`<img src>` 带不了请求头），其他接口不认；访问日志里 `token=` 的值写成 `***` | app/server/app.py、__main__.py |
 | T8 | 接口把 Key 回给调用方 | `GET /settings/api-key` 只返回 configured / source，**从不返回 Key** | app/server/app.py |
+| T6' | 前端同源托管后（阶段 5 F0）：免 token 的面被扩大 | 免 token 的只有 `/`（index.html）和 `/assets/*`（构建产物，不含机密），API 与 `/charts/*` 照旧要 token（tests/test_web.py 逐个断言 401）；静态文件同样受 TrustedHost 约束 | app/server/app.py |
+| T7' | `--open` 的 token 进 URL | token 放 fragment（`/#token=…`）：浏览器不把 fragment 发给服务器、不进访问日志；前端在任何 await 之前读出存 sessionStorage 并 `replaceState` 抹掉（ui/web/src/token.ts，Playwright 断言地址栏不含 token）。浏览器历史在 replaceState 前的一瞬间仍可能记下原 URL，接受（同用户本机，§5） | app/server/__main__.py、ui/web/src/token.ts |
+| T10 | 前端页面里被注入脚本（T9 万一漏了一处） | index.html 带 CSP：`script-src 'self'`（无 unsafe-inline / unsafe-eval）、`object-src 'none'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`img-src 'self' data: blob:`。构建产物不得有内联 script（`npm run build` 末尾 scripts/check-dist.mjs 检查）；Playwright 对照用例证明 CSP 确实拦下内联脚本。CSP 是第二道防线，第一道仍是 §2.3 的"按文本渲染" | app/server/app.py、ui/web |
 
 挡不住、也不打算挡的：
 - 同一用户下的其他程序：它能读 sidecar 的 stdout（token 在启动那一行里）、读钥匙串、读数据目录，属于 §5 的"本机已被控制"。
@@ -60,6 +63,9 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 生效（第 5 步实现） | 生效 |
 | 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 生效（第 5 步实现） | 生效 |
 | 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 生效（第 5 步实现） | 生效 |
+| 👍👎 的 note（用户输入，阶段 5 F0） | 后端清控制字符和双向文本控制符、限 1000 字；前端按纯文本渲染 | 生效 | 生效 |
+| 数据集预览单元格（F1） | 后端一律转字符串原样返回；前端按纯文本渲染 | F1 实现 | 生效 |
+| Markdown 里的 `img` / 链接 | 链接 `rel="noreferrer noopener"`；`javascript:` 由渲染器过滤（测试钉版本）；外链图片由 CSP `img-src 'self' data: blob:` 拦下 | F2 实现 | 生效 |
 
 **白名单只校验 builder 的输出（以及 v2 的 patch），最终渲染产物永不回验。** 前端在校验之后才加 `tooltip.renderMode = 'richText'`，而 `renderMode` 同时在 `BANNED_KEYS` 里，所以最终交给 ECharts 的 option 必然不过白名单。这是有意的：`BANNED_KEYS` 禁的是"由后端 / 模型决定这个键"，不是"渲染时不许出现"。将来任何把前端 option 回灌后端的流程（"保存我的风格"、服务端重绘导出 PNG 等）必须：
 - 只回传样式层的差量（v2 patch 的形状），在后端重新走 builder + 白名单，不回传整份 option；

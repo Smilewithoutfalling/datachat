@@ -71,6 +71,8 @@ class Message(Base):
     session: Mapped[ChatSession] = relationship(back_populates="messages")
     events: Mapped[list["EventRow"]] = relationship(back_populates="message", cascade="all, delete-orphan",
                                                     order_by="EventRow.seq")
+    feedback: Mapped[Optional["Feedback"]] = relationship(back_populates="message", cascade="all, delete-orphan",
+                                                          uselist=False)
 
 
 class EventRow(Base):
@@ -83,6 +85,19 @@ class EventRow(Base):
     ts: Mapped[str] = mapped_column(String(40))
     data_json: Mapped[str] = mapped_column(Text)
     message: Mapped[Message] = relationship(back_populates="events")
+
+
+class Feedback(Base):
+    """助手消息的 👍👎（阶段 5 F0）。单独成表而不是给 messages 加列：create_all 只会建缺的表、
+    不会给已有表加列，旧库启动后这张表自动出现，旧表不动（不需要迁移）。
+    一条消息至多一行（message_id 即主键）；rating 取 up / down / None——撤销评价时保留这一行（note 可能还有用），
+    不记改评价的历史。note 是用户输入，前端按纯文本渲染（THREAT_MODEL T9）。"""
+    __tablename__ = "feedback"
+    message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True)
+    rating: Mapped[Optional[str]] = mapped_column(String(8), default=None)
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[str] = mapped_column(String(40), default=now)
+    message: Mapped[Message] = relationship(back_populates="feedback")
 
 
 class Setting(Base):

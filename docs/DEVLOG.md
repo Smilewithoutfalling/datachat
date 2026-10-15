@@ -1137,7 +1137,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 
 影响：只改变原本会被 B69 判失败或重跑的路径，正常路径的输入和调用次数都不变，闸门门槛不变。闸门是否重跑由 S 决定；若重跑，看点是 m09 的 steps 里有没有 nudge。
 
-## [30] 2026-10-15 · 闸门工具修复：labels_final 双向、门槛哈希与行尾无关、复跑证据入库 · commit <待提交>
+## [30] 2026-10-15 · 闸门工具修复：labels_final 双向、门槛哈希与行尾无关、复跑证据入库 · commit 4497d2b（PR #31）
 
 来源：阶段 5 前端方案 v1 评审（`docs/roadmap/review-phase5-frontend-v1.md`）附录 A。S 复核后指定在 F0 之前单独提这个 PR —— 前端改动不碰提示词，所以这些不挡 F0，但挡"下一次闸门能不能信"。
 
@@ -1154,3 +1154,28 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - `docs/roadmap/M13-图表方案.md`（v4，随本条进仓库）：新增的"开关 × 产出键"原编号 §10，和"其余注意点"重号，且 §11 已被"风险与判据一览"占用 → 改为 §12，文首注解和 review 文档两处引用同步。
 - 留痕：workflow 多表门槛由 [24] 预登记的 ≥9/10 收严到 10/10（`thresholds.json` 的 `m13.agents.workflow.multi.allowed_fail=[]`，[25] 实现、S 10-14 确认），依据 [28] 实测 10/10。[24] 正文不改，以本条为准。
 - 未做（等 S 定案）：A1 的"名单外错题自动复跑 2 次，2 次都对记波动、有 1 次错记回归"规则。现行 `m13` 的 `allowed_fail` 是逐题登记的，`m09`/`m10` 这类会翻的题会让参照基线自己报"有回归"。S 不同意放宽名单（会把 B70 的效果盖掉），改走自动复跑 —— 规则定下来后随下一个闸门 PR 落地。S 已定（10-15）：该规则**取代** [28] 的 ≥4/5；复跑报告存原始 answer / result_text 并人工标注，不只存布尔（B68 前车之鉴）；超时、网关错误归为无效复跑，最多补跑 1 次，不计答错；verdict 注明假阴性率 ≤25%（真错误率 p=0.5 时）。
+
+## [31] 2026-10-15 · 阶段 5 F0：前端骨架、同源托管、token 流转、CSP、feedback 表、CI · commit <待提交>
+
+当前阶段：**阶段 5 前端，F0 完成，下一步 F1**（数据集含预览、会话、设置）。方案：`docs/roadmap/phase5-frontend.md`（v2.1，随本条入库）。[30] 的 SHA 已回填 4497d2b。
+
+按方案 §6 的 F0 顺序：
+1. **feedback 表**（`app/server/db.py` `Feedback`）：单独成表，`message_id` 即主键、外键级联删除；`rating` ∈ up / down / NULL，NULL 保留这一行；不记改评价历史。`PUT /messages/{id}/feedback`：只限助手消息（用户消息 400）、running 时 409；note ≤1000 字（422），清控制字符与双向文本控制符（保留 \t \n）。会话详情里每条助手消息带 `feedback`。
+   - 旧库兼容：`test_v1_database_gains_feedback_table_without_touching_old_tables` —— 建库跑一轮后删掉 feedback 表还原成 v1 库，记下 6 张旧表的行数和 `pragma table_info`，重新 `create_app`：新表出现，旧表结构与行数完全相同，旧消息可直接评价。
+2. **托管与 auth 边界**（`app/server/app.py`）：`/` 返回 `ui/web/dist/index.html`，`/assets/*` 挂 StaticFiles，二者免 token；其余 API 和 `/charts/*` 照旧要 token（测试逐个断言 401）。dist 位置 `default_web_dist()`：`DATACHAT_WEB_DIST` → 打包后 `_internal/web` → 源码 `ui/web/dist`；不存在时 `/` 返回 503 并提示 `npm ci && npm run build`。静态文件也受 TrustedHost 约束；路径穿越用例返回 404。
+3. **token 流转**：`python -m app.server --open` 打开 `http://127.0.0.1:端口/#token=…`（测试断言只走 fragment、不进查询串）。前端 `ui/web/src/token.ts` 在渲染前同步读出 → sessionStorage → `replaceState` 抹掉；`src/api.ts` 是唯一出口，401 或没有 token 统一进"会话已失效"页（提示回命令行重新 `--open`）。
+4. **CSP**：index.html 带 `default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'`，外加 no-store / nosniff / no-referrer。
+   - 内联脚本：实测 Vite 8.3.4 的 modulepreload polyfill 打在入口 chunk 里，index.html 本来就没有内联 script；仍设 `build.modulePreload.polyfill=false`。`npm run build` 末尾 `scripts/check-dist.mjs` 检查内联 script 和内联事件处理器为 0，否则构建失败。
+   - Playwright 对照用例：往页面塞一个内联 `<script>`，断言没执行且 `securitypolicyviolation` 记到 script-src 违规 —— 证明 CSP 真的在生效、监听也真能抓到，"无违规"那条用例才有意义。
+5. **CI**（`.github/workflows/tests.yml` 新 job `web`，ubuntu，Node 24 + Python 3.12）：npm ci → eslint（`react/no-danger`、禁写 innerHTML/outerHTML）→ vitest 12 条 → build（含 check-dist）→ Playwright（后端 `python -m app.server` 托管 dist，5 条）→ 上传 dist。Playwright 浏览器只在 CI 装。
+6. **sidecar**：`sidecar.yml` 先构建前端，`build_sidecar.py` 把 dist 打进 `_internal/web`；`smoke_sidecar.py` 加 `check_web`：`GET /` 不带 token 200、CSP 含 script-src 'self' 与 frame-ancestors 'none'、引用的 `/assets/*.js` 取得到（本地对源码后端实测 ok；exe 版待本 PR 的 sidecar run）。
+
+前端技术栈（`ui/web`）：React 19、Vite 8、TypeScript 6、vitest 5 + jsdom + testing-library、eslint 9 + typescript-eslint、Playwright 1.64。`node_modules` 约 170 MB（S 本机放 `D:\Coding\claude\datachat\ui\web`）；`package.json` `engines.node >=24`。
+
+本机怎么跑（S）：`cd ui/web; npm ci; npm run build; cd ../..; python -m app.server --open`。开发时 `npm run dev`（Vite 把 API 代理到 127.0.0.1:8765，后端另开）。
+
+文档：THREAT_MODEL §2.1 加 T6'（免 token 面）、T7'（fragment token）、T10（CSP）；§2.3 面表加 feedback note、预览单元格（F1）、Markdown img / 链接（F2）。plan.md 阶段 5 改为"M13 后端三步已完成 + 前端 F0–F5 另计 3–4.5 周"。
+
+验证：pytest 587 passed（3.12；[30] 后 578 + test_web 9）；`tests/test_web.py` 9 条；vitest 12；Playwright 5（沙箱本地跑通）。
+
+未做 / 下一步：F1 的 `GET /datasets/{id}/preview`；F2 的 cancel（按 v2.1：CAS + finally CAS + `done_seen` + 分流 cancelled）和 `gen_ui_types.py`。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
