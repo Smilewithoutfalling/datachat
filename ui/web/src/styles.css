@@ -1,0 +1,79 @@
+/* F1 的基础样式；主题（4 套）在 F3 做 */
+:root {
+  --bg: #fafafa;
+  --panel: #fff;
+  --fg: #1f2328;
+  --muted: #6a737d;
+  --line: #e1e4e8;
+  --accent: #2f6feb;
+  --warn-bg: #fff8e1;
+  --warn: #8a5a00;
+  --danger: #c62828;
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select { font: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+button.danger { color: var(--danger); }
+button.danger.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
+button.link { border: none; background: none; color: var(--accent); padding: 0; }
+input, select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--panel); }
+
+.shell { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+.sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.sidebar h1 { font-size: 18px; margin: 0; }
+.sidebar h2 { font-size: 12px; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.nav { display: block; width: 100%; text-align: left; border: none; background: none; padding: 5px 8px; border-radius: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav:hover { background: #f0f2f5; }
+.nav.active { background: #e7efff; }
+.nav .small { display: block; font-size: 11px; }
+.settings-link { margin-top: auto; }
+.upload { display: flex; flex-direction: column; gap: 6px; }
+.upload input[type="file"] { border: none; padding: 0; max-width: 100%; }
+
+.main { overflow: auto; padding: 16px 24px; }
+.view { max-width: 1200px; }
+.view-head { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.view-head h2 { margin: 8px 0; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.title-input { font-size: 18px; font-weight: 600; border-color: transparent; flex: 1; min-width: 0; }
+.title-input:hover, .title-input:focus { border-color: var(--line); }
+
+.muted { color: var(--muted); }
+.warn { background: var(--warn-bg); color: var(--warn); padding: 6px 10px; border-radius: 6px; }
+.ok { color: #1a7f37; }
+.files { margin: 4px 0; padding-left: 18px; }
+.tabs { display: flex; gap: 4px; margin: 8px 0; flex-wrap: wrap; }
+.tabs [aria-selected="true"] { background: #e7efff; border-color: var(--accent); }
+
+.table-scroll { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.preview table { border-collapse: collapse; font-size: 13px; }
+.preview th, .preview td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap;
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.preview th { position: sticky; top: 0; background: #f6f8fa; }
+.preview .dtype { display: block; font-weight: normal; font-size: 11px; color: var(--muted); }
+.preview .rownum { color: var(--muted); text-align: right; }
+.na { color: #b0b7c0; font-style: italic; }
+
+.messages { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.msg { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.msg.user { background: #f0f6ff; }
+.msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.badge { margin-left: 6px; padding: 0 6px; border-radius: 10px; background: #eee; font-size: 11px; }
+.badge.error { background: #fde7e9; color: var(--danger); }
+
+.settings form { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; max-width: 560px; }
+.settings h3 { margin: 0 0 8px; font-size: 15px; }
+.settings label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+
+.expired { max-width: 560px; margin: 15vh auto; }
