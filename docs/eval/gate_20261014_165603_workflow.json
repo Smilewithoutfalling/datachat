@@ -1,0 +1,93 @@
+{
+ "time": "2026-10-14T16:56:03",
+ "git_sha": "78de005?",
+ "git_sha_note": "找不到 git（不在 PATH 上；可设环境变量 DATACHAT_GIT 指向 git.exe）：exe='git'，[WinError 2] 系统找不到指定的文件。",
+ "agent": "workflow",
+ "use_dictionary": true,
+ "python": "3.11.17",
+ "pandas": "3.0.6",
+ "model": "Qwen3.5-397B-A17B",
+ "temperature": 0.0,
+ "base_url_host": "grg-aikits-test.grgbanking.com",
+ "questions_sha256": "75a559642e4e",
+ "sources": {
+  "uci_online_retail": {
+   "Online Retail.xlsx": "43465a06f2cc"
+  },
+  "olist": {
+   "category_translation.csv": "a81f0d1f27b2",
+   "customers.csv": "c26c17f59f30",
+   "order_items.csv": "4f6abdbbc940",
+   "order_payments.csv": "61674868ed7b",
+   "order_reviews.csv": "012b61c7593e",
+   "orders.csv": "8df58ef3d2d7",
+   "products.csv": "3e6569628a17",
+   "sellers.csv": "31eb9bd50d68"
+  }
+ },
+ "n": 1,
+ "execution_success": 1,
+ "auto_correct": 1,
+ "unverified_numbers": 0,
+ "note": "auto_correct 只是比较器参考；结论以人工 human_correct 为准（--verdict）。",
+ "chart_smoke": {
+  "出图率": {
+   "drew": 0,
+   "no_chart": [],
+   "pass": null,
+   "rule": "调了 chart() 或 plt 的题里，每轮至多 1 题无图"
+  },
+  "chart_option": {
+   "called": 0,
+   "ok": 0,
+   "fail": [],
+   "pass": null,
+   "rule": "调了 chart() 的题全部产出合格 option；内部错误必须为 0"
+  },
+  "internal_errors": []
+ },
+ "cases": [
+  {
+   "id": "s06",
+   "group": "single",
+   "category": "过滤",
+   "dataset": "data/gate/retail_report/零售报表.csv",
+   "question": "单价超过 100 英镑的记录有多少条？",
+   "expect_refusal": false,
+   "gold": {
+    "kind": "scalar",
+    "value": 1036
+   },
+   "alts": [],
+   "note": "单价 > 100 的行数（含邮费/手工调整等特殊行）；报表变体有两行表头",
+   "executed": true,
+   "error_kind": null,
+   "error": null,
+   "answer": "单价超过 100 英镑的记录有 1036 条。",
+   "result_text": "1036",
+   "code": "df.columns = df.iloc[0]\ndf = df.iloc[1:].reset_index(drop=True)\ndf['单价（英镑）'] = pd.to_numeric(df['单价（英镑）'], errors='coerce')\nfiltered_df = df[df['单价（英镑）'] > 100]\nresult = len(filtered_df)",
+   "attempts": 0,
+   "duration_s": 14.23,
+   "tokens": 1828,
+   "auto_correct": true,
+   "match": "strict",
+   "warnings": [],
+   "unverified_numbers": [],
+   "chart": {
+    "chart_calls": 0,
+    "used_plt": false,
+    "drew": false,
+    "options": 0,
+    "pngs": 0,
+    "chart_errors": [],
+    "chart_internal_errors": [],
+    "charts_discarded": 0
+   },
+   "human_correct": true,
+   "failure_class": null,
+   "reason": "1036 条，与 gold 一致",
+   "guessing": null
+  }
+ ],
+ "labeled_by": "Hark 标注（2026-10-15，逐题看 answer 与 result_text）；S 2026-10-14 复跑时已判答对（[28] 归因复跑，[30] 入库）"
+}
