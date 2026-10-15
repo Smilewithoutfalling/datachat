@@ -17,7 +17,7 @@
 | 3 评测基线 | 1–2 周 | 评测集 100–150 题，多张表，含歧义题、应拒答题；两个 Agent 同场比较准确率、耗时、token；GitHub Actions 跑单测 | 出一份带 SHA 的评测报告 | B13 |
 | 3.5 外部验证闸门 | 3 天 | 非自造数据上的 25 题（单表 15：UCI Online Retail 改造的中文 GBK 脏表；多表 10：Olist 8 张表）；标准答案由独立脚本在原始数据上算出；最小多表支持（dfs）；报告逐题标判对层级、评测集指纹 | 按 docs/roadmap/gate-phase35.md 预登记的阈值与失败分布规则出结论 | M01 M02 M04 M05 M10(部分) M15 |
 | 4 后端 API | 1–2 周 | 第一步：API Key 进系统钥匙串（keyring）；`analyze_stream()` 逐步产出事件，`analyze()` 包一层（M09）。FastAPI：数据集上传（一个数据集可含多个文件，M10）、会话、消息（SSE 流式推送每一步）、设置；SQLite + SQLAlchemy（表结构兼容 PG，预留 user_id）；logging + trace id（会话 / 消息 id），runs.jsonl 换成数据库（M08 M14）；接口返回 png + 图表数据（M13）。最后：PyInstaller sidecar + 沙箱 worker 在 Actions Windows runner 上的 spike（B35 / M06） | 用 curl 走完"上传 → 提问 → 流式结果 → 历史可查"；重启后会话还在；spike 打出的 exe 能在干净 runner 上执行一次沙箱代码 | B18 B35 |
-| 5 前端 | 2–3 周 | 第一件事（M13，从阶段 4 顺延，含后端三步）：图表库定为 ECharts；定 option 格式与白名单、写 builder `chart(kind, df, x=, y=, series=, title=)`；worker 产出 chart_option（与 result 脱钩，B44）；接口加 chart_option；改绘图提示词并重跑闸门。之后：React + Vite + TS：数据集面板、对话流（展示计划、代码、执行步骤）、图表、可展开的代码、👍👎 反馈、Key 设置页 | 不碰命令行就能完整用一遍 | — |
+| 5 前端 | 2–3 周 | 第一件事（M13，从阶段 4 顺延，含后端三步）：图表库定为 ECharts；定 option 格式与白名单、写 builder `chart(kind, df, x=, y=, series=, title=)`；worker 产出 chart_option（与 result 脱钩，B44）；接口加 chart_option；改绘图提示词并重跑闸门。之后：React + Vite + TS：数据集面板、对话流（展示计划、代码、执行步骤）、图表、可展开的代码、👍👎 反馈、Key 设置页，分步与验收见 docs/roadmap/phase5-frontend.md（F0–F5） | 不碰命令行就能完整用一遍 | — |
 | 6 桌面打包 | 1–2 周 | Tauri 2 外壳（前提见上：前端只走 HTTP）+ PyInstaller 后端 sidecar；Windows 安装包；自动更新；首次启动引导填 Key；依赖许可证审计；决定 pyarrow 去留（打包体积 78.5 MB，开发与打包环境须一致，见 DEVLOG [18]） | 在一台干净的 Windows 上一键安装，可用；对外分发前代码签名、SmartScreen 不拦（M19）；对外分发前满足 THREAT_MODEL.md 的 (b) 条件 | — |
 | 7 准确率 | 2–4 周 | DuckDB 统一 CSV/Excel/SQL；YAML 语义模型（指标、口径、同义词）；枚举值召回；结果合理性校验；反馈沉淀为已验证问答对 | 在阶段 3.5 闸门数据上给出具体目标（闸门结论后定，M20）；自造集只作回归 | B05 B09 |
 | 8 Web 上线（后续） | 另定 | PostgreSQL、登录、任务队列、Docker/E2B 沙箱、Langfuse、服务器部署与 ICP 备案 | 另定 | 多租户 |
@@ -38,7 +38,7 @@
 
 | 阶段 | 原估 | 重估（日历时间） | 主要不确定性 |
 |---|---|---|---|
-| 5 前端 | 2–3 周 | 1.5–3 周（2026-10-14 改：吸收 M13 后端三步） | S 的 UI 验收轮数；M13 改提示词后的闸门回归 |
+| 5 前端 | 2–3 周 | M13 后端三步已完成（[22]–[28]）；前端 F0–F5 另计 3–4.5 周（2026-10-15 改，见 docs/roadmap/phase5-frontend.md） | S 的 UI 验收轮数；M13 改提示词后的闸门回归 |
 | 6 桌面打包 | 1–2 周 | 1–2 周，签名证书另计 | Tauri WebView2 / 自动更新 spike；证书审核 |
 | 7 准确率 | 2–4 周 | 2–4 周（不变） | 需要新的留出评测集（闸门 25 题已只作回归）；评测轮数 |
 
