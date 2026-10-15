@@ -4,8 +4,8 @@
     GET    /health
     POST   /datasets                     multipart：files（一个或多个 CSV，可含 *.dict.csv 字典）、name
     GET    /datasets                     列表
-    GET    /datasets/{id}                详情（含文件与每张表的列）
-    GET    /datasets/{id}/preview?rows=20  每张表前 N 行（1–100），单元格一律字符串或 null（阶段 5 F1）
+    GET    /datasets/{id}?rows=20        详情（文件、每张表的列与概要）；带 rows（1–100）时加每张表前 N 行预览，
+                                         单元格一律字符串或 null（阶段 5 F1.1：预览与详情合并，每个文件只读一遍）
     DELETE /datasets/{id}
     POST   /sessions                     {"dataset_id", "agent": "workflow"|"react", "title"?}
     GET    /sessions                     列表（按更新时间倒序）
@@ -36,7 +36,7 @@ import shutil
 import sys
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -50,11 +50,16 @@ MAX_FILES = 50
 SETTING_KEYS = ("model", "base_url", "timeout")
 TIMEOUT_RANGE = (5.0, 600.0)
 PREVIEW_MAX_ROWS = 100
+PREVIEW_DEFAULT_ROWS = 20    # 上传后随响应带回的预览行数
 PREVIEW_CELL_MAX = 200       # 单元格超长截断（按文本渲染，T9）
 CHART_NAME = re.compile(r"^chart_[0-9_]+_[0-9a-f]{6}\.png$")
 FEEDBACK_NOTE_MAX = 1000
 # 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+# 方向控制符（LRM/RLM、嵌入 / 覆盖、隔离）：数据里没有合法用途，却能让后面的文本视觉重排（THREAT_MODEL §2.3）
+_BIDI = "\u200e\u200f\u202a-\u202e\u2066-\u2069"
+_BIDI_CONTROLS = re.compile(f"[{_BIDI}]")
+# 标题、note：C0/C1 控制字符（保留 \t \n）+ 方向控制符。预览只用 _BIDI_CONTROLS（数据里 \r \t \n 合法）
+_CONTROL_CHARS = re.compile(f"[\x00-\x08\x0b-\x1f\x7f-\x9f{_BIDI}]")
 # index.html 的内容安全策略（阶段 5 方案 §1）。构建产物里不能有内联 <script>（CI 检查），所以 script-src 只要 'self'；
 # ECharts / React 会写行内 style，故 style-src 带 'unsafe-inline'；图表导出用 data: / blob:。
 CSP = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -183,18 +188,47 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         r.pop("dataset", None)          # 本地绝对路径不外发
         return r
 
-    def dataset_out(ds: Dataset, detail=False):
+    def dataset_out(ds: Dataset, detail=False, rows: int | None = None):
+        """detail：读每张表，给出列名、概要；rows 不为 None 时再带每张表前 rows 行预览。
+        表的枚举直接用分析路径的 table_paths（表名、排序、字典过滤、重名检查与 load_data 结构性一致），
+        但逐表 try：一张读坏只在该表报 error，不影响其他表的列名和预览。每个文件只读一遍。"""
         out = {"id": ds.id, "name": ds.name, "created_at": ds.created_at,
                "files": [{"filename": f.filename, "size": f.size, "sha256": f.sha256} for f in ds.files]}
-        if detail:
-            from app.tools.dataset import load_data
+        if not detail:
+            return out
+        from app.tools.csv_io import read_csv_with_encoding
+        from app.tools.dataset import is_dict_file, table_paths
+        target = dataset_target(ds)
+        try:
+            tp = table_paths(target)
+        except Exception as e:  # noqa: BLE001 —— 目录空、表名重复：分析同样会失败
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
+        multi = tp is not None
+        cols, parts, errors, previews = {}, [], [], []
+        for name, path in tp or [("df", target)]:
+            filename = os.path.basename(path)
             try:
-                data, desc = load_data(dataset_target(ds))
-                tables = data if isinstance(data, dict) else {"df": data}
-                out["tables"] = {k: [str(c) for c in v.columns] for k, v in tables.items()}
-                out["summary"] = desc
+                df, enc = read_csv_with_encoding(path)
             except Exception as e:  # noqa: BLE001
-                out["error"] = f"{type(e).__name__}: {e}"
+                msg = f"{type(e).__name__}: {e}"
+                errors.append(f"{filename}：{msg}")
+                parts.append(f"{name} 读取失败")
+                previews.append({"name": name, "filename": filename, "error": msg})
+                continue
+            cols[name] = [str(c) for c in df.columns]
+            parts.append(f"{name} {len(df)}×{len(df.columns)}（{enc}）" if multi
+                         else f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}")
+            if rows is not None:
+                previews.append(preview_table(name, filename, df, enc, rows))
+            del df
+        out["tables"] = cols
+        out["summary"] = (f"{len(parts)} 张表：" + "，".join(parts)) if multi else parts[0]
+        if errors:                       # 任一张读坏，分析（load_data）整体会失败，所以在顶层也报
+            out["error"] = "；".join(errors)
+        if rows is not None:
+            out["preview"] = {"rows": rows, "tables": previews,
+                              "dicts": sorted(f.filename for f in ds.files if is_dict_file(f.filename))}
         return out
 
     def dataset_target(ds: Dataset) -> str:
@@ -235,16 +269,29 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 over.pop("timeout")          # 库里的坏值不让分析整个起不来，退回环境变量 / 默认
         return LLMConfig.from_env(**over)
 
-    def preview_cell(v):
-        """预览单元格：缺失 → None；其余转字符串并截断。前端按文本渲染（THREAT_MODEL T9）。"""
+    def preview_cell(v, stats):
+        """预览单元格：缺失 → None；其余转字符串，去掉方向控制符（只影响显示，模型拿到的仍是原数据），
+        超长截断。计数记进 stats，前端在提示行告诉用户。前端按文本渲染（THREAT_MODEL T9）。"""
         import pandas as pd
         try:
             if pd.isna(v):
                 return None
         except (TypeError, ValueError):     # 列表之类的非标量
             pass
-        s = str(v)
-        return s if len(s) <= PREVIEW_CELL_MAX else s[:PREVIEW_CELL_MAX] + "…"
+        s, n = _BIDI_CONTROLS.subn("", str(v))
+        stats["bidi_stripped"] += n
+        if len(s) > PREVIEW_CELL_MAX:
+            stats["truncated_cells"] += 1
+            s = s[:PREVIEW_CELL_MAX] + "…"
+        return s
+
+    def preview_table(name, filename, df, enc, rows):
+        stats = {"bidi_stripped": 0, "truncated_cells": 0}
+        columns = [preview_cell(c, stats) or "" for c in df.columns]
+        body = [[preview_cell(v, stats) for v in r] for r in df.head(rows).itertuples(index=False, name=None)]
+        return {"name": name, "filename": filename, "encoding": enc,
+                "total_rows": int(len(df)), "total_columns": int(len(df.columns)),
+                "columns": columns, "dtypes": [str(t) for t in df.dtypes], "rows": body, **stats}
 
     # ------------------------------------------------------------------ 路由
     @app.get("/health")
@@ -286,42 +333,16 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             db.rollback()
             shutil.rmtree(folder, ignore_errors=True)
             raise
-        return dataset_out(ds, detail=True)
+        return dataset_out(ds, detail=True, rows=PREVIEW_DEFAULT_ROWS)
 
     @app.get("/datasets", dependencies=[Depends(auth)])
     def list_datasets(db=Depends(db_dep)):
         return [dataset_out(d) for d in db.scalars(select(Dataset).order_by(Dataset.created_at.desc()))]
 
     @app.get("/datasets/{dataset_id}", dependencies=[Depends(auth)])
-    def get_dataset(dataset_id: str, db=Depends(db_dep)):
-        return dataset_out(get_or_404(db, Dataset, dataset_id), detail=True)
-
-    @app.get("/datasets/{dataset_id}/preview", dependencies=[Depends(auth)])
-    def preview_dataset(dataset_id: str, rows: int = 20, db=Depends(db_dep)):
-        """每张表前 rows 行。读法与分析时一致（同一个编码探测和 read_csv），用户看到的就是模型拿到的。"""
-        from app.tools.csv_io import read_csv_with_encoding
-        from app.tools.dataset import is_dict_file
-        if not 1 <= rows <= PREVIEW_MAX_ROWS:
-            raise HTTPException(400, f"rows 需在 1–{PREVIEW_MAX_ROWS}")
-        ds = get_or_404(db, Dataset, dataset_id)
-        tables, dicts = [], []
-        for f in sorted(ds.files, key=lambda f: f.filename.lower()):
-            if is_dict_file(f.filename):
-                dicts.append(f.filename)
-                continue
-            name = os.path.splitext(f.filename)[0]
-            try:
-                df, enc = read_csv_with_encoding(f.path)
-            except Exception as e:  # noqa: BLE001 —— 一张表读坏不影响其他表的预览
-                tables.append({"name": name, "filename": f.filename, "error": f"{type(e).__name__}: {e}"})
-                continue
-            head = df.head(rows)
-            tables.append({"name": name, "filename": f.filename, "encoding": enc,
-                           "total_rows": int(len(df)), "total_columns": int(len(df.columns)),
-                           "columns": [preview_cell(c) or "" for c in df.columns],
-                           "dtypes": [str(t) for t in df.dtypes],
-                           "rows": [[preview_cell(v) for v in r] for r in head.itertuples(index=False, name=None)]})
-        return {"dataset_id": ds.id, "rows": rows, "tables": tables, "dicts": dicts}
+    def get_dataset(dataset_id: str, rows: int | None = Query(None, ge=1, le=PREVIEW_MAX_ROWS), db=Depends(db_dep)):
+        """rows：带上就附每张表前 rows 行预览（越界、非整数都是 422）。"""
+        return dataset_out(get_or_404(db, Dataset, dataset_id), detail=True, rows=rows)
 
     @app.delete("/datasets/{dataset_id}", dependencies=[Depends(auth)])
     def delete_dataset(dataset_id: str, db=Depends(db_dep)):
