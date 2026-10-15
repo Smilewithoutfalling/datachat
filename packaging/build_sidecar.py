@@ -34,5 +34,12 @@ ARGS = [
     "--exclude-module", "pytest",
 ]
 
+# 前端构建产物（ui/web 下 npm run build）→ _internal/web，后端 default_web_dist() 在打包后读这里（阶段 5 F0）
+WEB_DIST = os.path.join(ROOT, "ui", "web", "dist")
+if os.path.isfile(os.path.join(WEB_DIST, "index.html")):
+    ARGS += ["--add-data", f"{WEB_DIST}{os.pathsep}web"]
+else:
+    print("警告：ui/web/dist 不存在，打出的 sidecar 不带前端（GET / 会返回 503）", file=sys.stderr)
+
 if __name__ == "__main__":
     PyInstaller.__main__.run(ARGS + sys.argv[1:])
