@@ -1180,7 +1180,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 
 未做 / 下一步：F1 的 `GET /datasets/{id}/preview`；F2 的 cancel（按 v2.1：CAS + finally CAS + `done_seen` + 分流 cancelled）和 `gen_ui_types.py`。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
 
-## [32] 2026-10-15 · 阶段 5 F1：数据集预览、会话、设置 · commit <待提交>
+## [32] 2026-10-15 · 阶段 5 F1：数据集预览、会话、设置 · commit 7f0cdcd（PR #33）
 
 当前阶段：**阶段 5 前端，F1 完成，下一步 F2**（SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types）。[31] 的 SHA 已回填 4beb924（PR #32，CI tests 38694679388 含 web job、sidecar 38694679138 均绿）。
 
@@ -1207,3 +1207,33 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 验证：pytest 594 passed（3.12；587 + test_web_f1 7）；vitest 17；Playwright 6（沙箱本地）；lint、build（check-dist 0 内联）通过。
 
 未做 / 下一步：F2。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
+
+## [33] 2026-10-15 · 阶段 5 F1.1：F1 评审收尾（预览并入详情、方向控制符、截断计数、token 先存后抹） · commit <待提交>
+
+当前阶段：**阶段 5 前端，F1.1 完成，下一步 F2**（SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types）。[32] 的 SHA 已回填 7f0cdcd（PR #33，CI tests 38699875135、sidecar 38699875296 均绿）。
+
+起因（S 评审 F1）：
+- 预览读整表的理由要写对：`detect_encoding` 对**整个文件**做严格解码；只读头部，前面全是 ASCII 的 GBK 文件会被判成 utf-8，整表读坏，而不只是 dtype 不一致。所以不改成 nrows。真正的代价不是"慢"：`DatasetView` 并发请求详情和 `/preview`，同一个 CSV 被整表读两遍，每遍 bytes / str / DataFrame 三份并存，1 GB 文件峰值 4–5 GB。
+- 详情原来用 `load_data` 整体 try：多表任一张坏，整个详情都没有 `tables`；"一张坏、其余照常"只在 `/preview` 层成立。
+- 表名、排序两条路径不一致：分析用 `table_paths`（`splitext(basename)`、按表名排、大小写敏感、`os.listdir`），`/preview` 按文件名小写排、用 DB 的 `ds.files`。`B.csv + a.csv`：前者 [B, a]，后者 [a, B]。
+
+后端（`app/server/app.py`）：
+1. **预览并入 `GET /datasets/{id}?rows=N`**：`rows: int | None = Query(None, ge=1, le=100)`；不传就不带预览，越界和非整数都是 422（原来越界 400、`abc` 422）。删掉 `/preview`（只在 F1 前端用过，未对外）。`POST /datasets` 的响应带 20 行预览（`create_dataset` 本来就返回 detail），前端上传后不用再请求。
+2. **详情逐表读、每个文件只读一遍**：直接用分析路径的 `table_paths(dataset_target(ds))` 枚举（多表 → [(表名, 路径)]；单表 None → `[("df", target)]`），表名、排序、字典过滤、重名检查与 `load_data` 结构性一致；每张表单独 try，一次 `read_csv_with_encoding` 同时出列名、概要、预览。坏表在 preview 里只带 `error`，好表的 `tables` 列名照常；任一张坏时顶层也给 `error`（分析时 `load_data` 会整体失败），概要写"x 读取失败"。单表表名沿用 `"df"`（prompt 里单表变量就叫 df；前端单表不显示 tab）。`table_paths` 本身抛（目录空、表名重复）→ 顶层 error。
+3. **方向控制符**：拆成 `_BIDI_CONTROLS`（U+200E/200F LRM/RLM、U+202A–202E、U+2066–2069）和 `_CONTROL_CHARS`（C0/C1 除 \t \n + 上面这些；标题、note 用，字符集与 F1 完全相同）。预览的单元格与表头只清 `_BIDI_CONTROLS`（数据里 \r \t \n 合法）。只影响显示，模型拿到的仍是原数据，所以每张表返回 `bidi_stripped` 计数，提示行写明。
+4. **截断计数**：每张表返回 `truncated_cells`，提示行写"n 个单元格超 200 字，已截断（末尾带 …）"；用户能区分原值本来就以 … 结尾的情况。
+5. `db.py`：`ChatSession.updated_at` 加注释——语义是"最后一次提问时间"，只在 post_message 更新，改名刻意不更新，故意没有 onupdate。
+
+前端（`ui/web/src`）：
+- `client.dataset(id, rows=20)` 一个请求拿详情 + 预览；删 `client.preview`；`types.ts` 的 `DatasetDetail.preview`、`bidi_stripped`、`truncated_cells`。
+- `DatasetView`：单请求；上传后直接用响应（Shell 传 `initial`），不再请求。不再单列 `summary`：单表时与预览提示行重复；多表的跨表概览并进 tab 标签（`orders 100×3 · gbk`、坏表"读取失败"）。顶层 error 显示"有表读取失败，分析会失败"。
+- `PreviewTable` 提示行加截断数与方向控制符数。
+- 左栏会话标题旁写"按最近分析时间排序"。
+- `token.ts`：先 `setItem`（try/catch），再无论成败都 `replaceState` 抹地址栏，然后返回 token；存失败时 token 只在内存，本页可用，刷新进"会话已失效"页（T7'：token 不进历史）。原实现先抹后存、注释写反了，`setItem` 一抛会冒到 `main.tsx` 顶层同步调用，导致白屏。
+
+测试：
+- `tests/test_web_f1.py`（10 条）：单表预览与 `read_csv` 逐格一致、名为 df；上传响应带预览且与详情一致、不传 rows 无预览、列表无预览；rows 0 / -1 / 101 / abc / 1.5 均 422、401、404、旧 `/preview` 404；表头与单元格清方向控制符（计数 5）、注入串原样、截断计数 1；GBK；多表一张空文件：好表列名与预览照常、坏表只有 error、顶层 error 与概要；`B.csv + a.csv` 表名顺序为 [B, a]，且与 `load_data` 的表名、列名一致（回归网）；改名清 LRM/RLO/BEL，**改名不动 updated_at**。
+- vitest 21（+4）：提示行的截断数与方向控制符数；详情只发一个请求、上传后不再请求；多表 tab 标签带行列数和编码、坏表与顶层 error 的提示；token 存储抛异常仍返回 token 且地址栏已抹、replaceState 时 token 已在存储里。
+- `docs/THREAT_MODEL.md` 预览一行改为：清方向控制符并计数、截断计数。
+
+未做 / 下一步：F2。`read_csv_with_encoding` 内部 bytes / str / DataFrame 三份并存的峰值内存（分析路径也一样，属于读取函数本身，不在 F1.1 顺手改；需要时改成解码后释放 bytes、或按块解码）。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
