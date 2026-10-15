@@ -52,6 +52,9 @@ class ChatSession(Base):
     agent: Mapped[str] = mapped_column(String(16))
     title: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[str] = mapped_column(String(40), default=now)
+    # 语义是"最后一次提问时间"：只在 post_message 里更新，会话列表按它倒序（界面写明"按最近分析时间排序"）。
+    # 改名（PATCH /sessions/{id}）刻意不更新——否则改个名就顶到最前，"最近分析"排序失真。
+    # 故意没有 onupdate；改字段名要迁移，先用这条注释钉住（tests/test_web_f1.py 有回归测试）。
     updated_at: Mapped[str] = mapped_column(String(40), default=now)
     messages: Mapped[list["Message"]] = relationship(back_populates="session", cascade="all, delete-orphan",
                                                      order_by="Message.created_at")
