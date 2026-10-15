@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { Api } from "./api";
 import { takeToken } from "./token";
+import "./styles.css";
 
 // 必须在任何 await / 渲染之前：读出 fragment 里的 token 并同步抹掉地址栏
 const api = new Api(takeToken());
