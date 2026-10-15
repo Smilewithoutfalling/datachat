@@ -187,14 +187,43 @@ def test_extension_array_result_survives_sandbox(chart_path):
     assert results_equal(result, frozenset({"France", "EIRE", "Germany"}))
 
 
-def test_react_no_exec_no_refusal_is_retried(sample_path):
-    """B69：回归 react m09 只回了一个 'B'：没执行代码、也不是拒答，却记成成功（error 为空）。"""
+def test_react_no_exec_no_refusal_is_nudged(sample_path):
+    """B69 → B70：没执行代码、也不是拒答就要收尾（m09 的 'B' / 英文推理摘要）→ 同一会话里先提醒一次。"""
+    from app.react_agent import NUDGE_NO_EXEC
     m = ScriptedChatModel(replies=["B", tool_call("result = 3"), "结果是 3。"], calls=[])
     res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    assert res.ok and res.result == 3 and len(m.calls) == 3
+    assert any(s.name == "nudge" for s in res.steps) and not any(s.name == "retry" for s in res.steps)
+    second = [(x.type, x.content) for x in m.calls[1] if x.type != "system"]
+    assert second == [("human", "q"), ("ai", "B"), ("human", NUDGE_NO_EXEC)]
+
+
+def test_react_nudge_only_once_then_b69_rerun(sample_path):
+    """提醒后仍不执行 → 不再提醒，走 B69 整轮重跑（新一轮可以再提醒一次）。"""
+    from app.react_agent import NUDGE_NO_EXEC
+    m = ScriptedChatModel(replies=["B", "B", tool_call("result = 3"), "结果是 3。"], calls=[])
+    res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
     assert res.ok and res.result == 3 and any(s.name == "retry" for s in res.steps)
+    assert len(m.calls) == 4
+    assert [x.content for x in m.calls[2] if x.type == "human"] == ["q"]      # 重跑是全新的一轮
+    assert sum(1 for c in m.calls for x in c if x.type == "human" and x.content == NUDGE_NO_EXEC) == 1
 
 
 def test_react_no_exec_no_refusal_persistent_is_error(sample_path):
-    m = ScriptedChatModel(replies=["B"] * 3, calls=[])
+    m = ScriptedChatModel(replies=["B"] * 6, calls=[])
     res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
-    assert res.error_kind == "agent" and not res.executed and len(m.calls) == 3
+    assert res.error_kind == "agent" and not res.executed and len(m.calls) == 6   # 3 轮 × （原答 + 提醒后）
+
+
+def test_react_no_nudge_for_refusal_gateway_error_or_history(sample_path):
+    """契约拒答（B40）、网关错误内容（B62 另行重跑）、带 history 的追问：都不提醒。"""
+    m = ScriptedChatModel(replies=["无法回答：数据中没有成本字段。"], calls=[])
+    analyze(sample_path, "毛利率", agent="react", chat_model=m, llm_config=FAST)
+    assert len(m.calls) == 1
+    m = ScriptedChatModel(replies=['{"message":"bad gateway"}', tool_call("result = 1"), "1"], calls=[])
+    res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
+    assert not any(s.name == "nudge" for s in res.steps) and any(s.name == "retry" for s in res.steps)
+    m = ScriptedChatModel(replies=["上一轮的结果表示……"], calls=[])
+    res = analyze(sample_path, "解释一下", agent="react", chat_model=m, llm_config=FAST,
+                  history=[("q", "结果是 3。")])
+    assert len(m.calls) == 1 and res.error is None
