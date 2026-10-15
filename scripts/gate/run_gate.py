@@ -164,7 +164,11 @@ def verdict(path: str, profile: str) -> dict:
                 "labeled_by": data.get("labeled_by", "")})
     # 显式写 True/False（[30]）：只写 False 的写法让"已终审"没法用这个字段表达，
     # 结果就是 labeled_by 改成"S 终审通过"之后 keys 里仍留着上一轮的 False。
-    out["labels_final"] = "待 S 终审" not in out["labeled_by"]
+    # labeled_by 为空时不写这个键：没人署名的标注不能被判成"已终审"（10-12 的老报告没有 labeled_by）。
+    if out["labeled_by"]:
+        out["labels_final"] = "待 S 终审" not in out["labeled_by"]
+    else:
+        out.pop("labels_final", None)
     if prof["kind"] == "phase35":
         out.update(_verdict_phase35(prof, s_ok, s_n, m_ok, m_n, fails, dist))
     else:
