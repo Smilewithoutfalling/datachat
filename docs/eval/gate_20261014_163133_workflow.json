@@ -1329,7 +1329,7 @@
    "guessing": false
   }
  ],
- "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+ "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text）；S 终审通过（2026-10-15）",
  "verdict": {
   "single": "10/15",
   "multi": "10/10",
@@ -1387,7 +1387,7 @@
    }
   },
   "thresholds_sha256": "4992a4016355",
-  "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text），待 S 终审",
+  "labeled_by": "Hark 预标注（2026-10-14，逐题看 answer 与 result_text）；S 终审通过（2026-10-15）",
   "labels_final": false,
   "single_min": "11/15",
   "single_regressions": [
