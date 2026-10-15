@@ -1,6 +1,6 @@
 """FastAPI 应用（阶段 4）。前端只通过这里的 HTTP / SSE 与后端交互（M22），不走 Tauri IPC。
 
-接口（除 /health 外都要 Authorization: Bearer <token>；图表另可用 ?token=，方便 <img>）：
+接口（除 /health 和前端静态文件外都要 Authorization: Bearer <token>；图表另可用 ?token=，方便 <img>）：
     GET    /health
     POST   /datasets                     multipart：files（一个或多个 CSV，可含 *.dict.csv 字典）、name
     GET    /datasets                     列表
@@ -12,6 +12,9 @@
     DELETE /sessions/{id}
     POST   /sessions/{id}/messages       {"content"} → text/event-stream，逐条转发 analyze_stream 事件
     GET    /charts/{name}                图表 png
+    PUT    /messages/{id}/feedback       {"rating": "up"|"down"|null, "note"?}（只限已结束的助手消息）
+    GET    /  、/assets/*                前端（ui/web 构建产物）。不要 token——页面本身不含机密，token 由
+                                         URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
     GET    /settings  PUT /settings      非机密设置：model、base_url
     GET    /settings/api-key             {"configured", "source"}——从不返回 Key 本身
     PUT    /settings/api-key             {"api_key"} → 存进系统钥匙串
@@ -28,20 +31,29 @@ import os
 import re
 import secrets
 import shutil
-from typing import Optional
+import sys
+from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Message, Setting, make_sessionmaker, now
+from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback, Message, Setting, make_sessionmaker, now
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
 MAX_FILES = 50
 SETTING_KEYS = ("model", "base_url")
 CHART_NAME = re.compile(r"^chart_[0-9_]+_[0-9a-f]{6}\.png$")
+FEEDBACK_NOTE_MAX = 1000
+# 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+# index.html 的内容安全策略（阶段 5 方案 §1）。构建产物里不能有内联 <script>（CI 检查），所以 script-src 只要 'self'；
+# ECharts / React 会写行内 style，故 style-src 带 'unsafe-inline'；图表导出用 data: / blob:。
+CSP = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
 
 
 def default_home() -> str:
@@ -67,13 +79,29 @@ class SettingsIn(BaseModel):
     base_url: Optional[str] = None
 
 
+class FeedbackIn(BaseModel):
+    rating: Optional[Literal["up", "down"]] = None
+    note: str = Field("", max_length=FEEDBACK_NOTE_MAX)
+
+
 class ApiKeyIn(BaseModel):
     api_key: str = Field(min_length=1, max_length=512)
 
 
+def default_web_dist() -> str:
+    """前端构建产物目录：DATACHAT_WEB_DIST；PyInstaller 打包后是 _internal/web；源码环境是 ui/web/dist。"""
+    if os.getenv("DATACHAT_WEB_DIST"):
+        return os.getenv("DATACHAT_WEB_DIST")
+    if getattr(sys, "frozen", False):
+        return os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), "web")
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "ui", "web", "dist")
+
+
 def create_app(home: str | None = None, token: str | None = None, *, chat_model_factory=None,
-               analyze_kwargs: dict | None = None) -> FastAPI:
+               analyze_kwargs: dict | None = None, web_dist: str | None = None) -> FastAPI:
     """home：数据目录（SQLite、上传文件、图表）。token：None 时随机生成，见 app.state.token。
+    web_dist：前端构建产物目录，默认 default_web_dist()；目录不存在时 / 返回 503 提示先构建。
     chat_model_factory：测试用，() -> ChatModel；None 时按设置和钥匙串构造真实模型。
     analyze_kwargs：透传给 analyze_stream 的额外参数（测试用，如 recursion_limit）。"""
     from app.core import AGENTS, LLMConfig, analyze_stream
@@ -170,6 +198,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             out["events"] = [public_event({"type": e.type, "trace_id": m.id, "seq": e.seq, "ts": e.ts,
                                            "data": json.loads(e.data_json)}) for e in m.events]
             out["result"] = public_result(json.loads(m.result_json)) if m.result_json else None
+            out["feedback"] = {"rating": m.feedback.rating, "note": m.feedback.note} if m.feedback else None
         return out
 
     def session_out(s: ChatSession):
@@ -326,6 +355,20 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                                  headers={"Cache-Control": "no-cache", "X-Message-Id": msg_id,
                                           "X-User-Message-Id": q.id})
 
+    @app.put("/messages/{message_id}/feedback", dependencies=[Depends(auth)])
+    def put_feedback(message_id: str, body: FeedbackIn, db=Depends(db_dep)):
+        m = get_or_404(db, Message, message_id)
+        if m.role != "assistant":
+            raise HTTPException(400, "只能评价助手消息")
+        if m.status == "running":
+            raise HTTPException(409, "这条消息还在分析中")
+        note = _CONTROL_CHARS.sub("", body.note).strip()
+        fb = m.feedback or Feedback(message_id=m.id)
+        fb.rating, fb.note, fb.updated_at = body.rating, note, now()
+        m.feedback = fb
+        db.commit()
+        return {"message_id": m.id, "rating": fb.rating, "note": fb.note}
+
     @app.get("/charts/{name}", dependencies=[Depends(auth)])
     def get_chart(name: str):
         path = os.path.join(persist.CHART_DIR, name)
@@ -370,5 +413,23 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         except keystore.KeyStoreError as e:
             raise HTTPException(400, str(e)) from None
         return get_api_key_status()
+
+    # ------------------------------------------------------------------ 前端静态文件（不要 token）
+    # 边界：只有 / 和 /assets/* 免 token。页面和 JS 不含机密；token 只经 URL fragment（不发给服务器、
+    # 不进访问日志）交给前端，之后所有 API 照旧要 Bearer。/charts/* 仍要 token（图里是用户数据）。
+    web_dist = os.path.abspath(web_dist or default_web_dist())
+    app.state.web_dist = web_dist
+    app.mount("/assets", StaticFiles(directory=os.path.join(web_dist, "assets"), check_dir=False), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        path = os.path.join(web_dist, "index.html")
+        if not os.path.isfile(path):
+            return HTMLResponse("<p>前端未构建：在 ui/web 目录运行 npm ci &amp;&amp; npm run build。</p>", status_code=503,
+                                headers={"Content-Security-Policy": CSP})
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+        return HTMLResponse(html, headers={"Content-Security-Policy": CSP, "Cache-Control": "no-store",
+                                           "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"})
 
     return app
