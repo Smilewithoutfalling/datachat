@@ -424,9 +424,14 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         def stream():
             # 状态写库只有两处，都用 CAS（WHERE status='running'）：这里的 finally，和 POST /messages/{id}/cancel。
             # 先到者生效；已被 cancel 的轮次这里不再覆盖（result_json 留空，前端按 status=cancelled 合成 done）。
-            # 默认：客户端断开（GeneratorExit）。不是用户点停止，所以不用 cancelled。前端点停止必须先等
-            # POST /cancel 返回、再断开 fetch，这样 cancel 的 CAS 先落库，这里的 CAS 命中 0 行。
-            status, content, result_json = "interrupted", DISCONNECTED_MESSAGE, None
+            # 判据是显式的：只有 except GeneratorExit（客户端断开）才落 interrupted；不是用户点停止，所以不用 cancelled。
+            # 前端点停止必须先等 POST /cancel 返回、再断开 fetch，这样 cancel 的 CAS 先落库，这里的 CAS 命中 0 行。
+            # 默认兜底是 error + STREAM_ABORTED_MESSAGE：任何没预料到的结局（异常、生成器正常结束却没有 done）都算后端问题，
+            # 不能显示成"连接已断开"把排查方向指向网络。
+            # 真 TCP 断开时：分析就跑在这个生成器里，下一个事件 yield 写失败 → 生成器被关闭 → 分析在下一个事件边界停下
+            # （最多晚一次模型调用）。分析真的停了，所以落 interrupted，不留 running——留 running 会让会话 409 到重启
+            # （tests/test_web_f2.py::test_real_tcp_disconnect_is_interrupted，真 uvicorn + 真 socket）。
+            status, content, result_json = "error", STREAM_ABORTED_MESSAGE, None
             done_seen = False
             try:
                 with Session() as wdb:
@@ -448,10 +453,11 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                         yield (f"id: {ev.seq}\nevent: {ev.type}\n"
                                f"data: {json.dumps(public_event(d), ensure_ascii=False, default=str)}\n\n")
             except GeneratorExit:
-                raise
-            except Exception:  # —— 没收到 done 又不是断开：记为 error，不能留成"已取消"；异常详情只进日志
                 if not done_seen:
-                    status, content = "error", STREAM_ABORTED_MESSAGE
+                    status, content = "interrupted", DISCONNECTED_MESSAGE
+                raise
+            except Exception:  # —— 没收到 done 又不是断开：保持默认 error，异常详情只进日志
+                if not done_seen:
                     logger.exception("消息 %s 的分析流异常中断", msg_id)
                 raise
             finally:
