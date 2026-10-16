@@ -5,7 +5,7 @@ export type SseMessage = { id: string; event: string; data: string };
 
 export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<SseMessage> {
   const reader = body.getReader();
-  const decoder = new TextDecoder(); // stream: true 处理跨 chunk 的多字节字符
+  const decoder = new TextDecoder(); // stream: true 处理跨 chunk 的多字节字符；ignoreBOM 默认 false = 去掉开头一个 BOM（规范要求）
   let buf = "";
   let id = "";
   let event = "";
