@@ -28,6 +28,16 @@
 | Node [v2] | **本机和 CI 统一用 Node 24**（S 本机已有 v24.14.0，D:\Coding\nodejs）。`node_modules` 放在 `D:\Coding\claude\datachat\ui\web`；Playwright 浏览器只在 CI 上装 |
 | 事件类型 [v2] | `scripts/gen_ui_types.py` 从 `app/core/events.py` 生成 `ui/web/src/generated/events.json`（EVENT_TYPES）和 `banned_keys.json`（BANNED_KEYS），CI 跑 `--check`，和 gen_eval_data 一样的做法 |
 
+**停止的已定规则 [F2，S 10-16 确认]**
+- 取消照常产出 fatal error + done（保留"done 之前有且只有一个终结事件"的不变式）；`error.message`、`AnalysisResult.error`、`messages.content` 在 cancelled 时一律是常量 `CANCELLED_MESSAGE`（"已取消"），不带内部异常或堆栈。前端只按 `kind` / `status` 分支，不匹配文案。
+- **"已取消"只用于用户动作。** 非用户动作的终止一律 `status=interrupted`（`ERROR_KINDS` 含它；analyze_stream 不产出，前端重放按 status 合成 done(error_kind=interrupted)），前端给重试入口：后端重启清理遗留 running → `INTERRUPTED_MESSAGE`；SSE 客户端断开（关标签页、网络抖动）→ `DISCONNECTED_MESSAGE`。流中途抛异常、没收到 done → `status=error`、`STREAM_ABORTED_MESSAGE`，异常详情只进日志。
+- **前端点停止的顺序**：先 `POST /messages/{id}/cancel` 并等它返回，再断开 fetch（或者不断开，等流里的 error + done）。反过来先断开，库里会落 interrupted。
+- **status → 终止原因映射（前端用）**：ok → 正常；cancelled → "已取消"；interrupted → 已中断 + 重试；error → 失败，原因看流里 / result 里的 error_kind，重放时没有 result（stream_aborted）就只显示 content。messages 表没有 error_kind 列（技术债，见 DEVLOG [34] 未做）。
+- `events.json` 带 `event_types`、`error_kinds`、`message_statuses` 和全部常量文案，`--check` 覆盖它们的漂移；测试另钉三条：service.py 写的 kind 恰为 `ERROR_KINDS` 去掉 interrupted；整个 app/ 只有 service.py 写 error_kind（评测记录自己的 `ground_truth` 以 (文件, kind) 列白名单）；app/ 里写进 status 的字面量都在 `MESSAGE_STATUSES` 里且每个都有人写。
+- 检查点：`analyze_stream` 在每个事件产出前检查（answer 也是检查点），内部跑完、done 之前再查一次。late-cancel 窗口只剩 answer 发出之后到 done 之前的收尾记账（没有模型调用）。
+- 晚到的取消算取消。**已知取舍**：answer 事件可能已经发出，但 status=cancelled、result_json 为空，这个组合会传到前端；写进 PR 描述和 DEVLOG。
+- **前端：status 是最终真相源，流只作增量渲染。** 流里收到过 answer、但最终 status=cancelled → 当场保留气泡，标"已取消（未保存）"；刷新/重放后不出现（重放按 status=cancelled 合成"已取消"的 done）。不把 answer 补写回库。
+
 ## 2. 页面
 1. 左栏：数据集、会话。**数据集详情含前 20 行预览**（F1 做）[v2]
 2. 对话流按事件渲染：plan、code（折叠）、exec（折叠）、error（黄 / 红）、answer（markdown）、done（图、警告）。**重放时由前端合成 done**：`{type:'done', seq: max+1, data:{result}}`，reducer 只走一条路径 [v2]
@@ -76,11 +86,12 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 |---|---|---|
 | F0 | ① feedback 表 + v1 库测试 ② 托管、auth 边界、`--open` ③ token 流转 + 401 页 ④ CSP + 内联检查 ⑤ CI job（Node 24：lint/test/build/上传 dist；Playwright 用单个 Linux job，和 pytest 同 job）⑥ sidecar 冒烟：`GET /` + 断言 CSP 头存在 | 2–3 天 |
 | F1 | 数据集（含预览）、会话、设置 | 2–3 天 |
-| F2 | SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types | 3–5 天 |
+| F2 | SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types（**完成，DEVLOG [34]**） | 3–5 天 |
 | F3 | ECharts、prepare、主题、开关、换图型、导出、注入实测 + THREAT_MODEL | 4–5 天 |
 | F4 | 层 1 面板 | 2–3 天 |
 | F5 | S 验收轮次、删 Streamlit | 3–5 天 |
 
 ## 7. 与前端并行，不在 F 路径上
+- 错误文案脱敏（THREAT_MODEL T10）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
 - [30] 的 SHA（4497d2b）随 F0 一起回填（已做，见 DEVLOG [31]）。
