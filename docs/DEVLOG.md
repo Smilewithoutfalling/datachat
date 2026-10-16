@@ -1295,7 +1295,7 @@ Playwright：
 - ECharts 渲染、prepare、主题、开关、换图型、导出（F3 下一步）。
 - late-cancel（answer 已发出后才取消）的端到端：answer 和 done 之间没有可挂住的模型调用，假服务造不出这个时序；单元测试已覆盖。
 
-## [36] 2026-10-16 · 移交文档 docs/HANDOVER.md · commit <待提交>
+## [36] 2026-10-16 · 移交文档 docs/HANDOVER.md · commit 7ece7a2（PR #37）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第一步假模型服务 + 停止已合并，下一步 ECharts 渲染）。[35] 的 SHA 已回填 7aed8e8（PR #36）。
 

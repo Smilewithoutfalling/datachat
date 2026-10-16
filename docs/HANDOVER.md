@@ -89,9 +89,10 @@ python -m venv venv && . venv/bin/activate
 pip install -r requirements-dev.txt          # 包含 requirements.txt
 python scripts/gen_eval_data.py --check
 python scripts/gen_ui_types.py --check
-python -m pytest -q                          # 约 8 分钟，654 passed；建议后台跑
+python -m pytest -q                          # 约 8 分钟，654 passed（前提：已下载闸门数据，见下）；建议后台跑
 python -m app.server --port 8765             # 第一行打印 {"port","token","home"}；API 要 Bearer token
 ```
+闸门数据（`data/gate/`，不入库）：先跑 `python scripts/gate/build_gate_data.py`。没下载的话，`tests/test_gate.py` 里会有 25 条跳过（629 passed, 25 skipped）。这 25 条是"闸门题在原始脏数据上能解出来"的 oracle 守卫，改内核时一定要在本地跑。CI 不生成这份数据，所以在 CI 上它们一直是跳过的。
 前端（`ui/web`）：
 ```bash
 npm ci
@@ -109,7 +110,7 @@ Playwright 的结构（`playwright.config.ts`）：
 
 ## 7. 提交 / PR / CI
 
-- 分支 → PR → CI 两个 workflow（`tests`：pytest + gen 检查 + 前端 lint/test/build + Playwright；`sidecar`：Windows 打包冒烟）都绿 → S 同意 → **squash 合并**，标题带 `(#N)` → 删除分支 → 本地 `git fetch && git reset --hard origin/master`。
+- 分支 → PR → CI 里**被触发的** workflow 全绿（`tests`：pytest + gen 检查 + 前端 lint/test/build + Playwright；`sidecar`：Windows 打包冒烟，配了 paths 过滤，只改文档的 PR 不会触发它，这是正常的） → S 同意 → **squash 合并**，标题带 `(#N)` → 删除分支 → 本地 `git fetch && git reset --hard origin/master`。
 - 查 CI：`GET /repos/Smilewithoutfalling/datachat/actions/runs?branch=<br>`。
 - 我原来所在的沙箱 `git push` 会 403，所以用 GitHub Contents API 逐个文件 `PUT` 到新分支再开 PR（只能新增或修改，不能删文件）。你那边能正常 push 就直接 push。
 
