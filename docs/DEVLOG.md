@@ -1238,7 +1238,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 
 未做 / 下一步：F2。`read_csv_with_encoding` 内部 bytes / str / DataFrame 三份并存的峰值内存（分析路径也一样，属于读取函数本身，不在 F1.1 顺手改；需要时改成解码后释放 bytes、或按块解码）。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
 
-## [34] 2026-10-16 · 阶段 5 F2：SSE、事件渲染、重放合成 done、停止、👍👎、gen_ui_types · commit <待提交>
+## [34] 2026-10-16 · 阶段 5 F2：SSE、事件渲染、重放合成 done、停止、👍👎、gen_ui_types · commit 50e9add
 
 当前阶段：**阶段 5 前端，F2 完成，下一步 F3**（ECharts、prepare、主题、开关、换图型、导出、注入实测）。后端停止的语义经 S 三轮评审。[33] 的 SHA 已回填 cccddd5。
 
@@ -1272,3 +1272,26 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - 错误文案脱敏（THREAT_MODEL T11；原写 T10，与 §2.1 的 CSP 条目撞号，已改）：单独一个 PR。
 - 停止的端到端测试（Playwright + 能挂住的假模型）、验收第 5 条的"实测停止耗时"：随 F3 的假模型服务。
 - 切走会话时不中断流（分析在后端跑完、结果照常落库）；回来时按库里的 status 显示。
+
+## [35] 2026-10-16 · 阶段 5 F3（进行中）：假模型服务 + 停止端到端 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**。第一步：公共的假模型服务 + 停止的端到端（验收第 5 条两个耗时都测出数）；下一步 ECharts 渲染。[34] 的 SHA 已回填 50e9add（PR #35 squash；DEVLOG 一律引用 CI run id 而不是分支中间 commit，squash 后零死引用）。
+
+假模型服务 `tests/fake_llm.py`（S 10-16 定：独立进程、无状态、按 model 名分派）：
+- OpenAI 兼容 `POST /v1/chat/completions`，标准库 `ThreadingHTTPServer`，不加依赖。产品代码不改，只把 base_url 指过去。
+- model 名 `<scenario>[@step]`：`ok`、`hang-<N>s`、`fail-<code>`、`slow-<N>s`；step ∈ plan/codegen/fix/answer（工作流）、act/final（ReAct）。不写 @step = 第一次调用（工作流 plan、ReAct act），按请求内容就能判定，不需要计数。
+- **fail loud**：未知 scenario / step、拼错（`hang-30`）、@step 不属于本次链路、认不出当前步骤（提示词变了）、`stream=true` → 一律 HTTP 400 + 原因。选 400 而不是 500：500 会被 LLMClient 当可重试错误退避重试，表现成"偶发慢"，400 立刻以 bad_request 失败。没有"认不出就走默认剧本"的分支。
+- 和 S 的提议差一处：没做 `stream-<N>tps`。产品不用流式调用（ChatOpenAI 非流式，SSE 是事件粒度不是 token 粒度），控 token 速率测不到任何东西；用 `slow-<N>s`（每次调用都慢 N 秒，把事件拉开）测增量渲染。
+- 测试 `tests/test_fake_llm.py`（39，四个 scenario 都在真链路上走过）：解析器正反例、认不出 → 400 且不先睡、跨链路 @step → 400、stream → 400、默认目标是第一次调用、同请求同回复；两种 agent 走真 HTTP + 真产品链路跑 ok / hang / 拼错——提示词一改这里先红（漂移守卫）；fail-500@codegen → server、退避重试 3 次（500 本来就是测重试路径，和认不出 → 400 不同），fail-401 → auth 1 次；slow-1s → 3 次调用总耗时 ≥ 3 s。ReAct 的 act/final 只按"最后一条是不是 tool"分，多轮工具调用分不出第几轮（代码注释写了边界）。
+
+Playwright：
+- 两个后端、两个 project：`nokey`（f0/f1/f2，没有 Key）和 `fake`（f3*，base_url → 假服务，`DATACHAT_LLM_MAX_RETRIES=0`）。场景用 `PUT /settings {model}` 按测试设；model 是后端全局设置，所以 `workers: 1`。
+- `e2e/f3-stop.spec.ts`：`hang-8s@codegen`，plan 到了点停止。beforeAll 先用 ok 走一轮 API 预热：后端进程首次分析要 import pandas/matplotlib/langchain + 建字体缓存，沙箱里 20 多秒（不预热时 plan 45 秒都没到）；被测窗口里混着冷启动，8 秒的上界根本量不准。CI 的新 runner 同样是冷的，以后任何测耗时的 e2e 都要预热。断言：落 cancelled、显示"已取消"不是失败、没有"未保存"、立刻重问不撞 409 并正常出结论、刷新后重放一致。
+- 实测（沙箱本地两次）：**感知延迟 1–2 ms**（点停止 → "正在停止…"，乐观 UI，门槛 < 500 ms）；点停止 → `POST /cancel` 返回 17–23 ms；**后端延迟 8048–8051 ms**（`POST /cancel` 200 → 界面"已取消"）。plan 一到就点，codegen 那次调用还剩约 8 秒，后端延迟就是这 8 秒：和"上界 ≈ 当前模型调用剩余时间"一致，只记录、不设门槛（断言只放 < 10 s 的健全性上界）。
+
+验证：pytest 654 passed（+39）；vitest 38；Playwright 8（nokey 7 + fake 1，本地连跑两次）；tsc、lint 通过。
+
+未做：
+- ECharts 渲染、prepare、主题、开关、换图型、导出（F3 下一步）。
+- late-cancel（answer 已发出后才取消）的端到端：answer 和 done 之间没有可挂住的模型调用，假服务造不出这个时序；单元测试已覆盖。
+
