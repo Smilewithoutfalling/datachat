@@ -1,0 +1,18 @@
+{
+  "_generated_by": "scripts/gen_ui_types.py",
+  "banned_keys": [
+    "aria",
+    "dataset",
+    "extraCssText",
+    "formatter",
+    "graphic",
+    "link",
+    "renderItem",
+    "renderMode",
+    "rich",
+    "sublink",
+    "sublinkTarget",
+    "target",
+    "toolbox"
+  ]
+}
