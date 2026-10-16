@@ -8,7 +8,7 @@
 | code   | 工作流 codegen / reviewer 写出代码；ReAct 模型发起一次工具调用 | code, source（codegen / reviewer / tool_call）, attempt；ReAct 另有 thought（模型随调用附带的文字，常为空） |
 | exec   | 一次代码执行结束 | ok, result_text（截断 2000 字）, error, duration_s, chart（PNG 路径或 None）, options（chart() 出的 ECharts spec 列表，exec 失败时为空）, chart_errors, charts_discarded（exec 失败丢弃的张数）；ReAct 另有 stdout, attempt |
 | answer | 最终结论（ReAct 在收尾判定后才发，所以每次分析最多一个） | text, forced（ReAct 步数用完后强制收尾得到的结论） |
-| error  | 出错 | message, kind（dataset / llm / execution / agent）, fatal |
+| error  | 出错 | message, kind（dataset / llm / execution / agent / cancelled）, fatal |
 | done   | 最后一个事件，必有且只有一个 | result（AnalysisResult.to_record()）；Python 侧另可用 Event.result 取原对象 |
 
 error 的 fatal=False 表示过程中的可恢复情况（数据字典读取失败已跳过；ReAct 整轮重跑）。
@@ -22,6 +22,17 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 EVENT_TYPES = ("plan", "code", "exec", "answer", "error", "done")
+# error 事件的 kind / AnalysisResult.error_kind。前端只按 kind / status 分支，不对文案做匹配（阶段 5 F2）。
+# - cancelled：用户点了停止（POST /messages/{id}/cancel）。只有用户动作才用它。
+# - interrupted：非用户动作的终止——后端重启时清理遗留 running、SSE 客户端断开（关标签页、网络抖动）。
+#   analyze_stream 永远不产出它：只落在 messages.status=interrupted，前端重放时按它合成 done
+#   （error_kind=interrupted）并给重试入口。两种原因文案不同，但前端不按文案分支。
+ERROR_KINDS = ("dataset", "llm", "execution", "agent", "cancelled", "interrupted")
+# 以下文案是常量，不带任何内部异常或堆栈（详情只进日志）。
+CANCELLED_MESSAGE = "已取消"
+INTERRUPTED_MESSAGE = "分析已中断（服务已重启）"
+DISCONNECTED_MESSAGE = "分析已中断（连接已断开）"
+STREAM_ABORTED_MESSAGE = "分析异常中断（服务端错误）"     # 流里没收到 done 就抛异常（status=error）
 
 
 @dataclass

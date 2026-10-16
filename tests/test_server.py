@@ -156,9 +156,10 @@ def test_concurrent_message_rejected_and_running_recovered(home, sample_path):
         db.add(Message(session_id=s["id"], role="assistant", status="running"))
         db.commit()
     assert c.post(f"/sessions/{s['id']}/messages", json={"content": "q"}, headers=H).status_code == 409
-    c2 = client(home, lambda: wf_model(["result = 1"]))                # 重启：遗留的 running 标成 cancelled
+    c2 = client(home, lambda: wf_model(["result = 1"]))                # 重启：遗留的 running 标成 interrupted
     msgs = c2.get(f"/sessions/{s['id']}", headers=H).json()["messages"]
-    assert [m["status"] for m in msgs] == ["cancelled"]
+    assert [m["status"] for m in msgs] == ["interrupted"]
+    assert msgs[0]["content"] == "分析已中断（服务已重启）"              # 不是"已取消"：用户没点过停止（F2）
     assert c2.post(f"/sessions/{s['id']}/messages", json={"content": "q"}, headers=H).status_code == 200
 
 

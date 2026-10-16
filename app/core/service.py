@@ -22,7 +22,7 @@ from functools import lru_cache
 
 from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
-from app.core.events import Emitter, Event
+from app.core.events import CANCELLED_MESSAGE, Emitter, Event
 from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, format_result, last_png,
                              refusal_from_answer)
 
@@ -103,12 +103,17 @@ def analyze_stream(
     encoding: str | None = None,
     log: bool = False,
     trace_id: str | None = None,
+    cancel=None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
     参数与 analyze() 相同。最后一个事件一定是 done（携带完整 AnalysisResult，见 Event.result）；
     分析失败时 done 之前有一个 fatal=True 的 error 事件。调用方中途停止迭代（如 SSE 客户端断开）
     会关闭生成器，正在进行的图执行随之停止，此时没有 done 事件、也不写 runs.jsonl。
+
+    cancel：可选的 threading.Event（阶段 5 F2，停止按钮）。每产出一个事件前（含 done 之前）检查一次，
+    置位就关掉内部生成器提前收尾：error_kind="cancelled"，照常产出 fatal error + done。粒度与断开连接相同——
+    正在进行的那次 LLM 调用或代码执行会跑完，下一个事件之前才停。
     """
     if agent not in AGENTS:
         raise ValueError(f"未知 agent: {agent!r}，可选 {AGENTS}")
@@ -125,12 +130,26 @@ def analyze_stream(
     tracker = UsageTracker()
     logger.info("analyze start trace=%s agent=%s dataset=%s", trace_id, agent, res.dataset)
 
+    def cancelled():
+        if cancel is None or not cancel.is_set() or res.error_kind == "cancelled":
+            return False
+        res.error, res.error_kind = CANCELLED_MESSAGE, "cancelled"
+        res.steps.append(Step("cancel", error=res.error))
+        return True
+
+    inner = _run(em, res, tracker, dataset, question, agent=agent, llm_config=llm_config,
+                 chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
+                 recursion_limit=recursion_limit, use_dictionary=use_dictionary,
+                 memory=memory, thread_id=thread_id, history=history, encoding=encoding)
     try:
-        yield from _run(em, res, tracker, dataset, question, agent=agent, llm_config=llm_config,
-                        chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
-                        recursion_limit=recursion_limit, use_dictionary=use_dictionary,
-                        memory=memory, thread_id=thread_id, history=history, encoding=encoding)
+        for ev in inner:
+            if cancelled():
+                break
+            yield ev
+        else:
+            cancelled()            # 内部跑完、done 之前再查一次：停止已落库为 cancelled，结果不能报成功
     finally:
+        inner.close()              # 提前收尾或外层被关闭（客户端断开）时，停掉正在进行的图执行
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
     if log:

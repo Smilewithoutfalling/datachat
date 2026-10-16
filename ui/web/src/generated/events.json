@@ -1,0 +1,32 @@
+{
+  "_generated_by": "scripts/gen_ui_types.py",
+  "event_types": [
+    "plan",
+    "code",
+    "exec",
+    "answer",
+    "error",
+    "done"
+  ],
+  "error_kinds": [
+    "dataset",
+    "llm",
+    "execution",
+    "agent",
+    "cancelled",
+    "interrupted"
+  ],
+  "message_statuses": [
+    "running",
+    "ok",
+    "error",
+    "cancelled",
+    "interrupted"
+  ],
+  "messages": {
+    "cancelled": "已取消",
+    "interrupted": "分析已中断（服务已重启）",
+    "disconnected": "分析已中断（连接已断开）",
+    "stream_aborted": "分析异常中断（服务端错误）"
+  }
+}

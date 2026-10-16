@@ -18,6 +18,9 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+# running 分析中；ok / error 分析结束；cancelled 用户点了停止；interrupted 非用户动作的终止（后端重启、客户端断开）（阶段 5 F2）
+MESSAGE_STATUSES = ("running", "ok", "error", "cancelled", "interrupted")
+
 class Base(DeclarativeBase):
     pass
 
@@ -62,7 +65,7 @@ class ChatSession(Base):
 
 class Message(Base):
     """role=user：content 是问题。role=assistant：content 是结论（失败时为错误信息），
-    status = running / ok / error / cancelled，result_json 是 AnalysisResult.to_record()，id 即 trace_id。"""
+    status 见 MESSAGE_STATUSES，result_json 是 AnalysisResult.to_record()，id 即 trace_id。"""
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), index=True)

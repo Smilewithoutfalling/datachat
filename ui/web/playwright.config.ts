@@ -14,7 +14,9 @@ export default defineConfig({
     command: `python -m app.server --port ${PORT} --token ${E2E_TOKEN} --home ui/web/test-results/home`,
     cwd: "../..",
     url: `http://127.0.0.1:${PORT}/health`,
-    env: { DATACHAT_WEB_DIST: "ui/web/dist", DEEPSEEK_API_KEY: "", PYTHONUTF8: "1" },
+    // 显式固定"没有 Key"：环境变量置空 + 钥匙串强制用 fail 后端（开发机钥匙串里存了 Key 也不读）。
+    // f2.spec 依赖这个前提（期望"模型调用失败"），并在提问前断言 configured=false。
+    env: { DATACHAT_WEB_DIST: "ui/web/dist", DEEPSEEK_API_KEY: "", PYTHON_KEYRING_BACKEND: "keyring.backends.fail.Keyring", PYTHONUTF8: "1" },
     reuseExistingServer: false,
     timeout: 60_000,
   },

@@ -61,7 +61,7 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | tooltip / label / legend 的 `formatter` | 白名单禁 `formatter` | 不可达：builder 不产出，模型改不到 | 生效 |
 | 图表的 DOM 通道 | 白名单禁 `title.link` / `sublink` / `graphic` / `aria` / `toolbox`（含 dataView） | 不可达：同上 | 生效 |
 | 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 生效（第 5 步实现） | 生效 |
-| 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML | 生效（第 5 步实现） | 生效 |
+| 自然语言结论 | 同上；若结论支持 Markdown，Markdown 渲染器关闭原始 HTML。**F2 已实现**：react-markdown 10.1.0（版本在测试里钉住）不装 rehype-raw，原始 HTML 按文本显示；默认 urlTransform 过滤 `javascript:` 等协议（测试断言 href 不含 javascript、点击不执行）；`a` 一律 `target=_blank rel="noreferrer noopener"`；`img` 不特殊处理，**不允许外部图片**：CSP 是 `img-src 'self' data: blob:`（值由 tests/test_web.py::test_index_has_csp_and_hardening_headers 钉住），`![](http://attacker/x.png)` 被浏览器在发请求之前拦下，外部拿不到 IP、referrer，也做不了加载追踪；同源 `/charts/*` 要 token，`<img>` 不带 Bearer，也加载不出来。事件（plan / code / exec / error）与 👍👎 的 note 都按文本渲染（vitest 断言无 img） | 生效（第 5 步实现） | 生效 |
 | 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 生效（第 5 步实现） | 生效 |
 | 👍👎 的 note（用户输入，阶段 5 F0） | 后端清控制字符和双向文本控制符、限 1000 字；前端按纯文本渲染 | 生效 | 生效 |
 | 数据集预览单元格与表头（F1 / F1.1） | 后端一律转字符串，去掉方向控制符（LRM/RLM、U+202A–202E、U+2066–2069，防视觉重排；\t \n \r 保留），超 200 字截断，两者都按表计数（`bidi_stripped` / `truncated_cells`），提示行告诉用户；只影响显示，模型拿到原数据；缺失为 null；前端按纯文本渲染 | tests/test_web_f1.py、views.test.tsx（注入串不成元素）、e2e/f1.spec.ts（托管 dist 上 tbody 无 img、无 CSP 违规） | 生效 |
@@ -76,6 +76,18 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 - v1 可达的字段：title.text、series[].name、xAxis.data[]（类目）、yAxis.name / xAxis.name（列名），以及错误消息、警告里的列名。
 - 只在 v2 才可达、v1 测的是不可达路径的字段（放到层 2 时再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
 - tests/test_charts.py 里的 HTML 用例只证明载荷能原样到达前端，那是攻击的前提，不是防御。
+
+## 2.4 错误文案：渲染面上的信息泄漏（阶段 5 F2 立项，修复单独一个 PR）
+| # | 威胁 | 例子 |
+|---|---|---|
+| T11 | 错误文案把内部实现细节或用户数据带到界面上（`messages.content`、error 事件、done 里的 error） | `数据集读取失败：FileNotFoundError: C:\Users\…\x.csv`；`工作流异常：KeyError: …`；网关报错回显了请求体片段 |
+
+分三层处理，方向相反，不能一刀切：
+1. **系统状态 → 常量**（F2 已做）：cancelled / interrupted（重启、断开）/ stream_aborted 用 `app/core/events.py` 的常量文案，异常详情只进日志。
+2. **用户可操作的诊断 → 保留原文、脱敏**：上游（网关 / 模型服务）返回的 message 是用户自救的依据（余额不足、模型不存在、context 超限），保留。**但要先查上游会不会回显请求内容**（SQL、表名、列名、用户问题原文、数据片段）：回显部分属于 PII 面，要剥掉或截断，不是所有上游原文都原样透出。
+3. **内部实现细节 → 去掉**：文件路径、`type(e).__name__`（对用户零信息量，还暴露内部结构，如 `FileNotFoundError` 直接说明是本地文件读取）、堆栈。
+
+现状：dataset / llm / agent / execution 的文案仍带 `{type(e).__name__}: {e}`（阶段 3/4 的写法）。待办：定义脱敏规则（保留什么、剥到什么粒度、上游回显怎么识别），单独一个 PR 改 `app/core/service.py`，带测试。
 
 ## 3. 结论：T1 / T2 在阶段 8 之前不算解决
 - "keyring 上线 = 偷 Key 已解决"是**错误**的读法。
