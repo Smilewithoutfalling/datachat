@@ -102,6 +102,62 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - 测试：按需引入的 ECharts 组件覆盖**后端可能产出的全部图表类型**（从后端导出的类型清单比对，不是只测当前用例用到的几种）；渲染时不产生外部资源请求（Playwright 断言零外部请求，不只靠 CSP）。
 - T11 单独 PR，不跟 F3 合。
 
+**F3-ECharts 第一步：原样渲染 + 图型覆盖 + 零外部请求（S 10-16 定稿）**
+
+范围：只做"后端出的 option 原样画出来"。`prepare()` 只做最小一层（BANNED_KEYS 递归清理 + 强制 `tooltip.renderMode='richText'`）。主题、开关、换图型、导出、注入实测放到后面几步。
+
+已定：
+1. **依赖**：`echarts` 锁精确版本 `6.1.0`（写 package.json 时不带 ^；Apache-2.0）。只从 `echarts/core` 按需引入，不 import `echarts` 全量包；ESLint `no-restricted-imports` 禁止 `import … from "echarts"`。lockfile 用 Node 24 生成。
+2. **renderer 用 canvas**（`CanvasRenderer`），产品里不注册 SVGRenderer。理由：
+   - 主要理由：SVG renderer 会把类目名、数据标签这些来自用户数据的字符串作为 `<text>` 节点插进 DOM。这样 THREAT_MODEL §2.3 的"用户字符串不进 DOM"就从结构上的事实，降成了"依赖 ECharts SVG renderer 自己的转义实现"：要去核实它内部用的是 textContent 还是拼 innerHTML，要为它写测试，ECharts 每升一次级都要重新验。canvas 把文本画成像素，DOM 里根本没有文本节点，这一面在结构上就不存在。
+   - 规模：5000 点的夹具在 SVG 下会生成约 5000 个 DOM 节点，产品里会慢，而且慢的程度正好随边界夹具一起涨；canvas 一次绘制就完成。
+   - 导出 PNG：canvas 的 `getDataURL({type:'png', pixelRatio:2})` 直接可用。矢量导出这一步不做；以后真要做，单独走一条 SVG renderer 的导出路径，到时再评估一次 §2.3。
+   - CSP：canvas 不需要额外放开什么，`img-src 'self' data: blob:` 够用。
+   - vitest 里用 SSR SVG（`init(null, null, {renderer:'svg', ssr:true})`）只作断言工具（§4 的分工），只在测试文件里注册 SVGRenderer。
+3. **图型清单的来源是后端白名单，不是只看 KINDS**：`gen_ui_types` 新增 `chart_schema.json`，内容是 `KINDS`、`_KIND_SERIES_TYPE`、`_ENUMS`（`series.type` ∈ {bar,line,pie,scatter}、`xAxis.type` ∈ {category,value}、`yAxis.type` ∈ {value}、`legend.type` ∈ {plain,scroll}）以及 `_ALLOWED` 的顶层键（color/title/tooltip/legend/grid/xAxis/yAxis/series）。
+   - 前端 `charts/register.ts` 维护一张"白名单项 → ECharts 组件"的显式映射表（BarChart、LineChart、PieChart、ScatterChart、TitleComponent、TooltipComponent、LegendComponent（含 plain 和 scroll）、GridComponent、CanvasRenderer）。
+   - `tooltip.trigger`、`legend.orient` 这类不需要额外组件的枚举，也在映射表里显式写成"无需组件"，保证后端新增任何枚举值时都必须有人在这里确认过。（已核对：echarts 6.1.0 的 `LegendComponent` 的 install 同时装了 plain 和 scroll。）
+   - vitest 防漂移：生成清单里的每个顶层键和每个枚举值都必须在映射表里有一项，少一项就红；映射表里多出的项也要红（无人产出的组件不预留，和 `_ALLOWED` 的规则一致）。
+   - 说明：后端**没有** ECharts 的 time 轴。时间列走 `xAxis.type='category'`，类目是 ISO 字符串，再加 `axisLabel.hideOverlap`（charts.py:256、261）。所以不注册 time 轴，夹具里的"时间列"例子测的是这条路径。
+4. **夹具由后端真实产出，不手写**：`gen_ui_types` 用 `build_option` 在固定的合成 DataFrame 上生成 `chart_fixtures.json`，CI 跑 `--check` 防止漂移。每个例子带 id，至少包括：
+   - 五种 kind 各一个正常例；
+   - 时间列作 x（line、area）；
+   - 缺失类目（显示为「（缺失）」）和缺失数值（null）；
+   - 长表 series：恰好 `MAX_SERIES`=20 个系列；
+   - 饼图：恰好 `MAX_PIE_SLICES`=50 个扇区；
+   - 点数边界：cartesian 恰好 `MAX_POINTS`=5000（truncated=false）和 5001（truncated=true，截到 5000）；scatter 同样做 5000 和 5001。
+     - 5001 的期望写死：输入 5001 行时，`build_option` **接受并截断**，产出 5000 点、truncated=true，并且通过 `validate_spec`（实测，见下）。这是一个能渲染的成功例，不是失败例。
+     - "已经产出的 spec 超过 5000 点 → `validate_spec` 拒绝"属于另一类期望，留在后端 `tests/test_charts.py::test_too_many_points_rejected`，**不进 chart_fixtures.json**。夹具文件里只放成功例。
+   - 多 y 宽表；带标题和不带标题各一个。
+   - 体积：全部存成实际产出的 option，不存生成参数。只存参数就要前端自己展开数据，又多出一个"前端生成器 vs `build_option`"需要对齐的面，夹具本来就是为了消掉这个面。系列 20 和点数 5000 是两个独立的边界，不做组合。
+   - 格式：用缩进 JSON（`json.dumps(…, ensure_ascii=False, indent=1)`），`--check` 按字节比对。这样 `build_option` 一改，从 diff 就能看出改了哪个值；紧凑 JSON 只有一行，每次 diff 都是整份重写。实测（2026-10-16，固定 seed）：bar 5000 点紧凑约 71 KB，indent=1 约 126 KB；scatter 5000 点紧凑约 84 KB，indent=1 约 214 KB，因为每个 [x, y] 都被拆成 3 行。整份文件估计约 0.75 MB，生成后实测写进 DEVLOG。
+   - 不写自定义序列化器（S 10-16）。indent=1 已经做到行粒度，改一个点只动几行。自定义序列化器能省一些体积（scatter 从 214 KB 降到约 114 KB），diff 也稍微紧凑一点，但数据形状每变一次都得重新检查它，`json.dumps` 没有这个负担。将来 diff 真的太吵，就把大数据夹具拆到单独的文件，这样改小夹具时不会碰到大文件；不换序列化器。
+   - 将来某个图型（比如热力图）大到不适合全存：改用后端固定 seed 的确定性生成器产出，测试只做轻量断言（渲染不报错、图数正确），不逐点比对。仍然不在前端生成数据。
+5. **渲染组件** `EChart({option})`：一张图一个实例。
+   - 挂载：`init(div, null, {renderer:'canvas'})` → `setOption(prepare(option), {notMerge:true})`。
+   - 尺寸：每个实例自己挂一个 `ResizeObserver` → `instance.resize()`。
+   - 卸载：先 `observer.disconnect()`，再 `instance.dispose()`。
+   - **截断必须让用户看到**：truncated=true 的图如果不提示，会让人以为看到的就是全部数据。这条通道已经有了，本步不新建：后端 `result.chart_warnings`（app/core/result.py:110）在截断时产出"图表「名」数据点超过 5000，只显示了前面的部分"（tests/test_chart_slot.py:75），由 `app/core/service.py`（:257 工作流，:524 ReAct）并入 `result.warnings`，F2 的 TurnView 把它和其他警告一起显示（TurnView.tsx:87）。前端不再根据 spec.truncated 自己拼一条提示，保持单一来源，不会重复显示。本步补两条测试：vitest 里用 5001 的夹具，断言图和截断警告同时出现；后端断言两条链路上 truncated=true 时 `result.warnings` 里都有这条警告（目前只测到 chart_slot 层）。
+   - 一轮最多 4 张结构化图（`MAX_CHARTS`）+ 1 张 PNG。TurnView 按 `result.charts` 的顺序渲染：option 项用 `EChart`，png 项用 `<img src="/charts/<name>?token=">`（同源，`img-src 'self'` 允许）。
+   - option 变化时整体重设（notMerge），不做增量合并。
+6. **prepare v0**：深拷贝 → 按 `banned_keys.json` 递归删除（renderMode 除外）→ 强制 `tooltip.renderMode='richText'`。这是**纵深防御**：第一道仍是后端的 `validate_spec`（charts.py），前端这一层只在后端校验有漏洞时兜底，不能当成前端校验，也不回验。
+
+验收：
+- vitest：
+  - 每个夹具 × 按产品映射表注册的组件，用 SSR SVG 渲染，断言 ECharts 没有打印任何 warn/error（缺组件时 ECharts 会报 "Unknown series" 之类，以 console spy 断言为 0），且产物里有对应 series 的图元。
+  - 第 3 条的防漂移测试双向都测。
+  - prepare：递归遍历清理后的 option，任何层级都不含被禁键；renderMode 只出现在 tooltip 下，值为 richText；不修改输入（深拷贝）。另外加一个人为塞了被禁键的对照例，证明清理确实执行过。
+  - EChart 组件：挂载、卸载 4 张图后 init 和 dispose 次数相等，`getInstanceByDom` 为空；resize 由 observer 触发。
+- Playwright（fake project，后端托管 dist，带 CSP）：
+  - 假服务新增 scenario `chart-<kind>`：codegen（工作流）和 act（ReAct）回一段调用 `chart('<kind>', df, …)` 的代码，列由 e2e 固定 CSV 决定。kind 不在 KINDS 里时返回 400；和 @step 组合也返回 400（fail loud）。
+  - 新 scenario 都要有单测，不能"写了没验证"。`tests/test_fake_llm.py` 补：解析的合法和非法例（含未知 kind、带 @step），以及真链路下五种 kind 各一条，断言 `result.charts` 的 kind 正确、spec 通过 `validate_spec`。
+  - 已有 scenario 的覆盖顺手补齐。现状：`fail-CODE` 在 handler 层（`test_targets_first_call_by_default_and_named_step_otherwise`）和真链路（`test_real_chain_fail_code_goes_through_product_classification`，500 重试和 401 不重试）都有测；`slow-Ns` 只在 handler 层断言了睡眠次数，没有真链路测试。本步补一条 `slow-1s` 真链路测试，断言分析成功，且总耗时 ≥ 调用次数 × 1 s。
+  - 五种 kind 各问一轮，断言出现 canvas、图数和 `result.charts` 一致；刷新后走重放路径，图仍在。
+  - **零外部请求**：`page.on('request')` 记录所有非同源 URL，断言为空；同时断言无 CSP 违规（`securitypolicyviolation` 为 0）。两条合起来才能说明 ECharts 没尝试加载外部资源：CSP 拦下的请求不会进入网络，单看 request 事件不够。对照例：断言监听器确实收到了同源的 `/assets/*` 请求，证明监听器在工作。
+- 性能数（只记录，不设闸门）：build 后的 chunk 增量（按需引入前后对比）；`prepare` 在 5000 点夹具上的耗时（深拷贝加全量递归遍历，每次 option 变化都会跑）。超过几十毫秒的话，在 DEVLOG 里标出来，和 S 讨论要不要优化。
+
+不做（后续步骤）：主题、开关、换图型、导出、注入实测和 THREAT_MODEL 更新、层 1 面板。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
