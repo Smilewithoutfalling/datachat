@@ -14,6 +14,7 @@
     DELETE /sessions/{id}
     POST   /sessions/{id}/messages       {"content"} → text/event-stream，逐条转发 analyze_stream 事件
     GET    /charts/{name}                图表 png
+    POST   /messages/{id}/cancel         停止正在分析的消息：CAS running→cancelled（已结束 409），置位取消信号（阶段 5 F2）
     PUT    /messages/{id}/feedback       {"rating": "up"|"down"|null, "note"?}（只限已结束的助手消息）
     GET    /  、/assets/*                前端（ui/web 构建产物）。不要 token——页面本身不含机密，token 由
                                          URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
@@ -29,20 +30,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
 import shutil
 import sys
+import threading
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.core.events import CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE
 from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback, Message, Setting, make_sessionmaker, now
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
@@ -64,6 +68,8 @@ _CONTROL_CHARS = re.compile(f"[\x00-\x08\x0b-\x1f\x7f-\x9f{_BIDI}]")
 # ECharts / React 会写行内 style，故 style-src 带 'unsafe-inline'；图表导出用 data: / blob:。
 CSP = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; "
        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
+
+logger = logging.getLogger("datachat.server")
 
 
 def default_home() -> str:
@@ -130,13 +136,15 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     Session = make_sessionmaker(os.path.join(home, "datachat.db"))
     token = token or secrets.token_urlsafe(32)
 
-    # 上次进程被杀时还在跑的消息，标成 cancelled
+    # 上次进程被杀时还在跑的消息，标成 interrupted（不是 cancelled：用户没点过停止）
     with Session() as db:
         for m in db.scalars(select(Message).where(Message.status == "running")):
-            m.status, m.content = "cancelled", m.content or "后端重启，分析中断"
+            m.status, m.content = "interrupted", INTERRUPTED_MESSAGE
+            logger.warning("后端重启，消息 %s 的分析中断，标成 interrupted", m.id)
         db.commit()
 
     app = FastAPI(title="datachat", version="0.4")
+    cancels: dict[str, threading.Event] = {}     # 正在分析的助手消息 id → 取消信号（只在本进程内有意义）
     app.state.token, app.state.home = token, home
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 
@@ -409,33 +417,71 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         if history:
             kwargs["history"] = history
 
+        cancel = threading.Event()
+        cancels[msg_id] = cancel
+        kwargs["cancel"] = cancel
+
         def stream():
-            status, content, result_json = "cancelled", "已取消", None
+            # 状态写库只有两处，都用 CAS（WHERE status='running'）：这里的 finally，和 POST /messages/{id}/cancel。
+            # 先到者生效；已被 cancel 的轮次这里不再覆盖（result_json 留空，前端按 status=cancelled 合成 done）。
+            # 默认：客户端断开（GeneratorExit）。不是用户点停止，所以不用 cancelled。前端点停止必须先等
+            # POST /cancel 返回、再断开 fetch，这样 cancel 的 CAS 先落库，这里的 CAS 命中 0 行。
+            status, content, result_json = "interrupted", DISCONNECTED_MESSAGE, None
+            done_seen = False
             try:
                 with Session() as wdb:
                     for ev in analyze_stream(target, body.content, **kwargs):
                         d = ev.to_dict()
                         if ev.type == "done":
+                            done_seen = True
                             r = ev.result
-                            status = "ok" if r.ok else "error"
-                            content = r.answer if r.ok else (r.error or "")
-                            result_json = json.dumps(d["data"]["result"], ensure_ascii=False, default=str)
+                            if r.error_kind == "cancelled":
+                                status, content = "cancelled", CANCELLED_MESSAGE
+                            else:
+                                status = "ok" if r.ok else "error"
+                                content = r.answer if r.ok else (r.error or "")
+                                result_json = json.dumps(d["data"]["result"], ensure_ascii=False, default=str)
                         else:
                             wdb.add(EventRow(message_id=msg_id, seq=ev.seq, type=ev.type, ts=str(ev.ts),
                                              data_json=json.dumps(d["data"], ensure_ascii=False, default=str)))
                             wdb.commit()
                         yield (f"id: {ev.seq}\nevent: {ev.type}\n"
                                f"data: {json.dumps(public_event(d), ensure_ascii=False, default=str)}\n\n")
+            except GeneratorExit:
+                raise
+            except Exception:  # —— 没收到 done 又不是断开：记为 error，不能留成"已取消"；异常详情只进日志
+                if not done_seen:
+                    status, content = "error", STREAM_ABORTED_MESSAGE
+                    logger.exception("消息 %s 的分析流异常中断", msg_id)
+                raise
             finally:
+                cancels.pop(msg_id, None)
                 with Session() as fdb:
-                    m = fdb.get(Message, msg_id)
-                    if m is not None:
-                        m.status, m.content, m.result_json = status, content, result_json
-                        fdb.commit()
+                    fdb.execute(update(Message).where(Message.id == msg_id, Message.status == "running")
+                                .values(status=status, content=content, result_json=result_json))
+                    fdb.commit()
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Message-Id": msg_id,
                                           "X-User-Message-Id": q.id})
+
+    @app.post("/messages/{message_id}/cancel", dependencies=[Depends(auth)])
+    def cancel_message(message_id: str, db=Depends(db_dep)):
+        """停止按钮。CAS 写库：只把仍在 running 的轮次改成 cancelled（命中 0 行 → 409，已完成的轮次不动）；
+        落库后同一会话立刻可以再问，不撞 409。正在进行的那次 LLM 调用或代码执行会跑完（粒度与断开连接相同），
+        之后 analyze_stream 看到信号提前收尾；它的 finally 也是 CAS，不会把 cancelled 覆盖回去。"""
+        m = get_or_404(db, Message, message_id)
+        if m.role != "assistant":
+            raise HTTPException(400, "只能停止助手消息")
+        hit = db.execute(update(Message).where(Message.id == message_id, Message.status == "running")
+                         .values(status="cancelled", content=CANCELLED_MESSAGE)).rowcount
+        db.commit()
+        if not hit:
+            raise HTTPException(409, "这条消息已经结束")
+        ev = cancels.get(message_id)
+        if ev is not None:
+            ev.set()
+        return {"id": message_id, "status": "cancelled"}
 
     @app.put("/messages/{message_id}/feedback", dependencies=[Depends(auth)])
     def put_feedback(message_id: str, body: FeedbackIn, db=Depends(db_dep)):
