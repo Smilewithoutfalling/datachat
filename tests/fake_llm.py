@@ -6,8 +6,11 @@
 
 model 名语法（解析器严格，见 parse_model）：
     <scenario>[@<step>]
-    scenario：ok | hang-<N>s | fail-<code> | slow-<N>s
+    scenario：ok | hang-<N>s | fail-<code> | slow-<N>s | chart-<kind>
       ok          每一步正常回复（固定剧本，见 reply_for）
+      chart-<kind> 同 ok，但写代码的那一步（codegen / fix / act）多调一次 chart('<kind>', df, …)（F3 图表测试）；
+                  kind 取 app/tools/charts.py 的 KINDS，列按 dtype 选（chart_code），任何 CSV 只要有一个类目列和
+                  一个数值列（scatter 要两个数值列）都能画。不带 @step。
       hang-<N>s   在目标调用上先睡 N 秒再正常回复（测停止）
       fail-<code> 目标调用返回 HTTP <code>（400/401/403/404/429/500/502/503）
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
@@ -33,6 +36,8 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
+from app.tools.charts import KINDS
+
 WORKFLOW_STEPS = ("plan", "codegen", "fix", "answer")
 REACT_STEPS = ("act", "final")
 FIRST_STEP = {"workflow": "plan", "react": "act"}
@@ -43,6 +48,14 @@ MAX_SECONDS = 600
 CODE = "result = int(len(df))"
 PLAN = "（fake）统计行数。"
 ANSWER = "（fake）结论：数据共有若干行。"
+
+
+def chart_code(kind: str) -> str:
+    """chart-<kind> 场景的代码：类目列取第一个非数值列，数值列取第一个（scatter 取前两个数值列）。"""
+    xy = "x=num[0], y=num[1]" if kind == "scatter" else "x=cat[0], y=num[0]"
+    return (f"num = list(df.select_dtypes('number').columns)\n"
+            f"cat = [c for c in df.columns if c not in num]\n"
+            f"chart({kind!r}, df, {xy}, title={'fake ' + kind!r})\n" + CODE)
 FAIL_ANSWER = "（fake）没能得出结果。"
 
 # 步骤识别用的提示词片段。改了 app/nodes/* 或 app/react_agent.py 的提示词，这里会认不出 → 400，
@@ -61,9 +74,10 @@ class FakeError(Exception):
 
 @dataclass(frozen=True)
 class Scenario:
-    kind: str                    # ok | hang | fail | slow
+    kind: str                    # ok | hang | fail | slow | chart
     value: int = 0               # 秒数或 HTTP 状态码
     step: Optional[str] = None   # 目标步骤；None = 第一次调用
+    chart: Optional[str] = None  # chart 场景的图型
 
     def targets(self, agent: str, step: str) -> bool:
         if self.step is not None and self.step not in (WORKFLOW_STEPS if agent == "workflow" else REACT_STEPS):
@@ -71,13 +85,21 @@ class Scenario:
         return step == (self.step or FIRST_STEP[agent])
 
 
+_CHART_RE = re.compile(r"^chart-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
 
 
 def parse_model(name: str) -> Scenario:
+    c = _CHART_RE.match(name or "")
+    if c:
+        if c["kind"] not in KINDS:
+            raise FakeError(f"未知图型 {c['kind']!r}：可选 {', '.join(KINDS)}")
+        if c["step"] is not None:
+            raise FakeError(f"chart 作用于写代码的那一步，不带 @step：{name!r}")
+        return Scenario("chart", chart=c["kind"])
     m = _MODEL_RE.match(name or "")
     if not m:
-        raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns>[@step]")
+        raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns|chart-KIND>[@step]")
     kind, val, unit, step = m["kind"], m["val"], m["unit"], m["step"]
     if step is not None and step not in WORKFLOW_STEPS + REACT_STEPS:
         raise FakeError(f"未知步骤 @{step}：可选 {', '.join(WORKFLOW_STEPS + REACT_STEPS)}")
@@ -127,18 +149,19 @@ def recognize(messages: list) -> tuple[str, str]:
     raise FakeError("无法识别当前步骤，提示词可能已变（更新 tests/fake_llm.py 的 MARK_*）")
 
 
-def reply_for(agent: str, step: str, messages: list) -> dict:
-    """固定剧本：返回 OpenAI 的 assistant message。"""
+def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None) -> dict:
+    """固定剧本：返回 OpenAI 的 assistant message。chart 给定时，写代码的那一步换成 chart_code(chart)。"""
+    code = chart_code(chart) if chart else CODE
     if agent == "react":
         if step == "act":
             return {"role": "assistant", "content": "", "tool_calls": [{
                 "id": "call_fake_1", "type": "function",
-                "function": {"name": "run_python_on_data", "arguments": json.dumps({"code": CODE})}}]}
+                "function": {"name": "run_python_on_data", "arguments": json.dumps({"code": code})}}]}
         return {"role": "assistant", "content": ANSWER}
     if step == "plan":
         return {"role": "assistant", "content": PLAN}
     if step in ("codegen", "fix"):
-        return {"role": "assistant", "content": f"```python\n{CODE}\n```"}
+        return {"role": "assistant", "content": f"```python\n{code}\n```"}
     whole = "\n".join(_text(m.get("content")) for m in messages)
     return {"role": "assistant", "content": FAIL_ANSWER if MARK_ANSWER_FAIL in whole else ANSWER}
 
@@ -158,7 +181,7 @@ def handle(body: dict, sleep=time.sleep) -> tuple[int, dict]:
     if sc.kind == "fail" and hit:
         return sc.value, {"error": {"message": f"[fake_llm] 按场景返回 {sc.value}", "type": "fake_failure",
                                     "code": str(sc.value)}}
-    msg = reply_for(agent, step, body["messages"])
+    msg = reply_for(agent, step, body["messages"], sc.chart)
     return 200, {
         "id": f"chatcmpl-fake-{uuid.uuid4().hex[:8]}", "object": "chat.completion", "created": int(time.time()),
         "model": body["model"],

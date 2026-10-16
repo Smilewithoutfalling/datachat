@@ -121,7 +121,7 @@ export function SessionView({ c, id, datasetName, onChanged, onDeleted }: {
     const q = questionBefore(i);
     return (
       <>
-        <TurnView turn={t} onRetry={!running && q ? () => void ask(q) : undefined} />
+        <TurnView turn={t} chartSrc={c.chartSrc} onRetry={!running && q ? () => void ask(q) : undefined} />
         {m.status === "running" ? (
           <button type="button" className="stop" disabled={stopping} onClick={() => void stop(m.id)}>
             停止
@@ -188,7 +188,7 @@ export function SessionView({ c, id, datasetName, onChanged, onDeleted }: {
                 <div className="who">
                   datachat<span className="badge running">{STATUS.running}</span>
                 </div>
-                <TurnView turn={live.turn} />
+                <TurnView turn={live.turn} chartSrc={c.chartSrc} />
                 <button type="button" className="stop" disabled={!live.messageId || stopping} onClick={() => void stop(live.messageId)}>
                   {stopping ? "正在停止…" : "停止"}
                 </button>
