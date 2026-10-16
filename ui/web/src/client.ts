@@ -1,6 +1,8 @@
 // 各接口的薄封装。全部经过 Api（统一 Bearer 与 401 处理）。
 import type { Api } from "./api";
-import type { Agent, Dataset, DatasetDetail, KeyStatus, Session, SessionDetail, Settings } from "./types";
+import { parseSse } from "./sse";
+import type { Ev } from "./turn";
+import type { Agent, Dataset, DatasetDetail, KeyStatus, Rating, Session, SessionDetail, Settings } from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
   method,
@@ -30,6 +32,38 @@ export function client(api: Api) {
     renameSession: (id: string, title: string) =>
       api.json<Session>(`/sessions/${encodeURIComponent(id)}`, jsonBody("PATCH", { title })),
     deleteSession: (id: string) => api.json(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+    /** 提问：POST 后读 SSE。messageId 在响应头里，拿到就能点停止。 */
+    ask: async (sessionId: string, content: string, signal?: AbortSignal) => {
+      const res = await api.request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        ...jsonBody("POST", { content }),
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        signal,
+      });
+      const messageId = res.headers.get("X-Message-Id") ?? "";
+      const body = res.body;
+      async function* events(): AsyncGenerator<Ev> {
+        if (!body) return;
+        for await (const m of parseSse(body)) {
+          let ev: Ev;
+          try {
+            ev = { type: m.event, ...JSON.parse(m.data) } as Ev;
+          } catch {
+            continue; // 坏块跳过；最终以库里的 status 为准
+          }
+          yield ev;
+        }
+      }
+      return { messageId, events: events() };
+    },
+    /** 停止：CAS 落库 cancelled。409 = 已经结束。前端必须等它返回再断开流（否则库里会落 interrupted）。 */
+    cancel: (messageId: string) =>
+      api.json<{ id: string; status: string }>(`/messages/${encodeURIComponent(messageId)}/cancel`, { method: "POST" }),
+    feedback: (messageId: string, rating: Rating, note = "") =>
+      api.json<{ message_id: string; rating: Rating; note: string }>(
+        `/messages/${encodeURIComponent(messageId)}/feedback`,
+        jsonBody("PUT", { rating, note }),
+      ),
 
     settings: () => api.json<Settings>("/settings"),
     saveSettings: (s: Partial<Settings>) => api.json<Settings>("/settings", jsonBody("PUT", s)),
