@@ -93,14 +93,14 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 | F1 | 数据集（含预览）、会话、设置 | 2–3 天 |
 | F2 | SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types（**完成，DEVLOG [34]**） | 3–5 天 |
 | F3 | ECharts、prepare、主题、开关、换图型、导出、注入实测 + THREAT_MODEL | 4–5 天 |
+| F4 | 层 1 面板 | 2–3 天 |
+| F5 | S 验收轮次、删 Streamlit | 3–5 天 |
 
 **F3 已定 [S 10-16]**
 - **假模型服务**是 F3/F4/T11 所有异步测试的公共设施：独立进程的 HTTP 服务，接口形状同真模型（OpenAI 兼容 chat/completions，产品代码只改 base_url 指过去，不 monkeypatch）。行为由请求控制、无副作用状态：按 model 名分派场景（如挂住 N 秒、可控失败、控制流式速率）。至少支持：挂住指定时长、可控失败（HTTP 5xx / 超时 / 坏响应）、控制 token 流速率。F3 停止测试、T11 错误文案测试、F4 重试测试都复用它，不另写。
 - **ECharts 原样渲染**：option 在后端已过 BANNED_KEYS（app/tools/charts.py），前端不做二次解释——不 eval、不执行 formatter 字符串、不动态拼 option，只"原样交给 ECharts"。
 - 测试：按需引入的 ECharts 组件覆盖**后端可能产出的全部图表类型**（从后端导出的类型清单比对，不是只测当前用例用到的几种）；渲染时不产生外部资源请求（Playwright 断言零外部请求，不只靠 CSP）。
 - T11 单独 PR，不跟 F3 合。
-| F4 | 层 1 面板 | 2–3 天 |
-| F5 | S 验收轮次、删 Streamlit | 3–5 天 |
 
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
