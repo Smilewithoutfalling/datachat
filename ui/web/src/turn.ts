@@ -56,7 +56,9 @@ export function synthResult(status: string, content: string): Result {
   return { ok: false, answer: "", error: content, error_kind: kind, warnings: [], charts: [] };
 }
 
-/** 重放：历史事件 + 合成 done，走同一个 reducer。 */
+/** 重放：历史事件 + 合成 done，走同一个 reducer。
+ *  注意：status=cancelled 的轮次，库里可能存着 answer 事件（late-cancel）。它只作审计，不能展示——
+ *  answerText 只在 ok 时出结论，outcome 的"未保存"只给实时轮次（live）。改这里的人别把它露出来。 */
 export function replay(m: Message): Turn {
   let t = emptyTurn(false);
   const evs = (m.events ?? []) as Ev[];
