@@ -13,6 +13,9 @@
   3. **导出 PNG 得到非空 data URL，文件名已清洗** [v2] → 👍👎
   4. **重启后端 → 重新打开 URL → 历史会话还在，图表还在（走重放路径）** [v2]
   5. **按停后：后端在有限时间内停下（记录实测耗时），status 落为 cancelled，立刻重问不撞 409** [v2]
+     - 耗时分两个数，分开记，不混成一个 [F3 前定，S 10-16]：
+       - **感知延迟**（验收指标）：点"停止"→ 按钮变"正在停止…"（乐观 UI，同一帧）；最终态"已取消 / 已取消（未保存）"只来自 settle() 读到的库里 status。
+       - **后端延迟**（只记录，不设门槛）：`POST /cancel` 返回 200 → 流里出现 error(kind=cancelled) + done / 库里 status=cancelled。检查点在"每产出一个事件之前"，所以上界 ≈ 当前这次模型调用的剩余时间（秒级到几十秒），这是架构选定的粒度，不是 bug；"< 1s"之类的门槛架构上达不到，不写。用假模型服务挂住 N 秒实测，记进 DEVLOG。
   6. **用 v1 的库启动一次：feedback 表出现，旧表行数不变**（写成测试）[v2]
   7. **注入实测结论写进 THREAT_MODEL §2.3，DOM 断言在后端托管的 dist 上跑通** [v2]
 
@@ -71,7 +74,7 @@
 |---|---|---|
 | vitest + ECharts SSR SVG | 按 THREAT_MODEL §2.3，只测 v1 可达的字段：title.text、series[].name、xAxis.data[]、xAxis/yAxis.name | tooltip（SSR 不渲染） |
 | vitest + testing-library | 错误、警告、结论、预览单元格、feedback note 都按文本渲染 | — |
-| Playwright（单个 Linux job） | **跑在后端托管的 dist 上（带 CSP）**：用 `chat_model_factory` 起假模型服务，产出带注入串的图，真机悬停 tooltip，断言不产生 DOM 节点 | — |
+| Playwright（单个 Linux job） | **跑在后端托管的 dist 上（带 CSP）**：用假模型服务（`tests/fake_llm.py`，独立进程的 OpenAI 兼容 HTTP 服务，后端只改 base_url，不是进程内对象），产出带注入串的图，真机悬停 tooltip，断言不产生 DOM 节点 | — |
 
 v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
@@ -90,6 +93,12 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 | F1 | 数据集（含预览）、会话、设置 | 2–3 天 |
 | F2 | SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types（**完成，DEVLOG [34]**） | 3–5 天 |
 | F3 | ECharts、prepare、主题、开关、换图型、导出、注入实测 + THREAT_MODEL | 4–5 天 |
+
+**F3 已定 [S 10-16]**
+- **假模型服务**是 F3/F4/T11 所有异步测试的公共设施：独立进程的 HTTP 服务，接口形状同真模型（OpenAI 兼容 chat/completions，产品代码只改 base_url 指过去，不 monkeypatch）。行为由请求控制、无副作用状态：按 model 名分派场景（如挂住 N 秒、可控失败、控制流式速率）。至少支持：挂住指定时长、可控失败（HTTP 5xx / 超时 / 坏响应）、控制 token 流速率。F3 停止测试、T11 错误文案测试、F4 重试测试都复用它，不另写。
+- **ECharts 原样渲染**：option 在后端已过 BANNED_KEYS（app/tools/charts.py），前端不做二次解释——不 eval、不执行 formatter 字符串、不动态拼 option，只"原样交给 ECharts"。
+- 测试：按需引入的 ECharts 组件覆盖**后端可能产出的全部图表类型**（从后端导出的类型清单比对，不是只测当前用例用到的几种）；渲染时不产生外部资源请求（Playwright 断言零外部请求，不只靠 CSP）。
+- T11 单独 PR，不跟 F3 合。
 | F4 | 层 1 面板 | 2–3 天 |
 | F5 | S 验收轮次、删 Streamlit | 3–5 天 |
 
