@@ -32,6 +32,17 @@ test("SSE：CRLF / LF / CR 三种换行、注释、多行 data、无 data 块、
   expect(await collect([new TextEncoder().encode(TEXT)])).toEqual(EXPECTED);
 });
 
+test("SSE：响应体以 UTF-8 BOM 开头时，第一行字段名不带 BOM（TextDecoder 默认去 BOM），BOM 单独成块也一样", async () => {
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+  const body = new TextEncoder().encode("data: x\n\n");
+  const joined = new Uint8Array([...bom, ...body]);
+  expect(await collect([joined])).toEqual([{ id: "", event: "message", data: "x" }]);
+  expect(await collect([bom, body])).toEqual([{ id: "", event: "message", data: "x" }]);
+  expect(await collect([joined.slice(0, 1), joined.slice(1)])).toEqual([{ id: "", event: "message", data: "x" }]);
+  // 只去开头一个：正文里的 U+FEFF 原样保留
+  expect(await collect([new TextEncoder().encode("data: \ufeffy\n\n")])).toEqual([{ id: "", event: "message", data: "\ufeffy" }]);
+});
+
 test("SSE：在任意字节处切 chunk（含多字节 UTF-8 中间、\\r 与 \\n 之间）结果都一样", async () => {
   const bytes = new TextEncoder().encode(TEXT);
   for (let i = 1; i < bytes.length; i++) {
