@@ -213,6 +213,24 @@ def _error_kind_writes(tree):
     return used
 
 
+def test_stream_ends_without_done_is_error_not_interrupted(home, sample_path, monkeypatch):
+    """interrupted 的判据是显式的（只在 except GeneratorExit 里落）。生成器正常结束却没有 done、也没抛异常——
+    这是后端 bug，不是网络问题：落默认的 error + STREAM_ABORTED_MESSAGE，不显示"连接已断开"。"""
+    import app.core as core
+
+    from app.core.events import DISCONNECTED_MESSAGE, STREAM_ABORTED_MESSAGE
+
+    def no_done(*a, **kw):
+        yield from ()
+    monkeypatch.setattr(core, "analyze_stream", no_done)
+    c = TestClient(create_app(home, TOKEN, chat_model_factory=lambda: wf_model(["result = 1"])))
+    ds = upload(c, sample_path)
+    sid = c.post("/sessions", json={"dataset_id": ds["id"]}, headers=H).json()["id"]
+    c.post(f"/sessions/{sid}/messages", json={"content": "q"}, headers=H)
+    a = c.get(f"/sessions/{sid}", headers=H).json()["messages"][-1]
+    assert a["status"] == "error" and a["content"] == STREAM_ABORTED_MESSAGE != DISCONNECTED_MESSAGE
+
+
 def test_error_kinds_written_by_service_are_registered():
     """service.py 写进 error_kind 的字面量必须在 ERROR_KINDS 里；除 interrupted（只落在 messages.status）外都实际出现过。"""
     import ast
@@ -259,6 +277,12 @@ def test_restart_marks_interrupted_not_cancelled(home, sample_path):
     assert c2.post(f"/sessions/{sid}/messages", json={"content": "重试"}, headers=H).status_code == 200
 
 
+# 为什么 error_kind 和 status 的约束是两套机制（不是其中一个写错了）：
+# - error_kind 有"唯一写入方"约定（只有 core/service.py 写），别处出现就是违规，个别合法例外用 (文件, kind) 二元组白名单
+#   列出来（EVAL_ONLY_KINDS）——例外是"这个文件写这个值"，所以按值放行。
+# - status 没有唯一写入方（db.py 重启清理、server/app.py 的 stream 和 cancel 都写），约束是"写进去的值 ⊆ MESSAGE_STATUSES"；
+#   误报来自"status"这个通用变量名（app/eval/report.py 的展示用局部变量），所以按形式和位置限定：
+#   只有局部变量 status = … 这一种形式限定在 app/server/，属性、关键字参数、dict 键三种形式扫全量。
 def _status_writes(tree, *, local_names):
     """写 status 的字面量：x.status = …、f(status=…)（Message(...)、update().values(...)）、{"status": …}；
     local_names=True 时另算局部变量 status = …（app/server 里 stream() 先算 status 再 CAS 写库）。含元组解包与条件表达式两分支。"""
@@ -350,3 +374,51 @@ def test_cancel_then_disconnect_stays_cancelled(home, sample_path, monkeypatch):
     gen.close()
     a = c.get(f"/sessions/{sid}", headers=H).json()["messages"][-1]
     assert a["status"] == "cancelled" and a["content"] == CANCELLED_MESSAGE
+
+
+def test_real_tcp_disconnect_is_interrupted(home, sample_path):
+    """真 TCP 断开（关标签页、进程被杀、断网），不是截生成器模拟：真 uvicorn + 真 socket，读到 plan 后关连接。
+    分析跑在 SSE 生成器里，断开后它在下一个事件 yield 时写失败、生成器被关闭（GeneratorExit）→ 分析在下一个事件边界停下
+    （最多晚一次模型调用），finally 的 CAS 落 interrupted + DISCONNECTED_MESSAGE。不是 cancelled（用户没点停止），
+    也不是 error，也不会烂在 running（那样这个会话会一直 409 到重启，因为分析其实已经停了）。"""
+    import socket
+    import time
+
+    import httpx
+    import uvicorn
+
+    from app.core.events import DISCONNECTED_MESSAGE
+    app = create_app(home, TOKEN, chat_model_factory=lambda: hooked("写一段 pandas 代码", lambda: time.sleep(0.5)))
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    th = threading.Thread(target=server.run, daemon=True)
+    th.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.05)
+        with httpx.Client(base_url=base, trust_env=False, timeout=30) as c:
+            ds = c.post("/datasets", files=[("files", ("s.csv", open(sample_path, "rb").read(), "text/csv"))],
+                        data={"name": "x"}, headers=H).json()
+            sid = c.post("/sessions", json={"dataset_id": ds["id"]}, headers=H).json()["id"]
+            with c.stream("POST", f"/sessions/{sid}/messages", json={"content": "总销量"}, headers=H) as r:
+                for line in r.iter_lines():
+                    if line.startswith("event: plan"):
+                        break                                   # 退出 with：连接被关掉，不读到 done
+            deadline = time.time() + 20
+            while True:
+                a = c.get(f"/sessions/{sid}", headers=H).json()["messages"][-1]
+                if a["status"] != "running" or time.time() > deadline:
+                    break
+                time.sleep(0.1)
+            assert a["status"] == "interrupted" and a["content"] == DISCONNECTED_MESSAGE, a
+            assert "done" not in [e["type"] for e in a["events"]]
+            # 不卡会话：立刻能再问
+            assert c.post(f"/sessions/{sid}/messages", json={"content": "再问"}, headers=H).status_code == 200
+    finally:
+        server.should_exit = True
+        th.join(timeout=10)
