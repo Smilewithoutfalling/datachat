@@ -12,6 +12,9 @@ test("提问 → SSE → 失败原因 → 👍 → 刷新重放一致", async ({
     w.__csp = [];
     document.addEventListener("securitypolicyviolation", (e) => w.__csp.push(e.violatedDirective));
   });
+  // 前提：后端没有 Key（playwright.config 固定）。哪天 CI 配了 Key，这里先红，而不是下面的期望静默变味
+  const key = await page.request.get("/settings/api-key", { headers: { Authorization: `Bearer ${E2E_TOKEN}` } });
+  expect(await key.json()).toEqual({ configured: false, source: null });
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "sales.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
   await page.getByRole("button", { name: "上传" }).click();
