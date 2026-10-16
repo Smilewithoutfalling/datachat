@@ -6,11 +6,10 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      # 判据是"构建产物会包含谁"：build_sidecar.py 用 --collect-submodules app 把整个 app 包打进去，
+      # 所以按目录写 app/**，不按静态 import 闭包写（动态 import 会让闭包失效）。
       - "packaging/**"
-      - "app/sidecar.py"
-      - "app/tools/sandbox*.py"
-      - "app/tools/_winjob.py"
-      - "app/server/**"
+      - "app/**"
       - "ui/web/**"
       - "requirements.txt"
       - ".github/workflows/sidecar.yml"
