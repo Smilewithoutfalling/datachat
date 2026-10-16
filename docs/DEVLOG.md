@@ -1338,6 +1338,12 @@ Playwright：
 
 补记：首次推送后 CI web job 的 lint 红了（run 38871680030）。原因是 lint 在写 `e2e/f3-charts.spec.ts` 之前跑过，之后没有重跑。e2e 里的辅助函数叫 `useScenario`，在循环里调用，触发了 `react-hooks/rules-of-hooks`。改名为 `setScenario` 后，lint 和 tsc 都通过；行为没变，e2e 没有重跑。
 
+补记二（S 10-16 评审）：
+- vitest 里的边界夹具只在 SSR SVG 下渲染过，canvas 路径只覆盖了五种 kind 的普通情况。为此新增 Playwright 测试 `f3-charts.spec.ts`「边界：bar 5000 点在 canvas 上画出，console 干净」：上传 5000 行 CSV，跑 chart-bar；断言 canvas 可见、尺寸非 0，没有截断提示，库里存的 option 是 `truncated=false` 且 `series[0].data` 正好 5000 条，console 里没有 error、warning 或 `[ECharts]` log，也没有 pageerror。
+- `charts.test.ts` 把双向比对改名为「（双向，仅顶层键 + 枚举值，不含嵌套键）」，并注明嵌套依赖靠夹具渲染兜底。
+- `register.ts` 补了跨端隐式契约的规则：现在只有 `grid.containLabel` 这一条，不建机制；一旦出现第二条，就在 chart_schema.json 里声明"字段 → 需要的前端 feature"，纳入双向比对。后端改用 outerBounds 跟主题一起定。
+- 验证：lint、tsc、vitest 67、build（check-dist）通过；Playwright **10 passed**（nokey 7 + fake 3），停止 e2e 本轮感知 1 ms、后端 8026 ms。`npm install --package-lock-only`（Node 24.22.0）重新生成后 lock 文件不变，lockfileVersion 3。
+
 未做：
 - 主题、显示开关、换图型、导出、注入实测、prepare 完整版（F3 后续）。
 - chunk 拆分 / 懒加载 ECharts。

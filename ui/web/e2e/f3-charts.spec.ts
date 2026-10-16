@@ -85,3 +85,47 @@ test("五种图型：canvas 渲染、图数一致、刷新重放仍在；零外�
   expect(csp).toEqual([]);
   expect(sameOriginAssets.length).toBeGreaterThan(0); // 对照：监听器确实收到了同源 /assets/* 请求
 });
+
+// 边界绘制走 canvas（S 10-16 评审）：vitest 里的边界夹具只用 SSR SVG 渲染过，这里补上 canvas 路径。
+// 5000 个类目 × 1 个系列 = MAX_POINTS，正好不截断。断言：画出 canvas，尺寸非 0；没有 console error / warning，
+// 也没有 [ECharts] log；没有页面异常；没有截断提示；库里存的 option 正好 5000 点。
+test("边界：bar 5000 点在 canvas 上画出，console 干净", async ({ page }) => {
+  test.setTimeout(120_000);
+  const big = "类目,值\n" + Array.from({ length: 5000 }, (_, i) => `c${String(i).padStart(4, "0")},${i % 97}`).join("\n") + "\n";
+  const bad: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning" || m.text().startsWith("[ECharts]")) bad.push(`${m.type()}: ${m.text()}`);
+  });
+  page.on("pageerror", (e) => bad.push(`pageerror: ${e.message}`));
+
+  await setScenario(page, "chart-bar");
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "bar5000.csv", mimeType: "text/csv", buffer: Buffer.from(big) }]);
+  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
+  const sv = page.getByTestId("session-view");
+  await sv.getByLabel("提问").fill("画 5000 点");
+  await sv.getByRole("button", { name: "提问" }).click();
+  const msg = sv.getByTestId("assistant-msg").last();
+  await expect(msg).toContainText("（fake）结论", { timeout: 60_000 });
+  const chart = msg.getByTestId("echart");
+  await expect(chart).toHaveCount(1);
+  await expect(chart).toHaveAttribute("data-kind", "bar");
+  const canvas = chart.locator("canvas").first();
+  await expect(canvas).toBeVisible();
+  const box = await canvas.boundingBox();
+  expect(box!.width).toBeGreaterThan(0);
+  expect(box!.height).toBeGreaterThan(0);
+  await expect(msg.locator(".warnings")).toHaveCount(0);
+
+  const sessions = (await (await page.request.get("/sessions", { headers: auth })).json()) as { id: string; title: string }[];
+  const sid = sessions.find((s) => s.title.startsWith("画 5000"))!.id;
+  const detail = await (await page.request.get(`/sessions/${sid}`, { headers: auth })).json();
+  const spec = (detail.messages as { role: string; result?: { charts: { option: { truncated: boolean; option: { series: { data: unknown[] }[] } } | null }[] } }[])
+    .filter((m) => m.role === "assistant").at(-1)!.result!.charts[0].option!;
+  expect(spec.truncated).toBe(false);
+  expect(spec.option.series[0].data).toHaveLength(5000);
+
+  await page.waitForTimeout(500); // 给 ResizeObserver 回调和后续帧留一点时间，再看 console
+  expect(bad).toEqual([]);
+});

@@ -19,6 +19,9 @@ export const TOP_LEVEL: Record<string, Ext[]> = {
   legend: [LegendComponent],
   // 后端产出 grid.containLabel=true（charts.py）。echarts 6 起它要额外 use(LegacyGridContainLabel)，否则生产构建里
   // 静默不生效（只在开发构建 console.log 一句），轴标签可能被裁。夹具渲染测试抓到的，见 charts.test.ts。
+  // 这是一条跨端的隐式契约：后端某个嵌套字段，要求前端注册一个 feature。现在只靠夹具渲染时抓 [ECharts] log 兜底，
+  // 而这依赖 echarts 6.1.0 的输出行为。只有这一条，所以不建机制；一旦出现第二条同类字段，就在 chart_schema.json
+  // 里声明"字段 → 需要的前端 feature"，纳入双向比对（S 10-16 评审）。后端改用 outerBounds 可以消掉这一条，跟主题一起定。
   grid: [GridComponent, LegacyGridContainLabel],
   xAxis: [GridComponent],
   yAxis: [GridComponent],

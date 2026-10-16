@@ -11,7 +11,9 @@ const FIX = fixtures.fixtures as { id: string; spec: Spec }[];
 
 installEcharts([...productExtensions(), SVGRenderer]); // 测试里只把 SVG 当断言工具；产品只注册 canvas
 
-describe("注册表 ↔ 后端白名单（双向）", () => {
+// 范围：只比对顶层键和枚举取值，不比对嵌套键。比如 grid.containLabel 需要 LegacyGridContainLabel，这类依赖不在这里，
+// 靠下面的夹具渲染测试兜底。
+describe("注册表 ↔ 后端白名单（双向，仅顶层键 + 枚举值，不含嵌套键）", () => {
   const sorted = (a: Iterable<string>) => [...a].sort();
   test("顶层键：少一项红，多一项也红", () => {
     expect(sorted(Object.keys(TOP_LEVEL))).toEqual(sorted(schema.top_level_keys));
