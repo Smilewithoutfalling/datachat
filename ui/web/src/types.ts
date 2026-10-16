@@ -1,4 +1,4 @@
-// 后端接口的形状（app/server/app.py）。F2 起事件类型改由 gen_ui_types 生成。
+// 后端接口的形状（app/server/app.py）。事件类型、error_kind、消息状态、常量文案由 scripts/gen_ui_types.py 生成（src/generated/）。
 export type FileInfo = { filename: string; size: number; sha256: string };
 export type Dataset = { id: string; name: string; created_at: string; files: FileInfo[] };
 
@@ -33,10 +33,14 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  status: string;
+  status: string; // MESSAGE_STATUSES（generated/events.json）
   created_at: string;
-  feedback?: { rating: "up" | "down" | null; note: string } | null;
+  events?: unknown[]; // 助手消息：done 以外的事件（重放用，见 turn.ts）
+  result?: unknown | null; // 助手消息：done 里的 result；cancelled / interrupted / 流异常时为 null
+  feedback?: Feedback | null;
 };
+export type Rating = "up" | "down" | null;
+export type Feedback = { rating: Rating; note: string };
 export type SessionDetail = Session & { messages: Message[] };
 
 export type Settings = { model: string; base_url: string; timeout: number };
