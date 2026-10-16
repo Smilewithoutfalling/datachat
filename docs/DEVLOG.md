@@ -1336,6 +1336,8 @@ Playwright：
 
 验证：pytest 680 passed（+26，含本地闸门数据 25 条）；vitest 67；Playwright 9（nokey 7 + fake 2）；tsc、lint、build（check-dist 0 内联）、`gen_ui_types --check` 通过。
 
+补记：首次推送后 CI web job 的 lint 红了（run 38871680030）。原因是 lint 在写 `e2e/f3-charts.spec.ts` 之前跑过，之后没有重跑。e2e 里的辅助函数叫 `useScenario`，在循环里调用，触发了 `react-hooks/rules-of-hooks`。改名为 `setScenario` 后，lint 和 tsc 都通过；行为没变，e2e 没有重跑。
+
 未做：
 - 主题、显示开关、换图型、导出、注入实测、prepare 完整版（F3 后续）。
 - chunk 拆分 / 懒加载 ECharts。

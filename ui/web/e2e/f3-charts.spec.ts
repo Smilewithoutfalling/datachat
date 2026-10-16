@@ -7,7 +7,7 @@ import schema from "../src/generated/chart_schema.json" with { type: "json" };
 const CSV = "城市,销量,利润\n北京,3,1.5\n上海,5,2.5\n广州,2,0.5\n";
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 
-async function useScenario(page: Page, model: string) {
+async function setScenario(page: Page, model: string) {
   const r = await page.request.put("/settings", { headers: auth, data: { model } });
   expect((await r.json()).model).toBe(model);
 }
@@ -48,7 +48,7 @@ test("五种图型：canvas 渲染、图数一致、刷新重放仍在；零外�
 
   const kinds = schema.kinds;
   for (const [i, kind] of kinds.entries()) {
-    await useScenario(page, `chart-${kind}`);
+    await setScenario(page, `chart-${kind}`);
     await sv.getByLabel("提问").fill(`画 ${kind}`);
     await sv.getByRole("button", { name: "提问" }).click();
     const msg = sv.getByTestId("assistant-msg").nth(i);
