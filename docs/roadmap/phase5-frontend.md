@@ -31,6 +31,8 @@
 **停止的已定规则 [F2，S 10-16 确认]**
 - 取消照常产出 fatal error + done（保留"done 之前有且只有一个终结事件"的不变式）；`error.message`、`AnalysisResult.error`、`messages.content` 在 cancelled 时一律是常量 `CANCELLED_MESSAGE`（"已取消"），不带内部异常或堆栈。前端只按 `kind` / `status` 分支，不匹配文案。
 - **"已取消"只用于用户动作。** 非用户动作的终止一律 `status=interrupted`（`ERROR_KINDS` 含它；analyze_stream 不产出，前端重放按 status 合成 done(error_kind=interrupted)），前端给重试入口：后端重启清理遗留 running → `INTERRUPTED_MESSAGE`；SSE 客户端断开（关标签页、网络抖动）→ `DISCONNECTED_MESSAGE`。流中途抛异常、没收到 done → `status=error`、`STREAM_ABORTED_MESSAGE`，异常详情只进日志。
+- **真 TCP 断开**（关标签页、进程被杀、断网）：分析跑在 SSE 生成器里，断开后在下一个事件 yield 时停下（最多晚一次模型调用），finally 落 `interrupted` + `DISCONNECTED_MESSAGE`。判据是显式的：只在 `except GeneratorExit` 里落 interrupted；默认兜底是 error + `STREAM_ABORTED_MESSAGE`（没预料到的结局是后端问题，不能把排查方向指向网络）。不留 running：分析已经停了，留 running 会让会话 409 到重启。真 uvicorn + 真 socket 的测试钉住。若以后要"断开后分析继续跑"，前提是分析挪出请求生命周期（后台 worker），那是另一个设计。
+- **events 表里 cancelled 轮次的 answer 事件只作审计**：库里照存（events 是发生过什么的记录），但重放 / 展示一律以 status 为准，status=cancelled 时不展示任何 answer。以后做"重放全部事件"类功能必须保留这条过滤（turn.ts 的 replay / answerText 有测试）。
 - **前端点停止的顺序**：先 `POST /messages/{id}/cancel` 并等它返回，再断开 fetch（或者不断开，等流里的 error + done）。反过来先断开，库里会落 interrupted。
 - **status → 终止原因映射（前端用）**：ok → 正常；cancelled → "已取消"；interrupted → 已中断 + 重试；error → 失败，原因看流里 / result 里的 error_kind，重放时没有 result（stream_aborted）就只显示 content。messages 表没有 error_kind 列（技术债，见 DEVLOG [34] 未做）。
 - `events.json` 带 `event_types`、`error_kinds`、`message_statuses` 和全部常量文案，`--check` 覆盖它们的漂移；测试另钉三条：service.py 写的 kind 恰为 `ERROR_KINDS` 去掉 interrupted；整个 app/ 只有 service.py 写 error_kind（评测记录自己的 `ground_truth` 以 (文件, kind) 列白名单）；app/ 里写进 status 的字面量都在 `MESSAGE_STATUSES` 里且每个都有人写。
@@ -92,6 +94,6 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 | F5 | S 验收轮次、删 Streamlit | 3–5 天 |
 
 ## 7. 与前端并行，不在 F 路径上
-- 错误文案脱敏（THREAT_MODEL T10）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
+- 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
 - [30] 的 SHA（4497d2b）随 F0 一起回填（已做，见 DEVLOG [31]）。
