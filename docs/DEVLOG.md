@@ -1208,7 +1208,7 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 
 未做 / 下一步：F2。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
 
-## [33] 2026-10-15 · 阶段 5 F1.1：F1 评审收尾（预览并入详情、方向控制符、截断计数、token 先存后抹） · commit <待提交>
+## [33] 2026-10-15 · 阶段 5 F1.1：F1 评审收尾（预览并入详情、方向控制符、截断计数、token 先存后抹） · commit cccddd5（PR #34）
 
 当前阶段：**阶段 5 前端，F1.1 完成，下一步 F2**（SSE、事件渲染、重放合成 done、cancel、👍👎、gen_ui_types）。[32] 的 SHA 已回填 7f0cdcd（PR #33，CI tests 38699875135、sidecar 38699875296 均绿）。
 
@@ -1237,3 +1237,37 @@ S 决定（10-14）：跳过"当前 master 先重跑一次基线"，直接改提
 - `docs/THREAT_MODEL.md` 预览一行改为：清方向控制符并计数、截断计数。
 
 未做 / 下一步：F2。`read_csv_with_encoding` 内部 bytes / str / DataFrame 三份并存的峰值内存（分析路径也一样，属于读取函数本身，不在 F1.1 顺手改；需要时改成解码后释放 bytes、或按块解码）。A1 自动复跑规则仍按计划在下一次闸门 PR 落地。
+
+## [34] 2026-10-16 · 阶段 5 F2：SSE、事件渲染、重放合成 done、停止、👍👎、gen_ui_types · commit <待提交>
+
+当前阶段：**阶段 5 前端，F2 完成，下一步 F3**（ECharts、prepare、主题、开关、换图型、导出、注入实测）。后端停止的语义经 S 三轮评审。[33] 的 SHA 已回填 cccddd5。
+
+后端（已完成，细节见 phase5-frontend.md §1「停止的已定规则」）：
+- `analyze_stream(cancel=threading.Event)`：每个事件产出前检查（answer 也是检查点），内部跑完、done 之前再查一次；置位 → `error_kind="cancelled"`，照常 fatal error + done。
+- `POST /messages/{id}/cancel`：CAS running → cancelled（已结束 409、用户消息 400）；`stream()` 的 finally 也 CAS，不覆盖先落库的取消；`done_seen`。
+- 状态与文案：cancelled 只用于用户点停止；非用户动作的终止（后端重启、SSE 客户端断开）→ `status=interrupted`；流异常没有 done → error + 常量文案，详情只进日志。文案全是 `app/core/events.py` 的常量；`db.MESSAGE_STATUSES`。
+- `scripts/gen_ui_types.py` → `ui/web/src/generated/{events,banned_keys}.json`（事件类型、error_kinds、message_statuses、常量文案、BANNED_KEYS），CI `--check`。
+- 测试 `tests/test_web_f2.py`：取消各路径、CAS、late-cancel、answer 检查点、断开 → interrupted、先 cancel 后断开仍 cancelled、重启 → interrupted、流异常文案不带异常；AST 约定：只有 service.py 写 error_kind（评测 `ground_truth` 白名单）、service.py 写的 kind 恰为 ERROR_KINDS − interrupted、app/ 写进 status 的字面量 ⊆ MESSAGE_STATUSES 且全覆盖。
+
+前端（`ui/web/src`）：
+- `sse.ts`：fetch + ReadableStream 自写 SSE 解析（带 Authorization；CRLF / LF / CR、注释、多行 data、无 data 块、未收尾块丢弃；TextDecoder stream 模式处理跨 chunk 的多字节字符）。
+- `turn.ts`：唯一的 reducer（按 seq 去重、未知类型忽略）；`replay()` 重放时合成 done（seq = max+1；没有 result 时按 status 合成，文案取库里的常量）；`settle()` 用库里的 status 收尾实时轮次；`outcome()` 只按 status / error_kind 分支。事件类型、error_kinds、消息状态、常量文案都读 `generated/events.json`。
+- `views/TurnView.tsx`：plan、code（折叠）、exec（折叠，失败标红）、可恢复 error（黄）、answer（markdown）、终止原因（error 红并带失败类型；cancelled 灰；interrupted 黄 + 重试）、警告、未核实数字；图表只给张数（F3 渲染）。致命 error 只在终止原因里出现一次。
+- `views/Markdown.tsx`：react-markdown 10.1.0 + remark-gfm 4.0.1（精确版本），不开 raw HTML，链接 `target=_blank rel="noreferrer noopener"`。
+- `views/SessionView.tsx`：提问框（Ctrl+Enter）、实时气泡、停止（先 await cancel、不断开流，409 当已结束）、流结束后重新拉会话按 status 收尾、interrupted 重试同一问题、历史里的 running 也能停；`views/FeedbackBar.tsx` 👍👎（再点取消 = null）+ 补充说明。
+- `client.ts`：`ask`（读 `X-Message-Id`）、`cancel`、`feedback`。
+
+测试（前端）：
+- vitest 37（+16）：`sse.test.ts` 在每个字节位置切 chunk 和逐字节结果一致；`turn.test.ts` 8 条（生成文件约定、reducer、重放 ok / cancelled 不出结论 / interrupted 两种文案 / error 无 result、late-cancel 实时轮次"已取消（未保存）"、每个状态都有明确分支）；`views/f2.test.tsx` 6 条（实时渲染与收尾、停止顺序与未保存气泡、重放与重试、409 不留气泡、👍👎 与 note 文本渲染、markdown 版本钉住 / raw HTML / javascript: / 链接属性）。
+- Playwright 7（+1）`e2e/f2.spec.ts`：后端托管 dist（带 CSP）上真实 SSE：无 Key → 模型调用失败原因 → 👍 → 刷新重放一致，无 CSP 违规。停止的端到端要能挂住的假模型，随 F3 的假模型服务做。
+
+验证：pytest 613 passed；vitest 37；Playwright 7（沙箱本地）；tsc、lint、build（check-dist 0 内联）、`gen_ui_types --check` 通过。
+
+已知取舍（S 确认）：
+- **晚到的取消算取消**：answer 事件可能已经发出，但 status=cancelled、result_json 为空，这个组合会传到前端。前端规则：status 是最终真相源；当场保留气泡并标"已取消（未保存）"，刷新后不出现，不把 answer 补写回库。窗口只剩 answer 发出后到 done 之前的收尾记账，加上 done 之后到 finally CAS 的一次 DB 写入。
+
+未做：
+- **messages 表没有 error_kind 列**：dataset / llm / agent / execution / stream_aborted 落库后都塌成 status=error，重放时只能靠 content 文案区分。短期够用；将来做"按失败类型重试"或错误分布统计要回头加列（不在 F2 动 schema）。
+- 错误文案脱敏（THREAT_MODEL T10）：单独一个 PR。
+- 停止的端到端测试（Playwright + 能挂住的假模型）、验收第 5 条的"实测停止耗时"：随 F3 的假模型服务。
+- 切走会话时不中断流（分析在后端跑完、结果照常落库）；回来时按库里的 status 显示。
