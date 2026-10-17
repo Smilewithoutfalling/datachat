@@ -1,9 +1,11 @@
-"""把后端的事件类型与图表禁用键导出成前端用的 JSON（阶段 5 F2），前端不手抄、改了后端 CI 就报。
+"""把后端的事件类型、图表白名单与禁用键、图表夹具导出成前端用的 JSON（阶段 5 F2 / F3），前端不手抄、改了后端 CI 就报。
 
-    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys}.json
+    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys,chart_schema,chart_fixtures}.json
     python scripts/gen_ui_types.py --check    # 只校验现有文件与重新生成的是否一致（CI 用）
 
-来源：app/core/events.py 的 EVENT_TYPES、ERROR_KINDS 和常量文案；app/server/db.py 的 MESSAGE_STATUSES；app/tools/charts.py 的 BANNED_KEYS（前端渲染 ECharts 前再过一遍）。
+来源：app/core/events.py 的 EVENT_TYPES、ERROR_KINDS 和常量文案；app/server/db.py 的 MESSAGE_STATUSES；app/tools/charts.py 的 BANNED_KEYS（前端渲染 ECharts 前再过一遍）、
+KINDS / _KIND_SERIES_TYPE / _ENUMS / _ALLOWED 顶层键（chart_schema.json，前端组件注册表双向比对），
+以及 build_option 在固定合成数据上的真实产出（chart_fixtures.json，前端渲染测试只用它，不手写 option）。
 """
 import argparse
 import json
@@ -13,6 +15,54 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 OUT_DIR = os.path.join(ROOT, "ui", "web", "src", "generated")
+
+
+def chart_schema() -> dict:
+    from app.tools.charts import _ALLOWED, _ENUMS, _KIND_SERIES_TYPE, KINDS
+    return {"_generated_by": "scripts/gen_ui_types.py", "kinds": list(KINDS),
+            "kind_series_type": dict(_KIND_SERIES_TYPE),
+            "top_level_keys": list(_ALLOWED),
+            "enums": {".".join(k): sorted(v) for k, v in _ENUMS.items()}}
+
+
+def chart_fixtures() -> dict:
+    """固定合成数据 → build_option 的真实产出。只放成功例（validate_spec 的拒绝例在 tests/test_charts.py）。"""
+    import numpy as np
+    import pandas as pd
+    from app.tools.charts import MAX_PIE_SLICES, MAX_POINTS, MAX_SERIES, build_option
+    rng = np.random.RandomState(20261016)
+    small = pd.DataFrame({"城市": ["北京", "上海", "广州", "深圳", "杭州"], "销量": [3, 5, 2, 8, 6],
+                          "利润": [1.5, 2.25, 0.5, 3.75, 2.0]})
+    days = pd.DataFrame({"日期": pd.date_range("2026-01-01", periods=30, freq="D"),
+                         "访问": rng.randint(50, 200, 30)})
+    missing = pd.DataFrame({"类别": ["甲", None, "丙", "丁"], "值": [1.0, 2.0, np.nan, 4.0]})
+    long = pd.DataFrame([(f"m{i}", f"s{j:02d}", int(rng.randint(0, 100))) for i in range(5) for j in range(MAX_SERIES)],
+                        columns=["月", "系列", "量"])
+    pie = pd.DataFrame({"项": [f"项{i:02d}" for i in range(MAX_PIE_SLICES)], "值": rng.randint(1, 100, MAX_PIE_SLICES)})
+    def cats(n):
+        return pd.DataFrame({"k": [f"k{i}" for i in range(n)], "v": rng.randint(0, 1000, n)})
+    def pts(n):
+        return pd.DataFrame({"x": rng.normal(0, 1, n).round(3), "y": rng.normal(0, 1, n).round(3)})
+    wide = pd.DataFrame({"季度": ["Q1", "Q2", "Q3", "Q4"], "收入": [10, 12, 9, 15], "成本": [7, 8, 8, 9], "利润": [3, 4, 1, 6]})
+    cases = [
+        ("bar", build_option("bar", small, x="城市", y="销量", title="各城市销量")),
+        ("bar-untitled", build_option("bar", small, x="城市", y="销量")),
+        ("line", build_option("line", small, x="城市", y="销量", title="销量走势")),
+        ("area", build_option("area", small, x="城市", y="销量", title="销量面积")),
+        ("pie", build_option("pie", small, x="城市", y="销量", title="销量占比")),
+        ("scatter", build_option("scatter", small, x="销量", y="利润", title="销量与利润")),
+        ("line-time", build_option("line", days, x="日期", y="访问", title="每日访问")),
+        ("area-time", build_option("area", days, x="日期", y="访问")),
+        ("bar-missing", build_option("bar", missing, x="类别", y="值", title="含缺失")),
+        (f"bar-series-{MAX_SERIES}", build_option("bar", long, x="月", y="量", series="系列")),
+        (f"pie-{MAX_PIE_SLICES}", build_option("pie", pie, x="项", y="值")),
+        ("line-wide", build_option("line", wide, x="季度", y=["收入", "成本", "利润"], title="多指标")),
+        (f"bar-{MAX_POINTS}", build_option("bar", cats(MAX_POINTS), x="k", y="v")),
+        (f"bar-{MAX_POINTS + 1}", build_option("bar", cats(MAX_POINTS + 1), x="k", y="v", title="截断柱图")),
+        (f"scatter-{MAX_POINTS}", build_option("scatter", pts(MAX_POINTS), x="x", y="y")),
+        (f"scatter-{MAX_POINTS + 1}", build_option("scatter", pts(MAX_POINTS + 1), x="x", y="y", title="截断散点")),
+    ]
+    return {"_generated_by": "scripts/gen_ui_types.py", "fixtures": [{"id": i, "spec": s} for i, s in cases]}
 
 
 def build() -> dict[str, str]:
@@ -29,6 +79,9 @@ def build() -> dict[str, str]:
                                           "disconnected": DISCONNECTED_MESSAGE,
                                           "stream_aborted": STREAM_ABORTED_MESSAGE}}),
         "banned_keys.json": dump({"_generated_by": "scripts/gen_ui_types.py", "banned_keys": sorted(BANNED_KEYS)}),
+        "chart_schema.json": dump(chart_schema()),
+        # indent=1：build_option 一改，diff 能看出改了哪个值（紧凑 JSON 一行，每次整份重写）。按字节比对。
+        "chart_fixtures.json": json.dumps(chart_fixtures(), ensure_ascii=False, indent=1) + "\n",
     }
 
 

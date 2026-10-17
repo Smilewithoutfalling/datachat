@@ -1,0 +1,54 @@
+{
+  "_generated_by": "scripts/gen_ui_types.py",
+  "kinds": [
+    "bar",
+    "line",
+    "area",
+    "pie",
+    "scatter"
+  ],
+  "kind_series_type": {
+    "bar": "bar",
+    "line": "line",
+    "area": "line",
+    "pie": "pie",
+    "scatter": "scatter"
+  },
+  "top_level_keys": [
+    "color",
+    "title",
+    "tooltip",
+    "legend",
+    "grid",
+    "xAxis",
+    "yAxis",
+    "series"
+  ],
+  "enums": {
+    "tooltip.trigger": [
+      "axis",
+      "item"
+    ],
+    "legend.type": [
+      "plain",
+      "scroll"
+    ],
+    "legend.orient": [
+      "horizontal",
+      "vertical"
+    ],
+    "xAxis.type": [
+      "category",
+      "value"
+    ],
+    "yAxis.type": [
+      "value"
+    ],
+    "series.type": [
+      "bar",
+      "line",
+      "pie",
+      "scatter"
+    ]
+  }
+}

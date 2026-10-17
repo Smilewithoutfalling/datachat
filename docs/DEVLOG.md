@@ -1302,3 +1302,49 @@ Playwright：
 - 新增 `docs/HANDOVER.md`：给接手的 agent 用，内容包括项目目的、阅读顺序、和 S 协作的规则、设计不变量、下一步、环境搭建、提交流程、踩过的坑、仓库外记忆的要点。
 - 只改文档，没有改代码。
 
+
+## [37] 2026-10-16 · 阶段 5 F3-ECharts 第一步：后端 option 原样渲染、五种图型、零外部请求 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第一步 ECharts 渲染完成；下一步 prepare 完整版 / 主题 / 开关 / 换图型 / 导出 / 注入实测）。方案见 phase5-frontend.md「F3-ECharts 第一步」（PR #40）。
+
+后端 / 生成：
+- `scripts/gen_ui_types.py` 新增 `chart_schema.json`（KINDS、kind→series.type、`_ALLOWED` 顶层键、`_ENUMS`）和 `chart_fixtures.json`（16 个夹具，全部是 `build_option` 在固定种子合成数据上的真实产出，存完整 spec，`indent=1`，838 KB）：五种 kind、无标题、时间列 line / area、缺失类目与缺失值、20 系列长表、50 扇区、多 y 宽表、bar / scatter 的 5000 与 5001。CI 已有的 `--check` 按字节比对。
+- `tests/test_chart_fixtures.py`：夹具全部通过 `validate_spec`、覆盖每个 kind；5000 不截断、5001 输出 5000 点且 `truncated=true`。
+- 假服务 `chart-<kind>`：同 ok，写代码的那一步（codegen / fix / act）多调一次 `chart()`，列按 dtype 选（第一个非数值列 + 第一个数值列；scatter 取前两个数值列）。kind 直接取 `app/tools/charts.py` 的 KINDS；未知 kind、带 @step（含空 `@`）一律 400。
+
+前端：
+- `echarts` 精确锁定 6.1.0（依赖 zrender 6.1.0、tslib 2.3.0），只从 `echarts/core` 按需引入；ESLint `no-restricted-imports` 禁止 `import "echarts"`。
+- `src/charts/register.ts`：注册表的键 = 后端白名单（顶层键 + 每个枚举值），不需要组件的也显式写 NONE。产品只注册 CanvasRenderer。
+- `src/charts/prepare.ts`（v0）：JSON 往返深拷贝 → 按 banned_keys.json 递归删除（含 renderMode）→ 强制 `tooltip.renderMode='richText'`（缺失或数组也处理）；不改输入。
+- `src/charts/EChart.tsx`：一图一实例，挂载 init(canvas) + ResizeObserver，卸载 disconnect + dispose；option 变了 `setOption(..., {notMerge:true})`，不重建实例。
+- `TurnView` 按 `result.charts` 顺序渲染：option 项 → EChart，png 项 → 同源 `<img src="/charts/<name>?token=">`（`Api.chartSrc` 只认 `/charts/<name>`）。截断提示只走后端 `result.warnings`，前端不另拼。
+
+偏离方案（及理由）：
+- **多注册了 `LegacyGridContainLabel`**（echarts/features）。夹具渲染测试抓到：后端产出 `grid.containLabel=true`，echarts 6 起它要单独注册这个 feature，否则生产构建里**静默不生效**（只在开发构建打一句 `console.log`，不是 warn），轴标签可能被裁。因此 console 断言把带 `[ECharts]` 前缀的 `console.log` 也算进去。后端改用 `grid.outerBounds` 留到主题那一步再议。
+- **`slow-1s` 真链路测试原来就有**（[35] 的 `test_real_chain_slow_delays_every_call`，3 次调用总耗时 ≥ 3 s），方案里说"补"是我写错了，这次没有新增。
+- 双向比对只覆盖顶层键和枚举值，嵌套键（如 `grid.containLabel`）不在 chart_schema 里——上面那个漏洞就是这样漏掉的，靠夹具渲染测试的 console 断言兜住。
+
+测试：
+- pytest：`test_fake_llm.py` 63（+24）：chart 场景的解析正反例；只改写代码的步骤、其余步骤与 ok 逐字节相同；**五种 kind × 两种 agent 走真 HTTP + 真沙箱**，`result.charts` 里恰好一张该 kind 的图且过 `validate_spec`；**5001 行 × 两条链路**：图截到 5000 点，`result.warnings` 里截断警告恰好一条（service 层）。
+- vitest 67（+29）：`charts.test.ts` 注册表 ↔ chart_schema 双向比对（多一项、少一项都红）、16 个夹具 × 产品注册表 SSR SVG 渲染（series 数一致、有图元、console 无 warn / error / `[ECharts]` log）、prepare（各层级无被禁键、renderMode 只在 tooltip 下且为 richText、不改输入、人为注入的被禁键被删）；`register.control.test.ts` 对照：少注册 BarChart → 报错 / 报警；少注册 LegacyGridContainLabel → `[ECharts]` log 被抓到；`EChart.test.tsx`：4 张图 init 4 次、卸载 dispose 4 次、`getInstanceByDom` 为空、observer 全断开；resize 由 observer 触发；TurnView 5001 夹具图和截断警告同时出现且只有一条；png 项走 chartSrc。jsdom 没有 canvas，组件测试里 init 换成真 init + SVG renderer，并断言产品传入的是 canvas。
+- Playwright 9（+1）`e2e/f3-charts.spec.ts`：后端托管 dist + CSP，五种 kind 各问一轮，每轮 1 个 canvas 图、`data-kind` 对得上、库里 `result.charts` 的 kind 序列一致；刷新后走重放仍在；全程**零外部请求**（对照：同源 `/assets/*` 请求被监听到）、**零 CSP 违规**。
+
+实测（沙箱 aarch64，只记录、不设门槛）：
+- 构建：主 chunk 399.93 → 964.38 kB（gzip 123.95 → 314.76 kB），增量 +564 kB（gzip +191 kB）。对照：全量 `import "echarts"` 是 1528.56 kB（gzip 498.73 kB），按需引入省 564 kB。Vite 报 chunk > 500 kB 警告，没压（拆包留到后续）。夹具没进产物（grep 确认）。
+- `prepare` 耗时（Node 24 / jsdom，200 次）：bar-5001 中位 0.55 ms、p95 0.80 ms；scatter-5000 中位 1.50 ms、p95 2.08 ms；scatter-5001 中位 1.61 ms、p95 1.95 ms。
+- 停止 e2e 本轮：感知 9 ms、POST /cancel 54 ms、后端 7984 ms（与 [35] 一致）。
+
+验证：pytest 680 passed（+26，含本地闸门数据 25 条）；vitest 67；Playwright 9（nokey 7 + fake 2）；tsc、lint、build（check-dist 0 内联）、`gen_ui_types --check` 通过。
+
+补记：首次推送后 CI web job 的 lint 红了（run 38871680030）。原因是 lint 在写 `e2e/f3-charts.spec.ts` 之前跑过，之后没有重跑。e2e 里的辅助函数叫 `useScenario`，在循环里调用，触发了 `react-hooks/rules-of-hooks`。改名为 `setScenario` 后，lint 和 tsc 都通过；行为没变，e2e 没有重跑。
+
+补记二（S 10-16 评审）：
+- vitest 里的边界夹具只在 SSR SVG 下渲染过，canvas 路径只覆盖了五种 kind 的普通情况。为此新增 Playwright 测试 `f3-charts.spec.ts`「边界：bar 5000 点在 canvas 上画出，console 干净」：上传 5000 行 CSV，跑 chart-bar；断言 canvas 可见、尺寸非 0，没有截断提示，库里存的 option 是 `truncated=false` 且 `series[0].data` 正好 5000 条，console 里没有 error、warning 或 `[ECharts]` log，也没有 pageerror。
+- `charts.test.ts` 把双向比对改名为「（双向，仅顶层键 + 枚举值，不含嵌套键）」，并注明嵌套依赖靠夹具渲染兜底。
+- `register.ts` 补了跨端隐式契约的规则：现在只有 `grid.containLabel` 这一条，不建机制；一旦出现第二条，就在 chart_schema.json 里声明"字段 → 需要的前端 feature"，纳入双向比对。后端改用 outerBounds 跟主题一起定。
+- 验证：lint、tsc、vitest 67、build（check-dist）通过；Playwright **10 passed**（nokey 7 + fake 3），停止 e2e 本轮感知 1 ms、后端 8026 ms。`npm install --package-lock-only`（Node 24.22.0）重新生成后 lock 文件不变，lockfileVersion 3。
+
+未做：
+- 主题、显示开关、换图型、导出、注入实测、prepare 完整版（F3 后续）。
+- chunk 拆分 / 懒加载 ECharts。
+- 沙箱环境备注：Playwright 浏览器装到仓库外 `PLAYWRIGHT_BROWSERS_PATH=/workspace/work/ms-playwright`（home 不持久），系统依赖用 `playwright install-deps chromium`。

@@ -20,6 +20,12 @@ export class Api {
 
   constructor(private token: string | null, private fetchImpl: typeof fetch = (...a) => fetch(...a)) {}
 
+  // <img src> 带不了请求头，图表 PNG 是唯一接受 ?token= 的接口（app/server/app.py auth）。只认后端给的 /charts/<name>。
+  chartSrc(path: string): string | null {
+    if (!this.token || !/^\/charts\/[^/?#]+$/.test(path)) return null;
+    return `${path}?token=${encodeURIComponent(this.token)}`;
+  }
+
   onUnauthorized(fn: Listener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

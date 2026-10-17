@@ -1,5 +1,8 @@
-// 一轮助手回答（阶段 5 F2）：plan、code（折叠）、exec（折叠）、可恢复 error（黄）、answer（markdown）、done（警告；图表在 F3）。
+// 一轮助手回答（阶段 5 F2/F3）：plan、code（折叠）、exec（折叠）、可恢复 error（黄）、answer（markdown）、done（警告、图表）。
+// 图表按 result.charts 的顺序：option 项用 EChart，png 项用同源 <img>。截断提示只走后端 result.warnings（单一来源），
+// 这里不根据 spec.truncated 另拼一条。
 // 终止原因只按 status / error_kind 分支（turn.ts 的 outcome），不对文案做匹配。所有用户数据按文本渲染（T9）。
+import { type ChartSpec, EChart } from "../charts/EChart";
 import { answerText, type Ev, MESSAGES, outcome, type Turn } from "../turn";
 import { Markdown } from "./Markdown";
 
@@ -45,7 +48,11 @@ function EventView({ ev }: { ev: Ev }) {
   }
 }
 
-export function TurnView({ turn, onRetry }: { turn: Turn; onRetry?: () => void }) {
+export function TurnView({ turn, onRetry, chartSrc }: {
+  turn: Turn;
+  onRetry?: () => void;
+  chartSrc?: (path: string) => string | null;
+}) {
   const o = outcome(turn);
   const answer = answerText(turn);
   const r = turn.result;
@@ -95,7 +102,13 @@ export function TurnView({ turn, onRetry }: { turn: Turn; onRetry?: () => void }
         <p className="warn small">结论里这些数字在执行结果中没找到，请核对：{r.unverified_numbers.join("、")}</p>
       ) : null}
       {o.kind === "ok" && r?.charts?.length ? (
-        <p className="muted small">本轮有 {r.charts.length} 张图表（图表渲染在 F3）。</p>
+        <div className="charts">
+          {r.charts.map((c, i) => {
+            if (c.option) return <EChart key={i} spec={c.option as unknown as ChartSpec} />;
+            const src = c.png && chartSrc ? chartSrc(c.png) : null;
+            return src ? <img key={i} className="chart-png" src={src} alt="图表" /> : null;
+          })}
+        </div>
       ) : null}
     </div>
   );

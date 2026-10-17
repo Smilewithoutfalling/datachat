@@ -9,7 +9,8 @@ import pytest
 
 from app.core import analyze
 from app.core.llm import LLMConfig
-from tests.fake_llm import (ANSWER, FAIL_CODES, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
+from app.tools.charts import KINDS, MAX_POINTS, validate_spec
+from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
                             REACT_STEPS, WORKFLOW_STEPS, Scenario, handle, make_server, parse_model)
 
 WF_PLAN = [{"role": "user", "content": MARK_PLAN + "……"}]
@@ -25,6 +26,8 @@ RE_FINAL = RE_ACT + [{"role": "assistant", "content": "", "tool_calls": []}, {"r
     ("fail-500", Scenario("fail", 500)),
     ("fail-429@final", Scenario("fail", 429, "final")),
     ("slow-2s", Scenario("slow", 2)),
+    ("chart-bar", Scenario("chart", chart="bar")),
+    ("chart-scatter", Scenario("chart", chart="scatter")),
 ])
 def test_parse_valid(name, sc):
     assert parse_model(name) == sc
@@ -33,6 +36,8 @@ def test_parse_valid(name, sc):
 @pytest.mark.parametrize("name", [
     "", "deepseek-chat", "hang-30", "hang30s", "hang-30m", "hang-0s", "hang-601s", "hang", "fail", "fail-500s",
     "fail-418", "ok-1s", "ok@plan", "slow-2s@plan", "hang-5s@codgen", "hang-5s@", "HANG-5s", " ok", "ok ",
+    "chart", "chart-", "chart-heatmap", "chart-Bar", "chart-bar@codegen", "chart-bar@act", "chart-bar@", "chart-bar-1s",
+    "chart-bar ",
 ])
 def test_parse_rejects_everything_else(name):
     code, body = handle({"model": name, "messages": WF_PLAN}, sleep=lambda s: pytest.fail("不该睡"))
@@ -84,6 +89,20 @@ def test_same_request_same_response():
     for msgs in (WF_PLAN, WF_CODEGEN, RE_ACT, RE_FINAL, [{"role": "user", "content": MARK_ANSWER_FAIL}]):
         a, b = handle({"model": "ok", "messages": msgs}), handle({"model": "ok", "messages": msgs})
         assert a[0] == b[0] == 200 and strip(a[1]) == strip(b[1])
+
+
+def test_chart_scenario_only_changes_the_code_steps():
+    """chart-<kind>：写代码的那一步（codegen / fix / act）带 chart() 调用，其余步骤与 ok 完全相同；每个 KINDS 都能解析。"""
+    assert {parse_model(f"chart-{k}").chart for k in KINDS} == set(KINDS)
+    strip = lambda b: {k: v for k, v in b.items() if k not in ("id", "created", "model")}  # noqa: E731
+    fix = [{"role": "user", "content": "之前生成的 pandas 代码执行出错了，请修正它……"}]
+    for msgs in (WF_PLAN, RE_FINAL, [{"role": "user", "content": MARK_ANSWER_FAIL}]):
+        assert strip(handle({"model": "chart-pie", "messages": msgs})[1]) == strip(handle({"model": "ok", "messages": msgs})[1])
+    for msgs in (WF_CODEGEN, fix):
+        content = handle({"model": "chart-pie", "messages": msgs})[1]["choices"][0]["message"]["content"]
+        assert "chart('pie', df, x=cat[0], y=num[0]" in content and CODE in content
+    args = handle({"model": "chart-scatter", "messages": RE_ACT})[1]["choices"][0]["message"]["tool_calls"][0]
+    assert "chart('scatter', df, x=num[0], y=num[1]" in args["function"]["arguments"]
 
 
 def test_step_vocabulary_is_closed():
@@ -144,3 +163,27 @@ def test_real_chain_slow_delays_every_call(fake_url, sample_path):
     r = analyze(sample_path, "有多少行", agent="workflow", llm_config=cfg(fake_url, "slow-1s"))
     took = time.monotonic() - t
     assert r.ok and r.usage.calls == 3 and 3.0 <= took < 10.0   # 三次调用各慢 1 秒
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+@pytest.mark.parametrize("kind", KINDS)
+def test_real_chain_chart_kind(agent, kind, fake_url, sample_path):
+    """chart-<kind> 走真链路：沙箱里的 chart() 真出图，主进程复检通过，result.charts 里是这一种图。"""
+    r = analyze(sample_path, "画个图", agent=agent, llm_config=cfg(fake_url, f"chart-{kind}"))
+    assert r.ok and r.result == 15, (r.error_kind, r.error)
+    opts = [c["option"] for c in r.charts if c.get("option")]
+    assert len(opts) == 1 and opts[0]["kind"] == kind and validate_spec(opts[0]) == []
+    assert opts[0]["truncated"] is False and not any("数据点超过" in w for w in r.warnings)
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+def test_real_chain_truncated_chart_warns(agent, fake_url, tmp_path):
+    """5001 行 → 图截到 5000 点、truncated=true，两条链路的 result.warnings 里都有截断警告（只有一条，不重复）。"""
+    p = tmp_path / "big.csv"
+    p.write_text("k,v\n" + "".join(f"k{i},{i}\n" for i in range(MAX_POINTS + 1)), encoding="utf-8")
+    r = analyze(str(p), "画个图", agent=agent, llm_config=cfg(fake_url, "chart-bar"))
+    assert r.ok, (r.error_kind, r.error)
+    spec = next(c["option"] for c in r.charts if c.get("option"))
+    assert spec["truncated"] is True and len(spec["option"]["series"][0]["data"]) == MAX_POINTS
+    want = f"图表「fake bar」数据点超过 {MAX_POINTS}，只显示了前面的部分"
+    assert r.warnings.count(want) == 1, r.warnings

@@ -14,6 +14,7 @@ export const PREVIEW_ROWS = 20;
 
 export function client(api: Api) {
   return {
+    chartSrc: (path: string) => api.chartSrc(path),
     datasets: () => api.json<Dataset[]>("/datasets"),
     dataset: (id: string, rows = PREVIEW_ROWS) =>
       api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}?rows=${rows}`),
