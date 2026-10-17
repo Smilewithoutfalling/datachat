@@ -158,6 +158,76 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 不做（后续步骤）：主题、开关、换图型、导出、注入实测和 THREAT_MODEL 更新、层 1 面板。
 
+第一步已完成：PR #41（acaa8bf），DEVLOG [37]。
+
+**F3 后续拆分（草案，待 S 评审）**
+
+| 步 | 内容 | 为什么排在这里 | 估时 |
+|---|---|---|---|
+| 第二步 | 注入实测 + THREAT_MODEL §2.3 结论（§0 验收 7） | **顺序上必须**：P4、P5 的结论直接决定第三步 prepare 的设计范围（见下文第二步第 1 条）。另外，第二步只加测试、不动产品 UI；之后每一步改 option，都要重跑这条注入回归 | 1–1.5 天 |
+| 第三步 | prepare 完整版的管线骨架（深拷贝 → 层 1 → 开关 → 清理）+ 后端 `containLabel` 改 `outerBounds`，然后从注册表里去掉 LegacyGridContainLabel；如果第二步判定 `{}` 会被解析，再加上对用户来源字符串的转义 | option 处理层，靠自动化测试判绿。两项改的是同一条 option 路径，合起来正好消掉唯一一条跨端隐式契约 | 1 天 |
+| 第四步 | 自研 4 套主题 | 视觉层，靠人眼验收。和第三步分开（S 10-17）：验收方式不同的东西放进同一个 PR，测试绿了主题还在来回调，已经能用的那一半也会被拖住 | 1 天 |
+| 第五步 | 开关 + 换图型（兼容性一起算）+ 回填 M13 §12 第三列 | 两者都要用到"当前图型能用哪些开关"，拆开做就得写两遍 | 2 天 |
+| 第六步 | 导出 PNG（离屏实例、文件名清洗、可选浅色）（§0 验收 3） | 导出的应该是用户最终看到的样子，所以依赖主题和开关 | 0.5–1 天 |
+
+每一步开工前，先在本文写好"已定"规则和验收标准，由 S 评审。下面只展开第二步。
+
+**F3 第二步：注入实测（草案，待 S 评审）**
+
+目标：§0 验收第 7 条，"注入实测结论写进 THREAT_MODEL §2.3，DOM 断言在后端托管的 dist 上跑通"。本步只测 v1 可达的字段；v2（层 2）才可达的字段写明"未测"，到层 2 再测。
+
+覆盖现状（逐条给测试名，不凭印象）：
+- 已有，vitest：`views.test.tsx`「预览：表头、单元格按文本渲染，注入串不变成元素…」；`f2.test.tsx`「markdown：版本钉住；不渲染 raw HTML；javascript: 链接被过滤…」，同文件「提问：事件实时渲染（计划、折叠代码、执行）…」只给 plan 文本带了注入串（:37），代码面和执行面没有；「👍👎：…补充说明按文本渲染」覆盖 note。
+- 已有，托管 dist：`e2e/f1.spec.ts` 只覆盖预览面。
+- **缺**：图表（标题、系列名、类目、轴名、图例、tooltip）在任何层级都没有注入测试；错误或警告文案、结论、代码面板在托管 dist 上没有测试（`grep -n "INJECT\|onerror" ui/web/e2e/*.ts` 只命中 f1.spec.ts）。
+
+已定（待评审）：
+1. **载荷常量**放在 `tests/fake_llm.py` 的 `INJECT_PAYLOADS`，由 `gen_ui_types` 导出给前端。前端不自己再写一份，避免两边漂移。每条都短于 `NAME_MAX`=100，这样不会被截断，攻击串能完整到达：
+   - P1 `<img src=x onerror="window.__pwned=1">`
+   - P2 `"><svg onload="window.__pwned=2">`
+   - P3 `javascript:window.__pwned=3`
+   - P4 `{a}{b}{c}`：ECharts 的模板占位符。观察默认 tooltip 会不会把它替换掉，只记录现象。
+   - P5 `{x|富文本}`：rich 语法（`rich` 已在 BANNED_KEYS 里）。观察它是原样显示，还是被当成样式标记。
+   P4、P5 不是代码执行面，但会造成**视觉欺骗或数据篡改**（S 10-17），所以不能只"记录现象"，必须对每个渲染位置给出明确的是或否：
+   - P5：在 richText 模式下（canvas tooltip 必须用这个模式），用户数据里的 `{x|…}` 会不会被当成富文本解析？如果会，攻击者就能改显示样式：把某个数染灰、缩小、藏起来，图看起来说的是一个数，实际数据是另一个。
+   - P4：类目名或系列名里的 `{a}{b}{c}` 会不会被某个模板替换成系列数据？如果会，图上显示的数字就不是真实数据。
+   - 结论直接决定第三步：任一位置答"是"，第三步 prepare 完整版就**必须**对用户来源的字符串做 `{}` 处理。ECharts 的 rich 语法没有转义符，具体做法（比如换成全角字符、加零宽字符，或者改由前端提供 formatter 函数自己拼 tooltip）在第三步方案里定。全部答"否"，就在 THREAT_MODEL 里记一条"已确认不解析（echarts 6.1.0）"，关掉这个面；以后升级 echarts，靠第二步的回归测试重新判定。
+   - 判定方法：见第 4 条的 `fillText` 记录。
+2. **假服务新增 scenario `inject-<kind>`**，kind 取 KINDS。行为同 `chart-<kind>`，但有三处不同：
+   - `title=` 传 P1；
+   - 写代码的那一步多调一次 `chart()`，传一个不存在的列名（取 P1），让 `chart_error` 带着载荷进 `result.warnings`；
+   - 结论文本里拼上 P1–P3。
+   CSV：列名用 P2、P3，类目值用 P1–P5，另有一个系列列，取值也是 P1–P5。这样系列名、轴名、类目、图例、饼图扇区名都由真 builder 产出，不走捷径。
+   - **series.name / legend 的来源**（已对照 charts.py 确认）：宽表的 series.name 是列名（`_wide`，`_clean_str(c, NAME_MAX)`）；长表（`series=`）的 series.name 是**系列列里的单元格值**（`_cat` 之后再 `_clean_str`），这是列名之外的另一个来源；饼图的扇区名是类目值（`_cat`）。加工只有三种：控制字符换成空格、去掉首尾空白、超长截断并加"…"，不拼后缀。builder 不设 `legend.data`，图例由 ECharts 从 series.name（饼图从扇区名）推出来，所以这一个字符串会出现在**图例和 tooltip 的系列名两个位置**。cartesian 和 scatter 的图例只在多系列时显示。所以写代码那一步对 cartesian 和 scatter 调两次 `chart()`：一次宽表多 y（列名进图例），一次长表 `series=系列列`（单元格值进图例）。饼图只调一次（单 y）。再加上 chart_error 那一次，一轮最多 3 张图，在 MAX_CHARTS=4 以内。
+   - **CSV 用标准库写**：由 `gen_ui_types` 用 `csv.writer` 生成，和载荷一起导出到 `inject.json`（`{payloads, csv}`）；e2e 直接上传这份 CSV，不在 TS 里手拼。载荷里有 `<`、`"`、`{`、`|`，手拼的话会把 CSV 结构撑坏，测试红了看起来像注入有问题，其实是夹具自己坏了。另加一条后端单测：pandas 把这份 CSV 读回来，列名和单元格值逐个等于载荷。解析规则同 chart：未知 kind → 400；带 @step → 400。`tests/test_fake_llm.py` 补单测：解析的正例和反例；两种 agent 各跑一次真链路，断言 `result.charts` 里有图，warnings 含载荷，结论含载荷。
+3. **夹具**：`chart_fixtures.json` 增加 bar、pie 两个注入例（由 `build_option` 用载荷列名、类目和标题产出）。vitest 用 SSR SVG 渲染，断言：
+   - SVG 串里载荷只以转义形式出现（`&lt;img`），没有原样的 `<img`、`onload=`、`onerror=`；
+   - 产物里有对应 series 的图元（证明载荷确实到了渲染器，这是攻击能成立的前提）。
+   注意 SVG 只是断言工具，产品用 canvas，结论要按 canvas 写（见第 5 条）。
+4. **托管 dist 上的 e2e**（`e2e/f3-inject.spec.ts`，fake project，带 CSP）：
+   - `addInitScript` 挂一个 MutationObserver，记录全页新增元素的 tagName 和属性名，同时 `page.on('dialog')` 一触发就判失败。
+   - bar、pie 各问一轮，然后展开代码面板（代码里有载荷字面量，这也是一个面）。
+   - `addInitScript` 再包一层 `CanvasRenderingContext2D.prototype.fillText`（以及 `strokeText`），记录每次画出的字符串，原样转调，不改行为。
+   - **tooltip 真机悬停**：在柱子或扇区的位置 hover，再加两道对照，证明 tooltip 真的画出来了；否则"零新增元素"可能只是因为根本没 hover 到：
+     - fillText 记录：hover 之后出现了新的绘制字符串，内容包含被 hover 的类目或系列名。这条是确定性的，不受动画时序影响；
+     - 像素：hover 前后各截一次 canvas，结果不同。**截图前要先等画面稳定**：连续两次截图逐字节相同才算稳定，有上限次数，超过就判失败并输出截图。ECharts 的入场动画和 tooltip 的过渡都会让单次截图的时机不确定。不改产品的 `animation` 或 `transitionDuration` 来迁就测试，那会让测试走的路径和产品不一样。
+   - **P4、P5 的判定**：在 fillText 记录里，按位置（标题、轴标签、图例、tooltip）检查载荷字面量 `{a}{b}{c}`、`{x|富文本}` 是否原样画出。原样出现就是"不解析"；只出现"富文本"而没有 `{x|`，或者 `{a}` 被替换成了数值，就是"解析"。每个位置的结论写进 THREAT_MODEL。
+   - 断言：
+     - `window.__pwned` 为 undefined；没有触发 dialog；
+     - 新增元素里没有 `on*` 属性；没有 `href` 或 `src` 以 `javascript:` 开头的元素；没有新增 img、svg、script、iframe、object、embed；
+     - 每个 `.echart` 容器的 `textContent` 为空，后代只有 div 和 canvas（文本全画成了像素）；
+     - 警告、结论、代码面板里载荷按文本出现（`toContainText`），且这些区域没有新增上述标签；
+     - 零 CSP 违规，零外部请求（复用 f3-charts 的监听器和同源对照）。
+5. **THREAT_MODEL §2.3** 的"验证（第 5 步）"一段改写为结论：
+   - 每个面怎么测、哪个文件里测，结果是什么；
+   - P4、P5 的实际现象；
+   - 未测字段写明"v2 才可达，层 2 时测"：title.link / sublink、label.formatter、legend.formatter、tooltip.formatter、aria.*；
+   - prepare 的纵深防御只在 vitest 层测过（人为塞入被禁键的对照例），托管 dist 上不可达，因为后端 `validate_spec` 先拒了。
+
+验收：上面第 2–4 条的测试全绿；THREAT_MODEL 已改；DEVLOG 写一条。
+
+不做：v2 字段的注入；prepare 完整版；任何产品 UI 改动。如果实测发现 P4、P5 显示错乱，只记录现象，修不修和 S 讨论。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
