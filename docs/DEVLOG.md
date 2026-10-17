@@ -1303,7 +1303,7 @@ Playwright：
 - 只改文档，没有改代码。
 
 
-## [37] 2026-10-16 · 阶段 5 F3-ECharts 第一步：后端 option 原样渲染、五种图型、零外部请求 · commit <待提交>
+## [37] 2026-10-16 · 阶段 5 F3-ECharts 第一步：后端 option 原样渲染、五种图型、零外部请求 · commit acaa8bf（PR #41）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第一步 ECharts 渲染完成；下一步 prepare 完整版 / 主题 / 开关 / 换图型 / 导出 / 注入实测）。方案见 phase5-frontend.md「F3-ECharts 第一步」（PR #40）。
 
@@ -1348,3 +1348,34 @@ Playwright：
 - 主题、显示开关、换图型、导出、注入实测、prepare 完整版（F3 后续）。
 - chunk 拆分 / 懒加载 ECharts。
 - 沙箱环境备注：Playwright 浏览器装到仓库外 `PLAYWRIGHT_BROWSERS_PATH=/workspace/work/ms-playwright`（home 不持久），系统依赖用 `playwright install-deps chromium`。
+
+
+## [38] 2026-10-17 · 阶段 5 F3 第二步：注入实测，tooltip 会解析 `}` · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第二步注入实测完成；下一步是第三步 prepare 骨架 + outerBounds + tooltip 的 `{}` 处理）。方案见 phase5-frontend.md「F3 第二步」（PR #42）。[37] 的 SHA 已回填 acaa8bf（PR #41）。
+
+结论（详见 THREAT_MODEL §2.3）：P1–P3 在所有面上都不执行，也不会变成元素。P4（`{a}{b}{c}`）在任何位置都**没有**被模板替换。但在 tooltip（richText）里，用户字符串中的第一个 `}` 会提前结束 ECharts 自己的 `{样式|名字}` 包装：`{a}{b}{c}` 实际画出来是 `{a` + `{b}{c}}`，`{x|富文本}` 是 `{x|富文本` + `}`，后半段换成了另一种字号。标题、轴名、类目轴标签、图例、饼图扇区标签都原样画出，不解析。所以第三步 prepare **必须**处理进 tooltip 的 `{` `}`。
+
+后端 / 生成：
+- `tests/fake_llm.py`：新增 `INJECT_PAYLOADS`（P1–P5，都短于 NAME_MAX）。`inject_csv()` 用 `csv.writer` 生成夹具 CSV：列名是 P4、P5、P2、P3，5 行，类目值按 `INJECT_ORDER`，系列值错开一位，P2 列全相等。新增场景 `inject-<kind>`：写代码的那一步，cartesian 和 scatter 各出两张图（宽表多 y，列名进图例；长表 `series=`，单元格值进图例），pie 出一张；结论里拼上 P1–P3，外加一个 `[点我](javascript:…)`。新增场景 `inject-error`：只调一次 `chart()`，x 传不存在的列名 P1。解析规则和 chart 一样：未知 kind 或带 @step 返回 400。
+- `scripts/gen_ui_types.py`：新增 `inject.json`（`{payloads, order, csv}`）。`chart_fixtures.json` 加了 3 个注入例（inject-bar、inject-bar-series、inject-pie），用的是同一份数据、同样的调用。`--check` 照旧按字节比对。
+
+前端测试：
+- `src/charts/inject.test.ts`：3 个注入夹具做 SSR SVG 渲染，用 DOMParser 按 XML 结构判定：载荷以文本节点完整出现；没有 img / script / iframe / object / embed / foreignObject / a；只有根 svg；没有 `on*` 属性和 `javascript:` 链接。第一版用正则查原串时红了：转义后的文本里本来就有 ` onerror=` 这几个字（`&lt;img src=x onerror=&quot;…`），所以改成按结构判。
+- `e2e/f3-inject.spec.ts`（fake project，托管 dist + CSP）：跑三轮（bar、pie、error）。断言包括：`fillText` / `strokeText` 包一层记录（原样转调）；MutationObserver 从页面就绪后开始记新增元素和 `on*` / `javascript:` 属性；`page.on('dialog')`；5 处真机悬停（宽表的 P4、P5 类目，长表的系列行，饼图的 P4、P5 扇区），每处都要求绘制记录里出现被悬停的名字，并且悬停前后像素不同（截图前等连续两次逐字节相同，最多 30 次，不改产品的 animation）；P4、P5 按位置的判定表用 `toEqual` 钉住；警告、结论、三轮的代码面板都按文本显示；`.echart` 的 textContent 为空，后代只有 div 和 canvas；零 CSP 违规、零外部请求。
+
+偏离方案（及理由）：
+- **chart_error 拆成单独的 `inject-error` 场景**，没有在 `inject-<kind>` 里多调一次。原因：`app/core/result.py` 的 `chart_warnings` 只在**没有** option 图时才把 chart_error 放进 warnings（`if res.chart_errors and not has_option`），照方案做的话，载荷根本到不了界面。
+- **第二张图的标题是 `P4 P5`**（方案只写了 P1），这样标题这个位置上 P4、P5 也有结论。
+- **类目顺序是 `INJECT_ORDER = P4, P1, P5, P2, P3`**，不是 P1–P5。`.view` 最宽 1200px，载荷标签又长，ECharts 会自动隔一个画一个（实测只画第 0、2、4 个）。按 P1–P5 排的话，P4 的类目标签画不出来，那个位置就没有结论。悬停坐标用画出来的标签线性推算。
+- MutationObserver 从页面就绪后才开始记新增元素：第一次跑时 index.html 自己的 3 个 script 被记了进去。
+- 判定口径：只要画出来的不是完整原串，或者出现了 `{a` 之类的残片，就算"解析"。
+
+推论（未单独实测）：`}` 能跳出包装，那么后面跟着的 `{名字|…}` 就会按 rich 语法解析，用户数据可以借用 tooltip 内部的样式名（比如加粗的数值样式）伪造显示。第三步可以加一条载荷（比如 `x}{y|999`）来实测。
+
+验证（最后一次改代码之后全部重跑）：pytest **707 passed**（+27，含本地闸门数据 25 条；`test_fake_llm.py` 63 → 90，其中真链路 inject 5 kind × 2 agent + error × 2）；vitest **77**（+10：inject.test.ts 7，夹具多 3 个带来 charts.test.ts SSR 渲染 +3）；Playwright **11 passed**（nokey 7 + fake 4，新增 f3-inject 11.2 s）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 kB 没变）、`gen_ui_types --check` 都通过。
+
+未做：
+- v2 字段的注入（title.link / sublink、各类 formatter、aria.*），留到层 2 再测。
+- tooltip 的 `{}` 处理：放在第三步，方案先由 S 评审。
+- 沙箱备注：后端 bind 没有设 SO_REUSEADDR，上一轮 e2e 刚结束时端口还在 TIME_WAIT，紧接着用同一个 E2E_PORT 会报 Address already in use，换个端口就好。

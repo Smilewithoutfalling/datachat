@@ -1,0 +1,18 @@
+{
+  "_generated_by": "scripts/gen_ui_types.py",
+  "payloads": {
+    "P1": "<img src=x onerror=\"window.__pwned=1\">",
+    "P2": "\"><svg onload=\"window.__pwned=2\">",
+    "P3": "javascript:window.__pwned=3",
+    "P4": "{a}{b}{c}",
+    "P5": "{x|富文本}"
+  },
+  "order": [
+    "P4",
+    "P1",
+    "P5",
+    "P2",
+    "P3"
+  ],
+  "csv": "{a}{b}{c},{x|富文本},\"\"\"><svg onload=\"\"window.__pwned=2\"\">\",javascript:window.__pwned=3\n{a}{b}{c},\"<img src=x onerror=\"\"window.__pwned=1\"\">\",2,1\n\"<img src=x onerror=\"\"window.__pwned=1\"\">\",{x|富文本},2,2\n{x|富文本},\"\"\"><svg onload=\"\"window.__pwned=2\"\">\",2,3\n\"\"\"><svg onload=\"\"window.__pwned=2\"\">\",javascript:window.__pwned=3,2,4\njavascript:window.__pwned=3,{a}{b}{c},2,5\n"
+}
