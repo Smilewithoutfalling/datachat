@@ -225,6 +225,8 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
   }
   writeFileSync(test.info().outputPath("verdict.json"), JSON.stringify(verdict, null, 1));
   // 实测结论（echarts 6.1.0）。改了这张表就要同步改 THREAT_MODEL §2.3；升级 echarts 时这里会红，按新现象重判。
+  // 变更纪律：每改一格，都要在那个 commit 里写清楚这个位置的行为为什么变了（prepare 上线后 tooltip 变成不解析、主题给 axisLabel /
+  // series.label 配了 rich 后变成解析，都属于正确的红）。不准"红了就改期望值"。如果规范化改变了字符串本身，要改的是判据（note()），不是期望值。
   const R = { raw: true, parsed: false };
   const PARSED = { raw: false, parsed: true };
   expect(verdict).toEqual({

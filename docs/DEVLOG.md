@@ -1371,11 +1371,18 @@ Playwright：
 - MutationObserver 从页面就绪后才开始记新增元素：第一次跑时 index.html 自己的 3 个 script 被记了进去。
 - 判定口径：只要画出来的不是完整原串，或者出现了 `{a` 之类的残片，就算"解析"。
 
-推论（未单独实测）：`}` 能跳出包装，那么后面跟着的 `{名字|…}` 就会按 rich 语法解析，用户数据可以借用 tooltip 内部的样式名（比如加粗的数值样式）伪造显示。第三步可以加一条载荷（比如 `x}{y|999`）来实测。
+补测（S 评审后，本地 probe，脚本不入库，第三步会转成 e2e 用例）：直接加载 echarts 6.1.0 dist，renderMode 为 richText，真机悬停，记录 fillText（文本、坐标、字体）。
+- `x}{y|999`：bar 的表头行、系列名行和饼图扇区名都画成 `x`（14px）+ `999`（12px），`}{y|` 消失。轴标签和饼图标签原样画出。
+- 借样式：内部样式名是 `__EC_aUTo_<n>`，起点为 `round(random×9)`（echarts `util/number.js` 的 `getRandomIdBase`），在 `tooltipMarkup.js` 的 `wrapRichTextStyle` 里递增。载荷 `x}{__EC_aUTo_K|999`，K 取 3–12，每个 K 悬停 20 次：只放在类目里时命中 18/200，类目和系列名都放时命中 36/200（每个 tooltip 有两次机会）。命中时 999 画成 `900 14px`，和真值同款。
+- 落点（同一 tooltip 内比较 x）：表头行的伪造 999 和真值 7、8 在同一个 x（右对齐数值列）；系列名行里，伪造 999 的 x 比真值小（`x 999 8`），夹在名字和真值之间。真值没有被替换。
+- 换行：`上\n下` 在表头拆成两行；在系列名行，`下` 从行首开始，真值跟着落在 `下` 那一行。
+- 未证：多个 token 连写的稳定命中、借 marker 样式伪造色块。按 S 的决定，第三步在后端规范化 `{}`，让这些路径不可达，所以不再测。
 
 验证（最后一次改代码之后全部重跑）：pytest **707 passed**（+27，含本地闸门数据 25 条；`test_fake_llm.py` 63 → 90，其中真链路 inject 5 kind × 2 agent + error × 2）；vitest **77**（+10：inject.test.ts 7，夹具多 3 个带来 charts.test.ts SSR 渲染 +3）；Playwright **11 passed**（nokey 7 + fake 4，新增 f3-inject 11.2 s）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 kB 没变）、`gen_ui_types --check` 都通过。
 
 未做：
 - v2 字段的注入（title.link / sublink、各类 formatter、aria.*），留到层 2 再测。
 - tooltip 的 `{}` 处理：放在第三步，方案先由 S 评审。
-- 沙箱备注：后端 bind 没有设 SO_REUSEADDR，上一轮 e2e 刚结束时端口还在 TIME_WAIT，紧接着用同一个 E2E_PORT 会报 Address already in use，换个端口就好。
+- 固定端口连续跑 e2e 会撞上 TIME_WAIT。定性为测试工具问题加 sidecar 契约缺口（壳必须用 `--port 0`），不要加 SO_REUSEADDR，见 issue #44。
+- `app/core/result.py:117`（`if res.chart_errors and not has_option`）：有图时 chart_error 被静默丢弃，用户少看到一张图却不知道。这是有意的"部分失败不打扰"还是遗漏，待定。
+- 第三步要连带处理：后端 `_clean_str` / `_cat` 规范化 `{}` 和换行，`validate_spec` 加上 ASCII `{}` 闸门；判定表的 `note()` 判据要跟着改（规范化后原串不再出现，判据不改的话会变成 raw 和 parsed 都为 false），改的是判据，不是期望值；重新生成 chart_fixtures 的注入例（inject.json 不变）。
