@@ -230,6 +230,63 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 不做：v2 字段的注入；prepare 完整版；任何产品 UI 改动。如果实测发现 P4、P5 显示错乱，只记录现象，修不修和 S 讨论。
 
+**F3 第三步：用户字符串规范化 + outerBounds + prepare 管线骨架（S 10-17 评审通过，含评审补充）**
+
+输入：第二步实测（THREAT_MODEL §2.3、DEVLOG [38]）和 S 10-17 的三轮评审。要处理三件事：
+- tooltip 的 richText 会解析用户字符串里的 `{` `}`（借样式时可以在数值列伪造数字）；
+- `\n` 会参与排版（真值配上假标签）；
+- `grid.containLabel` 要求前端注册 LegacyGridContainLabel，这是唯一一条跨端隐式契约。
+
+覆盖现状（grep 结果）：
+- `grep -o "_clean_str(" app/tools/charts.py` 共 19 处（含定义，`app/` 其他文件 0 处）。除了构造 option 的那些，**还有 5 处在拼消息**：`charts.py:77`、`:140-141`（ChartError："列 … 不存在；可用列：…"）、`:542`（internal）、`:584`（`_msgs`）、`:613`（截断警告里的标题）。
+- 其中 ChartError 会进 ReAct 的工具回执（`react_agent.py:210-211`，"chart() 未出图：…"），模型会照着"可用列"重新传列名。
+
+已定（待评审）：
+1. **规范化放在 option 构造完成之后的一处，不放在 `_clean_str` 里**。这一条和 S 上一轮的设想不同，理由是上面那 5 处消息出口：
+   - 如果在 `_clean_str` 里把 `{` 换成 `｛`，"可用列：｛a｝…"就会回到模型那里，模型照抄全角列名再调 `chart()`，结果是"列不存在"的死循环。这是功能 bug，不只是显示失真。
+   - 所以新增 `_display_safe(option)`：在 `build_option` 返回之前递归遍历整个 option，**每一个 string 值**都做 `{`→`｛`（U+FF5B）、`}`→`｝`（U+FF5D）、`\n`→空格（`\r` 已经在 `_CTRL` 里）。`\t` 不处理，第二步实测它不参与排版。
+   - 一处就能覆盖 v1 的全部字符串，以后新增字段也会自动覆盖，因为它遍历的是产物，不是登记表。消息、数据表、结论文本都不经过这里，保持原文。
+   - 结构上的理由（S）：`_clean_str` 负责"字符串怎么变成模型看得到的文本"，`_display_safe` 负责"字符串怎么变成画布像素"，两条消费路径。渲染面的规则（花括号、换行，以后可能还有零宽字符）只属于后者。
+   - **顺序写死**：`build_option` → `_display_safe` → `validate_spec`。闸门会拒绝任何 `{`，如果规范化放在校验之后，每张图都会被拒，而且是全量红。
+   - `\t` 不处理，依据（第二步实测不参与排版）写进代码注释，因为 `_CTRL` 本身就放过了它。
+   - 代价：名字里带花括号或换行时，标题、轴标签、图例、扇区标签也会跟着变成全角或空格。这样的名字很少，全角在视觉上几乎看不出差别。
+2. **`validate_spec` 加闸门 `_check_strings`**：
+   - 和 `_walk` 分开，单独递归遍历整个 option，**不看规则表**。任何 string 值（以及 dict 的键）含 ASCII `{`、`}`、`\n` 就报问题，整图拒绝。
+   - 单测里给 `_ALLOWED` 临时加一个新字段，证明闸门照样能拦下（防"只覆盖枚举到的部分"，S 10-17）。
+   - **字符集只定义一份**：模块常量 `DISPLAY_UNSAFE = {"{": "｛", "}": "｝", "\n": " "}`，`_display_safe` 和 `_check_strings` 都从它读。漂移测试：任取含有全部不安全字符的字符串，经过 `_display_safe` 后必须通过闸门；再给常量临时加一个字符，两侧必须同时生效。
+   - **拒绝路径单独测**：对 builder 的产物来说，规范化之后闸门永远不会触发，所以要手工构造含 `{` 和 `\n` 的 spec（绕过 builder），断言 `validate_spec` 拒绝。这和"给 `_ALLOWED` 加字段"不是一回事：后者测的是遍历覆盖，前者测的是拒绝本身。
+   - 职责划分：规范化负责把字符串变干净，闸门负责保证结果干净。builder 漏掉一处时，闸门变红，变红的原因记作 `ChartBugError`。
+3. **outerBounds 替换 containLabel（后端 + 前端，同一个 PR）**：
+   - `_cartesian` 和 `_scatter` 的 grid 改成 `outerBoundsMode: "same", outerBoundsContain: "axisLabel"`。依据是 echarts 6.1.0 官方注释，原文称两者等价（`types/dist/shared.d.ts`：「`grid.containLabel` is equivalent to `{outerBoundsMode: 'same', outerBoundsContain: 'axisLabel'}`」）。但同一处注释也写了 `'axisLabel'` "differs slightly from the previous option `containLabel` but more precise"，所以方案和 DEVLOG 都写成**官方称等价、更精确、和旧行为略有差异**，不写成"等价写法"。
+   - **下限差异**：`outerBoundsClampWidth/Height` 默认是 `['25%', '25%']`（`GridModel.js:56` 的 `OUTER_BOUNDS_CLAMP_DEFAULT`），为了容纳标签，grid 最多只能缩到原尺寸的 25%。legacy 的 containLabel 没有这个下限。新增夹具 `long-labels-bar`：bar 图，3 个类目，每个约 120 字（类目少，不会被 hideOverlap 隐藏）。断言轴标签都在画布内。如果真的溢出，就在 DEVLOG 记成已知差异并写明是 clamp 导致的，**不调** `outerBoundsClampWidth`。调成 100% 等于绕开官方下限，只是把"图被压扁"换成"图看不清"。
+   - 选等价写法而不是 `'all'`（`'all'` 会把轴名也算进去）：本步只做机械替换，靠自动化测试判绿。要不要把轴名也包进去属于视觉决策，放到第四步主题里由人眼定。
+   - `_ALLOWED.grid`（`charts.py:336`）删掉 `containLabel`，加上这两个键，让"option 里不可能再出现 containLabel"成为闸门保证的事实，前端摘掉组件才有依据。另加一条断言：全部夹具的产物里都不含 `containLabel`；`_ENUMS` 加 `("grid","outerBoundsMode"): {"same"}`、`("grid","outerBoundsContain"): {"axisLabel"}`。重新生成 `chart_schema.json`。
+   - `register.ts`：`ENUMS` 加对应的两项（都是 `NONE`）；`grid` 去掉 `LegacyGridContainLabel`，同时删掉那段"跨端隐式契约"注释。双向比对测试会强制两边对齐。
+   - 回归：`charts.test.ts` 现有的"零 `[ECharts]` log"断言继续保留。新增 SSR 断言：每个直角坐标系夹具里，每个轴标签 `<text>` 的锚点都在画布内。**布局差异做自动断言**：从 SSR 产物里取第一根柱子的 x 和 width，替换前后各取一次（替换前的值作为常量写进测试，并注明来源 commit），要求差异小于 5%。SSR 和 canvas 用的是同一套布局引擎。
+   - 零 `[ECharts]` log 断言留在 **vitest**，不挪到 e2e。生产构建里 `__DEV__` 分支被去掉，那条 log 根本不存在，放到 e2e 就成了空断言，会出现和 fail-CODE 一样的假绿。
+4. **prepare 管线骨架**：签名改成 `prepare(option, ui)`，`ui` 本步只有空类型 `UiState = {}`。步骤固定为深拷贝 → `applyLayer1` → `applySwitches` → `cleanup`（删被禁键 + 强制 richText）。前两步本步是恒等函数，导出给测试用；形参写成 `_ui`（tsconfig 开了 `noUnusedParameters`）。单测：
+   - 两个恒等步骤的输出和输入 `JSON.stringify` 后逐字节相同，`prepare` 的整体输出和改动前的 v0 逐字节相同；
+   - 输入不被修改；
+   - 往 `applyLayer1` 的测试替身里塞一个被禁键，最终产物里没有（证明清理在最后）；
+   - 现有的递归不含被禁键断言保持不变。
+   - prepare 耗时：vitest 对 5000 点夹具跑 20 次，取中位数打到日志并写进 DEVLOG，不设阈值（方案已定"要记录"，原来没做）。
+   - 前端**不**镜像 `{}` 规范化：v1 没有外部 option 输入；v2 层 2 的 patch 要重新走 builder 和 `validate_spec`，闸门覆盖。前端如果再做一遍，就等于两处规则，以后会漂移。
+5. **注入回归**：
+   - `INJECT_PAYLOADS` 新增 P6 `x}{__EC_aUTo_4|999`（借样式）和 P7 `上\n下`（换行），加进类目。类目顺序要重新验证：标签隔一个画一个，必须保证 P4–P7 都在被画出来的位置上。悬停点加上 P6、P7。
+   - `inject.json` 增加 `display`：由后端 `_display_safe` 算出每个载荷的期望显示串，前端不另写一份。
+   - **判定表改判据，不改期望值的形状**：`note()` 改成用 `includes(display[P])` 判 raw，不写成"不含原串、也不含 `{a`"这种多重否定。tooltip 那两格从 `PARSED` 变成 `R`。commit 里写清原因："后端 `_display_safe` 把 `{}` 规范化为全角，richText 包装不再能被提前闭合"。
+   - P6 另加断言：tooltip 里出现了 `display[P6]`（证明悬停确实命中），并且没有任何 `900` 字重的绘制串等于 `999`。P7：tooltip 里 `上 下` 是一次绘制，不拆行，真值和它在同一个 y。
+   - `chart_fixtures.json` 的注入例重新生成（`--check` 会提醒）。
+6. **THREAT_MODEL §2.3**：换行、借样式两条改成"已修（第三步，后端规范化 + 闸门）"，保留实测记录。"对第三步的要求"一段改成实际做法和测试名。
+
+验收：
+- pytest：`_display_safe` 的正例和反例；**消息出口保持原文**要有测试（ChartError 的"可用列"、`_msgs` 里 `{a}` 和 `\n` 原样保留），这是防止以后有人图省事把规范化挪进 `_clean_str` 的唯一屏障；字符集漂移测试；手工非法 spec 的拒绝路径；闸门遍历和"新增字段也拦"；`containLabel` 不在白名单，也不在任何产物里；
+- vitest：管线骨架（恒等步骤逐字节）；outerBounds 的 SSR 断言（标签在画布内，含 `long-labels-bar`；第一根柱子差异小于 5%）；零 `[ECharts]` log；注册表双向比对；
+- e2e：f3-inject 新判定表全绿，P6、P7 的断言通过；
+- 全部闸门在最后一次改动之后重跑；DEVLOG [39]，并回填 [38] 的 706e9b8。
+
+不做：主题和轴名是否包进 outerBounds（第四步）；开关和层 1 的实际内容（第五步）；result.py:117 有图时 chart_error 被丢弃的问题（未定，单独讨论）；#44。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
