@@ -1373,9 +1373,10 @@ Playwright：
 
 补测（S 评审后，本地 probe，脚本不入库，第三步会转成 e2e 用例）：直接加载 echarts 6.1.0 dist，renderMode 为 richText，真机悬停，记录 fillText（文本、坐标、字体）。
 - `x}{y|999`：bar 的表头行、系列名行和饼图扇区名都画成 `x`（14px）+ `999`（12px），`}{y|` 消失。轴标签和饼图标签原样画出。
-- 借样式：内部样式名是 `__EC_aUTo_<n>`，起点为 `round(random×9)`（echarts `util/number.js` 的 `getRandomIdBase`），在 `tooltipMarkup.js` 的 `wrapRichTextStyle` 里递增。载荷 `x}{__EC_aUTo_K|999`，K 取 3–12，每个 K 悬停 20 次：只放在类目里时命中 18/200，类目和系列名都放时命中 36/200（每个 tooltip 有两次机会）。命中时 999 画成 `900 14px`，和真值同款。
-- 落点（同一 tooltip 内比较 x）：表头行的伪造 999 和真值 7、8 在同一个 x（右对齐数值列）；系列名行里，伪造 999 的 x 比真值小（`x 999 8`），夹在名字和真值之间。真值没有被替换。
-- 换行：`上\n下` 在表头拆成两行；在系列名行，`下` 从行首开始，真值跟着落在 `下` 那一行。
+- 借样式：内部样式名是 `__EC_aUTo_<n>`，起点为 `round(random×9)`（echarts `util/number.js` 的 `getRandomIdBase`），在 `tooltipMarkup.js` 的 `wrapRichTextStyle` 里递增。载荷 `x}{__EC_aUTo_K|999`，K 取 3–12，每个 K 悬停 20 次：只放在类目里时命中 18/200，类目和系列名都放时命中 36/200（每个 tooltip 有两次机会）。命中时 999 画成 `900 14px`，和真值同款。命中率按配置分开记：单次机会 9%（18/200），两次机会 18%（36/200）。
+- 落点：第一版只记了 fillText 的 x，没记 `textAlign`，"右对齐"的论证不成立（S 指出：x 是起点还是右边缘，取决于 textAlign）。补测时同时记 `textAlign` 和 `measureText` 宽度，伪造数字分别用 `9`、`999`、`99999999`，真值用 `7` 和 `12,345,678`：伪造文本和真值都是 `textAlign=right`，x 都等于 134，宽度分别是 8、23、62 和 8、70。所以 x 是右边缘，右对齐到数值列，落点由借到的样式决定（表头行的 `x` 在 x=10，伪造数字仍然出现在数值列）。系列名行里，伪造数字夹在名字和真值之间（上一轮记录是 `x 999 8`）。真值没有被替换。
+- 换行：`上\n下` 在表头拆成两行；在系列名行里，`下` 从行首开始，真值跟着落在 `下` 那一行。确定性复现，定级排在借样式之前。
+- tab：`上\t下` 作为一段字符整体画出（宽 32），数值列位置不变，不参与排版。
 - 未证：多个 token 连写的稳定命中、借 marker 样式伪造色块。按 S 的决定，第三步在后端规范化 `{}`，让这些路径不可达，所以不再测。
 
 验证（最后一次改代码之后全部重跑）：pytest **707 passed**（+27，含本地闸门数据 25 条；`test_fake_llm.py` 63 → 90，其中真链路 inject 5 kind × 2 agent + error × 2）；vitest **77**（+10：inject.test.ts 7，夹具多 3 个带来 charts.test.ts SSR 渲染 +3）；Playwright **11 passed**（nokey 7 + fake 4，新增 f3-inject 11.2 s）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 kB 没变）、`gen_ui_types --check` 都通过。
@@ -1385,4 +1386,4 @@ Playwright：
 - tooltip 的 `{}` 处理：放在第三步，方案先由 S 评审。
 - 固定端口连续跑 e2e 会撞上 TIME_WAIT。定性为测试工具问题加 sidecar 契约缺口（壳必须用 `--port 0`），不要加 SO_REUSEADDR，见 issue #44。
 - `app/core/result.py:117`（`if res.chart_errors and not has_option`）：有图时 chart_error 被静默丢弃，用户少看到一张图却不知道。这是有意的"部分失败不打扰"还是遗漏，待定。
-- 第三步要连带处理：后端 `_clean_str` / `_cat` 规范化 `{}` 和换行，`validate_spec` 加上 ASCII `{}` 闸门；判定表的 `note()` 判据要跟着改（规范化后原串不再出现，判据不改的话会变成 raw 和 parsed 都为 false），改的是判据，不是期望值；重新生成 chart_fixtures 的注入例（inject.json 不变）。
+- 第三步要连带处理：后端 `_clean_str` / `_cat` 规范化 `{}` 和换行，`validate_spec` 加闸门：遍历整个 option，任何 string 值都不得含 `{`、`}`、`\n`，不按登记键逐个查；判定表的 `note()` 判据要跟着改（规范化后原串不再出现，判据不改的话会变成 raw 和 parsed 都为 false），改的是判据，不是期望值；重新生成 chart_fixtures 的注入例（inject.json 不变）。
