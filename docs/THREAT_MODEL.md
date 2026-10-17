@@ -57,7 +57,7 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | 面 | 怎么兜 | v1（builder-only） | v2（层 2 patch） |
 |---|---|---|---|
 | 图表（标题、坐标轴、图例、类目、系列名） | 画在 canvas 上，不进 DOM | 生效 | 生效 |
-| 图表 tooltip | 前端统一 `tooltip.renderMode = 'richText'`（画在 canvas） | 生效（主防线） | 生效（主防线） |
+| 图表 tooltip | 前端统一 `tooltip.renderMode = 'richText'`（画在 canvas）。挡住了代码执行，但 richText 自己有富文本边界问题：用户字符串里的 `}` 会跳出 ECharts 的包装（F3 第二步实测，见下文），第三步 prepare 处理 | 生效（主防线） | 生效（主防线） |
 | tooltip / label / legend 的 `formatter` | 白名单禁 `formatter` | 不可达：builder 不产出，模型改不到 | 生效 |
 | 图表的 DOM 通道 | 白名单禁 `title.link` / `sublink` / `graphic` / `aria` / `toolbox`（含 dataView） | 不可达：同上 | 生效 |
 | 错误消息、警告（含 chart_error） | 前端按纯文本渲染（`textContent` / React 默认转义），**禁止** `dangerouslySetInnerHTML` | 生效（第 5 步实现） | 生效 |
@@ -72,10 +72,39 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 - 由渲染端重新注入 `renderMode = 'richText'`，不信任回传值；
 - **不得从 `BANNED_KEYS` 删掉 `renderMode`** 来让回灌通过。删它等于让后端 / 模型能把 tooltip 改回 HTML 模式，正好拆掉 T9 在 tooltip 上的主防线。tests/test_charts.py 有用例钉住 `renderMode` 在禁用集里。
 
-验证（第 5 步）：用注入载荷逐字段喂，**断言打在渲染后的 DOM 上**（无新增元素、无事件属性、无可执行 href），至少测三个面：tooltip、错误消息、结论文本。
-- v1 可达的字段：title.text、series[].name、xAxis.data[]（类目）、yAxis.name / xAxis.name（列名），以及错误消息、警告里的列名。
-- 只在 v2 才可达、v1 测的是不可达路径的字段（放到层 2 时再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
-- tests/test_charts.py 里的 HTML 用例只证明载荷能原样到达前端，那是攻击的前提，不是防御。
+验证（F3 第二步实测，echarts 6.1.0，DEVLOG [38]）：载荷是 `tests/fake_llm.py` 的 `INJECT_PAYLOADS`，经 `gen_ui_types` 导出成 `inject.json`（前端不另写一份）：
+P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=2">`、P3 `javascript:window.__pwned=3`、P4 `{a}{b}{c}`（ECharts 模板占位符）、P5 `{x|富文本}`（rich 语法）。
+夹具 CSV 由 `csv.writer` 生成，列名、类目值、系列列的单元格值都是载荷，经真 builder 进标题、轴名、类目、两种来源的 series.name（宽表 = 列名，长表 = 系列列单元格值）、图例、饼图扇区名。
+
+| 面 | 怎么测（文件 / 测试名） | 结论 |
+|---|---|---|
+| 图表各位置（标题、轴名、类目轴标签、图例、饼图扇区标签、tooltip），托管 dist + CSP + canvas | `ui/web/e2e/f3-inject.spec.ts`「注入：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定」：三轮（inject-bar 宽表 + 长表两张、inject-pie、inject-error）；包一层 `fillText` / `strokeText` 记录实际绘制的字符串；tooltip 真机悬停 5 处，每处都断言绘制记录里出现被悬停的名字、悬停前后 canvas 像素不同（截图前等连续两次逐字节相同） | P1–P3 **不执行**：`window.__pwned` 未定义、无 dialog；每个 `.echart` 的 `textContent` 为空、后代只有 div 和 canvas；全页新增元素里没有 img / svg / script / iframe / object / embed，没有 `on*` 属性和 `javascript:` 的 href / src；零 CSP 违规、零外部请求 |
+| 同上，SSR SVG（断言工具，不是产品路径） | `ui/web/src/charts/inject.test.ts`：`chart_fixtures.json` 的 inject-bar / inject-bar-series / inject-pie | 载荷作为文本节点完整到达渲染器（攻击的前提成立）；按 XML 结构解析后没有载荷造出的元素、`on*` 属性或 `javascript:` 链接 |
+| 错误消息、警告（chart_error） | 同一 e2e 的 inject-error 轮：x 传不存在的列名 P1，`图表未生成：x 列 '<P1>' 不存在；可用列：<P4>、<P5>、<P2>、<P3>` 进 `result.warnings` | 按文本显示（`toContainText`），无新增元素 |
+| 结论（Markdown） | 同一 e2e：结论含 P1–P3 和 `[点我](javascript:…)` | 按文本显示；链接渲染出来了（对照），href 不含 `javascript:` |
+| 代码面板 | 同一 e2e：三轮都展开"生成代码"，代码里有 P1、P4、P5 字面量 | 按文本显示 |
+| 后端到达 | `tests/test_fake_llm.py::test_real_chain_inject_kind`（5 kind × 2 agent）、`test_real_chain_inject_error_reaches_warnings`、`test_inject_payloads_fit_and_csv_round_trips_through_pandas` | 载荷完整到达 option、warnings、结论（只证明前提，不是防御） |
+
+**P4 / P5：按位置的解析结论**（e2e 里 `expect(verdict).toEqual(...)` 钉住，升级 echarts 时会红，按新现象重判）：
+
+| 位置 | P4 `{a}{b}{c}` | P5 `{x\|富文本}` |
+|---|---|---|
+| 标题 | 不解析（原样画出） | 不解析 |
+| 轴名 | 不解析 | （未放在轴名上） |
+| 类目轴标签 | 不解析 | 不解析 |
+| 图例 | 不解析 | 不解析 |
+| 饼图扇区标签 | 不解析 | 不解析 |
+| **tooltip（richText）** | **解析** | **解析** |
+
+- 模板替换：所有位置都**没有**把 `{a}` 换成系列名或数值，P4 没有造成"数字被换"的篡改。
+- tooltip 的问题出在富文本边界：richText 模式下 ECharts 把每个名字包成 `{样式名|名字}`，用户字符串里的第一个 `}` 提前结束了这个包装。实测绘制：`{a}{b}{c}` 画成 `{a`（14px）+ `{b}{c}}`（12px），也就是屏幕上显示 `{a{b}{c}}`，字符顺序被改了；`{x|富文本}` 画成 `{x|富文本`（14px）+ `}`（12px）。tooltip 的类目表头、系列名行、饼图扇区名三处都是这样。
+- **换行：真值配上假标签（实测，确定性，本节最高一级）**：类目名或系列名里的 `\n` 会参与 richText 排版。`上\n下` 在表头被拆成两行；在系列名行里，`下` 从行首开始（不带色块缩进），真值 8 落在 `下` 那一行，读出来就是「下 = 8」。数字是真的，标签是攻击者写的，而数字本身经得起核对，所以比编一个假数字更难被发现。这条不用猜，也没有命中率，每次都复现。后端 `_CTRL` 放过了 `\x0a`。`\t`（同样被放过）实测不参与排版：作为一段字符整体画出，数值列位置不变。
+- **借用内部样式：在数值列伪造数字（实测，概率性）**：跳出包装后，后面的 `{名字|…}` 会按 rich 语法解析。`x}{y|999` 画成 `x` + `999`（`}{y|` 消失）。ECharts 给 tooltip 内部样式起名 `__EC_aUTo_<n>`，n 从 `round(random×9)` 开始递增，每次显示 tooltip 都重新生成。`x}{__EC_aUTo_K|<数字>` 命中时，借到的不只是字体（`900 14px`），还有对齐方式：伪造文本的 `textAlign` 是 `right`，绘制 x 和同一个 tooltip 里真值的 x 相同。伪造 1 位、3 位、8 位数字时这个 x 都不变（真值 `7` 和 `12,345,678` 的 x 也是它），所以右边缘对齐到数值列，落点由样式决定，可以复现。**表头行**本来没有数值列，伪造数字仍然出现在数值列位置，看起来像一行没有色块的数值行。**系列名行**里，伪造数字夹在系列名和真值之间。两种情况下真值都没有被替换。命中率：单次机会 9%（18/200），类目和系列名各给一次机会时 18%（36/200）。攻击者控制整份 CSV（每个类目猜一个 K），放到数据集层面可以靠枚举稳定命中。
+- **对第三步的要求**：在后端规范化（`_clean_str` / `_cat`，一处覆盖全路径），并在 `validate_spec` 加闸门：遍历整个 option，任何 string 值都不得含 ASCII `{`、`}`、`\n`，不按登记键逐个查。这样白名单以后加字段，闸门照样覆盖。不在前端注入 `tooltip.formatter`，否则会把"产物里没有 formatter"这条防线降级成不可判定。具体在第三步方案里定，这条注入回归要继续跑。
+
+未测（v2 层 2 才可达，到层 2 再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
+prepare 的纵深防御（删被禁键）只在 vitest 层测过（`charts.test.ts`「对照：人为塞进各层级的被禁键确实被删掉」）；托管 dist 上不可达，因为后端 `validate_spec` 先拒了。
+tests/test_charts.py 里的 HTML 用例同样只证明载荷能原样到达前端。
 
 ## 2.4 错误文案：渲染面上的信息泄漏（阶段 5 F2 立项，修复单独一个 PR）
 | # | 威胁 | 例子 |

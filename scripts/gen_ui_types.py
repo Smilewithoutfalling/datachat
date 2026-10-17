@@ -1,11 +1,12 @@
 """把后端的事件类型、图表白名单与禁用键、图表夹具导出成前端用的 JSON（阶段 5 F2 / F3），前端不手抄、改了后端 CI 就报。
 
-    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys,chart_schema,chart_fixtures}.json
+    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys,chart_schema,chart_fixtures,inject}.json
     python scripts/gen_ui_types.py --check    # 只校验现有文件与重新生成的是否一致（CI 用）
 
 来源：app/core/events.py 的 EVENT_TYPES、ERROR_KINDS 和常量文案；app/server/db.py 的 MESSAGE_STATUSES；app/tools/charts.py 的 BANNED_KEYS（前端渲染 ECharts 前再过一遍）、
 KINDS / _KIND_SERIES_TYPE / _ENUMS / _ALLOWED 顶层键（chart_schema.json，前端组件注册表双向比对），
-以及 build_option 在固定合成数据上的真实产出（chart_fixtures.json，前端渲染测试只用它，不手写 option）。
+以及 build_option 在固定合成数据上的真实产出（chart_fixtures.json，前端渲染测试只用它，不手写 option）；
+F3 第二步的注入载荷与 CSV（inject.json，来自 tests/fake_llm.py，前端 e2e 直接上传这份 CSV，不在 TS 里手拼）。
 """
 import argparse
 import json
@@ -44,6 +45,9 @@ def chart_fixtures() -> dict:
     def pts(n):
         return pd.DataFrame({"x": rng.normal(0, 1, n).round(3), "y": rng.normal(0, 1, n).round(3)})
     wide = pd.DataFrame({"季度": ["Q1", "Q2", "Q3", "Q4"], "收入": [10, 12, 9, 15], "成本": [7, 8, 8, 9], "利润": [3, 4, 1, 6]})
+    from tests.fake_llm import INJECT_PAYLOADS as P, INJECT_COLUMNS, INJECT_ROWS
+    inj = pd.DataFrame(INJECT_ROWS, columns=INJECT_COLUMNS)
+    c_cat, c_ser, c_n1, c_n2 = INJECT_COLUMNS
     cases = [
         ("bar", build_option("bar", small, x="城市", y="销量", title="各城市销量")),
         ("bar-untitled", build_option("bar", small, x="城市", y="销量")),
@@ -61,8 +65,18 @@ def chart_fixtures() -> dict:
         (f"bar-{MAX_POINTS + 1}", build_option("bar", cats(MAX_POINTS + 1), x="k", y="v", title="截断柱图")),
         (f"scatter-{MAX_POINTS}", build_option("scatter", pts(MAX_POINTS), x="x", y="y")),
         (f"scatter-{MAX_POINTS + 1}", build_option("scatter", pts(MAX_POINTS + 1), x="x", y="y", title="截断散点")),
+        # 注入例（F3 第二步）：与 fake inject-<kind> 同一份数据、同样的调用
+        ("inject-bar", build_option("bar", inj, x=c_cat, y=[c_n1, c_n2], title=P["P1"])),
+        ("inject-bar-series", build_option("bar", inj, x=c_cat, y=c_n1, series=c_ser, title=f"{P['P4']} {P['P5']}")),
+        ("inject-pie", build_option("pie", inj, x=c_cat, y=c_n1, title=P["P1"])),
     ]
     return {"_generated_by": "scripts/gen_ui_types.py", "fixtures": [{"id": i, "spec": s} for i, s in cases]}
+
+
+def inject() -> dict:
+    from tests.fake_llm import INJECT_ORDER, INJECT_PAYLOADS, inject_csv
+    return {"_generated_by": "scripts/gen_ui_types.py", "payloads": dict(INJECT_PAYLOADS), "order": list(INJECT_ORDER),
+            "csv": inject_csv()}
 
 
 def build() -> dict[str, str]:
@@ -82,6 +96,7 @@ def build() -> dict[str, str]:
         "chart_schema.json": dump(chart_schema()),
         # indent=1：build_option 一改，diff 能看出改了哪个值（紧凑 JSON 一行，每次整份重写）。按字节比对。
         "chart_fixtures.json": json.dumps(chart_fixtures(), ensure_ascii=False, indent=1) + "\n",
+        "inject.json": dump(inject()),
     }
 
 

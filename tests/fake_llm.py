@@ -6,11 +6,16 @@
 
 model 名语法（解析器严格，见 parse_model）：
     <scenario>[@<step>]
-    scenario：ok | hang-<N>s | fail-<code> | slow-<N>s | chart-<kind>
+    scenario：ok | hang-<N>s | fail-<code> | slow-<N>s | chart-<kind> | inject-<kind> | inject-error
       ok          每一步正常回复（固定剧本，见 reply_for）
       chart-<kind> 同 ok，但写代码的那一步（codegen / fix / act）多调一次 chart('<kind>', df, …)（F3 图表测试）；
                   kind 取 app/tools/charts.py 的 KINDS，列按 dtype 选（chart_code），任何 CSV 只要有一个类目列和
                   一个数值列（scatter 要两个数值列）都能画。不带 @step。
+      inject-<kind> F3 第二步注入实测：写代码的那一步对 inject_csv() 这份数据出图，标题、列名、类目、系列名都是
+                  INJECT_PAYLOADS；cartesian / scatter 出两张（宽表多 y：列名进图例；长表 series=：单元格值进图例），
+                  pie 出一张；结论拼上 P1–P3（含一个 javascript: 链接）。不带 @step。
+      inject-error 同上，但只调一次 chart()，x 传不存在的列名 P1：没有图时 chart_error 才进 result.warnings
+                  （app/core/result.py chart_warnings 的 `not has_option`），所以单独一个场景。
       hang-<N>s   在目标调用上先睡 N 秒再正常回复（测停止）
       fail-<code> 目标调用返回 HTTP <code>（400/401/403/404/429/500/502/503）
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
@@ -58,6 +63,53 @@ def chart_code(kind: str) -> str:
             f"chart({kind!r}, df, {xy}, title={'fake ' + kind!r})\n" + CODE)
 FAIL_ANSWER = "（fake）没能得出结果。"
 
+# ------------------------------------------------------------ F3 第二步：注入载荷（gen_ui_types 导出给前端，前端不另写）
+# 每条都短于 charts.NAME_MAX，不会被截断。P4 / P5 不是代码执行面，测的是 ECharts 会不会把用户字符串当模板 / 富文本解析。
+INJECT_PAYLOADS = {
+    "P1": '<img src=x onerror="window.__pwned=1">',
+    "P2": '"><svg onload="window.__pwned=2">',
+    "P3": "javascript:window.__pwned=3",
+    "P4": "{a}{b}{c}",
+    "P5": "{x|富文本}",
+}
+_P = INJECT_PAYLOADS
+# 列：类目列名 P4、系列列名 P5（进轴名 / 标题）；数值列名 P2、P3（进宽表图例、长表 y 轴名）。
+# 5 行：类目值按 INJECT_ORDER，系列值错开一位（长表每个 (类目, 系列) 唯一）。P2 列全相等，饼图 5 个扇区等分（e2e 按角度悬停）。
+# 顺序有讲究：载荷标签长，1200px 宽的图里 echarts 自动隔一个画一个（第 0、2、4 个），P4、P5 放在画得出来的位置上，
+# 这样类目轴标签这个位置上 P4、P5 都有实测结论。
+INJECT_COLUMNS = [_P["P4"], _P["P5"], _P["P2"], _P["P3"]]
+INJECT_ORDER = ["P4", "P1", "P5", "P2", "P3"]
+INJECT_ROWS = [[_P[INJECT_ORDER[i]], _P[INJECT_ORDER[(i + 1) % 5]], 2, i + 1] for i in range(5)]
+INJECT_ANSWER = (f"（fake）结论：{_P['P1']} {_P['P2']} {_P['P3']} [点我]({_P['P3']})")
+
+
+def inject_csv() -> str:
+    """注入夹具 CSV，用 csv.writer 生成：载荷里有 < " { |，手拼会把 CSV 结构撑坏。"""
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(INJECT_COLUMNS)
+    w.writerows(INJECT_ROWS)
+    return buf.getvalue()
+
+
+def inject_code(kind: str) -> str:
+    """inject-<kind> / inject-error 场景的代码。列按 dtype 选（不在代码里写列名），标题和错列名是载荷字面量（代码面板也是一个面）。"""
+    head = ("num = list(df.select_dtypes('number').columns)\n"
+            "cat = [c for c in df.columns if c not in num]\n")
+    if kind == "error":
+        return head + f"chart('bar', df, x={_P['P1']!r}, y=num[0], title={_P['P1']!r})\n" + CODE
+    if kind == "pie":
+        return head + f"chart('pie', df, x=cat[0], y=num[0], title={_P['P1']!r})\n" + CODE
+    title2 = f"{_P['P4']} {_P['P5']}"
+    if kind == "scatter":
+        wide, long_ = "x=num[0], y=num", "x=num[0], y=num[1], series=cat[1]"
+    else:
+        wide, long_ = "x=cat[0], y=num", "x=cat[0], y=num[0], series=cat[1]"
+    return (head + f"chart({kind!r}, df, {wide}, title={_P['P1']!r})\n"
+            f"chart({kind!r}, df, {long_}, title={title2!r})\n" + CODE)
+
 # 步骤识别用的提示词片段。改了 app/nodes/* 或 app/react_agent.py 的提示词，这里会认不出 → 400，
 # tests/test_fake_llm.py 的真链路测试（两种 agent 都跑一遍）立刻红。
 MARK_REACT = "你是一个数据分析智能体"
@@ -74,10 +126,10 @@ class FakeError(Exception):
 
 @dataclass(frozen=True)
 class Scenario:
-    kind: str                    # ok | hang | fail | slow | chart
+    kind: str                    # ok | hang | fail | slow | chart | inject
     value: int = 0               # 秒数或 HTTP 状态码
     step: Optional[str] = None   # 目标步骤；None = 第一次调用
-    chart: Optional[str] = None  # chart 场景的图型
+    chart: Optional[str] = None  # chart / inject 场景的图型（inject 另有 "error"）
 
     def targets(self, agent: str, step: str) -> bool:
         if self.step is not None and self.step not in (WORKFLOW_STEPS if agent == "workflow" else REACT_STEPS):
@@ -86,6 +138,7 @@ class Scenario:
 
 
 _CHART_RE = re.compile(r"^chart-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
+_INJECT_RE = re.compile(r"^inject-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
 
 
@@ -97,9 +150,16 @@ def parse_model(name: str) -> Scenario:
         if c["step"] is not None:
             raise FakeError(f"chart 作用于写代码的那一步，不带 @step：{name!r}")
         return Scenario("chart", chart=c["kind"])
+    j = _INJECT_RE.match(name or "")
+    if j:
+        if j["kind"] not in KINDS + ("error",):
+            raise FakeError(f"未知图型 {j['kind']!r}：可选 {', '.join(KINDS)}, error")
+        if j["step"] is not None:
+            raise FakeError(f"inject 作用于写代码的那一步，不带 @step：{name!r}")
+        return Scenario("inject", chart=j["kind"])
     m = _MODEL_RE.match(name or "")
     if not m:
-        raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns|chart-KIND>[@step]")
+        raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns|chart-KIND|inject-KIND>[@step]")
     kind, val, unit, step = m["kind"], m["val"], m["unit"], m["step"]
     if step is not None and step not in WORKFLOW_STEPS + REACT_STEPS:
         raise FakeError(f"未知步骤 @{step}：可选 {', '.join(WORKFLOW_STEPS + REACT_STEPS)}")
@@ -149,21 +209,23 @@ def recognize(messages: list) -> tuple[str, str]:
     raise FakeError("无法识别当前步骤，提示词可能已变（更新 tests/fake_llm.py 的 MARK_*）")
 
 
-def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None) -> dict:
-    """固定剧本：返回 OpenAI 的 assistant message。chart 给定时，写代码的那一步换成 chart_code(chart)。"""
-    code = chart_code(chart) if chart else CODE
+def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None, inject: bool = False) -> dict:
+    """固定剧本：返回 OpenAI 的 assistant message。chart 给定时，写代码的那一步换成 chart_code(chart)；
+    inject 时换成 inject_code(chart)，成功结论换成 INJECT_ANSWER。"""
+    code = inject_code(chart) if inject else (chart_code(chart) if chart else CODE)
+    answer = INJECT_ANSWER if inject else ANSWER
     if agent == "react":
         if step == "act":
             return {"role": "assistant", "content": "", "tool_calls": [{
                 "id": "call_fake_1", "type": "function",
                 "function": {"name": "run_python_on_data", "arguments": json.dumps({"code": code})}}]}
-        return {"role": "assistant", "content": ANSWER}
+        return {"role": "assistant", "content": answer}
     if step == "plan":
         return {"role": "assistant", "content": PLAN}
     if step in ("codegen", "fix"):
         return {"role": "assistant", "content": f"```python\n{code}\n```"}
     whole = "\n".join(_text(m.get("content")) for m in messages)
-    return {"role": "assistant", "content": FAIL_ANSWER if MARK_ANSWER_FAIL in whole else ANSWER}
+    return {"role": "assistant", "content": FAIL_ANSWER if MARK_ANSWER_FAIL in whole else answer}
 
 
 def handle(body: dict, sleep=time.sleep) -> tuple[int, dict]:
@@ -181,7 +243,7 @@ def handle(body: dict, sleep=time.sleep) -> tuple[int, dict]:
     if sc.kind == "fail" and hit:
         return sc.value, {"error": {"message": f"[fake_llm] 按场景返回 {sc.value}", "type": "fake_failure",
                                     "code": str(sc.value)}}
-    msg = reply_for(agent, step, body["messages"], sc.chart)
+    msg = reply_for(agent, step, body["messages"], sc.chart, sc.kind == "inject")
     return 200, {
         "id": f"chatcmpl-fake-{uuid.uuid4().hex[:8]}", "object": "chat.completion", "created": int(time.time()),
         "model": body["model"],

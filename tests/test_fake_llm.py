@@ -10,7 +10,9 @@ import pytest
 from app.core import analyze
 from app.core.llm import LLMConfig
 from app.tools.charts import KINDS, MAX_POINTS, validate_spec
-from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
+from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, INJECT_ANSWER, INJECT_COLUMNS, INJECT_ORDER, INJECT_PAYLOADS,
+                            INJECT_ROWS,
+                            inject_csv, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
                             REACT_STEPS, WORKFLOW_STEPS, Scenario, handle, make_server, parse_model)
 
 WF_PLAN = [{"role": "user", "content": MARK_PLAN + "……"}]
@@ -28,6 +30,9 @@ RE_FINAL = RE_ACT + [{"role": "assistant", "content": "", "tool_calls": []}, {"r
     ("slow-2s", Scenario("slow", 2)),
     ("chart-bar", Scenario("chart", chart="bar")),
     ("chart-scatter", Scenario("chart", chart="scatter")),
+    ("inject-bar", Scenario("inject", chart="bar")),
+    ("inject-pie", Scenario("inject", chart="pie")),
+    ("inject-error", Scenario("inject", chart="error")),
 ])
 def test_parse_valid(name, sc):
     assert parse_model(name) == sc
@@ -38,6 +43,8 @@ def test_parse_valid(name, sc):
     "fail-418", "ok-1s", "ok@plan", "slow-2s@plan", "hang-5s@codgen", "hang-5s@", "HANG-5s", " ok", "ok ",
     "chart", "chart-", "chart-heatmap", "chart-Bar", "chart-bar@codegen", "chart-bar@act", "chart-bar@", "chart-bar-1s",
     "chart-bar ",
+    "inject", "inject-", "inject-heatmap", "inject-Bar", "inject-bar@codegen", "inject-bar@act", "inject-bar@",
+    "inject-error@final", "inject-bar-1s", "chart-error",
 ])
 def test_parse_rejects_everything_else(name):
     code, body = handle({"model": name, "messages": WF_PLAN}, sleep=lambda s: pytest.fail("不该睡"))
@@ -187,3 +194,77 @@ def test_real_chain_truncated_chart_warns(agent, fake_url, tmp_path):
     assert spec["truncated"] is True and len(spec["option"]["series"][0]["data"]) == MAX_POINTS
     want = f"图表「fake bar」数据点超过 {MAX_POINTS}，只显示了前面的部分"
     assert r.warnings.count(want) == 1, r.warnings
+
+
+# ---------------------------------------------------------------- F3 第二步：注入场景
+def test_inject_payloads_fit_and_csv_round_trips_through_pandas():
+    """载荷都短于 NAME_MAX（不被截断，攻击串完整到达）；csv.writer 生成的 CSV 用 pandas 读回，列名、单元格逐个等于载荷。"""
+    import io
+
+    import pandas as pd
+
+    from app.tools.charts import NAME_MAX
+    assert all(len(v) < NAME_MAX for v in INJECT_PAYLOADS.values())
+    df = pd.read_csv(io.StringIO(inject_csv()))
+    assert list(df.columns) == INJECT_COLUMNS
+    assert df.values.tolist() == INJECT_ROWS
+    assert set(df.iloc[:, 0]) == set(df.iloc[:, 1]) == set(INJECT_PAYLOADS.values())
+
+
+def test_inject_scenario_only_changes_code_and_answer():
+    strip = lambda b: {k: v for k, v in b.items() if k not in ("id", "created", "model")}  # noqa: E731
+    assert strip(handle({"model": "inject-bar", "messages": WF_PLAN})[1]) == strip(handle({"model": "ok", "messages": WF_PLAN})[1])
+    ok_answer = [{"role": "user", "content": "根据分析结果，用中文简洁、直接地回答用户问题……"}]
+    assert handle({"model": "inject-bar", "messages": ok_answer})[1]["choices"][0]["message"]["content"] == INJECT_ANSWER
+    assert handle({"model": "inject-bar", "messages": RE_FINAL})[1]["choices"][0]["message"]["content"] == INJECT_ANSWER
+    fail = [{"role": "user", "content": MARK_ANSWER_FAIL}]
+    assert strip(handle({"model": "inject-pie", "messages": fail})[1]) == strip(handle({"model": "ok", "messages": fail})[1])
+    code = handle({"model": "inject-bar", "messages": WF_CODEGEN})[1]["choices"][0]["message"]["content"]
+    assert code.count("chart('bar'") == 2 and repr(INJECT_PAYLOADS["P1"]) in code and CODE in code
+    code = handle({"model": "inject-pie", "messages": WF_CODEGEN})[1]["choices"][0]["message"]["content"]
+    assert code.count("chart(") == 1
+    args = handle({"model": "inject-error", "messages": RE_ACT})[1]["choices"][0]["message"]["tool_calls"][0]
+    assert f"x={INJECT_PAYLOADS['P1']!r}" in __import__("json").loads(args["function"]["arguments"])["code"]
+
+
+@pytest.fixture
+def inject_path(tmp_path):
+    p = tmp_path / "inject.csv"
+    p.write_text(inject_csv(), encoding="utf-8")
+    return str(p)
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+@pytest.mark.parametrize("kind", KINDS)
+def test_real_chain_inject_kind(agent, kind, fake_url, inject_path):
+    """inject-<kind> 走真链路：载荷经真 builder 进标题、轴名、类目（饼图扇区名）、系列名两种来源（列名 / 单元格值），结论含载荷。"""
+    P = INJECT_PAYLOADS
+    r = analyze(inject_path, "画个图", agent=agent, llm_config=cfg(fake_url, f"inject-{kind}"))
+    assert r.ok and r.result == 5, (r.error_kind, r.error)
+    assert r.answer == INJECT_ANSWER and all(P[k] in r.answer for k in ("P1", "P2", "P3"))
+    specs = [c["option"] for c in r.charts if c.get("option")]
+    assert all(s["kind"] == kind and validate_spec(s) == [] for s in specs)
+    assert specs[0]["option"]["title"]["text"] == P["P1"]
+    if kind == "pie":
+        assert len(specs) == 1
+        assert [d["name"] for d in specs[0]["option"]["series"][0]["data"]] == [P[k] for k in INJECT_ORDER]
+        return
+    assert len(specs) == 2
+    wide, long_ = (s["option"] for s in specs)
+    assert long_["title"]["text"] == f"{P['P4']} {P['P5']}"
+    assert [s["name"] for s in wide["series"]] == ([P["P2"], P["P3"]])                 # 列名 → series.name
+    assert [s["name"] for s in long_["series"]] == [P[k] for k in INJECT_ORDER[1:] + INJECT_ORDER[:1]]  # 单元格值 → series.name
+    if kind == "scatter":
+        assert wide["xAxis"]["name"] == P["P2"] and long_["yAxis"]["name"] == P["P3"]
+    else:
+        assert wide["xAxis"]["data"] == [P[k] for k in INJECT_ORDER] and wide["xAxis"]["name"] == P["P4"]
+        assert long_["yAxis"]["name"] == P["P2"]
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+def test_real_chain_inject_error_reaches_warnings(agent, fake_url, inject_path):
+    """inject-error：chart() 传不存在的列名 P1，没有图，chart_error 带着载荷进 result.warnings（可用列也是载荷）。"""
+    r = analyze(inject_path, "画个图", agent=agent, llm_config=cfg(fake_url, "inject-error"))
+    assert r.ok and not [c for c in r.charts if c.get("option")], (r.error_kind, r.error)
+    w = [x for x in r.warnings if x.startswith("图表未生成：")]
+    assert len(w) == 1 and INJECT_PAYLOADS["P1"] in w[0] and all(c in w[0] for c in INJECT_COLUMNS), r.warnings

@@ -61512,6 +61512,259 @@
      }
     }
    }
+  },
+  {
+   "id": "inject-bar",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "containLabel": true
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "{a}{b}{c}",
+      "data": [
+       "{a}{b}{c}",
+       "<img src=x onerror=\"window.__pwned=1\">",
+       "{x|富文本}",
+       "\"><svg onload=\"window.__pwned=2\">",
+       "javascript:window.__pwned=3"
+      ],
+      "boundaryGap": true
+     },
+     "yAxis": {
+      "type": "value",
+      "name": ""
+     },
+     "series": [
+      {
+       "name": "\"><svg onload=\"window.__pwned=2\">",
+       "type": "bar",
+       "data": [
+        2,
+        2,
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "name": "javascript:window.__pwned=3",
+       "type": "bar",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "color": [
+      "#1F6FB2",
+      "#159A8C",
+      "#E2843B",
+      "#C0392B",
+      "#7E57C2",
+      "#3A7D44"
+     ],
+     "title": {
+      "text": "<img src=x onerror=\"window.__pwned=1\">",
+      "left": "center"
+     }
+    }
+   }
+  },
+  {
+   "id": "inject-bar-series",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "containLabel": true
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "{a}{b}{c}",
+      "data": [
+       "{a}{b}{c}",
+       "<img src=x onerror=\"window.__pwned=1\">",
+       "{x|富文本}",
+       "\"><svg onload=\"window.__pwned=2\">",
+       "javascript:window.__pwned=3"
+      ],
+      "boundaryGap": true
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "\"><svg onload=\"window.__pwned=2\">"
+     },
+     "series": [
+      {
+       "name": "<img src=x onerror=\"window.__pwned=1\">",
+       "type": "bar",
+       "data": [
+        2.0,
+        null,
+        null,
+        null,
+        null
+       ]
+      },
+      {
+       "name": "{x|富文本}",
+       "type": "bar",
+       "data": [
+        null,
+        2.0,
+        null,
+        null,
+        null
+       ]
+      },
+      {
+       "name": "\"><svg onload=\"window.__pwned=2\">",
+       "type": "bar",
+       "data": [
+        null,
+        null,
+        2.0,
+        null,
+        null
+       ]
+      },
+      {
+       "name": "javascript:window.__pwned=3",
+       "type": "bar",
+       "data": [
+        null,
+        null,
+        null,
+        2.0,
+        null
+       ]
+      },
+      {
+       "name": "{a}{b}{c}",
+       "type": "bar",
+       "data": [
+        null,
+        null,
+        null,
+        null,
+        2.0
+       ]
+      }
+     ],
+     "color": [
+      "#1F6FB2",
+      "#159A8C",
+      "#E2843B",
+      "#C0392B",
+      "#7E57C2",
+      "#3A7D44"
+     ],
+     "title": {
+      "text": "{a}{b}{c} {x|富文本}",
+      "left": "center"
+     }
+    }
+   }
+  },
+  {
+   "id": "inject-pie",
+   "spec": {
+    "v": 1,
+    "kind": "pie",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "item"
+     },
+     "legend": {
+      "show": true,
+      "type": "scroll",
+      "orient": "vertical",
+      "left": "left",
+      "top": "middle"
+     },
+     "series": [
+      {
+       "name": "\"><svg onload=\"window.__pwned=2\">",
+       "type": "pie",
+       "radius": [
+        "0%",
+        "65%"
+       ],
+       "center": [
+        "60%",
+        "55%"
+       ],
+       "data": [
+        {
+         "name": "{a}{b}{c}",
+         "value": 2
+        },
+        {
+         "name": "<img src=x onerror=\"window.__pwned=1\">",
+         "value": 2
+        },
+        {
+         "name": "{x|富文本}",
+         "value": 2
+        },
+        {
+         "name": "\"><svg onload=\"window.__pwned=2\">",
+         "value": 2
+        },
+        {
+         "name": "javascript:window.__pwned=3",
+         "value": 2
+        }
+       ]
+      }
+     ],
+     "color": [
+      "#1F6FB2",
+      "#159A8C",
+      "#E2843B",
+      "#C0392B",
+      "#7E57C2",
+      "#3A7D44"
+     ],
+     "title": {
+      "text": "<img src=x onerror=\"window.__pwned=1\">",
+      "left": "center"
+     }
+    }
+   }
   }
  ]
 }
