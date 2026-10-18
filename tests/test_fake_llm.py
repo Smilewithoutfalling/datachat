@@ -238,10 +238,11 @@ def inject_path(tmp_path):
 @pytest.mark.parametrize("kind", KINDS)
 def test_real_chain_inject_kind(agent, kind, fake_url, inject_path):
     """inject-<kind> 走真链路：载荷经真 builder 进标题、轴名、类目（饼图扇区名）、系列名两种来源（列名 / 单元格值），结论含载荷。"""
-    P = INJECT_PAYLOADS
+    from app.tools.charts import _display_safe
+    P = _display_safe(INJECT_PAYLOADS)             # option 里是渲染面规范化之后的串（F3 第三步）；结论原样
     r = analyze(inject_path, "画个图", agent=agent, llm_config=cfg(fake_url, f"inject-{kind}"))
-    assert r.ok and r.result == 5, (r.error_kind, r.error)
-    assert r.answer == INJECT_ANSWER and all(P[k] in r.answer for k in ("P1", "P2", "P3"))
+    assert r.ok and r.result == len(INJECT_ROWS), (r.error_kind, r.error)
+    assert r.answer == INJECT_ANSWER and all(INJECT_PAYLOADS[k] in r.answer for k in ("P1", "P2", "P3"))
     specs = [c["option"] for c in r.charts if c.get("option")]
     assert all(s["kind"] == kind and validate_spec(s) == [] for s in specs)
     assert specs[0]["option"]["title"]["text"] == P["P1"]

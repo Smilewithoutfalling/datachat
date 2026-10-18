@@ -6,8 +6,11 @@ import inject from "../src/generated/inject.json" with { type: "json" };
 // F3 第二步：注入实测（THREAT_MODEL §2.3）。后端托管 dist、带 CSP、canvas renderer，走真实产品路径。
 // 载荷和 CSV 都来自 inject.json（tests/fake_llm.py 的 INJECT_PAYLOADS + csv.writer），这里不手拼。
 // 三轮：inject-bar（宽表 + 长表两张图）、inject-pie、inject-error（无图，chart_error 进 warnings）。
+// P6（借样式伪造数值）、P7（换行改行归属）是第二步实测出的最高级威胁的回归（F3 第三步）。
 // canvas 上画了什么靠包一层 fillText / strokeText 记录（原样转调，不改行为）；P4、P5 按渲染位置判"解析 / 未解析"。
 const P = inject.payloads;
+// 第三步起画布上画的是后端 _display_safe 之后的串（{ } → 全角，\n → 空格），期望显示串由后端算好放在 inject.json，这里不另写规范化
+const D = inject.display;
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 
 type Draw = { m: string; text: string; x: number; y: number; font: string; align: string; chart: number; cw: number; ch: number; phase: string };
@@ -38,7 +41,9 @@ type Pos = "title" | "legend" | "xAxisLabel" | "axisName" | "pieLabel" | "toolti
 function posOf(d: Draw, pie: boolean): Pos {
   if (d.font.startsWith("bold")) return "title";
   if (pie) return d.x < 100 && d.align === "left" ? "legend" : "pieLabel";
-  if (d.y > d.ch - 30) return "legend";
+  // 图例在底部；第三步起长表有 7 个系列，图例折成两行（实测 y=326、348，ch=360），所以不能只认最底下 30px。
+  // x 轴名同样 align=left，但在轴线高度（实测 y=290），用 85% 高度分开
+  if (d.y > d.ch - 30 || (d.align === "left" && d.y > d.ch * 0.85)) return "legend";
   if (d.align === "right") return "yTick";
   if (d.align === "center" && d.y > d.ch * 0.6) return "xAxisLabel";
   return "axisName";
@@ -168,43 +173,70 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
   // 类目轴：按画出来的类目标签横坐标找第 k 个类目的中心（标签与柱子同一列）
   const atCategory = (k: number) => (box: { height: number }, st: Draw[]): [number, number] => {
     // 标签放不下时 echarts 自动隔一个画一个，所以用画出来的标签（类目下标已知）线性推出第 k 列的横坐标
-    const cats = inject.order.map((k) => P[k as keyof typeof P]);
+    const cats = inject.order.map((k) => D[k as keyof typeof D]);
     const pts = st.filter((d) => d.align === "center" && d.y > d.ch * 0.6 && cats.includes(d.text)).map((d) => [cats.indexOf(d.text), d.x]);
     const uniq = [...new Map(pts.map(([i, x]) => [i, x])).entries()];
     if (uniq.length < 2) throw new Error(`类目轴标签少于 2 个，推不出第 ${k} 列`);
     const [[i0, x0], [i1, x1]] = uniq;
     return [x0 + ((x1 - x0) / (i1 - i0)) * (k - i0), box.height * 0.5];
   };
-  // 饼图：5 个扇区等分（P2 列全相等），从 12 点方向顺时针；中心 60%/55%，半径 65%（builder 的 option）
+  // 饼图：N 个扇区等分（P2 列全相等），从 12 点方向顺时针；中心 60%/55%，半径 65%（builder 的 option）
+  const sliceDeg = 360 / inject.order.length;
   const atSlice = (k: number) => (box: { width: number; height: number }): [number, number] => {
     const r = (Math.min(box.width, box.height) / 2) * 0.65 * 0.6;
-    const a = ((90 - 72 * (k + 0.5)) * Math.PI) / 180;
+    const a = ((90 - sliceDeg * (k + 0.5)) * Math.PI) / 180;
     return [box.width * 0.6 + r * Math.cos(a), box.height * 0.55 - r * Math.sin(a)];
   };
-  // 第 4 个参数是解析与否都会留下的片段（"{b}{c}"、"富文本"），只用来证明悬停到了；解析与否在下面按位置判
+  // 第 4 个参数只用来证明悬停到了（第三步起是后端规范化后的显示串）；解析与否在下面按位置判
   const idx = (k: string) => inject.order.indexOf(k);
-  await hover(0, "t-bar-P4", atCategory(idx("P4")), "{b}{c}"); // 宽表：类目 P4 进 tooltip 表头，系列名 P2/P3 进行
+  await hover(0, "t-bar-P4", atCategory(idx("P4")), D.P4); // 宽表：类目 P4 进 tooltip 表头，系列名 P2/P3 进行
   await hover(0, "t-bar-P5", atCategory(idx("P5")), "富文本");
-  await hover(1, "t-series-P1", atCategory(idx("P1")), "富文本"); // 长表：系列名（单元格值 P1–P5）进 tooltip 行
-  await hover(2, "t-pie-P4", atSlice(idx("P4")), "{b}{c}"); // 饼图：扇区名进 tooltip
+  await hover(0, "t-bar-P6", atCategory(idx("P6")), D.P6); // 借样式：表头是 P6
+  await hover(1, "t-series-P1", atCategory(idx("P1")), "富文本"); // 长表：系列名（单元格值 P1–P7）进 tooltip 行
+  // 换行：长表第 i 行的系列是 order[i+1]，所以 P7 这个系列只在它前一个类目上有值；悬停那里，P7 那一行带真值
+  await hover(1, "t-series-P7", atCategory(idx("P7") - 1), D.P7);
+  await hover(2, "t-pie-P4", atSlice(idx("P4")), D.P4); // 饼图：扇区名进 tooltip
   await hover(2, "t-pie-P5", atSlice(idx("P5")), "富文本");
   await page.mouse.move(1, 1);
 
   // ---- P4 / P5 按位置判定
   const all = await draws();
   writeFileSync(test.info().outputPath("draws.json"), JSON.stringify(all));
+
+  // 前提：P4–P7 都画在宽表的类目轴标签位置上（INJECT_ORDER 的排布），否则类目轴这个位置的结论不完整
+  const xLabels0 = all.filter((d) => d.chart === 0 && d.phase === "static" && posOf(d, false) === "xAxisLabel").map((d) => d.text);
+  for (const k of ["P4", "P5", "P6", "P7"] as const) expect([k, xLabels0.includes(D[k])]).toEqual([k, true]);
+
+  // tooltip 新增绘制（悬停阶段出现、静态阶段没有的）
+  const tipDraws = (chart: number, phase: string) => {
+    const st = new Set(all.filter((d) => d.chart === chart && d.phase === "static").map((d) => `${d.text}|${d.x}|${d.y}|${d.font}`));
+    return all.filter((d) => d.chart === chart && d.phase === phase && !st.has(`${d.text}|${d.x}|${d.y}|${d.font}`));
+  };
+  // P6：悬停确实命中（显示串作为一段画出来），且任何 tooltip 里都没有以 900 字重画出的 "999"（借样式伪造数值已不可能）
+  expect(tipDraws(0, "t-bar-P6").some((d) => d.text.includes(D.P6))).toBe(true);
+  const fake999 = all.filter((d) => d.phase.startsWith("t-") && d.text === "999" && /\b900\b/.test(d.font));
+  expect(fake999).toEqual([]);
+  // P7：tooltip 每一帧里 "上 下" 都是一次画完、不拆行（tooltip 过渡期间会重绘多帧，所以按"每次绘制"判，不按次数）；
+  // 它那一行的真值（P2 列恒为 2）与它同一个 y
+  const t7 = tipDraws(1, "t-series-P7");
+  const t7label = t7.filter((d) => d.text.includes("上") || d.text.includes("下"));
+  expect(t7label.length).toBeGreaterThan(0);
+  expect([...new Set(t7label.map((d) => d.text))]).toEqual([D.P7]);
+  const valueYs = new Set(t7.filter((d) => d.text === "2").map((d) => d.y));
+  expect(t7label.filter((d) => !valueYs.has(d.y))).toEqual([]);
   type Verdict = { raw: boolean; parsed: boolean };
   const verdict: Record<string, Verdict> = {};
   const note = (key: string, d: Draw[]) => {
     const t = d.map((x) => x.text);
     const v = verdict[key] ?? { raw: false, parsed: false };
+    // 判据（第三步改）：raw = 画出了后端给的完整显示串 display[P]（规范化后不再含 ASCII { }）；
+    // parsed = 只剩残片：被当成模板替换（{a} 变成别的）或被富文本切开（画出 "{a" / "富文本" 而没有完整串）
     if (key.startsWith("P4")) {
-      v.raw ||= t.some((s) => s.includes(P.P4));
-      // 被当成模板替换（{a} 变成了系列名 / 数值），或被当成富文本切开（画出 "{a" 这类残片）都算解析
-      v.parsed ||= t.some((s) => !s.includes(P.P4) && /\{a\b|\{b\}\{c\}\}|^\{a$/.test(s));
+      v.raw ||= t.some((s) => s.includes(D.P4));
+      v.parsed ||= t.some((s) => /\{a\b|\{b\}\{c\}\}|^\{a$/.test(s));
     } else {
-      v.raw ||= t.some((s) => s.includes(P.P5));
-      v.parsed ||= t.some((s) => s.includes("富文本") && !s.includes(P.P5));
+      v.raw ||= t.some((s) => s.includes(D.P5));
+      v.parsed ||= t.some((s) => s.includes("富文本") && !s.includes(D.P5));
     }
     verdict[key] = v;
   };
@@ -217,7 +249,7 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
     byPos.set("tooltip", all.filter((d) => d.chart === chart && d.phase.startsWith("t-") && !stKeys.has(`${d.text}|${d.x}|${d.y}|${d.font}`)));
     for (const [pos, ds] of byPos) {
       if (pos === "yTick") continue;
-      const hit4 = ds.filter((d) => d.text.includes("{a") || d.text.includes("{b}") || d.text.includes(P.P4));
+      const hit4 = ds.filter((d) => d.text.includes("{a") || d.text.includes("{b}") || d.text.includes(D.P4));
       const hit5 = ds.filter((d) => d.text.includes("富文本"));
       if (hit4.length) note(`P4 ${pos}`, hit4);
       if (hit5.length) note(`P5 ${pos}`, hit5);
@@ -225,13 +257,13 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
   }
   writeFileSync(test.info().outputPath("verdict.json"), JSON.stringify(verdict, null, 1));
   // 实测结论（echarts 6.1.0）。改了这张表就要同步改 THREAT_MODEL §2.3；升级 echarts 时这里会红，按新现象重判。
+  // 第三步变更：tooltip 两格 PARSED → R。原因：后端 _display_safe 把 { } 规范化为全角，richText 包装不再能被提前闭合。
   // 变更纪律：每改一格，都要在那个 commit 里写清楚这个位置的行为为什么变了（prepare 上线后 tooltip 变成不解析、主题给 axisLabel /
   // series.label 配了 rich 后变成解析，都属于正确的红）。不准"红了就改期望值"。如果规范化改变了字符串本身，要改的是判据（note()），不是期望值。
   const R = { raw: true, parsed: false };
-  const PARSED = { raw: false, parsed: true };
   expect(verdict).toEqual({
-    "P4 title": R, "P4 axisName": R, "P4 xAxisLabel": R, "P4 legend": R, "P4 pieLabel": R, "P4 tooltip": PARSED,
-    "P5 title": R, "P5 xAxisLabel": R, "P5 legend": R, "P5 pieLabel": R, "P5 tooltip": PARSED,
+    "P4 title": R, "P4 axisName": R, "P4 xAxisLabel": R, "P4 legend": R, "P4 pieLabel": R, "P4 tooltip": R,
+    "P5 title": R, "P5 xAxisLabel": R, "P5 legend": R, "P5 pieLabel": R, "P5 tooltip": R,
   });
 
   // ---- 执行面 / DOM 面断言

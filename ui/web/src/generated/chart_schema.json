@@ -49,6 +49,12 @@
       "line",
       "pie",
       "scatter"
+    ],
+    "grid.outerBoundsMode": [
+      "same"
+    ],
+    "grid.outerBoundsContain": [
+      "axisLabel"
     ]
   }
 }

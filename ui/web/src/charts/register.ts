@@ -5,7 +5,6 @@
 import { BarChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TitleComponent, TooltipComponent } from "echarts/components";
 import { use as installEcharts } from "echarts/core";
-import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 
 type Ext = Exclude<Parameters<typeof installEcharts>[0], readonly unknown[]>;
@@ -17,12 +16,9 @@ export const TOP_LEVEL: Record<string, Ext[]> = {
   title: [TitleComponent],
   tooltip: [TooltipComponent],
   legend: [LegendComponent],
-  // 后端产出 grid.containLabel=true（charts.py）。echarts 6 起它要额外 use(LegacyGridContainLabel)，否则生产构建里
-  // 静默不生效（只在开发构建 console.log 一句），轴标签可能被裁。夹具渲染测试抓到的，见 charts.test.ts。
-  // 这是一条跨端的隐式契约：后端某个嵌套字段，要求前端注册一个 feature。现在只靠夹具渲染时抓 [ECharts] log 兜底，
-  // 而这依赖 echarts 6.1.0 的输出行为。只有这一条，所以不建机制；一旦出现第二条同类字段，就在 chart_schema.json
-  // 里声明"字段 → 需要的前端 feature"，纳入双向比对（S 10-16 评审）。后端改用 outerBounds 可以消掉这一条，跟主题一起定。
-  grid: [GridComponent, LegacyGridContainLabel],
+  // grid 用 outerBounds（后端 F3 第三步替换了已弃用的 containLabel），GridComponent 自带，不需要 LegacyGridContainLabel。
+  // containLabel 已从后端白名单删除，"option 里出现 containLabel"由 validate_spec 保证不会发生。
+  grid: [GridComponent],
   xAxis: [GridComponent],
   yAxis: [GridComponent],
   series: NONE,
@@ -37,6 +33,8 @@ export const ENUMS: Record<string, Record<string, Ext[]>> = {
   "xAxis.type": { category: [GridComponent], value: [GridComponent] },
   "yAxis.type": { value: [GridComponent] },
   "series.type": { bar: [BarChart], line: [LineChart], pie: [PieChart], scatter: [ScatterChart] },
+  "grid.outerBoundsMode": { same: NONE },
+  "grid.outerBoundsContain": { axisLabel: NONE },
 };
 
 export const RENDERER: Ext = CanvasRenderer;

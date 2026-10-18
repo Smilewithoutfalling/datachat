@@ -69,14 +69,19 @@ def chart_fixtures() -> dict:
         ("inject-bar", build_option("bar", inj, x=c_cat, y=[c_n1, c_n2], title=P["P1"])),
         ("inject-bar-series", build_option("bar", inj, x=c_cat, y=c_n1, series=c_ser, title=f"{P['P4']} {P['P5']}")),
         ("inject-pie", build_option("pie", inj, x=c_cat, y=c_n1, title=P["P1"])),
+        # F3 第三步：outerBounds 的 clamp 下限（默认 25%）在"类目少 + 标签超长"时最容易显形：3 个类目不会被 hideOverlap 隔开
+        ("long-labels-bar", build_option("bar", pd.DataFrame({"名": [f"{c}" * 120 for c in "甲乙丙"], "值": [3, 1, 2]}),
+                                         x="名", y="值")),
     ]
     return {"_generated_by": "scripts/gen_ui_types.py", "fixtures": [{"id": i, "spec": s} for i, s in cases]}
 
 
 def inject() -> dict:
+    from app.tools.charts import _display_safe
     from tests.fake_llm import INJECT_ORDER, INJECT_PAYLOADS, inject_csv
-    return {"_generated_by": "scripts/gen_ui_types.py", "payloads": dict(INJECT_PAYLOADS), "order": list(INJECT_ORDER),
-            "csv": inject_csv()}
+    # display：后端 _display_safe 算出的期望画布显示串（F3 第三步），前端判据只用它，不在 TS 里另写一份规范化
+    return {"_generated_by": "scripts/gen_ui_types.py", "payloads": dict(INJECT_PAYLOADS),
+            "display": _display_safe(dict(INJECT_PAYLOADS)), "order": list(INJECT_ORDER), "csv": inject_csv()}
 
 
 def build() -> dict[str, str]:

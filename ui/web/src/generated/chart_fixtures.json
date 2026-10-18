@@ -20,7 +20,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -85,7 +86,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -146,7 +148,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -212,7 +215,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -347,7 +351,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "value",
@@ -422,7 +427,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -541,7 +547,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -657,7 +664,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -720,7 +728,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 50,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -1234,7 +1243,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 50,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -1320,7 +1330,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -11371,7 +11382,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
@@ -21426,7 +21438,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "value",
@@ -41477,7 +41490,8 @@
       "right": "4%",
       "top": 60,
       "bottom": 30,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "value",
@@ -61532,17 +61546,20 @@
       "right": "4%",
       "top": 60,
       "bottom": 50,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
-      "name": "{a}{b}{c}",
+      "name": "｛a｝｛b｝｛c｝",
       "data": [
-       "{a}{b}{c}",
+       "｛a｝｛b｝｛c｝",
        "<img src=x onerror=\"window.__pwned=1\">",
-       "{x|富文本}",
+       "｛x|富文本｝",
        "\"><svg onload=\"window.__pwned=2\">",
-       "javascript:window.__pwned=3"
+       "x｝｛__EC_aUTo_4|999",
+       "javascript:window.__pwned=3",
+       "上 下"
       ],
       "boundaryGap": true
      },
@@ -61559,6 +61576,8 @@
         2,
         2,
         2,
+        2,
+        2,
         2
        ]
       },
@@ -61570,7 +61589,9 @@
         2,
         3,
         4,
-        5
+        5,
+        6,
+        7
        ]
       }
      ],
@@ -61608,17 +61629,20 @@
       "right": "4%",
       "top": 60,
       "bottom": 50,
-      "containLabel": true
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
      },
      "xAxis": {
       "type": "category",
-      "name": "{a}{b}{c}",
+      "name": "｛a｝｛b｝｛c｝",
       "data": [
-       "{a}{b}{c}",
+       "｛a｝｛b｝｛c｝",
        "<img src=x onerror=\"window.__pwned=1\">",
-       "{x|富文本}",
+       "｛x|富文本｝",
        "\"><svg onload=\"window.__pwned=2\">",
-       "javascript:window.__pwned=3"
+       "x｝｛__EC_aUTo_4|999",
+       "javascript:window.__pwned=3",
+       "上 下"
       ],
       "boundaryGap": true
      },
@@ -61635,15 +61659,19 @@
         null,
         null,
         null,
+        null,
+        null,
         null
        ]
       },
       {
-       "name": "{x|富文本}",
+       "name": "｛x|富文本｝",
        "type": "bar",
        "data": [
         null,
         2.0,
+        null,
+        null,
         null,
         null,
         null
@@ -61657,6 +61685,21 @@
         null,
         2.0,
         null,
+        null,
+        null,
+        null
+       ]
+      },
+      {
+       "name": "x｝｛__EC_aUTo_4|999",
+       "type": "bar",
+       "data": [
+        null,
+        null,
+        null,
+        2.0,
+        null,
+        null,
         null
        ]
       },
@@ -61667,14 +61710,31 @@
         null,
         null,
         null,
+        null,
+        2.0,
+        null,
+        null
+       ]
+      },
+      {
+       "name": "上 下",
+       "type": "bar",
+       "data": [
+        null,
+        null,
+        null,
+        null,
+        null,
         2.0,
         null
        ]
       },
       {
-       "name": "{a}{b}{c}",
+       "name": "｛a｝｛b｝｛c｝",
        "type": "bar",
        "data": [
+        null,
+        null,
         null,
         null,
         null,
@@ -61692,7 +61752,7 @@
       "#3A7D44"
      ],
      "title": {
-      "text": "{a}{b}{c} {x|富文本}",
+      "text": "｛a｝｛b｝｛c｝ ｛x|富文本｝",
       "left": "center"
      }
     }
@@ -61729,7 +61789,7 @@
        ],
        "data": [
         {
-         "name": "{a}{b}{c}",
+         "name": "｛a｝｛b｝｛c｝",
          "value": 2
         },
         {
@@ -61737,7 +61797,7 @@
          "value": 2
         },
         {
-         "name": "{x|富文本}",
+         "name": "｛x|富文本｝",
          "value": 2
         },
         {
@@ -61745,7 +61805,15 @@
          "value": 2
         },
         {
+         "name": "x｝｛__EC_aUTo_4|999",
+         "value": 2
+        },
+        {
          "name": "javascript:window.__pwned=3",
+         "value": 2
+        },
+        {
+         "name": "上 下",
          "value": 2
         }
        ]
@@ -61763,6 +61831,64 @@
       "text": "<img src=x onerror=\"window.__pwned=1\">",
       "left": "center"
      }
+    }
+   }
+  },
+  {
+   "id": "long-labels-bar",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "axisLabel"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "名",
+      "data": [
+       "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲",
+       "乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
+       "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙"
+      ],
+      "boundaryGap": true
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值"
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "bar",
+       "data": [
+        3,
+        1,
+        2
+       ]
+      }
+     ],
+     "color": [
+      "#1F6FB2",
+      "#159A8C",
+      "#E2843B",
+      "#C0392B",
+      "#7E57C2",
+      "#3A7D44"
+     ]
     }
    }
   }

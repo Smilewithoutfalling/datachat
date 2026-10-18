@@ -22,7 +22,7 @@ describe.each(INJ.map((f) => [f.id, f.spec] as const))("%s：SSR SVG", (_id, spe
   let svg = "";
   beforeAll(() => {
     const c = init(null, null, { renderer: "svg", ssr: true, width: 640, height: 400 });
-    c.setOption(prepare(spec.option), { notMerge: true });
+    c.setOption(prepare(spec.option, {}), { notMerge: true });
     svg = c.renderToSVGString();
     c.dispose();
   });

@@ -83,7 +83,7 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
 | 错误消息、警告（chart_error） | 同一 e2e 的 inject-error 轮：x 传不存在的列名 P1，`图表未生成：x 列 '<P1>' 不存在；可用列：<P4>、<P5>、<P2>、<P3>` 进 `result.warnings` | 按文本显示（`toContainText`），无新增元素 |
 | 结论（Markdown） | 同一 e2e：结论含 P1–P3 和 `[点我](javascript:…)` | 按文本显示；链接渲染出来了（对照），href 不含 `javascript:` |
 | 代码面板 | 同一 e2e：三轮都展开"生成代码"，代码里有 P1、P4、P5 字面量 | 按文本显示 |
-| 后端到达 | `tests/test_fake_llm.py::test_real_chain_inject_kind`（5 kind × 2 agent）、`test_real_chain_inject_error_reaches_warnings`、`test_inject_payloads_fit_and_csv_round_trips_through_pandas` | 载荷完整到达 option、warnings、结论（只证明前提，不是防御） |
+| 后端到达 | `tests/test_fake_llm.py::test_real_chain_inject_kind`（5 kind × 2 agent）、`test_real_chain_inject_error_reaches_warnings`、`test_inject_payloads_fit_and_csv_round_trips_through_pandas` | 载荷完整到达 option（第三步起是 `_display_safe` 规范化后的串）、warnings、结论（只证明前提，不是防御） |
 
 **P4 / P5：按位置的解析结论**（e2e 里 `expect(verdict).toEqual(...)` 钉住，升级 echarts 时会红，按新现象重判）：
 
@@ -94,13 +94,17 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
 | 类目轴标签 | 不解析 | 不解析 |
 | 图例 | 不解析 | 不解析 |
 | 饼图扇区标签 | 不解析 | 不解析 |
-| **tooltip（richText）** | **解析** | **解析** |
+| **tooltip（richText）** | **解析**（第二步实测）→ 不解析（第三步后端规范化后） | **解析** → 不解析（同左） |
 
 - 模板替换：所有位置都**没有**把 `{a}` 换成系列名或数值，P4 没有造成"数字被换"的篡改。
 - tooltip 的问题出在富文本边界：richText 模式下 ECharts 把每个名字包成 `{样式名|名字}`，用户字符串里的第一个 `}` 提前结束了这个包装。实测绘制：`{a}{b}{c}` 画成 `{a`（14px）+ `{b}{c}}`（12px），也就是屏幕上显示 `{a{b}{c}}`，字符顺序被改了；`{x|富文本}` 画成 `{x|富文本`（14px）+ `}`（12px）。tooltip 的类目表头、系列名行、饼图扇区名三处都是这样。
-- **换行：真值配上假标签（实测，确定性，本节最高一级）**：类目名或系列名里的 `\n` 会参与 richText 排版。`上\n下` 在表头被拆成两行；在系列名行里，`下` 从行首开始（不带色块缩进），真值 8 落在 `下` 那一行，读出来就是「下 = 8」。数字是真的，标签是攻击者写的，而数字本身经得起核对，所以比编一个假数字更难被发现。这条不用猜，也没有命中率，每次都复现。后端 `_CTRL` 放过了 `\x0a`。`\t`（同样被放过）实测不参与排版：作为一段字符整体画出，数值列位置不变。
-- **借用内部样式：在数值列伪造数字（实测，概率性）**：跳出包装后，后面的 `{名字|…}` 会按 rich 语法解析。`x}{y|999` 画成 `x` + `999`（`}{y|` 消失）。ECharts 给 tooltip 内部样式起名 `__EC_aUTo_<n>`，n 从 `round(random×9)` 开始递增，每次显示 tooltip 都重新生成。`x}{__EC_aUTo_K|<数字>` 命中时，借到的不只是字体（`900 14px`），还有对齐方式：伪造文本的 `textAlign` 是 `right`，绘制 x 和同一个 tooltip 里真值的 x 相同。伪造 1 位、3 位、8 位数字时这个 x 都不变（真值 `7` 和 `12,345,678` 的 x 也是它），所以右边缘对齐到数值列，落点由样式决定，可以复现。**表头行**本来没有数值列，伪造数字仍然出现在数值列位置，看起来像一行没有色块的数值行。**系列名行**里，伪造数字夹在系列名和真值之间。两种情况下真值都没有被替换。命中率：单次机会 9%（18/200），类目和系列名各给一次机会时 18%（36/200）。攻击者控制整份 CSV（每个类目猜一个 K），放到数据集层面可以靠枚举稳定命中。
-- **对第三步的要求**：在后端规范化（`_clean_str` / `_cat`，一处覆盖全路径），并在 `validate_spec` 加闸门：遍历整个 option，任何 string 值都不得含 ASCII `{`、`}`、`\n`，不按登记键逐个查。这样白名单以后加字段，闸门照样覆盖。不在前端注入 `tooltip.formatter`，否则会把"产物里没有 formatter"这条防线降级成不可判定。具体在第三步方案里定，这条注入回归要继续跑。
+- **换行：真值配上假标签（实测，确定性，本节最高一级）——已修（F3 第三步，后端规范化 + 闸门，见下）**：类目名或系列名里的 `\n` 会参与 richText 排版。`上\n下` 在表头被拆成两行；在系列名行里，`下` 从行首开始（不带色块缩进），真值 8 落在 `下` 那一行，读出来就是「下 = 8」。数字是真的，标签是攻击者写的，而数字本身经得起核对，所以比编一个假数字更难被发现。这条不用猜，也没有命中率，每次都复现。后端 `_CTRL` 放过了 `\x0a`。`\t`（同样被放过）实测不参与排版：作为一段字符整体画出，数值列位置不变。
+- **借用内部样式：在数值列伪造数字（实测，概率性）——已修（F3 第三步，同上）**：跳出包装后，后面的 `{名字|…}` 会按 rich 语法解析。`x}{y|999` 画成 `x` + `999`（`}{y|` 消失）。ECharts 给 tooltip 内部样式起名 `__EC_aUTo_<n>`，n 从 `round(random×9)` 开始递增，每次显示 tooltip 都重新生成。`x}{__EC_aUTo_K|<数字>` 命中时，借到的不只是字体（`900 14px`），还有对齐方式：伪造文本的 `textAlign` 是 `right`，绘制 x 和同一个 tooltip 里真值的 x 相同。伪造 1 位、3 位、8 位数字时这个 x 都不变（真值 `7` 和 `12,345,678` 的 x 也是它），所以右边缘对齐到数值列，落点由样式决定，可以复现。**表头行**本来没有数值列，伪造数字仍然出现在数值列位置，看起来像一行没有色块的数值行。**系列名行**里，伪造数字夹在系列名和真值之间。两种情况下真值都没有被替换。命中率：单次机会 9%（18/200），类目和系列名各给一次机会时 18%（36/200）。攻击者控制整份 CSV（每个类目猜一个 K），放到数据集层面可以靠枚举稳定命中。
+- **第三步的做法（已实现，DEVLOG [39]）**：
+  - 后端 `app/tools/charts.py` 新增 `_display_safe(option)`，在 `build_option` 返回前递归处理 option 里**每一个** string 值：`{`→`｛`、`}`→`｝`、`\n`→空格（字符集是模块常量 `DISPLAY_UNSAFE`）。不放在 `_clean_str` 里：它还负责拼 ChartError 等消息，消息会回到模型，全角化会让模型照抄出不存在的列名。顺序固定为 build → `_display_safe` → `validate_spec`。`\t` 不处理（实测不参与排版）。
+  - `validate_spec` 新增闸门 `_check_strings`：不看白名单，遍历整个 option，任何 string 值或键含 `DISPLAY_UNSAFE` 字符即整图拒绝。
+  - 测试：`tests/test_charts.py` 的 `test_builder_output_has_no_unsafe_chars_anywhere`、`test_message_exits_keep_raw_text`、`test_gate_rejects_hand_built_unsafe_spec`、`test_gate_rejects_unsafe_dict_key`、`test_gate_covers_fields_not_in_allowed`、`test_display_safe_and_gate_share_charset`、`test_builder_slip_becomes_chart_bug_error`；e2e `f3-inject.spec.ts` 新增 P6（`x}{__EC_aUTo_4|999`：悬停命中、显示串整段画出、任何 tooltip 里都没有 900 字重的 `999`）和 P7（`上\n下`：tooltip 每帧都是整段 `上 下`，和真值同一 y），判定表 tooltip 两格从"解析"变为"不解析"。
+  - 前端没有镜像这套规范化，也没有注入 `tooltip.formatter`。
 
 未测（v2 层 2 才可达，到层 2 再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
 prepare 的纵深防御（删被禁键）只在 vitest 层测过（`charts.test.ts`「对照：人为塞进各层级的被禁键确实被删掉」）；托管 dist 上不可达，因为后端 `validate_spec` 先拒了。
