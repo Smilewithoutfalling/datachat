@@ -305,6 +305,16 @@ def test_builder_output_has_no_unsafe_chars_anywhere():
         assert "a\uff5bb\uff5dc d|e\tf" == spec["option"]["title"]["text"]
 
 
+def test_crlf_in_cells_leaves_no_raw_cr_on_canvas():
+    """Windows 导出的 CSV 单元格里是 \r\n：\r 不在 DISPLAY_UNSAFE，靠 _clean_str 的 _CTRL 变成空格（"上  下"，两个空格）。
+    钉住"产物里没有裸 \r"，防止以后放宽 _CTRL 时 \r 悄悄回到画布（PR #46 windows CI 暴露）。"""
+    df = pd.DataFrame({"c\r\nx": ["上\r\n下", "a\rb"], "n": [1, 2]})
+    spec = build_option("bar", df, x="c\r\nx", y="n", title="t\r\nx")
+    assert validate_spec(spec) == []
+    assert not [s for s in _strings(spec["option"]) if "\r" in s]
+    assert spec["option"]["title"]["text"] == "t  x"
+
+
 def test_message_exits_keep_raw_text():
     """消息出口保持原文：ChartError 的"可用列"、accept_worker_charts 的 _msgs 里 { } \\n 原样。
     这是挡住"把规范化挪进 _clean_str"的唯一测试——模型照抄全角列名会陷入"列不存在"死循环。"""

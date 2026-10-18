@@ -230,7 +230,8 @@ def test_inject_scenario_only_changes_code_and_answer():
 @pytest.fixture
 def inject_path(tmp_path):
     p = tmp_path / "inject.csv"
-    p.write_text(inject_csv(), encoding="utf-8")
+    # newline="" 原样写字节：文本模式在 Windows 会把单元格里的 \n 写成 \r\n（P7 在 windows CI 上变成 "上\r 下"）
+    p.write_text(inject_csv(), encoding="utf-8", newline="")
     return str(p)
 
 

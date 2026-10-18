@@ -1414,10 +1414,11 @@ Playwright：
 - **轴标签识别按结构**：用 echarts AxisBuilder 给文本元素父节点的 `anid`（`label_<tick>`；轴名是 `name`）。第一版按文本匹配，红在注入夹具上：P4 同时是轴名和类目，轴名在画布右边缘外（x=629.4，宽 91）。轴名是否纳入 outerBounds 是第四步的事，所以轴名不算在这条断言里。
 - **e2e 位置分类器修正（判定表期望值没动）**：长表有 7 个系列后，图例折成两行（y=326 和 348，ch=360），第二行的 P5 图例被归成了"轴名"，判定表多出一格 `P5 axisName`。`posOf` 加了一条：`align=left` 且 y > 85% 高度 → 图例（x 轴名在 y=290）。
 - **P7 按"每次绘制"判**：tooltip 过渡期间会重绘多帧（实测 24 次绘制都是 `上 下`），所以断言改成"所有含上 / 下的绘制文本都等于 `上 下`，且每一次都有同一 y 的真值 `2`"，不再要求只画一次。
+- **PR #46 的 windows CI 红（P7）**：原因是测试夹具用文本模式写 CSV，Windows 会把单元格里的 `\n` 写成 `\r\n`，P7 变成了 `上  下`。修法：`test_fake_llm.py` 的 `inject_path` 改用 `write_text(..., newline="")`。顺带确认产品行为：`\r` 不在 `DISPLAY_UNSAFE` 里，但 `_clean_str` 的 `_CTRL`（覆盖 `\x0b-\x1f`）会先把它换成空格，所以画布上不会出现裸 `\r`。新增 `test_crlf_in_cells_leaves_no_raw_cr_on_canvas` 把这一点钉住。`\r\n` 会显示成两个空格，不合并（合并就要动 `_clean_str` 的消息出口，S 选了 A）。
 - `register.control.test.ts`：原来"少注册 LegacyGridContainLabel 会被 `[ECharts]` log 抓到"那条，现在改为手工往 option 里塞 `containLabel`。这样仍能证明零 log 守卫在 vitest 里有效（守卫留在 vitest，没有挪到 e2e）。
 
 测试：
-- pytest `tests/test_charts.py` +13：`test_display_safe_replaces_unsafe_and_keeps_tab_and_pipe`（正反例）、`test_builder_output_has_no_unsafe_chars_anywhere`（四种图型、每个入口都带全部不安全字符）、`test_message_exits_keep_raw_text`（ChartError 的可用列和 `_msgs` 原样保留 `{a}` 和 `\n`）、`test_gate_rejects_hand_built_unsafe_spec` ×5（拒绝路径）、`test_gate_rejects_unsafe_dict_key`、`test_gate_covers_fields_not_in_allowed`（遍历覆盖）、`test_display_safe_and_gate_share_charset`（漂移：给常量加零宽字符，两侧同时生效）、`test_builder_slip_becomes_chart_bug_error`、`test_grid_uses_outer_bounds_and_contain_label_is_gone`。`test_chart_fixtures.py` +1：`test_no_fixture_contains_contain_label`。`test_fake_llm.py` 的真链路断言改成对比 `_display_safe` 后的载荷（结论仍是原文）。
+- pytest `tests/test_charts.py` +14（含 `test_crlf_in_cells_leaves_no_raw_cr_on_canvas`）：`test_display_safe_replaces_unsafe_and_keeps_tab_and_pipe`（正反例）、`test_builder_output_has_no_unsafe_chars_anywhere`（四种图型、每个入口都带全部不安全字符）、`test_message_exits_keep_raw_text`（ChartError 的可用列和 `_msgs` 原样保留 `{a}` 和 `\n`）、`test_gate_rejects_hand_built_unsafe_spec` ×5（拒绝路径）、`test_gate_rejects_unsafe_dict_key`、`test_gate_covers_fields_not_in_allowed`（遍历覆盖）、`test_display_safe_and_gate_share_charset`（漂移：给常量加零宽字符，两侧同时生效）、`test_builder_slip_becomes_chart_bug_error`、`test_grid_uses_outer_bounds_and_contain_label_is_gone`。`test_chart_fixtures.py` +1：`test_no_fixture_contains_contain_label`。`test_fake_llm.py` 的真链路断言改成对比 `_display_safe` 后的载荷（结论仍是原文）。
 - vitest：`charts.test.ts` 新增「outerBounds」（直角坐标夹具每个轴标签在画布内；bar、bar-missing 第一根柱子对照 2213aac 的取值）和「prepare 管线骨架」（恒等步骤逐字节一致；prepare 与 v0 逐字节一致；替身步骤在第一位或第二位塞的被禁键都被清掉；替身原地修改不影响输入；耗时记录）。原 v0 断言原样保留。
 - e2e `f3-inject.spec.ts`：P6、P7 断言；前提断言 P4–P7 都画在宽表的类目轴标签上；`note()` 改成 `includes(display[P])`；tooltip 两格 PARSED → R（原因：后端 `_display_safe` 把 `{}` 规范化为全角，richText 包装不再能被提前闭合）；饼图悬停按 360/N 度算。
 
@@ -1425,7 +1426,7 @@ Playwright：
 - prepare 耗时：bar-5000 跑 20 次，中位数 1.022 ms（最小 0.927，最大 1.538）。
 - e2e 里 P6 悬停：表头画成 `x｝｛__EC_aUTo_4|999`（14px，align=left），数值行是 `2`（900 14px，align=right），没有 999。P7：tooltip 行 `上 下`（14px）和真值 `2`（900 14px）在同一个 y=160。
 
-验证（最后一次改动之后全部重跑）：pytest **721 passed**（+14，含本地闸门数据 25 条）；vitest **102**（+25）；Playwright **11 passed**（nokey 7 + fake 4，f3-inject 26.4 s；停止本轮感知 6 ms、POST /cancel 16 ms、后端 8039 ms）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 → 963.73 kB，少了 LegacyGridContainLabel）、`gen_ui_types --check` 都通过。
+验证（最后一次改动之后全部重跑）：pytest **722 passed**（+15，含本地闸门数据 25 条）；vitest **102**（+25）；Playwright **11 passed**（nokey 7 + fake 4，f3-inject 26.4 s；停止本轮感知 6 ms、POST /cancel 16 ms、后端 8039 ms）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 → 963.73 kB，少了 LegacyGridContainLabel）、`gen_ui_types --check` 都通过。
 
 未做：
 - 主题、轴名是否纳入 outerBounds（第四步）；开关和层 1 的实际内容（第五步）。
