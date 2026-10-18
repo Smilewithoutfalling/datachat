@@ -38,6 +38,11 @@ CATEGORY_MAX = 200         # 单个类目名
 PALETTE = ["#1F6FB2", "#159A8C", "#E2843B", "#C0392B", "#7E57C2", "#3A7D44"]
 
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]")
+# 渲染面的不安全字符 → 显示替换（F3 第三步，THREAT_MODEL §2.3）。_display_safe 与闸门 _check_strings 共用这一份。
+# - { } ：tooltip 的 richText 会解析，用户串里的 `}` 能提前闭合包装并借用内部样式（伪造数值列）。
+# - \n ：参与 tooltip 排版，能让真值配上攻击者的标签。
+# - \t 不在此列：第二步实测它作为整体绘制、不参与排版（_CTRL 同样放过了它）。
+DISPLAY_UNSAFE = {"{": "\uff5b", "}": "\uff5d", "\n": " "}
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -51,6 +56,9 @@ class ChartBugError(RuntimeError):
 
 # ------------------------------------------------------------------ 值转换
 def _clean_str(s, limit: int) -> str:
+    """字符串 → 模型 / 用户可见文本（清控制字符、限长）。也用于拼 ChartError 等消息，
+    所以这里**不做**渲染面的规范化：消息原样回到模型，全角化会让模型照抄出不存在的列名（F3 第三步）。
+    画布上的规则只在 _display_safe 里做。"""
     s = _CTRL.sub(" ", str(s)).strip()
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
@@ -202,11 +210,30 @@ def build_option(kind, df, *, x=None, y=None, series=None, title=None) -> dict:
     option["color"] = list(PALETTE)
     if title_txt:
         option["title"] = {"text": title_txt, "left": "center"}
-    spec = {"v": SPEC_VERSION, "kind": kind, "truncated": truncated, "option": option}
+    # 顺序写死：规范化在校验之前，否则闸门 _check_strings 会拒掉每一张图
+    spec = {"v": SPEC_VERSION, "kind": kind, "truncated": truncated, "option": _display_safe(option)}
     problems = validate_spec(spec)
     if problems:                                  # builder 自身的 bug 也不能放出去
         raise ChartBugError("图表未通过校验：" + "；".join(problems[:3]))
     return spec
+
+
+def _display_str(s: str) -> str:
+    for bad, good in DISPLAY_UNSAFE.items():
+        s = s.replace(bad, good)
+    return s
+
+
+def _display_safe(node):
+    """option → 可安全上画布的 option：递归替换每一个 string 值里的 DISPLAY_UNSAFE 字符（键由 builder 决定，不动）。
+    遍历的是产物不是登记表，新增字段自动覆盖。只用于 option；消息 / 数据表 / 结论不经过这里。"""
+    if isinstance(node, str):
+        return _display_str(node)
+    if isinstance(node, dict):
+        return {k: _display_safe(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_display_safe(v) for v in node]
+    return node
 
 
 def _wide(frame, xs, ys, series_col):
@@ -252,7 +279,8 @@ def _cartesian(kind, frame, xs, ys, series_col):
     option = {
         "tooltip": {"trigger": "axis"},
         "legend": {"show": multi, "top": "bottom"},
-        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if multi else 30, "containLabel": True},
+        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if multi else 30,
+                 "outerBoundsMode": "same", "outerBoundsContain": "axisLabel"},
         "xAxis": {"type": "category", "name": x_name, "data": cats,
                   "boundaryGap": kind == "bar"},
         "yAxis": {"type": "value", "name": y_name},
@@ -311,7 +339,8 @@ def _scatter(frame, xs, ys, series_col):
     option = {
         "tooltip": {"trigger": "item"},
         "legend": {"show": len(out) > 1, "top": "bottom"},
-        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if len(out) > 1 else 30, "containLabel": True},
+        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if len(out) > 1 else 30,
+                 "outerBoundsMode": "same", "outerBoundsContain": "axisLabel"},
         "xAxis": {"type": "value", "name": _clean_str(xs.name, NAME_MAX) if xs.name is not None else "", "scale": True},
         "yAxis": {"type": "value", "name": _clean_str(ys[0], NAME_MAX) if len(ys) == 1 else "", "scale": True},
         "series": out,
@@ -333,7 +362,10 @@ _ALLOWED = {
     "title": {"text": _STR, "left": _POS},
     "tooltip": {"trigger": _STR},
     "legend": {"show": _BOOL, "type": _STR, "top": _POS, "left": _POS, "orient": _STR},
-    "grid": {"left": _POS, "right": _POS, "top": _POS, "bottom": _POS, "containLabel": _BOOL},
+    # outerBounds 替代已弃用的 containLabel（官方注释称等价，'axisLabel' 更精确、与旧行为略有差异；
+    # 默认 outerBoundsClampWidth/Height=25%，有意不改）。containLabel 不在白名单，前端不再注册 LegacyGridContainLabel。
+    "grid": {"left": _POS, "right": _POS, "top": _POS, "bottom": _POS,
+             "outerBoundsMode": _STR, "outerBoundsContain": _STR},
     "xAxis": {"type": _STR, "name": _STR, "data": {"*": _STR}, "boundaryGap": _BOOL, "scale": _BOOL,
               "axisLabel": {"hideOverlap": _BOOL}},
     "yAxis": {"type": _STR, "name": _STR, "scale": _BOOL},
@@ -356,6 +388,8 @@ _ENUMS = {
     ("xAxis", "type"): {"category", "value"},
     ("yAxis", "type"): {"value"},
     ("series", "type"): {"bar", "line", "pie", "scatter"},
+    ("grid", "outerBoundsMode"): {"same"},
+    ("grid", "outerBoundsContain"): {"axisLabel"},
 }
 
 
@@ -397,6 +431,26 @@ def _walk(node, rule, path, problems):
             problems.append(f"{where}.{k} 不在白名单")
             continue
         _walk(v, rule[k], path + [k], problems)
+
+
+def _check_strings(node, path, problems):
+    """闸门：独立于 _ALLOWED，递归遍历整个 option，任何 string 值或键含 DISPLAY_UNSAFE 字符即报问题。
+    对 builder 产物它永远不该触发（_display_safe 在前）；触发就是 builder 漏了，记 ChartBugError。"""
+    if len(problems) >= 20:
+        return
+    where = ".".join(path) or "option"
+    if isinstance(node, str):
+        bad = sorted({c for c in DISPLAY_UNSAFE if c in node})
+        if bad:
+            problems.append(f"{where} 含渲染不安全字符 {bad!r}")
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(k, str) and any(c in k for c in DISPLAY_UNSAFE):
+                problems.append(f"{where} 的键 {k!r} 含渲染不安全字符")
+            _check_strings(v, path + [str(k)], problems)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            _check_strings(v, path + [str(i)], problems)
 
 
 def _check_enums(option, problems):
@@ -485,6 +539,7 @@ def validate_spec(spec) -> list[str]:
     if not isinstance(option, dict) or not isinstance(option.get("series"), list) or not option["series"]:
         return problems + ["option.series 应为非空数组"]
     _walk(option, _ALLOWED, [], problems)
+    _check_strings(option, [], problems)
     _check_kind(spec["kind"], option, problems)
     _check_enums(option, problems)
     _check_data(option, problems)

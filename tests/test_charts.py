@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.tools.charts import (BANNED_KEYS, MAX_POINTS, ChartError, build_option, validate_spec)
+import app.tools.charts as _ch
+from app.tools.charts import (BANNED_KEYS, DISPLAY_UNSAFE, MAX_POINTS, ChartBugError, ChartError, _display_safe,
+                              accept_worker_charts, build_option, validate_spec)
 
 
 def _strict_json(spec):
@@ -264,3 +266,130 @@ def test_total_and_sentinel_rows_pass_through_unchanged():
     s = pd.Series([10, 20, 30, 60], index=["南京", "未登记", "苏州", "合计"], name="销量")
     o = build_option("bar", s)["option"]
     assert o["xAxis"]["data"] == ["南京", "未登记", "苏州", "合计"] and o["series"][0]["data"] == [10, 20, 30, 60]
+
+
+# ---------------------------------------------------------------- F3 第三步：渲染面规范化 + 闸门（THREAT_MODEL §2.3）
+
+_EVIL = "a{b}c\nd|e\tf"
+
+
+def _strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            yield k
+            yield from _strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _strings(v)
+
+
+def test_display_safe_replaces_unsafe_and_keeps_tab_and_pipe():
+    assert _display_safe(_EVIL) == "a\uff5bb\uff5dc d|e\tf"
+    assert _display_safe({"k": [_EVIL, 1, None, True]}) == {"k": ["a\uff5bb\uff5dc d|e\tf", 1, None, True]}
+    assert _display_safe("纯文本 abc") == "纯文本 abc"                   # 反例：没有不安全字符时原样
+
+
+def test_builder_output_has_no_unsafe_chars_anywhere():
+    """每个用户字符串入口（标题、轴名、类目、系列名两种来源、饼图扇区名）都带上全部不安全字符，产物里一个都不剩。"""
+    df = pd.DataFrame({_EVIL: [_EVIL + "1", _EVIL + "2"], "s" + _EVIL: [_EVIL, _EVIL + "x"],
+                       "n" + _EVIL: [1, 2], "m" + _EVIL: [3, 4]})
+    specs = [build_option("bar", df, x=_EVIL, y=["n" + _EVIL, "m" + _EVIL], title=_EVIL),
+             build_option("line", df, x=_EVIL, y="n" + _EVIL, series="s" + _EVIL, title=_EVIL),
+             build_option("pie", df, x=_EVIL, y="n" + _EVIL, title=_EVIL),
+             build_option("scatter", df, x="n" + _EVIL, y="m" + _EVIL, series="s" + _EVIL, title=_EVIL)]
+    for spec in specs:
+        assert validate_spec(spec) == []
+        assert not [s for s in _strings(spec["option"]) if any(c in s for c in DISPLAY_UNSAFE)]
+        assert "a\uff5bb\uff5dc d|e\tf" == spec["option"]["title"]["text"]
+
+
+def test_crlf_in_cells_leaves_no_raw_cr_on_canvas():
+    """Windows 导出的 CSV 单元格里是 \r\n：\r 不在 DISPLAY_UNSAFE，靠 _clean_str 的 _CTRL 变成空格（"上  下"，两个空格）。
+    钉住"产物里没有裸 \r"，防止以后放宽 _CTRL 时 \r 悄悄回到画布（PR #46 windows CI 暴露）。"""
+    df = pd.DataFrame({"c\r\nx": ["上\r\n下", "a\rb"], "n": [1, 2]})
+    spec = build_option("bar", df, x="c\r\nx", y="n", title="t\r\nx")
+    assert validate_spec(spec) == []
+    assert not [s for s in _strings(spec["option"]) if "\r" in s]
+    assert spec["option"]["title"]["text"] == "t  x"
+
+
+def test_message_exits_keep_raw_text():
+    """消息出口保持原文：ChartError 的"可用列"、accept_worker_charts 的 _msgs 里 { } \\n 原样。
+    这是挡住"把规范化挪进 _clean_str"的唯一测试——模型照抄全角列名会陷入"列不存在"死循环。"""
+    df = pd.DataFrame({"{a}": [1], "x\ny": [2]})
+    with pytest.raises(ChartError) as e:
+        build_option("bar", df, x="不存在", y="{a}")
+    assert "{a}" in str(e.value) and "x\ny" in str(e.value) and "\uff5b" not in str(e.value)
+    out = accept_worker_charts({"chart_errors": ["列 '{a}' 不存在\n可用列：{b}"], "charts": []})
+    assert out["chart_errors"] == ["列 '{a}' 不存在\n可用列：{b}"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda o: o["title"].__setitem__("text", "t{x|y}"),
+    lambda o: o["title"].__setitem__("text", "上\n下"),
+    lambda o: o["xAxis"]["data"].__setitem__(0, "}"),
+    lambda o: o["series"][0].__setitem__("name", "{"),
+    lambda o: o["grid"].__setitem__("left", "3%{"),
+])
+def test_gate_rejects_hand_built_unsafe_spec(mutate):
+    """拒绝路径：绕过 builder 手工塞不安全字符。对 builder 产物闸门永远不触发，所以必须这样单独测。"""
+    spec = copy.deepcopy(_ok_spec())
+    mutate(spec["option"])
+    problems = validate_spec(spec)
+    assert any("渲染不安全字符" in p for p in problems), problems
+
+
+def test_gate_rejects_unsafe_dict_key():
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["title"]["te{xt"] = "x"
+    assert any("键" in p and "渲染不安全字符" in p for p in validate_spec(spec))
+
+
+def test_gate_covers_fields_not_in_allowed(monkeypatch):
+    """遍历覆盖：给 _ALLOWED 临时加一个新字段，闸门照样拦（它不看规则表）。"""
+    allowed = copy.deepcopy(_ch._ALLOWED)
+    allowed["yAxis"]["nameNew"] = _ch._STR
+    monkeypatch.setattr(_ch, "_ALLOWED", allowed)
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["yAxis"]["nameNew"] = "ok"
+    assert validate_spec(spec) == []                                   # 对照：新字段本身合法
+    spec["option"]["yAxis"]["nameNew"] = "a{b"
+    assert any("yAxis.nameNew" in p and "渲染不安全字符" in p for p in validate_spec(spec))
+
+
+def test_display_safe_and_gate_share_charset(monkeypatch):
+    """漂移测试：含全部不安全字符的串经 _display_safe 必过闸门；给 DISPLAY_UNSAFE 加一个字符，两侧同时生效。"""
+    every = "".join(DISPLAY_UNSAFE) + "正常"
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["title"]["text"] = _display_safe(every)
+    assert validate_spec(spec) == []
+    monkeypatch.setitem(_ch.DISPLAY_UNSAFE, "\u200b", "")
+    spec["option"]["title"]["text"] = "零\u200b宽"
+    assert any("渲染不安全字符" in p for p in validate_spec(spec))    # 闸门侧生效
+    assert "\u200b" not in build_option("bar", pd.Series([1], index=["零\u200b宽"]))["option"]["xAxis"]["data"][0]  # 规范化侧生效
+
+
+def test_builder_slip_becomes_chart_bug_error(monkeypatch):
+    """builder 漏规范化（_display_safe 失效）时闸门变红，记 ChartBugError，不放出去。"""
+    monkeypatch.setattr(_ch, "_display_safe", lambda o: o)
+    with pytest.raises(ChartBugError, match="渲染不安全字符"):
+        build_option("bar", pd.Series([1], index=["{a}"]))
+
+
+def test_grid_uses_outer_bounds_and_contain_label_is_gone():
+    assert "containLabel" not in _ch._ALLOWED["grid"]
+    assert _ch._ENUMS[("grid", "outerBoundsMode")] == {"same"}
+    assert _ch._ENUMS[("grid", "outerBoundsContain")] == {"axisLabel"}
+    for kind in ("bar", "line", "area"):
+        g = build_option(kind, pd.Series([1, 2], index=["a", "b"]))["option"]["grid"]
+        assert g["outerBoundsMode"] == "same" and g["outerBoundsContain"] == "axisLabel" and "containLabel" not in g
+    g = build_option("scatter", pd.DataFrame({"x": [1.0], "y": [2.0]}), x="x", y="y")["option"]["grid"]
+    assert g["outerBoundsMode"] == "same" and "containLabel" not in g
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["grid"]["containLabel"] = True
+    assert any("grid.containLabel 不在白名单" in p for p in validate_spec(spec))
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["grid"]["outerBoundsContain"] = "all"
+    assert any("不允许" in p for p in validate_spec(spec))

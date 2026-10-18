@@ -65,26 +65,32 @@ FAIL_ANSWER = "（fake）没能得出结果。"
 
 # ------------------------------------------------------------ F3 第二步：注入载荷（gen_ui_types 导出给前端，前端不另写）
 # 每条都短于 charts.NAME_MAX，不会被截断。P4 / P5 不是代码执行面，测的是 ECharts 会不会把用户字符串当模板 / 富文本解析。
+# P6 / P7（F3 第三步）：第二步实测出的两个最高级威胁的回归载荷。P6 用 `}` 跳出 tooltip 的 richText 包装、借内部数值样式
+# 在数值列伪造 999（样式名 __EC_aUTo_<n>，n 起点随机，固定写 4 只是覆盖其中一个）；P7 用换行改变 tooltip 行归属。
+# 后端 _display_safe 之后两者都应原样（全角 / 空格）画成一段，期望显示串由 gen_ui_types 算进 inject.json 的 display。
 INJECT_PAYLOADS = {
     "P1": '<img src=x onerror="window.__pwned=1">',
     "P2": '"><svg onload="window.__pwned=2">',
     "P3": "javascript:window.__pwned=3",
     "P4": "{a}{b}{c}",
     "P5": "{x|富文本}",
+    "P6": "x}{__EC_aUTo_4|999",
+    "P7": "上\n下",
 }
 _P = INJECT_PAYLOADS
 # 列：类目列名 P4、系列列名 P5（进轴名 / 标题）；数值列名 P2、P3（进宽表图例、长表 y 轴名）。
-# 5 行：类目值按 INJECT_ORDER，系列值错开一位（长表每个 (类目, 系列) 唯一）。P2 列全相等，饼图 5 个扇区等分（e2e 按角度悬停）。
-# 顺序有讲究：载荷标签长，1200px 宽的图里 echarts 自动隔一个画一个（第 0、2、4 个），P4、P5 放在画得出来的位置上，
-# 这样类目轴标签这个位置上 P4、P5 都有实测结论。
+# 7 行：类目值按 INJECT_ORDER，系列值错开一位（长表每个 (类目, 系列) 唯一）。P2 列全相等，饼图 7 个扇区等分（e2e 按角度悬停）。
+# 顺序有讲究：载荷标签长，1200px 宽的图里 echarts 自动隔一个画一个（第 0、2、4、6 个），P4–P7 放在画得出来的位置上，
+# 这样类目轴标签这个位置上 P4–P7 都有实测结论（e2e 断言了这四个确实被画出来）。
 INJECT_COLUMNS = [_P["P4"], _P["P5"], _P["P2"], _P["P3"]]
-INJECT_ORDER = ["P4", "P1", "P5", "P2", "P3"]
-INJECT_ROWS = [[_P[INJECT_ORDER[i]], _P[INJECT_ORDER[(i + 1) % 5]], 2, i + 1] for i in range(5)]
+INJECT_ORDER = ["P4", "P1", "P5", "P2", "P6", "P3", "P7"]
+_N = len(INJECT_ORDER)
+INJECT_ROWS = [[_P[INJECT_ORDER[i]], _P[INJECT_ORDER[(i + 1) % _N]], 2, i + 1] for i in range(_N)]
 INJECT_ANSWER = (f"（fake）结论：{_P['P1']} {_P['P2']} {_P['P3']} [点我]({_P['P3']})")
 
 
 def inject_csv() -> str:
-    """注入夹具 CSV，用 csv.writer 生成：载荷里有 < " { |，手拼会把 CSV 结构撑坏。"""
+    """注入夹具 CSV，用 csv.writer 生成：载荷里有 < " { | 和换行，手拼会把 CSV 结构撑坏。"""
     import csv
     import io
     buf = io.StringIO()

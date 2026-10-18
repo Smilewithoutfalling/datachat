@@ -1350,7 +1350,7 @@ Playwright：
 - 沙箱环境备注：Playwright 浏览器装到仓库外 `PLAYWRIGHT_BROWSERS_PATH=/workspace/work/ms-playwright`（home 不持久），系统依赖用 `playwright install-deps chromium`。
 
 
-## [38] 2026-10-17 · 阶段 5 F3 第二步：注入实测，tooltip 会解析 `}` · commit <待提交>
+## [38] 2026-10-17 · 阶段 5 F3 第二步：注入实测，tooltip 会解析 `}` · commit 706e9b8（PR #43）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第二步注入实测完成；下一步是第三步 prepare 骨架 + outerBounds + tooltip 的 `{}` 处理）。方案见 phase5-frontend.md「F3 第二步」（PR #42）。[37] 的 SHA 已回填 acaa8bf（PR #41）。
 
@@ -1387,3 +1387,49 @@ Playwright：
 - 固定端口连续跑 e2e 会撞上 TIME_WAIT。定性为测试工具问题加 sidecar 契约缺口（壳必须用 `--port 0`），不要加 SO_REUSEADDR，见 issue #44。
 - `app/core/result.py:117`（`if res.chart_errors and not has_option`）：有图时 chart_error 被静默丢弃，用户少看到一张图却不知道。这是有意的"部分失败不打扰"还是遗漏，待定。
 - 第三步要连带处理：后端 `_clean_str` / `_cat` 规范化 `{}` 和换行，`validate_spec` 加闸门：遍历整个 option，任何 string 值都不得含 `{`、`}`、`\n`，不按登记键逐个查；判定表的 `note()` 判据要跟着改（规范化后原串不再出现，判据不改的话会变成 raw 和 parsed 都为 false），改的是判据，不是期望值；重新生成 chart_fixtures 的注入例（inject.json 不变）。
+
+
+## [39] 2026-10-17 · 阶段 5 F3 第三步：渲染面规范化 + 闸门、outerBounds、prepare 管线骨架 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第三步完成；下一步是第四步主题，人眼验收，单独一个 PR）。方案见 phase5-frontend.md「F3 第三步」（PR #45）。[38] 的 SHA 已回填 706e9b8（PR #43）。
+
+后端：
+- `app/tools/charts.py`：新增模块常量 `DISPLAY_UNSAFE = {"{": "｛", "}": "｝", "\n": " "}`，由 `_display_safe` 和 `_check_strings` 共用。
+  - `_display_safe(option)` 在 `build_option` 里、`validate_spec` 之前调用，递归处理 option 的每个 string 值（键不动）。
+  - `_check_strings` 是 `validate_spec` 里的独立闸门，不看 `_ALLOWED`，string 值或键含不安全字符即报问题。builder 漏掉时变成 ChartBugError。
+  - `_clean_str` 不改，补了 docstring 说明原因（它也是消息出口）。`\t` 不处理的依据写在常量注释里。
+- grid：`containLabel: True` → `outerBoundsMode: "same", outerBoundsContain: "axisLabel"`（`_cartesian`、`_scatter`）。官方注释称两者等价，同时说明 'axisLabel' 更精确、与旧行为略有差异。`_ALLOWED.grid` 删 containLabel、加两个键，`_ENUMS` 加两项。clamp 保持默认 25%。
+- `tests/fake_llm.py`：新增 P6 `x}{__EC_aUTo_4|999`、P7 `上\n下`。`INJECT_ORDER = P4, P1, P5, P2, P6, P3, P7`（7 行）。
+- `scripts/gen_ui_types.py`：`inject.json` 加 `display`（后端 `_display_safe` 算出）；新夹具 `long-labels-bar`（3 个 120 字类目）。chart_schema / chart_fixtures 已重新生成。
+
+前端：
+- `register.ts`：去掉 `LegacyGridContainLabel` 和那段跨端隐式契约注释，`ENUMS` 加 `grid.outerBoundsMode` / `grid.outerBoundsContain`（都是 NONE）。跨端隐式契约现在是零条。
+- `prepare.ts`：拆成 `applyLayer1` / `applySwitches`（恒等）/ `cleanup`，由 `runPipeline(option, ui, steps)` 串起来；`prepare(option, ui)` 固定用两个恒等步骤。`UiState` 是空类型。调用方都改成传 `{}`。
+
+偏离方案（及理由）：
+- **恒等步骤不声明 `ui` 形参**，而不是写 `_ui`。`_ui` 能过 tsc（noUnusedParameters 放过下划线），但 ESLint `@typescript-eslint/no-unused-vars` 会红（实测 2 errors）。TS 允许把参数更少的函数赋给 `Step`，第五步用到时再加。
+- **`runPipeline` 单独导出**，用来注入替身步骤，产品只调 `prepare`。这样产品签名里没有只给测试用的参数。
+- **第一根柱子的门槛**：width 用相对变化 < 5%；x 用平移量占画布宽 < 5%，没有用 x 自身的相对变化。实测 bar 的 x 51.91 → 54.82（自身相对变化 5.6%，占画布宽 0.45%），width 80.11 → 79.69（-0.5%）。bar-missing 的 x 56.41 → 59.30，width 100.13 → 99.62。x 平移来自新机制把轴标签的边距算得更精确（grid 由 [33.92, 60, 580.48, 290] 变成 [36.92, 66, 577.48, 284]），和官方注释说的"略有差异"一致。如果拿 x 自身比，这一条在没有缺陷的情况下也是红的。
+- **long-labels-bar 的结论和方案预想不同**：3 个 120 字类目在 640×400 的 SSR 里，**新旧两种写法都一个类目标签都不画**，grid 也基本不缩（旧 [44, 60, 570, 290]，新 [47, 66, 567, 298]）。所以"标签都在画布内"对这个夹具来说是空真。测试里把"类目标签数 = 0"单独钉住，其他直角坐标夹具要求至少画出一个。按标签长度扫了一遍（同样 640 宽，3 个类目）：10 字时两者都画 3 个；20 字时都画 2 个；**30 字时旧写法画 1 个、左边溢出画布 41 px（x=-41），新写法一个都不画**（grid 左边缩进 103）；40 字及以上两者都不画。不是 clamp 导致的溢出，反而是旧写法会溢出。clamp 没调。注意：jsdom 没有 canvas，SSR 的文字宽度是 zrender 估算的（每个中文字 12 px），浏览器里的真实阈值会不同。
+- **轴标签识别按结构**：用 echarts AxisBuilder 给文本元素父节点的 `anid`（`label_<tick>`；轴名是 `name`）。第一版按文本匹配，红在注入夹具上：P4 同时是轴名和类目，轴名在画布右边缘外（x=629.4，宽 91）。轴名是否纳入 outerBounds 是第四步的事，所以轴名不算在这条断言里。
+- **e2e 位置分类器修正（判定表期望值没动）**：长表有 7 个系列后，图例折成两行（y=326 和 348，ch=360），第二行的 P5 图例被归成了"轴名"，判定表多出一格 `P5 axisName`。`posOf` 加了一条：`align=left` 且 y > 85% 高度 → 图例（x 轴名在 y=290）。
+- **P7 按"每次绘制"判**：tooltip 过渡期间会重绘多帧（实测 24 次绘制都是 `上 下`），所以断言改成"所有含上 / 下的绘制文本都等于 `上 下`，且每一次都有同一 y 的真值 `2`"，不再要求只画一次。
+- **PR #46 的 windows CI 红（P7）**：原因是测试夹具用文本模式写 CSV，Windows 会把单元格里的 `\n` 写成 `\r\n`，P7 变成了 `上  下`。修法：`test_fake_llm.py` 的 `inject_path` 改用 `write_text(..., newline="")`。顺带确认产品行为：`\r` 不在 `DISPLAY_UNSAFE` 里，但 `_clean_str` 的 `_CTRL`（覆盖 `\x0b-\x1f`）会先把它换成空格，所以画布上不会出现裸 `\r`。新增 `test_crlf_in_cells_leaves_no_raw_cr_on_canvas` 把这一点钉住。`\r\n` 会显示成两个空格，不合并（合并就要动 `_clean_str` 的消息出口，S 选了 A）。
+- `register.control.test.ts`：原来"少注册 LegacyGridContainLabel 会被 `[ECharts]` log 抓到"那条，现在改为手工往 option 里塞 `containLabel`。这样仍能证明零 log 守卫在 vitest 里有效（守卫留在 vitest，没有挪到 e2e）。
+
+测试：
+- pytest `tests/test_charts.py` +14（含 `test_crlf_in_cells_leaves_no_raw_cr_on_canvas`）：`test_display_safe_replaces_unsafe_and_keeps_tab_and_pipe`（正反例）、`test_builder_output_has_no_unsafe_chars_anywhere`（四种图型、每个入口都带全部不安全字符）、`test_message_exits_keep_raw_text`（ChartError 的可用列和 `_msgs` 原样保留 `{a}` 和 `\n`）、`test_gate_rejects_hand_built_unsafe_spec` ×5（拒绝路径）、`test_gate_rejects_unsafe_dict_key`、`test_gate_covers_fields_not_in_allowed`（遍历覆盖）、`test_display_safe_and_gate_share_charset`（漂移：给常量加零宽字符，两侧同时生效）、`test_builder_slip_becomes_chart_bug_error`、`test_grid_uses_outer_bounds_and_contain_label_is_gone`。`test_chart_fixtures.py` +1：`test_no_fixture_contains_contain_label`。`test_fake_llm.py` 的真链路断言改成对比 `_display_safe` 后的载荷（结论仍是原文）。
+- vitest：`charts.test.ts` 新增「outerBounds」（直角坐标夹具每个轴标签在画布内；bar、bar-missing 第一根柱子对照 2213aac 的取值）和「prepare 管线骨架」（恒等步骤逐字节一致；prepare 与 v0 逐字节一致；替身步骤在第一位或第二位塞的被禁键都被清掉；替身原地修改不影响输入；耗时记录）。原 v0 断言原样保留。
+- e2e `f3-inject.spec.ts`：P6、P7 断言；前提断言 P4–P7 都画在宽表的类目轴标签上；`note()` 改成 `includes(display[P])`；tooltip 两格 PARSED → R（原因：后端 `_display_safe` 把 `{}` 规范化为全角，richText 包装不再能被提前闭合）；饼图悬停按 360/N 度算。
+
+实测（沙箱 aarch64，只记录）：
+- prepare 耗时：bar-5000 跑 20 次，中位数 1.022 ms（最小 0.927，最大 1.538）。
+- e2e 里 P6 悬停：表头画成 `x｝｛__EC_aUTo_4|999`（14px，align=left），数值行是 `2`（900 14px，align=right），没有 999。P7：tooltip 行 `上 下`（14px）和真值 `2`（900 14px）在同一个 y=160。
+
+验证（最后一次改动之后全部重跑）：pytest **722 passed**（+15，含本地闸门数据 25 条）；vitest **102**（+25）；Playwright **11 passed**（nokey 7 + fake 4，f3-inject 26.4 s；停止本轮感知 6 ms、POST /cancel 16 ms、后端 8039 ms）；lint、tsc、build（check-dist 0 内联，主 chunk 964.38 → 963.73 kB，少了 LegacyGridContainLabel）、`gen_ui_types --check` 都通过。
+
+未做：
+- 主题、轴名是否纳入 outerBounds（第四步）；开关和层 1 的实际内容（第五步）。
+- `result.py:117` 有图时 chart_error 被丢弃（待定）；#44。
+- 截断警告里的标题现在取自规范化后的 option（`_spec_title`），名字含 `{}` 时警告里显示全角。这条警告给用户看，不会回到模型的列名流程，所以没动。
+- long-labels 在真实浏览器字体下的阈值没有测（SSR 是估算宽度）。

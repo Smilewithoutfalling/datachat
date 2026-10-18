@@ -26,3 +26,9 @@ def test_point_boundaries():
         at, over = fx[f"{kind}-{MAX_POINTS}"], fx[f"{kind}-{MAX_POINTS + 1}"]
         assert at["truncated"] is False and len(at["option"]["series"][0]["data"]) == MAX_POINTS
         assert over["truncated"] is True and len(over["option"]["series"][0]["data"]) == MAX_POINTS
+
+
+def test_no_fixture_contains_contain_label():
+    """F3 第三步：前端摘掉 LegacyGridContainLabel 的依据——全部夹具产物里都没有 containLabel。"""
+    text = json.dumps(_fixtures(), ensure_ascii=False)
+    assert "containLabel" not in text and "outerBoundsMode" in text

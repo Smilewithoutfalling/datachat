@@ -26,7 +26,7 @@ export function EChart({ spec }: { spec: ChartSpec }) {
   }, []);
 
   useEffect(() => {
-    inst.current?.setOption(prepare(spec.option), { notMerge: true }); // option 变了整体重设，不做增量合并
+    inst.current?.setOption(prepare(spec.option, {}), { notMerge: true }); // option 变了整体重设，不做增量合并
   }, [spec]);
 
   return <div ref={ref} className="echart" data-testid="echart" data-kind={spec.kind} />;
