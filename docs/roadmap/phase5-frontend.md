@@ -492,6 +492,95 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - `prepare` 的签名是 `prepare(spec, ui, theme)`，第一参数是 spec 不是 option：`changeKind` 要 `spec.kind`（源图型）和 `spec.x_kind`，从 option 反推图型和 x_kind 正是本步否掉的做法。
 - dataZoom 那一行在 M13 §12 里加了"前端实际写出"一列（没有覆盖原第三列"v1 `_ALLOWED`"），测试读这一列。
 
+**F3 第六步：导出 PNG（S 10-19 评审已并入：交互态选 (b)）**
+
+输入：§0 验收 3"导出 PNG 得到非空 data URL，文件名已清洗"；§3"导出 [v2]"（离屏实例、文件名清洗、可选浅色）；第四步第 1 条"离屏导出用同一个主题名 init、走同一个 prepare"；拆分表"导出的应该是用户最终看到的样子"。
+
+实测（echarts 6.1.0，后端托管的 dist + 真实 CSP，Playwright Chromium；探针把 `init` / `prepare` 临时挂到 window 上，走 `prepare(spec, ui, theme)` 完整路径，夹具是 `build_option` 产出的 `bar`，不入库）：
+- **离屏实例不用挂进 DOM。** `init(document.createElement("div"), theme, {renderer: "canvas", width: 800, height: 450})` → `setOption` → `getDataURL({type: "png", pixelRatio: 2})`，得到 1600×900 的 PNG，每张约 22 ms。
+- **入场动画会被拍成半成品。** 同一张图，`setOption` 后立刻 `getDataURL`：保留动画时非背景像素 21,921，`animation: false` 时 365,183，相差约 17 倍（柱子还在从 0 长高）。所以离屏 option 必须关动画。
+- **背景来自主题，`getDataURL` 的 `backgroundColor` 参数不起作用。** 暗色画布导出的左上角是 `#15181C`（21,24,28），不透明；传 `backgroundColor: "#FFFFFF"` 后仍是 `#15181C`。所以"导出用浅色"只能换主题重画一遍，不能靠这个参数。
+- **下载：data URL 和 blob URL 的 `<a download>` 在 CSP 下都能触发下载。** Chromium 会自己把 `a/b\c:d*?.png` 改成 `a_b_c_d__.png`，但这是浏览器的行为，Tauri 的 WebView2 / WKWebView 不一定一样，所以不依赖它。
+- **`fetch(dataURL)` 被 CSP 拦下**（`connect-src 'self'`，console 报错）。所以 data URL 不能用 fetch 转成 blob；如果要转，用 `atob` 手动转。
+- **下载的字节拿得到。** Playwright 的 `waitForEvent("download")` + `download.path()`：data URL 和 blob URL 两种都能拿到文件（52,446 字节，PNG 签名 `89504e470d0a1a0a`，IHDR 宽高 1600×900，`failure()` 为 null）。所以 e2e 可以建在真下载上（S 10-19 要求先验证）。Chromium 在 Linux 上**不会**改写 `CON.png`，保留名完全靠我们自己清洗。
+- **darkCanvas 的系列色放到白底上不达标**：对 `#FFFFFF` 的对比度分别是 2.96 / 3.27 / 2.25 / 2.32 / 2.94 / 2.51，6 个里有 5 个低于第四步的 3.0（WCAG 1.4.11）。"同一套配色只把背景换白"会违反第四步的对比度契约。
+- **后端的 `_clean_str` 不清 bidi 控制符**：`_CTRL`（`charts.py:56`）只覆盖 C0、DEL、U+2028/2029，不含 U+202A–202E、U+2066–2069，也不含 C1。另外，重放路径不过 `validate_spec`（第四步已用测试钉住）。所以文件名只能由前端自己清洗，不能假设后端已经清过。仓库里已经有两套控制字符集：`charts.py:56` 的 `_CTRL`，以及 `app/server/app.py:66` 的 `_CONTROL_CHARS`（含 C1 和 bidi）。文件名是第三套需求，**独立定义、表驱动测试，不复用其中任何一套**（S 10-19）：否则将来有人"统一一下"，RLO 防线的依据就混了。
+
+已定：
+1. **离屏导出，和屏幕走同一条管线。** `exportPng(spec, ui, theme, size)` 是纯 DOM 函数，放在 `charts/exportPng.ts`。导出的结果只由这四个参数决定，屏幕上也是同一套 `prepare`：
+   - 创建不挂 DOM 的 div；`init(el, theme, {renderer: "canvas", width, height})`；
+   - `opt = prepare(spec, ui, theme)`，然后写 `opt.animation = false`；
+   - `setOption(opt, {notMerge: true})`；`getDataURL({type: "png", pixelRatio: 2})`；
+   - `dispose` 放在 `finally` 里，抛错也要释放。
+   - `animation` 只在导出路径写，不进 `prepare`，所以屏幕上的图不受影响。它也不是开关的产物，不进 FRONTEND_KEYS。
+   - 尺寸取屏幕上这张图容器当前的 `clientWidth × clientHeight`：布局（nameTruncate、图例换行、刻度密度）依赖尺寸，换个尺寸就不是同一张图了。
+2. **交互态进 UiState，在事件发生时写入，导出时不从实例里取（S 10-19 选 (b)，并定了实现形状）。**
+   - 不走 `chart.getOption()`：它返回的是渲染后的完整 option，带全部 series data。它是渲染产物，spec 才是后端的真相，拿它再 prepare 就等于把数据重算一遍。也不走 `getModel()`：那是内部 API，升级就会挂。
+   - `UiState` 加 `view: { zoom: {start, end} | null, hidden: number[] }`：
+     - 监听 `datazoom`，存 `{start, end}`：0–100 的有限数，start ≤ end；
+     - 监听 `legendselectchanged`，存被隐藏系列的 **seriesIndex** 集合。
+   - **系列显隐用 index，不用名字**：`legend.selected` 的键是系列名，而系列名来自 CSV 列名，这是整个产物里唯一一条"用户字符串作为对象键进 option"的路径。现在它经过了 `_display_safe`，所以不危险；但只要将来有人把 option 回传后端，它就是一条新的用户字符串通道。事件给的是名字，在事件处理里按当前 option 的 `series[i].name` 换成 index 再存，名字不进 UiState。
+   - `prepare` 新增一步 `applyView`，放在 `applySwitches` 之后、`cleanup` 之前：
+     - `zoom` 写进开关已经产出的 `dataZoom[*].start/end`。zoom 开关关着、或当前图型不兼容时忽略；
+     - `hidden` 用 index 生成 `legend.selected`：键取 `series[i].name`，这个名字来自 option 本身，不来自 UiState。index 越界的直接丢掉。
+     - 换图型时（target 变化）、spec 变化时，`view` 清空。系列数和类目轴都可能变，旧的 index 和区间没有意义。
+     - `view` 不持久化，刷新后回到全量、全显，和"目标图型"一致。
+   - 屏幕路径：`view` 变化也走整体 `setOption(notMerge)`。`datazoom` 是 ECharts 自己先画好的，写回 UiState 之后重设一遍结果相同；要防止回环，比较值相同就不 set。
+   - FRONTEND_KEYS 补两条：`dataZoom[*].start/end`（数值）、`legend.selected`（键必须等于某个 `series[i].name`，值是布尔）。例外层的机制测试同样覆盖它们。
+   - tooltip 和 hover 高亮不进 UiState，导出时也不带。
+3. **文件名清洗**，放在 `charts/filename.ts`，纯函数 `safeFilename(title, kind)`。字符集在本文件里独立定义（见实测最后一条）。按下面的顺序执行，**trim 放在限长之后**（S 10-19 指出初稿的顺序会重新造出非法的尾部）：
+   1. 来源：`option.title.text`（normalize 之后）；没有标题时用 `KIND_LABEL[kind]`（"柱状图"等）；
+   2. NFC 规范化；
+   3. 删除 C0、DEL、C1（U+0080–009F）、U+2028/2029、bidi 控制符（U+200E/200F、U+061C、U+202A–202E、U+2066–2069）。RLO 能让 `gnp.exe` 显示成 `exe.png`；
+   4. 把 `\ / : * ? " < > |` 换成 `_`；连续空白合并成一个空格；
+   5. 按码点限长 60（`Array.from`，不切断代理对）；
+   6. **限长之后**再去掉首尾的空格和点（Windows 会拒绝或静默去掉尾随的空格和点；前导点在类 Unix 上是隐藏文件）；
+   7. 清完为空时回退到 `图表`；
+   8. 保留名判"第一个点之前的那一段"：`name.split(".")[0].trimEnd().toUpperCase()` 属于 {CON, PRN, AUX, NUL, COM1–9, LPT1–9} 时，整个名字前面加 `_`。所以 `CON`、`con.txt`、`CON.png`、`Nul.tar.gz` 都会加；
+   9. 加 `.png`，不加时间戳，重名由浏览器自己编号。
+   - 第 8 步加 `_` 后最多 61 个码点，加上 `.png` 是 65，远低于 255，不需要再限长。
+4. **"导出为浅色（经典配色）"，文案写死（S 10-19 要求二选一，选这个）。**
+   - 只在当前主题是 darkCanvas 时，在导出按钮旁边显示这个勾选框。勾上后用 classic 重新 `prepare` 再 `init`（渐变的色值由 prepare 按主题写死，所以必须重新 prepare），系列配色也会一起变成经典配色，文案就照这个写。
+   - 不做"darkCanvas 的浅色变体"：实测 darkCanvas 的系列色有 5 个在白底上低于 3.0，同色系白底的方案过不了第四步的对比度契约。真要做，就是第五套配色加一整套对比度和 ΔE00 测试，不在这一步做。
+   - 勾选不持久化。
+5. **下载用 data URL 加 `<a download>`**：`a.href = dataURL; a.download = safeFilename(...); a.click()`，不挂进 DOM。`img-src` 已经允许 `data:`，不用改 CSP。不走 fetch 转 blob（会被 CSP 拦，见实测）。Tauri 壳里的下载行为到壳那一步再验证。
+6. **UI**：
+   - 控件面板加"导出 PNG"按钮；darkCanvas 下旁边多一个"导出为浅色（经典配色）"。导出失败（抛错）时在按钮旁显示"导出失败"，不弹窗，不影响屏幕上的图。
+   - matplotlib 的 png 项不加导出按钮，但在图下方标注"静态图（由 matplotlib 生成），可右键另存为"。这样同一页上两种图一个有按钮一个没有时，用户知道是为什么，不会以为按钮坏了（S 10-19）。
+
+验收：
+- **vitest**：
+  - `safeFilename` 表驱动，逐条写期望值，不只断言"不含某字符"。覆盖：
+    - INJECT_PAYLOADS P1–P7 全部；
+    - RLO 构造的 `U+202E + "gnp.exe"`；
+    - `CON`、`con.txt`、`CON.png`、`Nul.tar.gz`、`CONSOLE`（不是保留名，不加 `_`）；
+    - `..`、`  . `、全是控制字符（回退到 `图表`）；
+    - 120 字符、第 60 个码点是空格（截断后不能有尾随空格）；第 60 个码点是 `.` 同理；
+    - 65 个 emoji（限长不切断代理对）；
+    - 正常中文标题原样保留；无标题时回退到图型名。
+  - 另加一条：文件名字符集与 `_CTRL`、`_CONTROL_CHARS` 互相独立，不 import 任何一方。
+  - `exportPng`：mock `init`，断言传入的主题名和 width/height、`setOption` 收到的 option 等于 `prepare(spec, ui, theme)` 加上 `animation: false`、`getDataURL` 的参数、`dispose` 被调用；`getDataURL` 抛错时 `dispose` 仍被调用。
+  - `applyView`：
+    - zoom 写进 dataZoom；zoom 开关关着或图型不兼容时忽略；
+    - hidden 按 index 生成 `legend.selected`，键等于 `series[i].name`；
+    - 越界 index、NaN、start > end、超出 0–100 都丢掉；
+    - 换图型或 spec 变化后 view 清空；
+    - `view` 里只有数值，没有任何字符串。
+  - 4 套主题 × 全部夹具 × 开关全开 × 带 view，导出 option 都过 cleanup：不含被禁键，`tooltip.renderMode` 是 richText；例外层机制测试包含 view 产物。
+- **e2e**（后端托管的 dist；下载的字节已实测拿得到，见实测）：
+  - 点"导出 PNG"后用 `waitForEvent("download")` + `path()` 拿到文件：前 8 字节是 PNG 签名，IHDR 宽高等于容器尺寸 × 2，非背景像素数 > 0。`suggestedFilename` 等于 `safeFilename` 的期望值，用 inject 夹具的标题（P1）来测。
+  - 不发新的分析请求，零外部请求，console 干净。
+  - **开关全开和全关的导出不同，限定在单系列、类目轴的 bar 上，并且只比较对这个形状 ✅ 的开关**。COMPAT 里没有哪种图型九格全是 ✅：单系列类目 bar 上 ✅ 的是 label、gradient、radius、sort、marks、zoom 六个，legend、stack 要求多系列，smooth 不支持 bar。选到 ❌ 格时，全开就等于全关，断言恒真（S 10-19）。所以测试先用 `compat()` 算出这个形状的 ✅ 集合，断言它正好是这六个；再逐个打开，断言每一个的导出都和全关不同，最后断言全开也和全关不同。
+  - Shift + 滚轮缩放后导出的图和缩放前不同；在图例上点掉一个系列后导出的图和点掉前不同；刷新后 view 清空，导出的图和初始相同。
+  - darkCanvas 勾"导出为浅色（经典配色）"后左上角是 `#FFFFFF`，不勾是 `#15181C`。
+  - matplotlib 的 png 项有"静态图"标注，没有导出按钮。
+- **人眼**：4 套主题各导出一张，加一张 darkCanvas 的浅色导出、一张缩放加点掉系列后的导出，给 S 看。
+- THREAT_MODEL §2.3 加两行：导出文件名是用户串离开画布的唯一出口，前端清洗，规则见本条第 3 点；系列显隐按 index 存，用户串不作为 UiState 的键或值。DEVLOG [42]，[41] 回填 d589d61。全部闸门在最后一次改动之后重跑。
+
+不做：SVG / 矢量导出（第一步已说明这一步不做）；复制到剪贴板；批量导出；导出时改尺寸或分辨率；matplotlib png 的导出按钮；darkCanvas 的浅色变体（第 4 点）；view 持久化；Tauri 壳里的下载行为（到壳那一步再做）；#49。
+
+估时：1–1.25 天（含 view 进 UiState 和 applyView）。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
