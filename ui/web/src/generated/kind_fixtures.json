@@ -1,0 +1,3167 @@
+{
+ "_generated_by": "scripts/gen_ui_types.py",
+ "groups": {
+  "single": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "城市",
+      "data": [
+       "北京",
+       "上海",
+       "广州",
+       "深圳",
+       "杭州"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "销量",
+       "type": "bar",
+       "data": [
+        3,
+        5,
+        2,
+        8,
+        6
+       ]
+      }
+     ],
+     "title": {
+      "text": "销量",
+      "left": "center"
+     }
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "城市",
+      "data": [
+       "北京",
+       "上海",
+       "广州",
+       "深圳",
+       "杭州"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "销量",
+       "type": "line",
+       "data": [
+        3,
+        5,
+        2,
+        8,
+        6
+       ],
+       "showSymbol": true
+      }
+     ],
+     "title": {
+      "text": "销量",
+      "left": "center"
+     }
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "城市",
+      "data": [
+       "北京",
+       "上海",
+       "广州",
+       "深圳",
+       "杭州"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "销量",
+       "type": "line",
+       "data": [
+        3,
+        5,
+        2,
+        8,
+        6
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ],
+     "title": {
+      "text": "销量",
+      "left": "center"
+     }
+    }
+   },
+   "pie": {
+    "v": 1,
+    "kind": "pie",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "item"
+     },
+     "legend": {
+      "show": true,
+      "type": "scroll",
+      "orient": "vertical",
+      "left": "left",
+      "top": "middle"
+     },
+     "series": [
+      {
+       "name": "销量",
+       "type": "pie",
+       "radius": [
+        "0%",
+        "65%"
+       ],
+       "center": [
+        "60%",
+        "55%"
+       ],
+       "data": [
+        {
+         "name": "北京",
+         "value": 3
+        },
+        {
+         "name": "上海",
+         "value": 5
+        },
+        {
+         "name": "广州",
+         "value": 2
+        },
+        {
+         "name": "深圳",
+         "value": 8
+        },
+        {
+         "name": "杭州",
+         "value": 6
+        }
+       ]
+      }
+     ],
+     "title": {
+      "text": "销量",
+      "left": "center"
+     }
+    }
+   }
+  },
+  "time": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "time",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "日期",
+      "data": [
+       "2026-01-01",
+       "2026-01-02",
+       "2026-01-03",
+       "2026-01-04",
+       "2026-01-05",
+       "2026-01-06",
+       "2026-01-07",
+       "2026-01-08",
+       "2026-01-09",
+       "2026-01-10",
+       "2026-01-11",
+       "2026-01-12",
+       "2026-01-13",
+       "2026-01-14",
+       "2026-01-15",
+       "2026-01-16",
+       "2026-01-17",
+       "2026-01-18",
+       "2026-01-19",
+       "2026-01-20",
+       "2026-01-21",
+       "2026-01-22",
+       "2026-01-23",
+       "2026-01-24",
+       "2026-01-25",
+       "2026-01-26",
+       "2026-01-27",
+       "2026-01-28",
+       "2026-01-29",
+       "2026-01-30"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      },
+      "axisLabel": {
+       "hideOverlap": true
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "访问",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "访问",
+       "type": "bar",
+       "data": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "time",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "日期",
+      "data": [
+       "2026-01-01",
+       "2026-01-02",
+       "2026-01-03",
+       "2026-01-04",
+       "2026-01-05",
+       "2026-01-06",
+       "2026-01-07",
+       "2026-01-08",
+       "2026-01-09",
+       "2026-01-10",
+       "2026-01-11",
+       "2026-01-12",
+       "2026-01-13",
+       "2026-01-14",
+       "2026-01-15",
+       "2026-01-16",
+       "2026-01-17",
+       "2026-01-18",
+       "2026-01-19",
+       "2026-01-20",
+       "2026-01-21",
+       "2026-01-22",
+       "2026-01-23",
+       "2026-01-24",
+       "2026-01-25",
+       "2026-01-26",
+       "2026-01-27",
+       "2026-01-28",
+       "2026-01-29",
+       "2026-01-30"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      },
+      "axisLabel": {
+       "hideOverlap": true
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "访问",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "访问",
+       "type": "line",
+       "data": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59
+       ],
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "time",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "日期",
+      "data": [
+       "2026-01-01",
+       "2026-01-02",
+       "2026-01-03",
+       "2026-01-04",
+       "2026-01-05",
+       "2026-01-06",
+       "2026-01-07",
+       "2026-01-08",
+       "2026-01-09",
+       "2026-01-10",
+       "2026-01-11",
+       "2026-01-12",
+       "2026-01-13",
+       "2026-01-14",
+       "2026-01-15",
+       "2026-01-16",
+       "2026-01-17",
+       "2026-01-18",
+       "2026-01-19",
+       "2026-01-20",
+       "2026-01-21",
+       "2026-01-22",
+       "2026-01-23",
+       "2026-01-24",
+       "2026-01-25",
+       "2026-01-26",
+       "2026-01-27",
+       "2026-01-28",
+       "2026-01-29",
+       "2026-01-30"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      },
+      "axisLabel": {
+       "hideOverlap": true
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "访问",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "访问",
+       "type": "line",
+       "data": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "pie": {
+    "v": 1,
+    "kind": "pie",
+    "truncated": false,
+    "x_kind": "time",
+    "option": {
+     "tooltip": {
+      "trigger": "item"
+     },
+     "legend": {
+      "show": true,
+      "type": "scroll",
+      "orient": "vertical",
+      "left": "left",
+      "top": "middle"
+     },
+     "series": [
+      {
+       "name": "访问",
+       "type": "pie",
+       "radius": [
+        "0%",
+        "65%"
+       ],
+       "center": [
+        "60%",
+        "55%"
+       ],
+       "data": [
+        {
+         "name": "2026-01-01",
+         "value": 30
+        },
+        {
+         "name": "2026-01-02",
+         "value": 31
+        },
+        {
+         "name": "2026-01-03",
+         "value": 32
+        },
+        {
+         "name": "2026-01-04",
+         "value": 33
+        },
+        {
+         "name": "2026-01-05",
+         "value": 34
+        },
+        {
+         "name": "2026-01-06",
+         "value": 35
+        },
+        {
+         "name": "2026-01-07",
+         "value": 36
+        },
+        {
+         "name": "2026-01-08",
+         "value": 37
+        },
+        {
+         "name": "2026-01-09",
+         "value": 38
+        },
+        {
+         "name": "2026-01-10",
+         "value": 39
+        },
+        {
+         "name": "2026-01-11",
+         "value": 40
+        },
+        {
+         "name": "2026-01-12",
+         "value": 41
+        },
+        {
+         "name": "2026-01-13",
+         "value": 42
+        },
+        {
+         "name": "2026-01-14",
+         "value": 43
+        },
+        {
+         "name": "2026-01-15",
+         "value": 44
+        },
+        {
+         "name": "2026-01-16",
+         "value": 45
+        },
+        {
+         "name": "2026-01-17",
+         "value": 46
+        },
+        {
+         "name": "2026-01-18",
+         "value": 47
+        },
+        {
+         "name": "2026-01-19",
+         "value": 48
+        },
+        {
+         "name": "2026-01-20",
+         "value": 49
+        },
+        {
+         "name": "2026-01-21",
+         "value": 50
+        },
+        {
+         "name": "2026-01-22",
+         "value": 51
+        },
+        {
+         "name": "2026-01-23",
+         "value": 52
+        },
+        {
+         "name": "2026-01-24",
+         "value": 53
+        },
+        {
+         "name": "2026-01-25",
+         "value": 54
+        },
+        {
+         "name": "2026-01-26",
+         "value": 55
+        },
+        {
+         "name": "2026-01-27",
+         "value": 56
+        },
+        {
+         "name": "2026-01-28",
+         "value": 57
+        },
+        {
+         "name": "2026-01-29",
+         "value": 58
+        },
+        {
+         "name": "2026-01-30",
+         "value": 59
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "wide": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "季度",
+      "data": [
+       "Q1",
+       "Q2",
+       "Q3",
+       "Q4"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "收入",
+       "type": "bar",
+       "data": [
+        10,
+        12,
+        9,
+        15
+       ]
+      },
+      {
+       "name": "成本",
+       "type": "bar",
+       "data": [
+        7,
+        8,
+        8,
+        9
+       ]
+      }
+     ],
+     "title": {
+      "text": "收支",
+      "left": "center"
+     }
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "季度",
+      "data": [
+       "Q1",
+       "Q2",
+       "Q3",
+       "Q4"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "收入",
+       "type": "line",
+       "data": [
+        10,
+        12,
+        9,
+        15
+       ],
+       "showSymbol": true
+      },
+      {
+       "name": "成本",
+       "type": "line",
+       "data": [
+        7,
+        8,
+        8,
+        9
+       ],
+       "showSymbol": true
+      }
+     ],
+     "title": {
+      "text": "收支",
+      "left": "center"
+     }
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "季度",
+      "data": [
+       "Q1",
+       "Q2",
+       "Q3",
+       "Q4"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "收入",
+       "type": "line",
+       "data": [
+        10,
+        12,
+        9,
+        15
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      },
+      {
+       "name": "成本",
+       "type": "line",
+       "data": [
+        7,
+        8,
+        8,
+        9
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ],
+     "title": {
+      "text": "收支",
+      "left": "center"
+     }
+    }
+   }
+  },
+  "many": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "k",
+      "data": [
+       "k00",
+       "k01",
+       "k02",
+       "k03",
+       "k04",
+       "k05",
+       "k06",
+       "k07",
+       "k08",
+       "k09",
+       "k10",
+       "k11",
+       "k12",
+       "k13",
+       "k14",
+       "k15",
+       "k16",
+       "k17",
+       "k18",
+       "k19",
+       "k20",
+       "k21",
+       "k22",
+       "k23",
+       "k24",
+       "k25",
+       "k26",
+       "k27",
+       "k28",
+       "k29",
+       "k30",
+       "k31",
+       "k32",
+       "k33",
+       "k34",
+       "k35",
+       "k36",
+       "k37",
+       "k38",
+       "k39",
+       "k40",
+       "k41",
+       "k42",
+       "k43",
+       "k44",
+       "k45",
+       "k46",
+       "k47",
+       "k48",
+       "k49",
+       "k50",
+       "k51",
+       "k52",
+       "k53",
+       "k54",
+       "k55",
+       "k56",
+       "k57",
+       "k58",
+       "k59",
+       "k60"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "v",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "v",
+       "type": "bar",
+       "data": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "k",
+      "data": [
+       "k00",
+       "k01",
+       "k02",
+       "k03",
+       "k04",
+       "k05",
+       "k06",
+       "k07",
+       "k08",
+       "k09",
+       "k10",
+       "k11",
+       "k12",
+       "k13",
+       "k14",
+       "k15",
+       "k16",
+       "k17",
+       "k18",
+       "k19",
+       "k20",
+       "k21",
+       "k22",
+       "k23",
+       "k24",
+       "k25",
+       "k26",
+       "k27",
+       "k28",
+       "k29",
+       "k30",
+       "k31",
+       "k32",
+       "k33",
+       "k34",
+       "k35",
+       "k36",
+       "k37",
+       "k38",
+       "k39",
+       "k40",
+       "k41",
+       "k42",
+       "k43",
+       "k44",
+       "k45",
+       "k46",
+       "k47",
+       "k48",
+       "k49",
+       "k50",
+       "k51",
+       "k52",
+       "k53",
+       "k54",
+       "k55",
+       "k56",
+       "k57",
+       "k58",
+       "k59",
+       "k60"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "v",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "v",
+       "type": "line",
+       "data": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60
+       ],
+       "showSymbol": false
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "k",
+      "data": [
+       "k00",
+       "k01",
+       "k02",
+       "k03",
+       "k04",
+       "k05",
+       "k06",
+       "k07",
+       "k08",
+       "k09",
+       "k10",
+       "k11",
+       "k12",
+       "k13",
+       "k14",
+       "k15",
+       "k16",
+       "k17",
+       "k18",
+       "k19",
+       "k20",
+       "k21",
+       "k22",
+       "k23",
+       "k24",
+       "k25",
+       "k26",
+       "k27",
+       "k28",
+       "k29",
+       "k30",
+       "k31",
+       "k32",
+       "k33",
+       "k34",
+       "k35",
+       "k36",
+       "k37",
+       "k38",
+       "k39",
+       "k40",
+       "k41",
+       "k42",
+       "k43",
+       "k44",
+       "k45",
+       "k46",
+       "k47",
+       "k48",
+       "k49",
+       "k50",
+       "k51",
+       "k52",
+       "k53",
+       "k54",
+       "k55",
+       "k56",
+       "k57",
+       "k58",
+       "k59",
+       "k60"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "v",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "v",
+       "type": "line",
+       "data": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60
+       ],
+       "areaStyle": {},
+       "showSymbol": false
+      }
+     ]
+    }
+   }
+  },
+  "pie-max": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "bar",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50
+       ],
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "pie": {
+    "v": 1,
+    "kind": "pie",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "item"
+     },
+     "legend": {
+      "show": true,
+      "type": "scroll",
+      "orient": "vertical",
+      "left": "left",
+      "top": "middle"
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "pie",
+       "radius": [
+        "0%",
+        "65%"
+       ],
+       "center": [
+        "60%",
+        "55%"
+       ],
+       "data": [
+        {
+         "name": "项00",
+         "value": 1
+        },
+        {
+         "name": "项01",
+         "value": 2
+        },
+        {
+         "name": "项02",
+         "value": 3
+        },
+        {
+         "name": "项03",
+         "value": 4
+        },
+        {
+         "name": "项04",
+         "value": 5
+        },
+        {
+         "name": "项05",
+         "value": 6
+        },
+        {
+         "name": "项06",
+         "value": 7
+        },
+        {
+         "name": "项07",
+         "value": 8
+        },
+        {
+         "name": "项08",
+         "value": 9
+        },
+        {
+         "name": "项09",
+         "value": 10
+        },
+        {
+         "name": "项10",
+         "value": 11
+        },
+        {
+         "name": "项11",
+         "value": 12
+        },
+        {
+         "name": "项12",
+         "value": 13
+        },
+        {
+         "name": "项13",
+         "value": 14
+        },
+        {
+         "name": "项14",
+         "value": 15
+        },
+        {
+         "name": "项15",
+         "value": 16
+        },
+        {
+         "name": "项16",
+         "value": 17
+        },
+        {
+         "name": "项17",
+         "value": 18
+        },
+        {
+         "name": "项18",
+         "value": 19
+        },
+        {
+         "name": "项19",
+         "value": 20
+        },
+        {
+         "name": "项20",
+         "value": 21
+        },
+        {
+         "name": "项21",
+         "value": 22
+        },
+        {
+         "name": "项22",
+         "value": 23
+        },
+        {
+         "name": "项23",
+         "value": 24
+        },
+        {
+         "name": "项24",
+         "value": 25
+        },
+        {
+         "name": "项25",
+         "value": 26
+        },
+        {
+         "name": "项26",
+         "value": 27
+        },
+        {
+         "name": "项27",
+         "value": 28
+        },
+        {
+         "name": "项28",
+         "value": 29
+        },
+        {
+         "name": "项29",
+         "value": 30
+        },
+        {
+         "name": "项30",
+         "value": 31
+        },
+        {
+         "name": "项31",
+         "value": 32
+        },
+        {
+         "name": "项32",
+         "value": 33
+        },
+        {
+         "name": "项33",
+         "value": 34
+        },
+        {
+         "name": "项34",
+         "value": 35
+        },
+        {
+         "name": "项35",
+         "value": 36
+        },
+        {
+         "name": "项36",
+         "value": 37
+        },
+        {
+         "name": "项37",
+         "value": 38
+        },
+        {
+         "name": "项38",
+         "value": 39
+        },
+        {
+         "name": "项39",
+         "value": 40
+        },
+        {
+         "name": "项40",
+         "value": 41
+        },
+        {
+         "name": "项41",
+         "value": 42
+        },
+        {
+         "name": "项42",
+         "value": 43
+        },
+        {
+         "name": "项43",
+         "value": 44
+        },
+        {
+         "name": "项44",
+         "value": 45
+        },
+        {
+         "name": "项45",
+         "value": 46
+        },
+        {
+         "name": "项46",
+         "value": 47
+        },
+        {
+         "name": "项47",
+         "value": 48
+        },
+        {
+         "name": "项48",
+         "value": 49
+        },
+        {
+         "name": "项49",
+         "value": 50
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "pie-over": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49",
+       "项50"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "bar",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49",
+       "项50"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51
+       ],
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "项",
+      "data": [
+       "项00",
+       "项01",
+       "项02",
+       "项03",
+       "项04",
+       "项05",
+       "项06",
+       "项07",
+       "项08",
+       "项09",
+       "项10",
+       "项11",
+       "项12",
+       "项13",
+       "项14",
+       "项15",
+       "项16",
+       "项17",
+       "项18",
+       "项19",
+       "项20",
+       "项21",
+       "项22",
+       "项23",
+       "项24",
+       "项25",
+       "项26",
+       "项27",
+       "项28",
+       "项29",
+       "项30",
+       "项31",
+       "项32",
+       "项33",
+       "项34",
+       "项35",
+       "项36",
+       "项37",
+       "项38",
+       "项39",
+       "项40",
+       "项41",
+       "项42",
+       "项43",
+       "项44",
+       "项45",
+       "项46",
+       "项47",
+       "项48",
+       "项49",
+       "项50"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ]
+    }
+   }
+  },
+  "holes": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "bar",
+       "data": [
+        1.0,
+        null,
+        3.0
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1.0,
+        null,
+        3.0
+       ],
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1.0,
+        null,
+        3.0
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ]
+    }
+   }
+  },
+  "negative": {
+   "bar": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "bar",
+       "data": [
+        1,
+        -2,
+        3
+       ]
+      }
+     ]
+    }
+   },
+   "line": {
+    "v": 1,
+    "kind": "line",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        -2,
+        3
+       ],
+       "showSymbol": true
+      }
+     ]
+    }
+   },
+   "area": {
+    "v": 1,
+    "kind": "area",
+    "truncated": false,
+    "x_kind": "category",
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "类",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "值",
+       "type": "line",
+       "data": [
+        1,
+        -2,
+        3
+       ],
+       "areaStyle": {},
+       "showSymbol": true
+      }
+     ]
+    }
+   }
+  }
+ }
+}

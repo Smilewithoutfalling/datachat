@@ -3,7 +3,9 @@
 // 不需要组件的项也显式写 NONE：后端新增任何键或枚举值，charts.test.ts 的双向比对就红，必须有人在这里确认过。
 // 只从 echarts/core 按需引入（ESLint 禁止 import "echarts" 全量包）。产品只注册 CanvasRenderer；SVGRenderer 只在测试里注册。
 import { BarChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
-import { GridComponent, LegendComponent, TitleComponent, TooltipComponent } from "echarts/components";
+import {
+  DataZoomInsideComponent, GridComponent, LegendComponent, MarkLineComponent, MarkPointComponent, TitleComponent, TooltipComponent,
+} from "echarts/components";
 import { use as installEcharts, registerTheme } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { THEMES } from "./themes";
@@ -42,10 +44,29 @@ export const ENUMS: Record<string, Record<string, Ext[]>> = {
   "yAxis.nameTextStyle.align": { left: NONE },
 };
 
+// F3 第五步：前端开关写的键（switches.ts 的 FRONTEND_KEYS，白名单外的例外层）→ 需要注册的组件。
+// charts.test.ts 双向比对这张表和 FRONTEND_KEYS：开关多写一个键，必须有人在这里确认要不要注册组件。
+export const FRONTEND_REG: Record<string, Ext[]> = {
+  "legend.top": NONE,
+  "series[].label.show": NONE,
+  "series[].label.position": NONE,
+  "series[].stack": NONE,
+  "series[].smooth": NONE,
+  "series[].itemStyle.color": NONE,
+  "series[].areaStyle.color": NONE,
+  "series[].itemStyle.borderRadius": NONE,
+  "series[].markLine.data": [MarkLineComponent],
+  "series[].markPoint.data": [MarkPointComponent],
+  dataZoom: [DataZoomInsideComponent], // 只用 inside，不注册 slider
+  "xAxis.data": NONE,
+  "series[].data": NONE,
+};
+
 export const RENDERER: Ext = CanvasRenderer;
 
 export function productExtensions(): Ext[] {
-  const all = [...Object.values(TOP_LEVEL).flat(), ...Object.values(ENUMS).flatMap((m) => Object.values(m).flat())];
+  const all = [...Object.values(TOP_LEVEL).flat(), ...Object.values(ENUMS).flatMap((m) => Object.values(m).flat()),
+    ...Object.values(FRONTEND_REG).flat()];
   return [...new Set(all)];
 }
 

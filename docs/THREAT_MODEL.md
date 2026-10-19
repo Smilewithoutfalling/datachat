@@ -107,6 +107,7 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
   - 前端没有镜像这套规范化，也没有注入 `tooltip.formatter`。
 
 未测（v2 层 2 才可达，到层 2 再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
+**F3 第五步：前端开关是白名单外的例外层**。开关写的整层（`dataZoom`、`series[].markLine / markPoint / label / stack / smooth / itemStyle / areaStyle.color`）不过后端 `_ALLOWED`，也不过 `_check_strings`。约束改由前端 `FRONTEND_KEYS`（`ui/web/src/charts/switches.ts`，路径 → 值集合）承担：值只有固定字面量、当前主题色构成的渐变、和原数组的排列（排序），没有任何字符串型用户数据。`switches.test.ts`「例外层」对 4 主题 × 全部夹具 × 目标图型 × 开关组合求差，断言新增 / 改动 ⊆ FRONTEND_KEYS；`inject.test.ts` 与 e2e `f3-inject.spec.ts` 在开关全开时判定表不变。
 prepare 的纵深防御（删被禁键）只在 vitest 层测过（`charts.test.ts`「对照：人为塞进各层级的被禁键确实被删掉」）；托管 dist 上不可达，因为后端 `validate_spec` 先拒了。
 tests/test_charts.py 里的 HTML 用例同样只证明载荷能原样到达前端。
 

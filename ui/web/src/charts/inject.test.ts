@@ -5,7 +5,8 @@ import { init, use as installEcharts } from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
 import fixtures from "../generated/chart_fixtures.json";
 import inject from "../generated/inject.json";
-import { prepare } from "./prepare";
+import { DEFAULT_UI, prepare, type UiState } from "./prepare";
+import { SWITCHES, SWITCH_VALUES, type Switches } from "./switches";
 import { productExtensions } from "./register";
 
 installEcharts([...productExtensions(), SVGRenderer]);
@@ -18,11 +19,14 @@ test("注入夹具齐全：bar 宽表、bar 长表、pie", () => {
   expect(INJ.map((f) => f.id)).toEqual(["inject-bar", "inject-bar-series", "inject-pie"]);
 });
 
-describe.each(INJ.map((f) => [f.id, f.spec] as const))("%s：SSR SVG", (_id, spec) => {
+// F3 第五步：每个夹具再跑一轮"全部兼容开关开启"——开关只写字面量，判定表应与关闭时相同
+const ALL_ON: UiState = { kind: null, sw: Object.fromEntries(SWITCHES.map((s) => [s, SWITCH_VALUES[s][1]])) as Switches };
+const MODES = [["开关全关", DEFAULT_UI], ["开关全开", ALL_ON]] as const;
+describe.each(INJ.flatMap((f) => MODES.map(([m, u]) => [f.id, m, f.spec, u] as const)))("%s（%s）：SSR SVG", (_id, _m, spec, ui) => {
   let svg = "";
   beforeAll(() => {
     const c = init(null, null, { renderer: "svg", ssr: true, width: 640, height: 400 });
-    c.setOption(prepare(spec.option, {}), { notMerge: true });
+    c.setOption(prepare(spec, ui), { notMerge: true });
     svg = c.renderToSVGString();
     c.dispose();
   });

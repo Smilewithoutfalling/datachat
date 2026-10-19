@@ -1434,7 +1434,7 @@ Playwright：
 - 截断警告里的标题现在取自规范化后的 option（`_spec_title`），名字含 `{}` 时警告里显示全角。这条警告给用户看，不会回到模型的列名流程，所以没动。
 - long-labels 在真实浏览器字体下的阈值没有测（SSR 是估算宽度）。
 
-## [40] 2026-10-19 · 阶段 5 F3 第四步：四套主题、配色归主题、轴名纳入外边界 · commit <待提交>
+## [40] 2026-10-19 · 阶段 5 F3 第四步：四套主题、配色归主题、轴名纳入外边界 · commit 2373f24（PR #48）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第四步完成，等 S 人眼验收；下一步是第五步开关 + 换图型）。方案见 phase5-frontend.md「F3 第四步」（PR #47）。[39] 的 SHA 已回填 10e76ff（PR #46）。
 
@@ -1482,4 +1482,49 @@ Playwright：
   - 六：LEGACY 余量豁免改成按 (theme, hex) 二元组，不按色值（否则任何主题复用 #1F6FB2 都会自动绕过 ≥22），和 error_kind 白名单同一套逻辑。
 - 本条 SHA 等 squash 合并后回填 squash SHA（不填分支上的 da96f4b，同 [34]→50e9add）。
 - `result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
+
+## [41] 2026-10-19 · 阶段 5 F3 第五步：前端开关 + 换图型、历史 spec 几何归一 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第五步完成；下一步第六步导出）。方案见 phase5-frontend.md「F3 第五步」（PR #50，ba5354c）。[40] 的 SHA 已回填 2373f24（PR #48）。没有拆 PR（见"未做"）。
+
+后端：
+- `app/tools/charts.py`：spec 加 `x_kind`（category / time / value），放在 spec 层、和 option 并列，不进 option；`validate_spec` 校验它（枚举 + scatter ⇔ value）。`SPEC_VERSION` 旁写升版规则（加字段不升，改语义 / 删字段才升，判据"老前端读新 spec 会不会误判"），所以仍是 1。
+- 几何登记表 `GEOMETRY`（grid 的 outerBounds 四键、x / y 轴名参数 + nameTruncate），以及换图型要用的框架值 `_CART_GRID` / `_CART_BOTTOM` / `_PIE_LEGEND` / `_PIE_RADIUS` / `_PIE_CENTER`、阈值 `SHOW_SYMBOL_MAX`：builder 改为引用这些常量（产物不变，chart_fixtures.json 只多了 `x_kind` 和一个新夹具）。
+- 白名单注释：例外层不止 renderMode，约束改由前端 FRONTEND_KEYS 承担（THREAT_MODEL §2.3 同步）。
+- `scripts/gen_ui_types.py`：`chart_schema.json` 新增 geometry / x_kinds / pie_max_slices / show_symbol_max / frame；新增 `kind_fixtures.json`（同一份数据分别以 bar / line / area / pie 调 build_option，8 组：单系列类目、时间、宽表、类目数 61、饼图 50 扇区，以及换不了饼图的超 50 / 有空值 / 有负值）；`chart_fixtures.json` 加 `scatter-multi`。
+
+前端：
+- `src/charts/switches.ts`：COMPAT（9 开关 × 5 图型）、FRONTEND_KEYS（13 条路径 → 值集合：字面量 / 主题渐变 / 排列）、`applySwitchesTo`（只经 `lit()` 从表里取值）、`canChangeKind` / `changeKind`（从后端原始 option 出发，不链式；框架值从 schema 读）、`KIND_DIFF`（只有 pie → 直角坐标的 x 轴名）。
+- `src/charts/prepare.ts`：`prepare(spec, ui, theme)`；管线 normalize → changeKind → applyLayer1 → applySwitches → cleanup。normalize 用 `schema.geometry` 归一历史 spec。
+- `src/charts/uiPrefs.ts`：`datachat.chartUi:<kind>`，逐字段校验，读写 try/catch，同图型的图共享订阅。
+- `src/charts/EChart.tsx`：图型下拉 + 开关面板（不兼容的 disabled，title 写原因）；图型 / 开关 / 主题任一变化：主题变了先 setTheme，再整体 `setOption(prepare(...), {notMerge: true})`，取代第四步"切主题只调 setTheme"；实例不重建（`data-instance`）。zoom 开着时：zr `dblclick` 先判 `e.target` 再还原；容器 capture 阶段拦不按 Shift 的滚轮（偏离 1）。
+- `register.ts`：`FRONTEND_REG`（markLine / markPoint / dataZoom inside 三个组件）。
+- `docs/roadmap/M13-图表方案.md` §12：加"前端实际写出"一列，测试读它比对 FRONTEND_KEYS。
+- `vite.config.ts`：`server.fs.allow` 放开 `../../docs/roadmap`（vitest 用 `?raw` 读 M13）。
+
+偏离方案（及理由）：
+1. **普通滚轮仍被 ECharts 吞掉，只靠 option 做不到"不劫持页面滚动"**。echarts 6.1.0 `lib/component/dataZoom/roams.js:175-181` 给 RoamController 的是统一配置（`zoomOnMouseWheel: true`、`moveOnMouseWheel: true`），各 dataZoom 的 `'shift'` / `false` 到监听器里才判（roams.js:107）；`lib/component/helper/RoamController.js:316-322` 在触发监听器前、指针在 grid 内时先 `eventTool.stop(e.event)`。探针（e2e，已删）：zoom 开、指针在 plot 区中心，滚轮 −60 后 `.main` scrollTop 150 → 150，window 上 passive 监听器收到 0 个事件；指针在 grid 外边缘时 150 → 90。修法：容器 capture 阶段 `if (!e.shiftKey) e.stopPropagation()`，只在 zoom 开着时挂。option 不变。
+2. `prepare` 第一参数是 spec 不是 option：changeKind 要 `spec.kind` 和 `spec.x_kind`，从 option 反推正是本步否掉的。现有测试的 `prepare(option, {})` 全部改成传 spec（裸 option 用 `{kind: "", option}`，不换图型、不开开关）。
+3. 第四步的两条"对照"（第三步写法 x 轴名出画布；只换 'all' 不移位 plot < 50%）原来走 prepare，现在 normalize 会把旧形状修好，对照就失效了。改为只做 cleanup 的原始路径看缺陷，并补断言"同一旧形状走产品路径时修好了"。
+4. COMPAT 的排序格条件写成 `single-nontime`：x_kind 缺失时不拦排序（S 第三轮第五条：降级只写"不可换饼图"）。
+5. M13 §12 没覆盖原第三列"v1 `_ALLOWED`"，而是新加一列。
+6. 注入 e2e 的分类器两处调整（判定表期望值没动）：`xLabelRow` 排除纯数字文本——开关全开时柱顶数值标签和极值标记也是下半部居中的文字，实测把类目行定到了数值标签行，P4 被分成 axisName；`posOf` 在开关全开那一轮把 `align=left && y < 40` 认作图例——图例位置开关把多系列图例挪到顶部，否则 P5 图例会被分成 axisName（实测判定表多出一格 "P5 axisName"，内容是 raw、不解析）。
+
+测试：
+- pytest：`test_x_kind_sits_beside_option_and_is_correct`、`test_validate_spec_checks_x_kind`、`test_geometry_registry_matches_builder_both_ways`（登记表每个键在产物里且值相同；产物里每个键要么登记、要么在逐图内容清单）、`test_schema_exports_step5_contract`；`test_validation_rejects_callable_and_bad_envelope` 的期望文案加 x_kind（结构改了，所以文案变）。
+- vitest `switches.test.ts`：COMPAT 45 格逐格测生效（✅ 格开了键在、关了键不在；❌ 格开关产物相同，递归排序键再比较），共 70 个用例；例外层机制（4 主题 × 全部夹具 × 6 种目标图型 × 11 种开关组合求差，⊆ FRONTEND_KEYS、值在集合里），FRONTEND_KEYS 每条都被写到过，= FRONTEND_REG，= M13 §12 那一列（改文档少一条时实测变红），值集合没有用户串，加一组对照（表外路径 / 表外值 / 非排列 / 别的主题的渐变 / 用户串进标签都会被抓）；换图型契约（kind_fixtures 每组两两互换 = builder 的 B，只放 KIND_DIFF）、boundaryGap / areaStyle / showSymbol 对照、饼图置灰的 6 种原因、A → B → A、产品路径不链式、`spec_kind_is_backend_truth`、目标图型不可用时留在原图型；渐变（只写 series 层、无顶层 color、换主题 colorStops 跟着变）；排序（按 (类目, 值) 对比、null 最后、饼图）；标签位置 / 圆角在堆叠时；4 主题 × 全部夹具 × 全开零 [ECharts] log；历史 spec（手写第三步形状）normalize 后 = 当前 builder；偏好存取 / 非法值回退 / localStorage 抛错。
+- vitest `EChart.test.tsx`：切主题先 setTheme 再 setOption(notMerge)、渐变色跟着变、实例不重建；开关写 localStorage、同图型另一张图立即跟着变；disabled + 原因；换饼图后 spec.kind 不变、重挂载回后端图型、有空值时饼图选项置灰；wheel capture 拦截；zr 双击 `e.target` 判断与解绑。
+- vitest `themes.test.ts`：LEGACY 豁免按 (主题, 色值)。`inject.test.ts`：开关全关 / 全开各跑一遍。
+- e2e `f3-switches.spec.ts`（新）：开关逐个开像素变化、关回原样、无新分析请求、不兼容 disabled、刷新保持、同会话新图继承；柱 → 饼 → 柱画面回到初始、data-kind 不变、刷新回后端图型；缩放（plot 区中心普通滚轮滚页面且图不动、Shift + 滚轮缩放、双击空白还原）；渐变开着切主题实例不重建、画面变、classic 与 soft 左上角 10×10 以外有像素差异（第四步评审五）。
+- e2e `f3-inject.spec.ts`：加一轮"经典 + 开关全开"，判定表不变。
+
+实测：
+- prepare（bar-5000，20 次中位数）：见闸门输出。
+- 例外层机制测试实际写到的路径 = FRONTEND_KEYS 全部 13 条。
+
+未做：
+- 没有拆成两个 PR：开关和换图型都在本 PR，估时没有超出到需要拆的程度（实现 + 测试一个上午）。
+- Shift + 滚轮在 Windows 真鼠标上的行为没验证：Chrome 在 Windows 上会把 Shift + 竖滚轮转成横向 deltaX，zrender 的 wheelDelta 取值是否还非零，需要 S 本机手试（e2e 的 mouse.wheel 是合成事件，不经过系统这一层）。
+- 历史 spec 的 e2e（真库里的老 spec）没做：重放路径要往库里写老 result，e2e 没有入口。由 vitest SSR 覆盖（`charts.test.ts` 两条对照的产品路径断言、`switches.test.ts`「第三步形状：几何键等于当前 builder 产出」）。
+- 截图人眼验收（S）。#49、`result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
 

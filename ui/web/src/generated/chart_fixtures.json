@@ -7,6 +7,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -80,6 +81,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -149,6 +151,7 @@
     "v": 1,
     "kind": "line",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -223,6 +226,7 @@
     "v": 1,
     "kind": "area",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -298,6 +302,7 @@
     "v": 1,
     "kind": "pie",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -358,6 +363,7 @@
     "v": 1,
     "kind": "scatter",
     "truncated": false,
+    "x_kind": "value",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -441,6 +447,7 @@
     "v": 1,
     "kind": "line",
     "truncated": false,
+    "x_kind": "time",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -568,6 +575,7 @@
     "v": 1,
     "kind": "area",
     "truncated": false,
+    "x_kind": "time",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -692,6 +700,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -763,6 +772,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -1041,6 +1051,7 @@
     "v": 1,
     "kind": "pie",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -1277,6 +1288,7 @@
     "v": 1,
     "kind": "line",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -1371,6 +1383,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -11430,6 +11443,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": true,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -21493,6 +21507,7 @@
     "v": 1,
     "kind": "scatter",
     "truncated": false,
+    "x_kind": "value",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -41552,6 +41567,7 @@
     "v": 1,
     "kind": "scatter",
     "truncated": true,
+    "x_kind": "value",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -61615,6 +61631,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -61705,6 +61722,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -61860,6 +61878,7 @@
     "v": 1,
     "kind": "pie",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "item"
@@ -61928,6 +61947,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -61993,6 +62013,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -62058,6 +62079,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -62123,6 +62145,7 @@
     "v": 1,
     "kind": "bar",
     "truncated": false,
+    "x_kind": "category",
     "option": {
      "tooltip": {
       "trigger": "axis"
@@ -62179,6 +62202,97 @@
        ]
       }
      ]
+    }
+   }
+  },
+  {
+   "id": "scatter-multi",
+   "spec": {
+    "v": 1,
+    "kind": "scatter",
+    "truncated": false,
+    "x_kind": "value",
+    "option": {
+     "tooltip": {
+      "trigger": "item"
+     },
+     "legend": {
+      "show": true,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 50,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "value",
+      "name": "销量",
+      "scale": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "利润",
+      "scale": true,
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "a",
+       "type": "scatter",
+       "data": [
+        [
+         3,
+         1.5
+        ],
+        [
+         2,
+         0.5
+        ],
+        [
+         6,
+         2.0
+        ]
+       ],
+       "symbolSize": 9
+      },
+      {
+       "name": "b",
+       "type": "scatter",
+       "data": [
+        [
+         5,
+         2.25
+        ],
+        [
+         8,
+         3.75
+        ]
+       ],
+       "symbolSize": 9
+      }
+     ],
+     "title": {
+      "text": "分组散点",
+      "left": "center"
+     }
     }
    }
   }
