@@ -373,6 +373,118 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时：1–1.5 天，人眼来回调色不计在内。
 
+**F3 第五步：开关 + 换图型（S 10-19 评审：A 同意、B 选 (a)、C 同意、D 改按图型存，另加三个结构点，已并入）**
+
+输入：§3「开关」「换图型」；M13 §6.2、§6.3、§12；PR #48 评审里第四、五、六条（S 10-19 定：随第五步做）；issue #49（不在本步，见"不做"）。
+
+实测和源码依据（echarts 6.1.0；探针走 `build_option` 夹具 → `prepare` → SSR，探针不入库）：
+- **slider 型 dataZoom 不进 outerBounds，会压住 x 轴名。** `bar` 夹具 640×360 加 `dataZoom:[{type:'slider'}]`：plot 区仍是 y 87–285（和不加时一样），slider 落在 y 308–338，x 轴名"城市"在 y 313–325，两者重叠；`long-axis-name-bar`、`line-wide` 也一样。
+- **inside 型的默认值会劫持页面滚动**：`InsideZoomModel.js:58–60` 的默认值是 `zoomOnMouseWheel: true`、`moveOnMouseMove: true`、`moveOnMouseWheel: false`；`InsideZoomView.js:424` 写明取值可以是 `true / false / 'shift' / 'ctrl' / 'alt'`。
+- **`chart.on('dblclick')` 在空白处不触发**：`echarts.js:843–870` 只在命中带 `dataIndex` 或 `eventData` 的元素时才派发；双击 plot 区的空白处，`params` 为空，不会派发。所以双击重置必须挂在 `chart.getZr().on('dblclick')` 上。
+- **图例改到顶部不会撞标题**：图例在 y 6–18，标题从 y 20 开始，plot 区不变（`grid.top: 60` 本来就留了空间）。左右放置会盖住 plot 区：竖排图例不在 outerBounds 的计算范围内。
+- **渐变必须写死颜色值**：`colorStops[].color` 只接受具体颜色，不能引用"主题第 i 色"。
+
+已定：
+1. **管线：`prepare(option, ui, theme)` 是纯函数，顺序为深拷贝 → `normalize` → `changeKind` → `applyLayer1` → `applySwitches` → `cleanup`。**
+   - `normalize`（第四步评审第四条）：把历史 spec 的几何归一到当前契约，理由和删 `color` 一样，在渲染时归一，不动库。
+     - 覆盖的键：`grid.outerBounds*`，以及 x/y 轴的 `nameLocation` / `nameGap` / `nameTextStyle.align` / `nameTruncate`。
+     - 值由 `gen_ui_types.py` 导出到 `chart_schema.json` 的 `geometry`，前端不写第二份字面量。
+     - **分界规则**写进 prepare.ts 头注释：后端契约改了、而重放路径原样下发的键，一律在 `normalize` 归一。后端以后改任何几何或外观键，必须在 `geometry` 里登记；pytest 双向比对登记表和 `_cartesian` / `_scatter` 的产物，漏登记就红。
+   - `color` 的删除留在 `cleanup`，它同时防止前面任何一步写回顶层 color。
+   - `changeKind` 放在开关之前，开关的兼容性按换完后的图型算。
+   - `cleanup` 仍然最后执行。
+2. **架构变更（PR 描述里单列）：第四步的 setTheme 路径被"整体重算"取代。**
+   - 渐变的色值是 `prepare` 写死的，`setTheme` 换主题对象时不会重算它。所以 `EChart` 持有后端原始 option，**图型、开关、主题任何一个输入变化，都整体重算 `prepare` 并 `setOption(…, {notMerge: true})`**。主题变化时还要先 `setTheme`（主题的默认值层，例如背景、轴色，仍然由主题对象提供）。
+   - 这和第四步不冲突：第四步 e2e 断言的是"切主题不重建实例"，重跑 `prepare` 同样不重建实例。第四步第 1 条管的是顶层 `color`，本步碰的是 series 层，那一条不用改写。
+3. **UiState**：`{ kind: 目标图型 | null, sw: { label, legend, stack, smooth, gradient, radius, sort, marks, zoom } }`。
+   - **开关偏好按图型存（S 10-19，D）**：键为 `datachat.chartUi:<kind>`，最多 5 个键，和 COMPAT 的维度一致。语义是"饼图看百分比、柱图看原始值"这一类图型偏好：新出的图直接继承，删会话也不会留下残留。（S 的原文写的是 `datachart.`，按仓库现有前缀 `datachat.` 统一。）
+     - 键名取 `changeKind` 之后的图型，也就是用户眼前看到的图型。
+     - 读取时逐字段校验，不认识的字段或值丢弃并回退默认；**读写都包在 try/catch 里**（F2 token.ts 的教训：隐私模式或配额满时会抛错）。写失败只是不持久化，不影响渲染。
+   - **"换成什么图型"不持久化**，只存在组件状态里，刷新后回到后端出的图型。它是对某一张图的操作，按 messageId 存会重新带回 D 否掉的三个问题。
+   - 开关状态在换图型时保留；不兼容的开关置灰且不生效（§3），换回来后恢复。
+4. **兼容表**（"多系列"指 ≥ 2 个 series；"时间轴"见第 7 条的 `x_kind`）：
+
+| 开关 | bar | line | area | pie | scatter | 写入的键 |
+|---|---|---|---|---|---|---|
+| 数值标签 | ✅ | ✅ | ✅ | ✅ | ❌（点多时满屏） | `series[].label.show`、`.position`（bar/line/area 写 `top`，堆叠时写 `inside`；pie 写 `outside`） |
+| 图例位置 | 多系列 | 多系列 | 多系列 | ❌（竖排在左，见实测） | 多系列 | `legend.top`：只能是 `top` 或 `bottom` |
+| 堆叠 | 多系列 | 多系列 | 多系列 | ❌ | ❌ | `series[].stack = "total"` |
+| 平滑 | ❌ | ✅ | ✅ | ❌ | ❌ | `series[].smooth = true` |
+| 渐变 | ✅ | ❌（无填充） | ✅ | ❌ | ❌ | bar 写 `series[i].itemStyle.color`，area 写 `series[i].areaStyle.color`（见第 6 条） |
+| 圆角 | ✅ | ❌ | ❌ | ❌ | ❌ | `series[].itemStyle.borderRadius = [4,4,0,0]`；堆叠时只写最上面那个系列 |
+| 排序 | 单系列、非时间轴 | ❌ | ❌ | ✅ | ❌ | 不写新键：`xAxis.data` 和 `series[0].data` 一起重排（pie 只重排 `data`）。三态：关 / 降序 / 升序；null 排最后 |
+| 平均线和极值 | ✅ | ✅ | ✅ | ❌ | ❌ | `series[].markLine.data=[{type:'average'}]`、`series[].markPoint.data=[{type:'max'},{type:'min'}]` |
+| dataZoom | ✅ | ✅ | ✅ | ❌ | ❌ | 见第 5 条 |
+
+   - 兼容表在代码里是常量 `COMPAT`。UI 置灰和 `applySwitches` 的过滤都读这一张表。
+5. **dataZoom 只用 inside（S 10-19，A），并补两件事，否则不成立：**
+   - **不劫持页面滚动**：写 `dataZoom: [{type: "inside", zoomOnMouseWheel: "shift", moveOnMouseWheel: false, moveOnMouseMove: true}]`。对话流里图占的屏幕面积不小，用默认值的话，用户在图上滚一下，缩放的是图，页面不动。开关旁边的提示改成"Shift + 滚轮缩放，拖动平移，双击还原"。
+   - **恢复入口**：`toolbox.feature.restore` 用不了，因为 `toolbox` 在 BANNED_KEYS 里。所以 `EChart` 自己接双击：`chart.getZr().on("dblclick", () => chart.dispatchAction({type: "dataZoom", start: 0, end: 100}))`。挂在 zr 上，不挂 `chart.on`，理由见上面的源码依据。只在 zoom 开着时注册，关掉或 dispose 时解绑。
+   - 不用 slider（理由见实测），代价是没有可见的缩放条。
+6. **渐变写在 series 层，不写顶层 `color`（S 10-19，B 选 (a)）。** 写顶层 color 会被 `mergeTheme` 整条跳过，等于把第四步修掉的问题带回来。写法：
+   - `{type:"linear", x:0, y:0, x2:0, y2:1, colorStops:[{offset:0, color: theme.color[i % n]}, {offset:1, color: rgba(theme.color[i % n], 0)}]}`
+   - 第二端用同一个颜色、透明度为 0，所以色值只依赖 `color[i]`，不用给每套主题再定义第二色。
+   - 主题色由 `theme` 参数传入 `prepare`，`rgba()` 只接受 `#RRGGBB`（主题色的格式已由第四步的测试钉住），格式不对就抛错，不静默降级。
+7. **`x_kind` 放在 spec 层，和 `option` 并列，不放进 option（S 10-19 结构点②）。**
+   - option 是交给 ECharts 的东西，"能不能换成饼图"所需的信息不属于它。
+   - spec 结构从 `{v, kind, truncated, option}` 变成 `{v, kind, truncated, x_kind, option}`，`x_kind ∈ {category, time, value}`。builder 总是产出它，`validate_spec` 的结构检查同步修改；`SPEC_VERSION` 不变，新字段只用于判断能否换图型，不影响渲染。
+   - 历史 spec 没有 `x_kind`（重放路径不过 validate_spec）。前端按"未知"保守处理：不可换饼图、不可排序，悬停原因写"旧图缺少类型信息"。不从 `axisLabel.hideOverlap` 反推。
+8. **换图型（S 10-19，C 同意放宽）**：一律从后端原始 option 出发，不链式转换，所以来回切换无损。
+   - **bar ↔ line ↔ area**：条件是 category 轴，系列数不限。放宽 §6.3 的"单个数值 series"：柱换折线不丢信息，M13 那条是按饼图的口径写的。
+   - **bar / line / area → pie**：单系列、`x_kind` 为 category、全部值非 null 且 ≥ 0、类目数 ≤ `MAX_PIE_SLICES`（导出）。
+   - **pie → bar / line / area**：总是可以换。
+   - **scatter**：不参与互换。
+   - **跨端契约测试**：`gen_ui_types.py` 用同一份数据分别以 bar / line / area / pie 调 `build_option`，生成换图型夹具。vitest 断言 `changeKind(A, B)` 等于 builder 直接出的 B，**只允许下表列出的差异**，表外任何差异都红：
+
+| 差异位置 | 什么时候出现 | 为什么允许 |
+|---|---|---|
+| `xAxis.name` 为空 | pie → bar / line / area | pie 的 option 里没有 x 列名；和 builder 在 `xs.name is None` 时的行为一致 |
+
+   `boundaryGap`（bar 为 true，line/area 为 false）、`areaStyle`（area 有，line 没有）、`showSymbol`（类目数 ≤ 60，阈值导出）**不在差异表里**：`changeKind` 必须产出和 builder 相同的值，否则断言就是红的，而这个红正是我们要的（S 10-19 指出初稿漏了前两项）。
+   - 换不了时选项置灰，悬停显示固定文案（例如"有空值，不能换成饼图"），不拼接任何数据。
+9. **白名单外的产出要有机制约束，不只是约定（S 10-19 结构点①）。**
+   - 现状：`charts.py` 白名单上方的注释写明，前端加了 `renderMode` 后，最终产物必然不过白名单，这是有意的，最终产物永不回验。之前唯一的例外是一个被测试钉住的键。第五步把例外扩成一整层：`dataZoom`、`markLine`、`markPoint`、`label`、`stack`、`smooth`、`itemStyle`、`areaStyle.color`。这些都在 `_ALLOWED` 外，`_check_strings` 的 `{`、`}`、`\n` 闸门也管不到它们。
+   - **`FRONTEND_KEYS` 是一张常量表**：路径模式 → 允许的值集合。值只能是字面量、字面量对象，或者特定标记 `THEME_GRADIENT`（结构固定为第 6 条的写法，颜色从主题 `color` 取）。`applySwitches` 写值时**只从这张表取**，代码里不出现第二处字面量。
+   - **测试**：全部夹具 × 4 套主题 × 开关组合（每个开关单开 + 全开），对 `prepare` 的产物和 `normalize → changeKind` 的产物求差：新增或改动的路径必须 ⊆ `FRONTEND_KEYS`，每个值必须属于该路径的值集合（`THEME_GRADIENT` 按结构比对，颜色 ∈ 该主题的 `color` 或其透明版本）。基线取 `normalize → changeKind`，因为它已经由第 8 条的契约测试钉成等于 builder 的产物（在白名单内）。
+   - 例外层不含任何字符串型的用户数据，所以 `_check_strings` 管不到也没关系。这一点由"值集合里只有字面量"保证，测试注释和 THREAT_MODEL §2.3 都要写明。
+   - 同步改 `charts.py` 白名单上方那段注释：例外从 `renderMode` 一个键扩成 `FRONTEND_KEYS` 这一层，并指向这条测试。
+10. **注册**：新增 `MarkLineComponent`、`MarkPointComponent`、`DataZoomInsideComponent`。register.ts 加 `FRONTEND_REG`（`FRONTEND_KEYS` 的路径 → 组件），和 `FRONTEND_KEYS` 双向比对。
+11. **M13 §12 第三列回填**：用 `FRONTEND_KEYS` 的路径集合。vitest 读 M13 §12 的 markdown，断言集合里的每个路径都在表里、表里写出的每个前端路径也都在集合里（M13 §12「两条实现约定」第 2 条）。
+12. **第四步评审遗留**：
+    - 四：见第 1 条。加一个"第三步形状"的历史夹具（`outerBoundsContain:"axisLabel"`、带 `color`、没有 nameLocation / nameTruncate / x_kind；手写，注释写明它对应第三步的 build_option）。断言 prepare 后的几何键等于当前 builder 的产出。
+    - 五：主题 e2e 加配色断言：classic 和 soft 各截一张，左上角 10×10 以外的像素必须有差异。
+    - 六：themes.test.ts 的 LEGACY 余量豁免改成按 `(theme, hex)` 二元组，只豁免 classic 现有的 5 色。
+
+验收：
+- **pytest**：schema 导出 `geometry`、`pie_max_slices`、`show_symbol_max`；`geometry` 登记表和 builder 产物双向一致；spec 带 `x_kind`，取值正确（category / time / value 各一例），`validate_spec` 的结构检查同步；换图型夹具由 `build_option` 生成，`--check` 覆盖。
+- **vitest**：
+  - **COMPAT 45 格都测"生效"（S 10-19 结构点③）**：每格挑一个满足条件的夹具（缺的补上，例如多系列 scatter）。
+    - ✅ 格：开关打开后，产物里该开关的键在、值对；关闭时该键不在。
+    - ❌ 格：开和关的产物逐字节相同。
+    - 条件格（多系列、单系列、非时间轴）：两边各一个夹具。
+    - 用 `test.each` 展开，测试名带"开关 × 图型"，45 格一格不少（用一条计数断言钉住）。
+  - 第 9 条的例外层机制测试；`FRONTEND_KEYS` = `FRONTEND_REG` = M13 §12 第三列；任何开关组合下 prepare 产物都不含被禁键。
+  - 换图型契约（第 8 条的差异表），以及 A → B → A 和原始 A 完全一致。
+  - 渐变：只写 series 层，产物顶层没有 `color`；换主题后 colorStops 跟着变。
+  - 4 套主题 × 全部夹具 × 全开：零 `[ECharts]` log。
+  - 排序：类目和值一起移动，null 排最后。
+  - UiState：按图型读写；不合法时回退；`localStorage` 抛错时渲染不受影响。
+  - 历史夹具经 normalize 后几何正确；没有 `x_kind` 时不可换饼图、不可排序；LEGACY 二元组。
+  - 注入夹具全开时，SSR 判定表与关闭时相同。
+- **e2e**：
+  - 开关逐个打开，像素有变化，不发新的分析请求；刷新后偏好保持；同一图型的新图继承偏好；不兼容的开关是 disabled。
+  - dataZoom：在图上普通滚轮滚动，页面会滚、图不缩放；Shift + 滚轮会缩放；双击空白处还原（还原前后的 fillText 类目集合对比）。
+  - 换图型：bar → pie → bar 后 fillText 记录与初始相同；刷新后回到后端图型。
+  - 渐变开着切主题：实例不重建，柱子颜色跟着变。
+  - 主题配色差异（第 12 条之五）；历史 spec 的 x 轴名在画布内。
+  - f3-inject 加一轮"全开关"，判定表不变。
+- **人眼**：5 种图型 × 开关全开的截图，给 S。
+- PR 描述单列第 2 条的架构变更。DEVLOG [41]，回填 [40] 的 2373f24（S 已核对）。全部闸门在最后一次改动之后重跑。
+
+不做：层 1 面板（F4）；dataZoom slider；横 / 竖（v1 已删）；scatter 换图型；图例放左右；时间轴排序；"换成什么图型"的持久化；#49 的高度问题和矮画布刻度丢失；导出（第六步）。
+
+估时：2.5 天（加了例外层机制测试和 45 格生效测试）。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
