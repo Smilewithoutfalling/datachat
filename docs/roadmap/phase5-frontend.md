@@ -287,6 +287,92 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 不做：主题和轴名是否包进 outerBounds（第四步）；开关和层 1 的实际内容（第五步）；result.py:117 有图时 chart_error 被丢弃的问题（未定，单独讨论）；#44。
 
+**F3 第四步：4 套主题 + 轴名纳入外边界（S 10-19 两轮评审已并入；S 10-19 定：阈值 20、换 #CD7D28、暗色 bg ≤ #1B1F24）**
+
+输入：第三步遗留的"轴名是否包进 outerBounds"；M13 §6.1（`registerTheme`，切换即重绘、不重跑代码）；HANDOVER §0 验收 2"换主题"。
+
+实测和源码依据（echarts 6.1.0；探针走 `build_option` 产物 + SSR，不入库）：
+- **后端 `option.color` 会压过主题配色。** `Global.js` 的 `mergeTheme` 里有 `name === 'color' && option.color` 就 `return`。实测 bar 夹具配红色主题：保留 `color` 时柱子是 `#1F6FB2`，删掉后才是 `#ff0000`。`charts.py:37` 的注释"前端主题可整体覆盖"是错的，要删。
+- **`setTheme(theme, opts?)` 是公开实例方法**，内部走 `_resetOption('recreate')` → `initBase`，第一行就是 `ecModel.option = {}`。所以切换主题不用重建实例，也不会残留旧主题的键：新主题没写的键会先清空，再由 globalDefault 补回。
+- **轴名出画布，根因是名字太长，不是 clamp。** 用 3 档画布宽 × 轴名 2/20/100 字测（估算宽度按中文 12px/字）：
+  - 2 字：`axisLabel` 下 x 轴名在 640 宽时是 [629,653]，出画布；改成 `all` 后三档宽度都在画布内。
+  - 20 字：`all` 在 320 宽时是 [171,411]，把 clamp 调到 10% 也只到 [141,381]，仍然出画布。
+  - 100 字：x 轴名本身约 1200px，比 320 和 640 的画布都宽，任何 clamp 都包不住。
+  - 加上 `nameTruncate: {maxWidth: 120, ellipsis: "…"}` 后，三档宽度 × 三种长度全部在画布内（x 轴名最右到 304 / 611 / 1149）。
+
+已定（待评审）：
+1. **主题载体：`registerTheme` + `setTheme`，不进 prepare。**
+   - 主题是 echarts 的"默认值层"：后端 option 管内容，主题管外观。
+   - `EChart` 用 `init(el, theme)` 创建，切换时调 `setTheme`。`prepare(option, ui)` 签名不变。
+   - 第六步离屏导出时，用同一个主题名 `init`，走同一个 `prepare`。
+2. **配色归主题，后端摘掉 `color`（S 10-19 同意）。**
+   - `build_option` 删掉 `option["color"]`。死代码和死测试同一次清掉：`_HEX`（`:46`）、`:474` 的 `#RRGGBB` 检查、`_ALLOWED["color"]`、`test_charts.py:180` 的格式用例。
+   - 删掉 `charts.py:37` 那句错误注释。
+   - `PALETTE` 由 `gen_ui_types.py` 写进 `chart_schema.json` 的 `palette`，默认主题从这里读。新增 `charts.PALETTE == plotting.PALETTE` 测试，两份字面量从此有测试钉住。
+   - **历史兼容**：重放路径是 `app.py:252` 的 `public_result` → `public_chart`，原样下发 `option`，不过 `validate_spec`，所以老会话的 spec 里还带着 `color`。所有渲染路径共用的 `prepare` 的 `cleanup` 会删掉顶层 `color`，第六步导出也走它。
+   - **把"重放不过 validate_spec"这个前提用测试钉住**：手工写一条 `result_json` 含 `color`（以及一个现在白名单外的键）的消息，经 `GET` 会话接口取回，断言 `option` 原样回来；同时 monkeypatch `validate_spec` 断言它没被调用。以后谁在重放路径上加校验，这条先红，不会出现老会话的图静默消失。
+3. **对比度拆成两条，各自写明适用范围**：
+   - **文字**（轴标签、轴名、标题、图例、tooltip 文字）对背景 ≥ 4.5（WCAG 1.4.3）。echarts 默认轴标签灰 `#6E7079` 在白底上是 4.93，可以过；在深底 `#15181C` 上只有 3.61，所以暗色主题必须显式改色。
+   - **系列色**对背景 ≥ 3.0（WCAG 1.4.11 非文本），并且相邻两色的 CIEDE2000 ≥ 20。
+     - 现 PALETTE 对白底的对比度：5.28 / 3.48 / **2.76** / 5.44 / 5.21 / 5.00；相邻 ΔE00：31.0 / 46.6 / 24.5 / 38.2 / 46.9 / 43.5。
+     - **阈值 20 按外部标准定（S 10-19）**：JND 约 2.3，5–10 是"能看出不同"，20 是"不同色系"。它和本仓库调色板无关，不是现状的快照；常量旁边要写明这一点，以免以后有人当快照去改。
+     - **余量规则**：新引入的颜色必须 ≥ 阈值 × 1.1，即 ≥ 22，用来吸收实现差异（kL 参数、换库、色域处理）。
+     - **`#E2843B` 换成 `#CD7D28`，两份 PALETTE 同改**，不记成取舍，因为 matplotlib 的 PNG 也有同样的问题。`#CD7D28` 的数据：对白底 3.20，对 `#C0392B` 的 ΔE00 是 25.0，对青色 43.9，和旧橙相差 5.6（人眼看仍是同一个橙）。最弱的一项是对白底的 3.20。在这一色带里，"白底 3:1"和"离红 ≥24"几乎互斥，25 左右就是上限，要写进测试注释。曾考虑过 `#D2701F`，它的 ΔE00 是 20.6，余量只有 3%，所以出局。
+     - **ΔE00 断言对每套主题自己的 `color` 数组都跑**，不只测默认主题。
+     - **暗色画布的数值约束**：PALETTE 中最弱的 `#C0392B` 在 `#15181C` 上是 3.27，在 `#1B1F24` 上是 3.05，在 `#20242A` 上是 2.87。所以暗色 bg 不能亮于 `#1B1F24`，否则这套主题就得单独配一套提亮的 palette。断言写成"该主题的每个系列色对它的 bg ≥ 3.0"，bg 被调亮时自动变红。
+     - **文字同理**：echarts 默认轴标签灰 `#6E7079` 在 `#15181C` 上只有 3.61。这就是暗色画布要逐键改文字色的理由，写在 `themes.ts` 的注释里。
+   - 两条都是纯计算断言，覆盖 4 套主题，不悄悄删掉。
+4. **轴名：`outerBoundsContain: "all"` + `nameTruncate`，clamp 显式写成 `"25%"`。**
+   - 后端 `_cartesian` 和 `_scatter` 的 x、y 轴都加 `nameTruncate: {maxWidth: 120, ellipsis: "…"}`。120 要注释说明：12px 字体下约等于 10 个汉字，或约 18 个 ASCII 字符（每字约 6.5–7px）。
+   - grid 显式加 `outerBoundsClampWidth/Height: "25%"`，不靠默认值。`_ALLOWED` 和 `_ENUMS` 同步更新，然后重新生成 schema。
+   - clamp 调到 10% 对 20 字以上的轴名无效（见上面的实测），所以不放弃官方默认值。
+   - **代价**：超过约 10 个汉字或约 18 个 ASCII 字符的轴名会被截断。y 轴名在 tooltip 的系列名里还能看到全文，x 轴名看不到。这是已知取舍，可以接受，理由是省略号会自己说明截断（S 10-19）：用户看到"…"就知道名字被截了。这和当初 truncated 静默截断不是一类问题，那次是图在说假话，这次是图在说"我截了"。
+   - 第三步"第一根柱子偏差 < 5%"的常量要更新，测试旁边写明原因：轴名纳入外边界后 grid 缩小了（判定表纪律③）。
+   - 新增三个夹具：
+     - `long-axis-name-bar`：中文轴名，长度为 `NAME_MAX`（100）。
+     - `long-ascii-axis-name-bar`：ASCII 轴名，长度 100。CSV 列名以 ASCII 为主，这才是主流场景。
+     - `long-y-axis-name-bar`：只有 y 轴名长，配矮画布（高 200 档）。截断是按轴分别生效的，这个夹具覆盖 y 方向。
+5. **4 套主题，只在配色和背景一个维度上区分**（排版、线宽、网格不作为区分维度，免得几套主题看起来像同一套的不同深浅）：
+   - **经典**（默认）：白底，`palette`。
+   - **柔和**：白底，低饱和配色。
+   - **商务蓝**：白底，蓝色系色阶。
+   - **暗色画布**：深底。改名的理由：应用本身没有暗色模式，名字要直说"只有图是暗的"。
+   - 每套主题逐键写出，不留给"看起来还行"：
+     - `color`、`backgroundColor`（**4 套都显式设**；不设时画布透明，暗色主题会透出白页面）、`textStyle.color`；
+     - `title.textStyle.color`、`legend.textStyle.color`、`legend.pageTextStyle.color`；
+     - `tooltip.backgroundColor` / `borderColor` / `textStyle.color`；
+     - `categoryAxis`、`valueAxis`、`timeAxis` 各自的 `axisLine.lineStyle.color`、`axisTick.lineStyle.color`、`axisLabel.color`、`splitLine.lineStyle.color`、`nameTextStyle.color`。
+   - 测试断言每套主题都包含上面每一个键，缺一个就红。
+   - **不设 `rich`、`formatter`、`renderMode`，不设任何 `BANNED_KEYS`**，所以注入判定表不受主题影响。
+6. **切换和持久化**：对话区顶栏放一个全局选择器，值存 `localStorage` 的 `datachat.chartTheme`。
+   - 读出来先查 `THEMES`，**不认识的名字（改名、删除、手改）回退到默认主题**，再调 `setTheme`。否则 echarts 查不到主题会静默保持旧主题。
+   - 不做单图主题。
+
+验收：
+- **pytest**：
+  - 产物不含 `color`；`palette` 已导出；`charts.PALETTE == plotting.PALETTE`；
+  - 重放路径原样回传含 `color` 的 spec，且 `validate_spec` 未被调用；
+  - 枚举和白名单已更新；死用例已删。
+- **vitest**：
+  - 主题对象是纯 JSON，不含 `BANNED_KEYS`、`rich`、`formatter`；必需键齐全；
+  - 默认主题的 `color` 等于 `palette`；
+  - 文字对比度 ≥ 4.5；系列色对比度 ≥ 3.0，相邻 ΔE00 ≥ 20；
+  - 每套主题 × 全部夹具：零 `[ECharts]` log，第一个系列的填充色等于该主题的 `color[0]`；
+  - 未知主题名回退默认；`prepare` 删掉历史 `color`；
+  - **轴名在画布内**：宽度 [320, 640, 1200] × 全部直角坐标夹具（含上面三个长名夹具）。SSR 按锚点和估算宽度判定（中文 12px/字，ASCII 7px/字）；改动前的写法下应当是红的，作为对照。**同一个测试里断言 plot 区宽度 ≥ 画布的 50%**，防止"把图压废了，轴名照样在画布内"也被判为通过。
+- **e2e**：
+  - 用 fillText 记录（同时记 textAlign 和 measureText 宽度），在 320、640、1200 三档视口下检查：长轴名画出来的宽度 ≤ 120+ε，末尾是"…"，并且在画布内。只断言"在画布内"可能是碰巧过的；
+  - 切换主题后像素有变化，刷新后主题保持，零 CSP 违规；
+  - f3-inject 在经典和暗色画布两套主题下各跑一遍，判定表不变。
+- **人眼**：4 套主题 × 5 种图型的截图（不入库）交给 S 定稿；调色只改 `themes.ts`。
+- **注入 e2e 防假绿（S 10-19）**：轴名纳入外边界后 grid 变窄，`hideOverlap` 隐藏的类目集合跟着变；而且这个集合还取决于运行宽度。所以每个载荷先断言它的标签确实有 fillText 记录，再断言没有被解析。前一条不过，说明测试失效，不能算"不解析"的结论。不靠重新排类目顺序来规避。
+- **人眼清单里加一张 matplotlib 图**：`plotting.py:101` 的 `prop_cycle` 会让所有新出的 PNG 换色。仓库里没有 matplotlib 金图（chart_path 都是 tmp_path 加存在性断言），所以这是唯一没人看的输出。
+- 全部闸门在最后一次改动之后重跑；DEVLOG [40]，并回填 [39] 的 10e76ff（已核对是 #46 的合并 SHA）。
+
+不做：导出用浅色（第六步）；开关和层 1（第五步）；应用整体暗色模式；单图主题；内置主题；`result.py:117`；#44。
+
+估时：1–1.5 天，人眼来回调色不计在内。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
