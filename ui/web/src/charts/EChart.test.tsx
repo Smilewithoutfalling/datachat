@@ -6,6 +6,7 @@ import fixtures from "../generated/chart_fixtures.json";
 import type { Turn } from "../turn";
 import { TurnView } from "../views/TurnView";
 import { EChart, type ChartSpec } from "./EChart";
+import * as exp from "./exportPng";
 import { DEFAULT_SWITCHES } from "./switches";
 import { setChartTheme, THEMES } from "./themes";
 import { resetPrefsForTest, setPrefs } from "./uiPrefs";
@@ -23,6 +24,12 @@ vi.mock("echarts/core", async (orig) => {
       return c;
     }),
   };
+});
+
+// 导出：保留真实现（走真 prepare + 离屏 init），只把下载换掉、把 exportPng 包一层看参数
+vi.mock("./exportPng", async (orig) => {
+  const real = await orig<typeof import("./exportPng")>();
+  return { ...real, exportPng: vi.fn(real.exportPng), download: vi.fn() };
 });
 
 const observers: { cb: ResizeObserverCallback; disconnected: boolean }[] = [];
@@ -98,6 +105,9 @@ test("TurnView：png 项走 chartSrc（同源 /charts/<name>?token=），给不�
   } as unknown as Turn;
   const { unmount } = render(<TurnView turn={turn} chartSrc={(p) => `${p}?token=t`} />);
   expect(screen.getByAltText("图表").getAttribute("src")).toBe("/charts/a.png?token=t");
+  // F3 第六步：静态图没有导出按钮，标注出来（S 10-19）；交互图有按钮
+  expect(screen.getByTestId("chart-static").textContent).toBe("静态图（由 matplotlib 生成），可右键另存为");
+  expect(screen.getAllByRole("button", { name: "导出 PNG" })).toHaveLength(1);
   unmount();
   render(<TurnView turn={turn} chartSrc={() => null} />);
   expect(screen.queryByAltText("图表")).toBeNull();
@@ -192,5 +202,110 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     dispatch.mockClear();
     act(() => zr.trigger("dblclick", { target: undefined }));
     expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
+// ---- F3 第六步：导出 PNG；交互态在事件发生时写进 view，导出和下一次重算都带上它 ------------------------------------
+describe("F3 第六步：导出与交互态", () => {
+  const exportSpy = vi.mocked(exp.exportPng);
+  const downloadSpy = vi.mocked(exp.download);
+  beforeEach(() => {
+    exportSpy.mockClear();
+    downloadSpy.mockClear();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    resetPrefsForTest();
+    act(() => setChartTheme("classic"));
+  });
+  const exportArgs = () => exportSpy.mock.calls.at(-1)!;
+  const clickExport = () => fireEvent.click(screen.getByRole("button", { name: "导出 PNG" }));
+
+  test("点导出：走 exportPng(spec, ui, 当前主题, 容器尺寸)，下载文件名是清洗过的标题；离屏实例用完即释放", () => {
+    render(<EChart spec={spec("bar")} />);
+    clickExport();
+    const [s, ui, theme, size] = exportArgs();
+    expect(s).toBe(spec("bar"));
+    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, view: { zoom: null, hidden: [] } });
+    expect(theme).toBe("classic");
+    expect(size).toEqual({ width: 800, height: 450 }); // jsdom 的 clientWidth 是 0，回退
+    expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
+    expect(created).toHaveLength(2); // 屏幕 1 + 离屏 1
+    expect(created[1].isDisposed()).toBe(true);
+    expect(created[0].isDisposed()).toBeFalsy();
+  });
+
+  test("文件名：注入标题清洗；无标题回退到当前显示的图型名", () => {
+    render(<><EChart spec={spec("inject-bar")} /><EChart spec={spec("bar-untitled")} /></>);
+    const [a, b] = screen.getAllByRole("button", { name: "导出 PNG" });
+    fireEvent.click(a);
+    expect(downloadSpy.mock.calls.at(-1)![1]).toBe("_img src=x onerror=_window.__pwned=1__.png");
+    fireEvent.click(b);
+    expect(downloadSpy.mock.calls.at(-1)![1]).toBe("柱状图.png");
+  });
+
+  test("导出为浅色（经典配色）：只在暗色画布下出现；勾上用 classic，不勾用 darkCanvas；不持久化", () => {
+    render(<EChart spec={spec("bar")} />);
+    expect(screen.queryByRole("checkbox", { name: "导出为浅色（经典配色）" })).toBeNull();
+    act(() => setChartTheme("darkCanvas"));
+    clickExport();
+    expect(exportArgs()[2]).toBe("darkCanvas");
+    fireEvent.click(screen.getByRole("checkbox", { name: "导出为浅色（经典配色）" }));
+    clickExport();
+    expect(exportArgs()[2]).toBe("classic");
+    expect(Object.keys(localStorage).some((k) => localStorage.getItem(k)?.includes("light"))).toBe(false);
+  });
+
+  test("导出抛错：按钮旁显示导出失败，屏幕上的图不受影响；再导出成功后提示消失", () => {
+    render(<EChart spec={spec("bar")} />);
+    const setOption = vi.spyOn(created[0], "setOption");
+    exportSpy.mockImplementationOnce(() => { throw new Error("boom"); });
+    clickExport();
+    expect(screen.getByRole("alert").textContent).toBe("导出失败");
+    expect(setOption).not.toHaveBeenCalled();
+    expect(created[0].isDisposed()).toBeFalsy();
+    clickExport();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  test("缩放：datazoom 写进 view（本身不触发 setOption）；导出和下一次重算都带上；双击空白还原后清空", () => {
+    setPrefs("bar", { ...DEFAULT_SWITCHES, zoom: true });
+    render(<EChart spec={spec("bar")} />);
+    const c = created[0];
+    const setOption = vi.spyOn(c, "setOption");
+    act(() => { c.dispatchAction({ type: "dataZoom", start: 20, end: 70 }); });
+    expect(setOption).not.toHaveBeenCalled();
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: { start: 20, end: 70 }, hidden: [] });
+    act(() => setChartTheme("soft"));
+    expect((setOption.mock.calls.at(-1)![0] as { dataZoom: { start: number; end: number }[] }).dataZoom[0]).toMatchObject({ start: 20, end: 70 });
+    act(() => c.getZr().trigger("dblclick", { target: undefined }));
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
+  });
+
+  test("图例显隐：legendselectchanged 的名字换成 index 存（view 里没有字符串）；导出带上", () => {
+    render(<EChart spec={spec("inject-bar")} />);
+    const c = created[0];
+    const name = (spec("inject-bar").option.series as { name: string }[])[1].name;
+    act(() => { c.dispatchAction({ type: "legendToggleSelect", name }); });
+    clickExport();
+    const view = exportArgs()[1].view!;
+    expect(view).toEqual({ zoom: null, hidden: [1] });
+    expect(JSON.stringify(view)).not.toMatch(/:"/); // 值里没有字符串
+  });
+
+  test("换图型、换 spec：view 清空", () => {
+    setPrefs("bar", { ...DEFAULT_SWITCHES, zoom: true });
+    setPrefs("line", { ...DEFAULT_SWITCHES, zoom: true });
+    const { rerender } = render(<EChart spec={spec("bar")} />);
+    act(() => { created[0].dispatchAction({ type: "dataZoom", start: 20, end: 70 }); });
+    fireEvent.change(screen.getByRole("combobox", { name: "图型" }), { target: { value: "line" } });
+    clickExport();
+    expect(exportArgs()[1]).toMatchObject({ kind: "line", view: { zoom: null, hidden: [] } });
+    act(() => { created[0].dispatchAction({ type: "dataZoom", start: 20, end: 70 }); });
+    rerender(<EChart spec={spec("bar-untitled")} />);
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
   });
 });

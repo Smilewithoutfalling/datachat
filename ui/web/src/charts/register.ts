@@ -58,6 +58,10 @@ export const FRONTEND_REG: Record<string, Ext[]> = {
   "series[].markLine.data": [MarkLineComponent],
   "series[].markPoint.data": [MarkPointComponent],
   dataZoom: [DataZoomInsideComponent], // 只用 inside，不注册 slider
+  // F3 第六步：交互态写回（UiState.view）。dataZoom / legend 组件已在上面和 TOP_LEVEL 注册，子键不需要新组件
+  "dataZoom[].start": NONE,
+  "dataZoom[].end": NONE,
+  "legend.selected": NONE,
   "xAxis.data": NONE,
   "series[].data": NONE,
 };

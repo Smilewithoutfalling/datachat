@@ -108,6 +108,11 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
 
 未测（v2 层 2 才可达，到层 2 再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
 **F3 第五步：前端开关是白名单外的例外层**。开关写的整层（`dataZoom`、`series[].markLine / markPoint / label / stack / smooth / itemStyle / areaStyle.color`）不过后端 `_ALLOWED`，也不过 `_check_strings`。约束改由前端 `FRONTEND_KEYS`（`ui/web/src/charts/switches.ts`，路径 → 值集合）承担：值只有固定字面量、当前主题色构成的渐变、和原数组的排列（排序），没有任何字符串型用户数据。`switches.test.ts`「例外层」对 4 主题 × 全部夹具 × 目标图型 × 开关组合求差，断言新增 / 改动 ⊆ FRONTEND_KEYS；`inject.test.ts` 与 e2e `f3-inject.spec.ts` 在开关全开时判定表不变。
+
+**F3 第六步：交互态与导出**。
+- 交互态（缩放窗口、图例显隐）写进 `UiState.view`，只存数值：缩放是 0–100 的区间，显隐是图例项的 **index**。`legendselectchanged` 给的系列名（用户串：列名 / 类目）只在事件处理里换成 index，不进 UiState。`applyView` 写回 `legend.selected` 时，键取 option 自己的 `series[i].name`（饼图是 `series[0].data[i].name`），所以没有新的用户串通道。FRONTEND_KEYS 新增 `dataZoom[].start/end`（区间）、`legend.selected`（键必须是 option 里已有的图例项名，值是布尔），例外层机制测试覆盖带 view 的组合。
+- **导出文件名是用户串离开画布的唯一出口**（标题 → 下载文件名），由前端 `safeFilename`（`ui/web/src/charts/filename.ts`）清洗：删 C0 / DEL / C1 / U+2028–2029 / bidi 控制符（RLO 能把 `gnp.exe` 显示成 `exe.png`）；路径符和 Windows 非法字符换成 `_`；按码点限长 60 **之后**再去首尾空格和点；保留名按第一个点之前的段判（`CON.png` 也算）。不信任上游：后端 `_CTRL`（`app/tools/charts.py`）不含 C1 和 bidi，重放路径不过 `validate_spec`。字符集在 filename.ts 独立定义，不复用 `_CTRL` 或 `app/server/app.py` 的 `_CONTROL_CHARS`。`filename.test.ts` 表驱动覆盖 INJECT_PAYLOADS P1–P7。
+- 导出的像素走同一条 `prepare`（含 cleanup），离屏实例用完 `dispose`；下载用 data URL，不改 CSP，不走 fetch（`connect-src 'self'` 会拦）。
 prepare 的纵深防御（删被禁键）只在 vitest 层测过（`charts.test.ts`「对照：人为塞进各层级的被禁键确实被删掉」）；托管 dist 上不可达，因为后端 `validate_spec` 先拒了。
 tests/test_charts.py 里的 HTML 用例同样只证明载荷能原样到达前端。
 

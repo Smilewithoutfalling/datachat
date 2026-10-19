@@ -106,7 +106,13 @@ export function TurnView({ turn, onRetry, chartSrc }: {
           {r.charts.map((c, i) => {
             if (c.option) return <EChart key={i} spec={c.option as unknown as ChartSpec} />;
             const src = c.png && chartSrc ? chartSrc(c.png) : null;
-            return src ? <img key={i} className="chart-png" src={src} alt="图表" /> : null;
+            // matplotlib 的静态图没有导出按钮：标注出来，免得和旁边带"导出 PNG"的交互图比着以为按钮坏了（F3 第六步，S 10-19）
+            return src ? (
+              <figure key={i} className="chart-static-wrap" data-testid="chart-static">
+                <img className="chart-png" src={src} alt="图表" />
+                <figcaption className="chart-static">静态图（由 matplotlib 生成），可右键另存为</figcaption>
+              </figure>
+            ) : null;
           })}
         </div>
       ) : null}

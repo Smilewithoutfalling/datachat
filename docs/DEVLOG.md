@@ -1483,7 +1483,7 @@ Playwright：
 - 本条 SHA 等 squash 合并后回填 squash SHA（不填分支上的 da96f4b，同 [34]→50e9add）。
 - `result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
 
-## [41] 2026-10-19 · 阶段 5 F3 第五步：前端开关 + 换图型、历史 spec 几何归一 · commit <待提交>
+## [41] 2026-10-19 · 阶段 5 F3 第五步：前端开关 + 换图型、历史 spec 几何归一 · commit d589d61（PR #51）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第五步完成；下一步第六步导出）。方案见 phase5-frontend.md「F3 第五步」（PR #50，ba5354c）。[40] 的 SHA 已回填 2373f24（PR #48）。没有拆 PR（见"未做"）。
 
@@ -1528,3 +1528,39 @@ Playwright：
 - 历史 spec 的 e2e（真库里的老 spec）没做：重放路径要往库里写老 result，e2e 没有入口。由 vitest SSR 覆盖（`charts.test.ts` 两条对照的产品路径断言、`switches.test.ts`「第三步形状：几何键等于当前 builder 产出」）。
 - 截图人眼验收（S）。#49、`result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
 
+
+## [42] 2026-10-19 · 阶段 5 F3 第六步：导出 PNG、交互态 view、文件名清洗 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第六步完成，F3 六步全部落地；下一步 F4）。方案见 phase5-frontend.md「F3 第六步」（PR #52，b3b2d10）。[41] 的 SHA 已回填 d589d61（PR #51）。
+
+前端：
+- `src/charts/exportPng.ts`（新）：离屏 div 不挂 DOM → `init(theme, {canvas, width, height})` → `prepare(spec, ui, theme)` + `animation: false` → `setOption(notMerge)` → `getDataURL({png, pixelRatio: 2})` → `finally dispose`。尺寸取屏幕容器的 `clientWidth × clientHeight`（为 0 时回退 800 × 450，只有 jsdom 会走到）。`download()`：`<a download>` + data URL，a 不挂 DOM。
+- `src/charts/filename.ts`（新）：`safeFilename(title, fallback)`，字符集本文件独立定义（不 import 任何模块）。顺序：NFC → 删 C0 / DEL / C1 / U+2028–2029 / bidi → 非法字符换 `_` → 合并空白 → 按码点限长 60 → 去首尾空格和点 → 空值回退 → 保留名按 `split(".")[0]` 判、加 `_` → `.png`。无标题时回退到当前显示的图型名。
+- `src/charts/switches.ts`：`View = {zoom: {start, end} | null; hidden: number[]}`、`asZoom`（NaN / 越界 / start > end 都是 null，全量归 null）、`legendItems`（饼图是扇区）、`hiddenFromSelected`（名字只在这里换成 index）、`applyViewTo`（缩放只在开关已写出 dataZoom 时生效；hidden 越界丢弃；图例 `show: false` 时不写；写值经 `inRange()` 第二道校验）。FRONTEND_KEYS 加 `dataZoom[].start`、`dataZoom[].end`（range）、`legend.selected`（legendItems），共 16 条。
+- `src/charts/prepare.ts`：`UiState.view?`；管线加 `applyView`（开关之后、cleanup 之前）。
+- `src/charts/EChart.tsx`：监听 `datazoom`（参数两种形状：inside 漫游是 `batch[0]`，dispatchAction 是顶层）和 `legendselectchanged`，写进 view ref；换图型 / 换 spec 时清空。"导出 PNG"按钮、darkCanvas 下"导出为浅色（经典配色）"勾选（不持久化）、失败时按钮旁"导出失败"（`role=alert`，不弹窗）。
+- `src/views/TurnView.tsx`：png 项包一层 figure，标注"静态图（由 matplotlib 生成），可右键另存为"。
+- `register.ts` FRONTEND_REG 加三条（都不需要新组件）；M13 §12 dataZoom 行补 start / end，加一行"图例显隐（交互态）"。
+
+测试设施：`tests/fake_llm.py` 加 `chart-matplotlib` 场景（plt 画一张，结果里是 png 项），给 e2e 用。
+
+文档：THREAT_MODEL §2.3 加"F3 第六步：交互态与导出"（view 只存数值；导出文件名是用户串离开画布的唯一出口，规则和不复用 `_CTRL` / `_CONTROL_CHARS` 的理由）。phase5「F3 第六步」末尾加"实现时的偏离"。
+
+偏离方案（及理由）：
+1. **view 变化不触发 setOption**（方案第 2 条写的是"view 变化也走整体 setOption(notMerge)，比较值相同就不 set"）。屏幕已经是 ECharts 画好的样子，重设结果相同；但 notMerge 会重建 dataZoom 组件，拖动 / Shift + 滚轮途中每个 datazoom 事件都重建一次会打断手势。现在 view 写进 ref，下一次重算（开关 / 主题）和导出都带上，屏幕和导出仍走同一条 prepare。`EChart.test.tsx`「缩放：datazoom 写进 view（本身不触发 setOption）…」钉住：dispatch 后 setOption 0 次；切主题后 setOption 收到的 dataZoom[0] 是 {start: 20, end: 70}。
+2. **zoom 单开时导出和全关逐字节相同**，方案验收"六个 ✅ 逐个打开都不同"在这一格不成立：inside 型 dataZoom 不画任何东西。e2e 对 zoom 断言"相同"并写明原因；zoom 的效果由交互态用例证明（缩过之后导出不同）。另外五个（数值标签、渐变、圆角、平均线和极值、排序）逐个不同，全开不同。
+3. 饼图的图例项是扇区而不是系列：`hidden` 对饼图存 `series[0].data` 的 index（方案只写了 seriesIndex）。键仍取 option 自己的名字。
+4. 例外层机制测试的 `diff`：字面量路径的子键另有登记时（dataZoom 的 start / end），先摘出来按各自的值集合判，再比字面量。
+
+测试：
+- vitest `filename.test.ts`（新，36 条）：P1–P7 逐条期望值、RLO / LRI / ALM / C1 / 行分隔符、CON / con.txt / CON.png / Nul.tar.gz / lpt1（CONSOLE、COM0 不算）、`..` / 空格点 / 全控制字符回退、第 60 个码点是空格或点、65 个 emoji 不切代理对、NFC、全角空格合并、无标题回退图型名；源码不 import 任何模块。
+- vitest `exportPng.test.ts`（新，5 条）：init 参数（div 未挂 DOM、主题、canvas、尺寸）、setOption 收到 `prepare(...) + animation:false`、getDataURL 参数、dispose；getDataURL 抛错时仍 dispose；prepare 产物里没有 animation；4 主题 × 全部夹具 × 全开 × 带 view 的导出 option 无被禁键、renderMode 是 richText；download 的 a 不挂 DOM。
+- vitest `switches.test.ts`：例外层组合加"全开 + view / 全开 + 越界 view / 全关 + view"，16 条路径全部被写到过；对照加"缩放越界 / 图例键不是图例项 / 图例值不是布尔"会被抓、合法的不误报；新 describe「交互态 view → applyView」8 条。
+- vitest `EChart.test.tsx`：导出参数与文件名、注入标题清洗 / 无标题回退、浅色勾选只在 darkCanvas 出现且用 classic、导出失败提示、缩放 / 图例写进 view、换图型 / 换 spec 清空；png 项的静态图标注。
+- pytest `test_real_chain_chart_matplotlib`（workflow / react 两条链路）。
+- e2e `f3-export.spec.ts`（新，5 条）：真下载 PNG（签名、IHDR = 容器 × 2、非背景像素 > 1000）、注入标题的文件名、无新分析请求、零外部请求、console 干净；单系列类目 bar 先断言 UI 上 enabled 的正好是六个 ✅，再逐个比；Shift + 滚轮后导出不同、图例点掉一项后导出不同、刷新后导出与初始逐字节相同；darkCanvas 左上角 #15181C / 勾浅色后 #FFFFFF；matplotlib 静态图有标注、无导出按钮。
+
+未做：
+- 人眼验收（S）。
+- Windows 真鼠标 Shift + 滚轮（[41] 留下的）仍待 S 手试；Tauri 壳里的下载行为到壳那一步。
+- #49、`result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。

@@ -1,4 +1,4 @@
-// F3 prepare 管线：深拷贝 → normalize → changeKind → applyLayer1 → applySwitches → cleanup。
+// F3 prepare 管线：深拷贝 → normalize → changeKind → applyLayer1 → applySwitches → applyView → cleanup。
 // - prepare(spec, ui, theme) 是纯函数（F3 第五步）：图型、开关、主题任何一个输入变了，EChart 都整体重算 + setOption(notMerge)。
 //   主题进来是因为渐变色值由这里写死（取主题 color[i]），setTheme 换主题对象不会重算它。
 // - normalize：把历史 spec 的几何归一到当前契约（chart_schema.json 的 geometry，后端 GEOMETRY 登记表导出）。
@@ -6,6 +6,8 @@
 //   （tests/test_charts.py 双向比对登记表与 builder 产物）。在渲染期归一，不动库。
 // - changeKind：从后端原始 option 换图型（switches.ts）；开关的兼容性按换完后的图型算，所以排在开关之前。
 // - applyLayer1：恒等，F4 填层 1 样式。applySwitches：前端开关，只写 FRONTEND_KEYS 里的值（switches.ts）。
+// - applyView（F3 第六步）：交互态（缩放窗口、图例显隐，UiState.view）写回 option。排在开关之后：缩放只在 zoom 开关已经写出
+//   dataZoom 时生效。导出（exportPng.ts）和屏幕走同一条管线，导出结果只由 (spec, ui, theme, size) 决定。
 // - cleanup 永远最后：按 banned_keys.json 递归删被禁键 → 删顶层 color → 强制 tooltip.renderMode='richText'。放在最后，
 //   前面任何一步（含层 1 / 开关）塞进来的被禁键或顶层 color 都会被删掉（charts.test.ts 用替身证明）。
 // 纵深防御：第一道是后端 validate_spec（app/tools/charts.py），这里只在后端校验有漏洞时兜底；不是前端校验，也不回验。
@@ -16,8 +18,8 @@
 import generated from "../generated/banned_keys.json";
 import schema from "../generated/chart_schema.json";
 import {
-  applySwitchesTo, asKind, asXKind, canChangeKind, changeKind as changeKindOf, DEFAULT_SWITCHES, type Kind, type Shape,
-  type Switches, type XKind,
+  applySwitchesTo, applyViewTo, asKind, asXKind, canChangeKind, changeKind as changeKindOf, DEFAULT_SWITCHES, type Kind, type Shape,
+  type Switches, type View, type XKind,
 } from "./switches";
 import { DEFAULT_THEME, type ThemeName } from "./themes";
 
@@ -25,8 +27,8 @@ export const BANNED_KEYS: ReadonlySet<string> = new Set(generated.banned_keys);
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type Option = { [k: string]: Json };
-/** 前端 UI 状态：kind = 用户选的目标图型（null = 后端原图型），sw = 开关。 */
-export type UiState = { kind: Kind | null; sw: Switches };
+/** 前端 UI 状态：kind = 用户选的目标图型（null = 后端原图型），sw = 开关，view = 交互态（F3 第六步；不持久化，只有数值）。 */
+export type UiState = { kind: Kind | null; sw: Switches; view?: View };
 export const DEFAULT_UI: UiState = { kind: null, sw: DEFAULT_SWITCHES };
 /** 进管线的图：spec.kind 是后端出的图型（后端真相，换图型不改它）；x_kind 历史 spec 可能没有。 */
 export type ChartInput = { kind: string; x_kind?: string | null; option: Record<string, unknown> };
@@ -67,6 +69,8 @@ export const applySwitches: Step = (option, ctx) => {
   return applySwitchesTo(option, { shape, theme: ctx.theme, sw: ctx.ui.sw });
 };
 
+export const applyView: Step = (option, ctx) => applyViewTo(option, ctx.ui.view);
+
 export function cleanup(option: Option): Option {
   const out = strip(option) as Option;
   delete out.color;
@@ -98,7 +102,7 @@ export function runPipeline(spec: ChartInput, ui: UiState, theme: ThemeName, ste
   return cleanup(out);
 }
 
-export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches];
+export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches, applyView];
 
 export function prepare(spec: ChartInput, ui: UiState = DEFAULT_UI, theme: ThemeName = DEFAULT_THEME): Record<string, unknown> {
   return runPipeline(spec, ui, theme, STEPS);

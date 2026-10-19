@@ -11,8 +11,8 @@ import schema from "../generated/chart_schema.json";
 import { type ChartInput, DEFAULT_UI, type Json, normalize, type Option, prepare, type Ctx, type UiState } from "./prepare";
 import { FRONTEND_REG, productExtensions } from "./register";
 import {
-  canChangeKind, changeKind, COMPAT, DEFAULT_SWITCHES, FRONTEND_KEYS, gradient, KIND_DIFF, KINDS, type Kind, rgba0,
-  SWITCHES, SWITCH_VALUES, type SwitchName, type Switches,
+  applyViewTo, asZoom, canChangeKind, changeKind, COMPAT, DATA_ZOOM, DEFAULT_SWITCHES, hiddenFromSelected, FRONTEND_KEYS, gradient, KIND_DIFF, KINDS, type Kind, legendItems, rgba0,
+  SWITCHES, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
 import { THEME_NAMES, THEMES, type ThemeName } from "./themes";
 import { getPrefs, parseSwitches, PREFS_PREFIX, resetPrefsForTest, setPrefs } from "./uiPrefs";
@@ -24,7 +24,7 @@ const FIX = fixtures.fixtures as unknown as { id: string; spec: Spec }[];
 const GROUPS = kindFixtures.groups as unknown as Record<string, Partial<Record<Kind, Spec>>>;
 const fx = (id: string) => FIX.find((f) => f.id === id)!.spec;
 const kf = (g: string, k: Kind) => GROUPS[g][k]!;
-const ui = (patch: Partial<Switches> = {}, kind: Kind | null = null): UiState => ({ kind, sw: { ...DEFAULT_SWITCHES, ...patch } });
+const ui = (patch: Partial<Switches> = {}, kind: Kind | null = null, view?: View): UiState => ({ kind, sw: { ...DEFAULT_SWITCHES, ...patch }, view });
 /** 第一个非默认值 = "开"（legend → top，sort → desc） */
 const ON = Object.fromEntries(SWITCHES.map((s) => [s, SWITCH_VALUES[s][1]])) as Switches;
 // 递归排序键再 stringify（S 10-19 第四条）：开关全关时对象可能被重建，键序变了不算行为变化；顺带能发现重复键
@@ -94,12 +94,34 @@ describe("COMPAT 45 格：开关 × 图型都测生效", () => {
 // 基线 = 同一图型、开关全关（normalize → changeKind → cleanup）。changeKind 已由下面的契约测试钉成等于 builder 的产物，
 // 所以基线在后端白名单内；差出来的部分就是白名单外的例外层，必须全部登记在 FRONTEND_KEYS。
 const pattern = (path: (string | number)[]) => path.map((p) => (typeof p === "number" ? "[]" : p)).join(".").replace(/\.\[\]/g, "[]");
-function diff(out: Json | undefined, base: Json | undefined, path: (string | number)[], theme: ThemeName, hits: Set<string>, bad: string[]) {
+function diff(out: Json | undefined, base: Json | undefined, path: (string | number)[], theme: ThemeName, hits: Set<string>, bad: string[], root?: Json) {
+  root ??= out; // legendItems 的判据要用整份产物（图例项名取自 option 自己）
   const pat = pattern(path);
   const set = FRONTEND_KEYS[pat];
   if (set && canon(out) !== canon(base)) {
     hits.add(pat);
-    if ("lit" in set) { if (!set.lit.some((v) => canon(v) === canon(out))) bad.push(`${pat} 值不在集合里：${JSON.stringify(out)}`); }
+    if ("lit" in set) {
+      // 子键另有登记（F3 第六步的 dataZoom[].start / end）：先摘出来按各自的值集合判，剩下的再比字面量
+      let rest = out;
+      const kids = Object.keys(FRONTEND_KEYS).filter((k) => k.startsWith(`${pat}[].`)).map((k) => k.slice(pat.length + 3));
+      if (kids.length && Array.isArray(out)) {
+        rest = JSON.parse(JSON.stringify(out)) as Json;
+        (rest as Json[]).forEach((el, i) => {
+          if (el === null || typeof el !== "object" || Array.isArray(el)) return;
+          for (const k of kids) if (k in el) { diff(el[k], undefined, [...path, i, k], theme, hits, bad, root); delete el[k]; }
+        });
+      }
+      if (!set.lit.some((v) => canon(v) === canon(rest))) bad.push(`${pat} 值不在集合里：${JSON.stringify(out)}`);
+    }
+    else if ("range" in set) {
+      if (typeof out !== "number" || !Number.isFinite(out) || out < set.range[0] || out > set.range[1]) bad.push(`${pat} 越界：${JSON.stringify(out)}`);
+    }
+    else if ("legendItems" in set) {
+      const names = new Set(legendItems(root as Option).filter((n) => typeof n === "string"));
+      const ok = out !== null && typeof out === "object" && !Array.isArray(out) &&
+        Object.entries(out).every(([k, v]) => names.has(k) && typeof v === "boolean");
+      if (!ok) bad.push(`${pat} 键不是图例项或值不是布尔：${JSON.stringify(out)}`);
+    }
     else if ("gradient" in set) { if (!THEMES[theme].theme.color.some((c) => canon(gradient(c)) === canon(out))) bad.push(`${pat} 不是 ${theme} 的渐变`); }
     else {
       const sorted = (a: Json | undefined) => (Array.isArray(a) ? a.map((x) => JSON.stringify(x)).sort() : []);
@@ -107,12 +129,12 @@ function diff(out: Json | undefined, base: Json | undefined, path: (string | num
     }
     return;
   }
-  if (Array.isArray(out) && Array.isArray(base) && out.length === base.length) { out.forEach((v, i) => diff(v, base[i], [...path, i], theme, hits, bad)); return; }
+  if (Array.isArray(out) && Array.isArray(base) && out.length === base.length) { out.forEach((v, i) => diff(v, base[i], [...path, i], theme, hits, bad, root)); return; }
   const isO = (v: Json | undefined) => v !== null && typeof v === "object" && !Array.isArray(v);
   if (isO(out) && (isO(base) || base === undefined)) {
     const b = (base ?? {}) as Record<string, Json>;
     const o = out as Record<string, Json>;
-    for (const k of new Set([...Object.keys(o), ...Object.keys(b)])) diff(o[k], b[k], [...path, k], theme, hits, bad);
+    for (const k of new Set([...Object.keys(o), ...Object.keys(b)])) diff(o[k], b[k], [...path, k], theme, hits, bad, root);
     return;
   }
   if (canon(out) !== canon(base)) bad.push(`${pat || "(根)"} 未登记：${JSON.stringify(base)?.slice(0, 60)} → ${JSON.stringify(out)?.slice(0, 60)}`);
@@ -121,7 +143,13 @@ const ALL_SPECS: [string, Spec][] = [
   ...FIX.map((f) => [f.id, f.spec] as [string, Spec]),
   ...Object.entries(GROUPS).flatMap(([g, m]) => Object.entries(m).map(([k, s]) => [`k:${g}:${k}`, s!] as [string, Spec])),
 ];
-const COMBOS: [string, Partial<Switches>][] = [...SWITCHES.map((s) => [s, { [s]: ON[s] }] as [string, Partial<Switches>]), ["全开", ON], ["全开·升序", { ...ON, sort: "asc" }]];
+// F3 第六步：交互态也走这张表。V1 正常；V2 带越界 / 负数 / 重复 index 和全量区间（应当什么都不写）
+const V1: View = { zoom: { start: 10, end: 60 }, hidden: [0] };
+const V2: View = { zoom: { start: 0, end: 100 }, hidden: [1, 1, 999, -1] };
+const COMBOS: [string, Partial<Switches>, View?][] = [
+  ...SWITCHES.map((s) => [s, { [s]: ON[s] }] as [string, Partial<Switches>]), ["全开", ON], ["全开·升序", { ...ON, sort: "asc" }],
+  ["全开+view", ON, V1], ["全开+越界 view", ON, V2], ["全关+view", {}, V1],
+];
 
 describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
   const hits = new Set<string>();
@@ -131,9 +159,9 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
       for (const target of [null, ...KINDS]) {
         const u0 = ui({}, target);
         const base = prepare(spec, u0, theme) as Json;
-        for (const [name, patch] of COMBOS) {
+        for (const [name, patch, view] of COMBOS) {
           const before = bad.length;
-          diff(prepare(spec, ui(patch, target), theme) as Json, base, [], theme, hits, bad);
+          diff(prepare(spec, ui(patch, target, view), theme) as Json, base, [], theme, hits, bad);
           if (bad.length > before) bad.push(`↑ ${id} → ${target ?? "原图型"} / ${name}`);
         }
       }
@@ -148,6 +176,9 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
       ["非排列", (o) => { o.series[0].data[0] = 999; }],
       ["别的主题的渐变", (o) => { o.series[0].itemStyle = { color: gradient(THEMES.soft.theme.color[0]) }; }],
       ["用户串进标签", (o) => { o.series[0].label = { show: true, position: o.xAxis.data[0] }; }],
+      ["缩放越界", (o) => { o.dataZoom = [{ ...(DATA_ZOOM as O[])[0], start: -5, end: 60 }]; }],
+      ["图例键不是图例项", (o) => { o.legend.selected = { 不存在的系列: false }; }],
+      ["图例值不是布尔", (o) => { o.legend.selected = { [o.series[0].name]: "false" }; }],
     ];
     for (const [name, mutate] of cases) {
       const out = JSON.parse(JSON.stringify(base)) as O;
@@ -156,6 +187,15 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
       diff(out as Json, base as Json, [], "classic", new Set(), bad);
       expect([name, bad.length > 0]).toEqual([name, true]);
     }
+  });
+  test("对照的反面：合法的缩放窗口和图例显隐不误报", () => {
+    const base = prepare(fx("inject-bar"), ui(), "classic") as O;
+    const out = JSON.parse(JSON.stringify(base)) as O;
+    out.dataZoom = [{ ...(DATA_ZOOM as O[])[0], start: 10, end: 60 }];
+    out.legend.selected = { [out.series[1].name]: false };
+    const bad: string[] = [];
+    diff(out as Json, base as Json, [], "classic", new Set(), bad);
+    expect(bad).toEqual([]);
   });
   test("FRONTEND_KEYS 的每条路径都被开关真正写到过（表里没有死条目）", () => {
     expect([...hits].sort()).toEqual(Object.keys(FRONTEND_KEYS).sort());
@@ -366,4 +406,55 @@ describe("开关偏好：localStorage 的 datachat.chartUi:<kind>", () => {
 
 test("DEFAULT_UI 下 prepare 不改变任何夹具的开关相关键（开关全关恒等）", () => {
   for (const { spec } of FIX) expect(canon(prepare(spec, DEFAULT_UI))).toBe(canon(prepare(spec)));
+});
+
+// ---- 交互态（F3 第六步）：view 只有数值，按 index 写回 legend.selected ------------------------------------------------
+describe("交互态 view → applyView", () => {
+  const multi = fx("inject-bar"); // 两个系列，系列名是注入载荷（用户串）
+  test("缩放窗口写进开关已写出的 dataZoom；zoom 开关关着、或图型不兼容时忽略", () => {
+    const on = prepare(multi, ui({ zoom: true }, null, V1)) as O;
+    expect(on.dataZoom.map((d: O) => [d.start, d.end])).toEqual([[10, 60]]);
+    expect(canon(prepare(multi, ui({}, null, V1)) as O)).toBe(canon(prepare(multi, ui({}, null, { zoom: null, hidden: [0] })) as O));
+    expect((prepare(fx("pie"), ui({ zoom: true }, null, V1)) as O).dataZoom).toBeUndefined();
+  });
+  test("hidden 按 index 生成 legend.selected，键等于 series[i].name（取自 option，不来自 view）", () => {
+    const o = prepare(multi, ui({}, null, { zoom: null, hidden: [1] })) as O;
+    expect(o.legend.selected).toEqual({ [o.series[1].name]: false });
+  });
+  test("饼图的图例项是扇区：index 对应 series[0].data[i].name", () => {
+    const o = prepare(fx("pie"), ui({}, null, { zoom: null, hidden: [0, 2] })) as O;
+    expect(o.legend.selected).toEqual({ [o.series[0].data[0].name]: false, [o.series[0].data[2].name]: false });
+  });
+  test("越界 / 负数 / 非整数 index、图例没显示时都不写", () => {
+    const off = prepare(multi) as O;
+    for (const hidden of [[999], [-1], [0.5], [Number.NaN]]) {
+      expect((prepare(multi, ui({}, null, { zoom: null, hidden })) as O).legend.selected).toBeUndefined();
+    }
+    expect(off.legend.selected).toBeUndefined();
+    // 单系列 bar 的图例是 show: false：没有能点的图例，hidden 不写
+    expect((prepare(fx("bar"), ui({}, null, { zoom: null, hidden: [0] })) as O).legend.selected).toBeUndefined();
+  });
+  test("asZoom：NaN、越界、start > end、非数值都是 null；全量 (0, 100) 归成 null", () => {
+    expect(asZoom(10, 60)).toEqual({ start: 10, end: 60 });
+    for (const [a, b] of [[Number.NaN, 50], [-1, 50], [10, 101], [60, 10], ["10", 60], [undefined, 60], [0, 100], [Infinity, 100]]) {
+      expect([a, b, asZoom(a, b)]).toEqual([a, b, null]);
+    }
+  });
+  test("applyViewTo 再兜一道：手塞不合法的 view 也写不出越界值", () => {
+    const o = prepare(multi, ui({ zoom: true })) as O;
+    applyViewTo(o as Option, { zoom: { start: -5, end: 200 }, hidden: [] });
+    expect(o.dataZoom[0].start).toBeUndefined();
+  });
+  test("hiddenFromSelected：名字只在这里换成 index，结果只有数值；未知名字、非 false 的值忽略", () => {
+    const o = prepare(multi) as O;
+    const [a, b] = [o.series[0].name, o.series[1].name];
+    expect(hiddenFromSelected(o as Option, { [a]: true, [b]: false, 不存在: false })).toEqual([1]);
+    expect(hiddenFromSelected(o as Option, { [b]: 0 })).toEqual([]);
+    expect(hiddenFromSelected(o as Option, null)).toEqual([]);
+    expect(hiddenFromSelected(o as Option, { ["__proto__"]: false })).toEqual([]);
+  });
+  test("view 里只有数值（类型之外再用值钉一次）", () => {
+    const strs = JSON.stringify([V1, V2]).match(/:"/g);
+    expect(strs).toBeNull();
+  });
 });

@@ -3,13 +3,19 @@
 // F3 第五步：EChart 持有后端原始 spec，图型 / 开关 / 主题任何一个变了都整体重算 prepare + setOption(notMerge)；
 // 主题变了先 setTheme（主题的默认值层：背景、轴色）。取代第四步"切主题只调 setTheme"的路径——渐变色值由 prepare 写死，
 // setTheme 换主题对象不会重算它。实例始终不重建（data-instance 不变，e2e 钉住）。
+// F3 第六步：交互态（缩放窗口、图例显隐）在 datazoom / legendselectchanged 发生时写进 view，下一次重算（开关 / 主题）和导出
+// 都带上它，导出和屏幕走同一条 prepare。view 变化本身**不**触发 setOption：屏幕上 ECharts 已经画成这样了，再整体重设一遍
+// 结果相同，却会在拖动 / 滚轮途中重建 dataZoom 组件、打断手势（偏离方案第 2 条"view 变化也走整体 setOption"，DEVLOG [42]）。
+// view 在换图型、spec 变化时清空，不持久化。
 import { init } from "echarts/core";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { download, exportPng } from "./exportPng";
+import { safeFilename } from "./filename";
 import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState } from "./prepare";
 import { registerCharts } from "./register";
 import {
-  asKind, asXKind, canChangeKind, compat, KINDS, KIND_LABEL, type Kind, type Shape, SWITCHES, SWITCH_LABEL, SWITCH_VALUES,
-  type SwitchName, type Switches,
+  asKind, asXKind, asZoom, canChangeKind, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
+  SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme } from "./themes";
 import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
@@ -27,6 +33,11 @@ export function EChart({ spec }: { spec: ChartSpec }) {
   const theme = useSyncExternalStore(subscribeChartTheme, getChartTheme);
   const themeApplied = useRef(theme);
   const [target, setTarget] = useState<Kind | null>(null); // 换成什么图型：不持久化，刷新回到后端图型
+  const view = useRef<View>(EMPTY_VIEW);
+  const shown = useRef<Option | null>(null); // 屏幕上当前这份 prepare 产物：legendselectchanged 的名字按它换成 index
+  const viewFor = useRef<{ spec: ChartSpec; target: Kind | null } | null>(null);
+  const [light, setLight] = useState(false); // 导出为浅色（经典配色）：不持久化
+  const [exportFailed, setExportFailed] = useState(false);
   const src = asKind(spec.kind);
   const kind = effectiveKind(spec, { kind: target, sw: getPrefs(src ?? "bar") });
   const prefKind = kind ?? "bar";
@@ -59,8 +70,36 @@ export function EChart({ spec }: { spec: ChartSpec }) {
       chart.setTheme(theme); // 默认值层先换；option 紧接着整体重设
       themeApplied.current = theme;
     }
-    chart.setOption(prepare(spec, ui, theme), { notMerge: true });
-  }, [spec, ui, theme]);
+    if (viewFor.current?.spec !== spec || viewFor.current.target !== target) {
+      view.current = EMPTY_VIEW; // 换图型 / 换 spec：系列数和类目轴都可能变，旧的 index 和区间没有意义
+      viewFor.current = { spec, target };
+    }
+    const option = prepare(spec, { ...ui, view: view.current }, theme);
+    shown.current = option as Option;
+    chart.setOption(option, { notMerge: true });
+  }, [spec, ui, theme, target]);
+
+  // 交互态写进 view（只存数值：区间和 index）。datazoom 的参数两种形状：inside 漫游是 batch[0]，dispatchAction 是顶层。
+  useEffect(() => {
+    const chart = inst.current;
+    if (!chart) return;
+    const onZoom = (e: unknown) => {
+      const p = e as { start?: unknown; end?: unknown; batch?: { start?: unknown; end?: unknown }[] };
+      const b = Array.isArray(p.batch) && p.batch[0] ? p.batch[0] : p;
+      view.current = { ...view.current, zoom: asZoom(b.start, b.end) };
+    };
+    const onLegend = (e: unknown) => {
+      const o = shown.current;
+      if (o) view.current = { ...view.current, hidden: hiddenFromSelected(o, (e as { selected?: unknown }).selected) };
+    };
+    chart.on("datazoom", onZoom);
+    chart.on("legendselectchanged", onLegend);
+    return () => {
+      if (chart.isDisposed()) return;
+      chart.off("datazoom", onZoom);
+      chart.off("legendselectchanged", onLegend);
+    };
+  }, []);
 
   // 缩放的恢复入口：toolbox 在 BANNED_KEYS 里，restore 用不了，自己接双击。挂 zr 不挂 chart.on：实例级事件只在命中带
   // dataIndex 的元素时派发，空白处不触发（echarts.js:843–870）。e.target 有值 = ECharts 自己的交互（图例双击切显隐、柱子），
@@ -94,6 +133,20 @@ export function EChart({ spec }: { spec: ChartSpec }) {
   }, [zoomOn]);
 
   const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...sw, [s]: v });
+
+  const onExport = () => {
+    try {
+      const el = ref.current!;
+      const size = { width: el.clientWidth || 800, height: el.clientHeight || 450 };
+      const t = theme === "darkCanvas" && light ? "classic" : theme;
+      const url = exportPng(spec, { ...ui, view: view.current }, t, size);
+      const title = (spec.option.title as { text?: unknown } | undefined)?.text;
+      download(url, safeFilename(title, kind ? KIND_LABEL[kind] : undefined));
+      setExportFailed(false);
+    } catch {
+      setExportFailed(true);
+    }
+  };
 
   return (
     <div className="echart-wrap">
@@ -136,6 +189,16 @@ export function EChart({ spec }: { spec: ChartSpec }) {
             );
           })}
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}
+          <span className="chart-export">
+            <button type="button" onClick={onExport}>导出 PNG</button>
+            {theme === "darkCanvas" && (
+              <label>
+                <input type="checkbox" checked={light} onChange={(e) => setLight(e.target.checked)} />
+                导出为浅色（经典配色）
+              </label>
+            )}
+            {exportFailed && <span className="warn small" role="alert">导出失败</span>}
+          </span>
         </div>
       )}
     </div>

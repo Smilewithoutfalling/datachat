@@ -68,7 +68,10 @@ export function compat(sw: SwitchName, s: Shape): Verdict {
 // ---- 例外层：路径 → 值集合 ---------------------------------------------------------------------
 // 路径里数组下标写成 []。值集合三种：lit（字面量，按 JSON 比对）、gradient（第 6 条的固定结构，颜色取当前主题 color）、
 // perm（排序：只许是原数组的一个排列）。
-export type ValueSet = { lit: readonly Json[] } | { gradient: true } | { perm: true };
+// F3 第六步加两种：range（有限数、落在区间内；dataZoom 的 start / end）、legendItems（legend.selected：键必须是 option 里
+// 已有的图例项名——直角坐标是 series[i].name，饼图是 series[0].data[i].name——值是布尔）。legend.selected 的键是用户串
+// （列名 / 类目），但它取自 option 本身、不来自 UiState：UiState.view 只存 index（S 10-19）。
+export type ValueSet = { lit: readonly Json[] } | { gradient: true } | { perm: true } | { range: readonly [number, number] } | { legendItems: true };
 export const DATA_ZOOM: Json = [{ type: "inside", zoomOnMouseWheel: "shift", moveOnMouseWheel: false, moveOnMouseMove: true }];
 export const FRONTEND_KEYS: Readonly<Record<string, ValueSet>> = {
   "legend.top": { lit: ["top"] },
@@ -83,6 +86,10 @@ export const FRONTEND_KEYS: Readonly<Record<string, ValueSet>> = {
   "series[].markPoint.data": { lit: [[{ type: "max" }, { type: "min" }]] },
   // inside：不用 slider（slider 不进 outerBounds，压住 x 轴名）；Shift + 滚轮才缩放，普通滚轮滚页面（S 10-19）
   dataZoom: { lit: [DATA_ZOOM] },
+  // F3 第六步：交互态（UiState.view）写回的缩放窗口和图例显隐。dataZoom 本身仍是上面那条字面量，start / end 是它的子键
+  "dataZoom[].start": { range: [0, 100] },
+  "dataZoom[].end": { range: [0, 100] },
+  "legend.selected": { legendItems: true },
   "xAxis.data": { perm: true },
   "series[].data": { perm: true },
 };
@@ -96,6 +103,14 @@ function lit(path: string, value: Json): Json {
   const hit = set.lit.find((v) => same(v, value));
   if (hit === undefined) throw new Error(`${path} 的值不在 FRONTEND_KEYS 里：${JSON.stringify(value)}`);
   return JSON.parse(JSON.stringify(hit)) as Json;
+}
+
+/** 取 FRONTEND_KEYS[path] 的区间值：不是有限数或出了区间就抛错（调用方先校验，这里是第二道）。 */
+function inRange(path: string, v: number): number {
+  const set = FRONTEND_KEYS[path];
+  if (!set || !("range" in set)) throw new Error(`FRONTEND_KEYS 没有区间路径 ${path}`);
+  if (!Number.isFinite(v) || v < set.range[0] || v > set.range[1]) throw new Error(`${path} 越界：${v}`);
+  return v;
 }
 
 /** 渐变第二端：同一颜色、透明度 0。主题色格式已由 themes.test.ts 钉成 #RRGGBB，格式不对就抛错，不静默降级。 */
@@ -256,3 +271,55 @@ export function changeKind(o: Option, from: Kind, to: Kind, xKind: XKind): Optio
 export const KIND_DIFF: readonly { from: "pie"; path: "xAxis.name"; why: string }[] = [
   { from: "pie", path: "xAxis.name", why: "pie 的 option 里没有 x 列名；和 builder 在 xs.name is None 时一致（空串）" },
 ];
+
+// ---- 交互态（F3 第六步）-------------------------------------------------------------------------
+// 缩放窗口和图例显隐在事件发生时写进 UiState.view（EChart 监听 datazoom / legendselectchanged），导出和屏幕走同一条
+// prepare，不从实例里捞（getOption 是渲染产物、带全部 data；getModel 是内部 API。S 10-19）。
+// hidden 存图例项的 index，不存名字：名字是用户串（列名 / 类目），不进 UiState。view 只有数值。
+export type ZoomWindow = { start: number; end: number };
+export type View = { zoom: ZoomWindow | null; hidden: number[] };
+export const EMPTY_VIEW: View = { zoom: null, hidden: [] };
+
+/** 合法的缩放窗口：0–100 的有限数、start ≤ end；全量（0, 100）归成 null。不合法返回 null。 */
+export function asZoom(start: unknown, end: unknown): ZoomWindow | null {
+  if (typeof start !== "number" || typeof end !== "number") return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > 100 || start > end) return null;
+  return start === 0 && end === 100 ? null : { start, end };
+}
+
+/** 图例项名：饼图是扇区（series[0].data[i].name），其余是系列（series[i].name）。顺序就是 hidden 里 index 的含义。 */
+export function legendItems(o: Option): Json[] {
+  const series = seriesOf(o);
+  if (series[0]?.type === "pie") return (Array.isArray(series[0].data) ? series[0].data : []).map((d) => (isObj(d) ? d.name : null));
+  return series.map((s) => s.name);
+}
+
+/** legendselectchanged 的 selected（名字 → 布尔）换成被隐藏项的 index；名字只在这里过一手，不往外带。 */
+export function hiddenFromSelected(o: Option, selected: unknown): number[] {
+  if (!selected || typeof selected !== "object") return [];
+  const sel = selected as Record<string, unknown>;
+  const out: number[] = [];
+  legendItems(o).forEach((name, i) => {
+    if (typeof name === "string" && Object.prototype.hasOwnProperty.call(sel, name) && sel[name] === false) out.push(i);
+  });
+  return out;
+}
+
+/** 把 view 写进 option（就地改）。缩放只在开关已经写出 dataZoom 时生效；hidden 越界的丢掉；图例没显示时不写。 */
+export function applyViewTo(o: Option, view: View | undefined): Option {
+  if (!view) return o;
+  if (view.zoom && Array.isArray(o.dataZoom)) {
+    const z = asZoom(view.zoom.start, view.zoom.end);
+    if (z) for (const d of o.dataZoom) if (isObj(d)) { d.start = inRange("dataZoom[].start", z.start); d.end = inRange("dataZoom[].end", z.end); }
+  }
+  if (view.hidden.length && isObj(o.legend) && o.legend.show !== false) {
+    const items = legendItems(o);
+    const selected: Obj = {};
+    for (const i of new Set(view.hidden)) {
+      const name = Number.isInteger(i) && i >= 0 && i < items.length ? items[i] : null;
+      if (typeof name === "string") selected[name] = false;
+    }
+    if (Object.keys(selected).length) o.legend.selected = selected;
+  }
+  return o;
+}

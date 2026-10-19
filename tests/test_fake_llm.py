@@ -184,6 +184,15 @@ def test_real_chain_chart_kind(agent, kind, fake_url, sample_path):
 
 
 @pytest.mark.parametrize("agent", ["workflow", "react"])
+def test_real_chain_chart_matplotlib(agent, fake_url, sample_path):
+    """chart-matplotlib（F3 第六步）：不调 chart()，plt 画的图落成 png 项，没有 option 项。"""
+    assert parse_model("chart-matplotlib") == Scenario("chart", chart="matplotlib")
+    r = analyze(sample_path, "画个图", agent=agent, llm_config=cfg(fake_url, "chart-matplotlib"))
+    assert r.ok and r.result == 15, (r.error_kind, r.error)
+    assert [bool(c.get("png")) for c in r.charts] == [True] and not any(c.get("option") for c in r.charts)
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
 def test_real_chain_truncated_chart_warns(agent, fake_url, tmp_path):
     """5001 行 → 图截到 5000 点、truncated=true，两条链路的 result.warnings 里都有截断警告（只有一条，不重复）。"""
     p = tmp_path / "big.csv"
