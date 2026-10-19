@@ -139,7 +139,7 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
       }
     }
     expect(bad.slice(0, 20)).toEqual([]);
-  });
+  }, 60_000); // 穷举：本地每轮约 3.2 s，CI 上 classic 轮 5.4 s 超过默认 5 s（tests run 39205703625）
   test("对照：表外路径、表内路径的表外值、非排列的 data，都会被抓到", () => {
     const base = prepare(fx("bar"), ui(), "classic") as O;
     const cases: [string, (o: O) => void][] = [
