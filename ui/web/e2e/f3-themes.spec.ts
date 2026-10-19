@@ -78,56 +78,114 @@ test("主题：四套逐个切换不重跑分析，背景与配色跟着变；�
   expect(bad).toEqual([]);
 });
 
-// 长轴名：真实字体下（vitest 的 SSR 只有估算字宽）用 fillText + measureText 判。三档画布宽度。
-type Draw = { text: string; x: number; y: number; w: number; align: string; cw: number; ch: number; gen: number };
-test("长轴名：320 / 640 / 1200 三档宽度下截断为 …，实际绘制宽度 ≤ 120+ε，且在画布内", async ({ page }) => {
-  test.setTimeout(120_000);
+// 长轴名：真实字体下（vitest 的 SSR 只有估算字宽）用 fillText + measureText 判。
+// bbox 按变换矩阵算：记下 getTransform() 的 a..f 和 measureText 的 actualBoundingBox*（相对锚点，已含 textAlign / textBaseline），
+// 把局部四角都变换到设备坐标后取 min/max——旋转过的文本也成立，不再假定不旋转。
+// 旋转角取画布上的世界变换（a, b）：y 轴名的元素自身 rotation 是 3π/2，但它先挂在 rotation=π/2 的 transformGroup 下
+// 再 decomposeTransform 到 group（echarts 6.1.0 lib/component/axis/AxisBuilder.js:566-585），世界角 = 2π ≡ 0，所以横排。
+// 帧：每次 echart 画布 clearRect 记一帧；只判"最后一次画 y 轴名"的那一帧（resize 过渡里会有旧布局的帧）。
+type Box = { l: number; t: number; r: number; b: number };
+type Draw = { text: string; box: Box; a: number; b: number; rot: number; align: string; w: number; cw: number; ch: number; gen: number; frame: number };
+const NUM = /^-?\d+(\.\d+)?$/;
+const hit = (p: Box, q: Box) => p.l < q.r && q.l < p.r && p.t < q.b && q.t < p.b;
+const mid = (b: Box) => (b.t + b.b) / 2;
+const xName = ("x_total_revenue_by_region_".repeat(10)).slice(0, 100);
+const yName = ("y_total_revenue_by_region_".repeat(10)).slice(0, 100);
+const isName = (d: Draw, full: string) => d.text.length > 3 && full.startsWith(d.text.slice(0, -1));
+
+async function longAxisChart(page: Page) {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.addInitScript(() => {
-    const w = window as unknown as { __draws: Draw[]; __gen: number };
+    const w = window as unknown as { __draws: Draw[]; __gen: number; __frame: number };
     w.__draws = [];
     w.__gen = 0;
+    w.__frame = 0;
+    const clear = CanvasRenderingContext2D.prototype.clearRect;
+    CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, ...a: [number, number, number, number]) {
+      if (this.canvas.closest(".echart")) w.__frame += 1;
+      return clear.apply(this, a);
+    };
     const orig = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (this: CanvasRenderingContext2D, text: string, x: number, y: number, mw?: number) {
       if (this.canvas.closest(".echart")) {
         const dpr = window.devicePixelRatio || 1;
-        const p = this.getTransform().transformPoint(new DOMPoint(x, y));
-        w.__draws.push({ text: String(text), x: p.x / dpr, y: p.y / dpr, w: this.measureText(String(text)).width, align: this.textAlign,
-          cw: this.canvas.width / dpr, ch: this.canvas.height / dpr, gen: w.__gen });
+        const m = this.measureText(String(text));
+        const tf = this.getTransform();
+        const pts = [[x - m.actualBoundingBoxLeft, y - m.actualBoundingBoxAscent], [x + m.actualBoundingBoxRight, y - m.actualBoundingBoxAscent],
+          [x - m.actualBoundingBoxLeft, y + m.actualBoundingBoxDescent], [x + m.actualBoundingBoxRight, y + m.actualBoundingBoxDescent]]
+          .map(([px, py]) => tf.transformPoint(new DOMPoint(px, py)));
+        const xs = pts.map((p) => p.x / dpr), ys = pts.map((p) => p.y / dpr);
+        w.__draws.push({ text: String(text), box: { l: Math.min(...xs), t: Math.min(...ys), r: Math.max(...xs), b: Math.max(...ys) },
+          a: tf.a / dpr, b: tf.b / dpr, rot: Math.round((Math.atan2(tf.b, tf.a) * 180) / Math.PI), align: this.textAlign, w: m.width,
+          cw: this.canvas.width / dpr, ch: this.canvas.height / dpr, gen: w.__gen, frame: w.__frame });
       }
       return mw === undefined ? orig.call(this, text, x, y) : orig.call(this, text, x, y, mw);
     };
   });
   await page.goto(`/#token=${E2E_TOKEN}`);
-  const xName = ("x_total_revenue_by_region_".repeat(10)).slice(0, 100);
-  const yName = ("y_total_revenue_by_region_".repeat(10)).slice(0, 100);
   const sv = await ask(page, `${xName},${yName}\na,3\nb,1\nc,2\n`, "long.csv", "chart-bar", "长轴名");
-  const chart = sv.getByTestId("echart").first();
+  return sv.getByTestId("echart").first();
+}
+// 把画布设成 width×height，返回最后一帧里两个轴名、y 刻度、类目标签，以及 plot 区占比
+async function measure(page: Page, chart: Locator, width: number, height: number) {
+  const gen = await page.evaluate(([wd, ht]) => {
+    const w = window as unknown as { __gen: number };
+    w.__gen += 1;
+    document.querySelectorAll<HTMLElement>(".echart").forEach((el) => { el.style.width = `${wd}px`; el.style.height = `${ht}px`; });
+    return w.__gen;
+  }, [width, height]);
+  await expect.poll(async () => { const b = (await chart.boundingBox())!; return [b.width, b.height]; }).toEqual([width, height]);
+  await expect.poll(() => page.evaluate((g) => (window as unknown as { __draws: Draw[] }).__draws.filter((d) => d.gen === g && d.text.endsWith("\u2026")).length, gen))
+    .toBeGreaterThanOrEqual(2);
+  await page.waitForTimeout(800);
+  const draws = await page.evaluate((g) => (window as unknown as { __draws: Draw[] }).__draws.filter((d) => d.gen === g), gen);
+  const lastY = draws.filter((d) => isName(d, yName)).at(-1);
+  const frame = lastY ? draws.filter((d) => d.frame === lastY.frame) : [];
+  const ticks = frame.filter((d) => NUM.test(d.text) && d.align === "right");
+  // plot 区上下沿：数据是 a,3 b,1 c,2，值轴是 [0, 3]。矮画布下 0 和 3 两个刻度会被 hideOverlap 藏掉，
+  // 所以不取"画出来的最高 / 最低刻度"，而用画出来的刻度做线性映射，换算 v=3 和 v=0 的像素位置
+  const pts = ticks.map((t) => [Number(t.text), mid(t.box)] as const).sort((p, q) => p[0] - q[0]);
+  const [v0, y0] = pts[0] ?? [0, NaN], [v1, y1] = pts.at(-1) ?? [1, NaN];
+  const at = (v: number) => y0 + ((y1 - y0) / (v1 - v0)) * (v - v0);
+  const plotTop = at(3), plotBottom = at(0);
+  return { draws, frame, ticks, plotTop, plotBottom, tickTexts: ticks.map((t) => t.text), plotRatio: (plotBottom - plotTop) / height,
+    xn: frame.filter((d) => isName(d, xName)).at(-1), yn: lastY, cats: frame.filter((d) => ["a", "b", "c"].includes(d.text)) };
+}
+const SIZES = [[320, 360], [640, 360], [1200, 360], [1200, 220]] as const;
+
+test("长轴名：320 / 640 / 1200 宽与 1200×220 矮画布下截断为 …，绘制宽度 ≤ 120+ε，旋转 bbox 在画布内、不压 y 刻度和 plot 区，x 轴名与类目行隔 ≥ 8", async ({ page }) => {
+  test.setTimeout(120_000);
+  const chart = await longAxisChart(page);
   const eps = 1;
-  for (const width of [320, 640, 1200]) {
-    const gen = await page.evaluate((wd) => {
-      const w = window as unknown as { __gen: number };
-      w.__gen += 1;
-      document.querySelectorAll<HTMLElement>(".echart").forEach((el) => (el.style.width = `${wd}px`));
-      return w.__gen;
-    }, width);
-    await expect.poll(async () => (await chart.boundingBox())!.width).toBe(width);
-    await expect.poll(() => page.evaluate((g) => (window as unknown as { __draws: Draw[] }).__draws.filter((d) => d.gen === g && d.text.endsWith("\u2026")).length, gen))
-      .toBeGreaterThanOrEqual(2);
-    await page.waitForTimeout(800);
-    const draws = await page.evaluate((g) => (window as unknown as { __draws: Draw[] }).__draws.filter((d) => d.gen === g), gen);
-    // 轴名：以完整名的前缀开头。前提：两个轴名都画了（没画就谈不上"在画布内"）
-    const all = draws.filter((d) => d.text.length > 3 && (xName.startsWith(d.text.slice(0, -1)) || yName.startsWith(d.text.slice(0, -1))));
-    // 只判最后一帧：resize 过渡里会有旧布局的帧（实测 320 宽时还画过一次 x=595 的轴名），按轴取最后一次绘制
-    const names = ["x", "y"].map((k) => all.filter((d) => d.text[0] === k).at(-1)).filter((d): d is Draw => !!d);
-    expect([width, names.length]).toEqual([width, 2]);
-    expect(draws.filter((d) => d.text === xName || d.text === yName)).toEqual([]); // 没有未截断的全名
-    for (const d of names) {
-      expect([width, d.text.endsWith("\u2026")]).toEqual([width, true]);
+  for (const [width, height] of SIZES) {
+    const tag = `${width}x${height}`;
+    const m = await measure(page, chart, width, height);
+    writeFileSync(test.info().outputPath(`long-axis-${tag}.json`), JSON.stringify({ xn: m.xn, yn: m.yn, ticks: m.ticks, cats: m.cats, plotTop: m.plotTop, plotBottom: m.plotBottom }));
+    writeFileSync(test.info().outputPath(`long-axis-${tag}.png`), await chart.screenshot());
+    expect(m.draws.filter((d) => d.text === xName || d.text === yName)).toEqual([]); // 没有未截断的全名
+    // 前提：这一帧里两个轴名、≥2 个 y 刻度、3 个类目标签都画了（没画就谈不上"在画布内 / 不相交"）
+    expect([tag, !!m.yn, !!m.xn, m.ticks.length >= 2, m.cats.length]).toEqual([tag, true, true, true, 3]);
+    expect([tag, m.frame[0].ch]).toEqual([tag, height]);
+    for (const d of [m.xn!, m.yn!]) {
+      expect([tag, d.text.endsWith("\u2026")]).toEqual([tag, true]);
       expect(d.w).toBeLessThanOrEqual(schema.axis_name_max_px + eps);
-      const left = d.align === "center" ? d.x - d.w / 2 : d.align === "right" || d.align === "end" ? d.x - d.w : d.x;
-      expect([width, d.text, left >= -eps && left + d.w <= d.cw + eps]).toEqual([width, d.text, true]);
+      const b = d.box;
+      expect([tag, d.text, d.rot, b.l >= -eps && b.t >= -eps && b.r <= d.cw + eps && b.b <= d.ch + eps]).toEqual([tag, d.text, d.rot, true]);
     }
-    writeFileSync(test.info().outputPath(`long-axis-${width}.png`), await chart.screenshot());
+    // y 轴名：不压 y 刻度数字，也不进 plot 区（plot 顶 = 最高刻度的中线）
+    expect([tag, m.ticks.filter((t) => hit(t.box, m.yn!.box)).map((t) => t.text)]).toEqual([tag, []]);
+    expect([tag, m.yn!.box.b <= m.plotTop + eps]).toEqual([tag, true]);
+    // x 轴名行与类目行至少隔 8px（nameGap 28 吃掉的余量；主题加 axisLabel.fontSize 时先红在这里）
+    expect([tag, mid(m.xn!.box) - Math.max(...m.cats.map((c) => mid(c.box))) >= 8]).toEqual([tag, true]);
+    expect([tag, Number.isFinite(m.plotRatio) && m.plotRatio > 0]).toEqual([tag, true]); // 占比可算，下面 test.fail 那条只吞一个数
   }
+});
+
+// 已知缺陷（DEVLOG [40]，issue 见那里）：矮画布下 grid 固定开销挤压 plot 区。只放这一个数，其余断言都在上一条里。
+// top 60 + bottom 30 + nameGap 28 = 118px（220 的 54%），再扣类目行与 y 轴名 → plot 58px ≈ 26%。哪天修好了这条会反过来报错。
+test.fail("已知缺陷：1200×220 下 plot 区高 ≥ 画布 40%", async ({ page }) => {
+  test.setTimeout(120_000);
+  const chart = await longAxisChart(page);
+  const m = await measure(page, chart, 1200, 220);
+  expect(m.plotRatio).toBeGreaterThanOrEqual(0.4);
 });

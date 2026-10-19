@@ -1461,14 +1461,25 @@ Playwright：
 测试：
 - pytest：`test_option_has_no_color_and_palettes_agree`、`test_axis_names_truncate_with_ellipsis`、`test_grid_uses_outer_bounds_and_contain_label_is_gone`（改判 axisLabel → all + clamp）、拒绝例 color → "不在白名单"；`tests/test_web_f2.py::test_replay_returns_stored_chart_option_verbatim_without_validation`（重放原样下发、不调 validate_spec）。
 - vitest：`themes.test.ts`（结构 / 安全 / 必需键；文字 ≥ 4.5、系列 ≥ 3.0、相邻 ΔE00 ≥ 20，新色 ≥ 22；ΔE00 实现自检对 S 的数；暗色 bg 边界；4 主题 × 全部夹具零 [ECharts] log 且 series 0 颜色 = 主题 color[0]；历史 color 被删；setTheme 不重设 option；y 轴 nameTextStyle 深合并；持久化与回退）。`charts.test.ts`「轴名在画布内」：直角坐标夹具 × 320/640/1200 宽 + 640×200，轴名在画布内且 plot 宽 ≥ 50%；长轴名以 … 结尾、估算宽 ≤ 121；两条对照（第三步写法时 x 轴名出画布；只换 'all' 不移位时 plot < 50%）。
-- e2e `f3-themes.spec.ts`：四套主题逐个切换，背景像素 = 主题 bg，没有新的分析请求；刷新后保持；未知名回退经典；长轴名在 320/640/1200 下用真实字体 fillText + measureText 判：两个轴名都画了、以 … 结尾、宽 ≤ 121、按 textAlign 算的左右边界在画布内（只判最后一帧，resize 过渡里有旧布局帧）。
-- e2e `f3-inject.spec.ts`：Draw 记 `w`（measureText）；前提断言 P1–P7 都有 fillText 记录、x 轴名 P4 一行确实存在。
+- e2e `f3-themes.spec.ts`：四套主题逐个切换，背景像素 = 主题 bg，没有新的分析请求；刷新后保持；未知名回退经典。
+- e2e `f3-themes.spec.ts`「长轴名」（S 评审 PR #48 后重写）：320×360 / 640×360 / 1200×360 / 1200×220 四档。bbox 按 `getTransform()` 的 a–f 把 `measureText` 的 `actualBoundingBox*` 四角变换后取 min/max（不再假定不旋转）；按 `clearRect` 分帧，只判最后一次画 y 轴名的那一帧。断言：两个轴名、≥2 个 y 刻度、3 个类目标签都画了（前提）；轴名以 … 结尾、宽 ≤ 121、bbox 在画布内；y 轴名 bbox 不与任何 y 刻度 bbox 相交，底边 ≤ plot 顶；x 轴名行与类目行中线差 ≥ 8。
+- e2e `f3-themes.spec.ts`「已知缺陷：1200×220 下 plot 区高 ≥ 画布 40%」：`test.fail`，只放这一个数（拆成独立测试，`test.fail` 不会吞掉不变式的断言）。plot 上下沿用画出的刻度线性映射到 v=3 / v=0（矮画布下两端刻度被藏）。
+- e2e `f3-inject.spec.ts`：Draw 记 `w`（measureText）；前提断言 P1–P7 都有 fillText 记录、x 轴名 P4 一行确实存在；x 轴名行 − 类目行 ≥ 8（实测 299 − 279 = 20；分类器靠 |y − labelY| ≤ 2 区分两行，间距不够时先红在这里）。
 
 实测：
 - 主题配色（对背景 / 相邻 ΔE00 最小值）：经典 ≥ 3.20 / 25.0；柔和 ≥ 3.16 / 25.7；商务蓝 ≥ 4.11 / 26.3；暗色画布 ≥ 5.44 / 39.9。
 - 真实字体下 320 宽：x 轴名 `x_total_revenue_by…` 宽 116.7，center x=172.2；y 轴名宽 116.7，left x=37.3。
+- 轴名旋转：四档里 x、y 轴名的画布世界变换都是 a=1、b=0（0°），bbox 是 116×12 的横条（y 轴名 360 高时在 y 60.3–72.3，最上面的刻度"3"从 81.3 开始）。和源码一致：y 轴名元素自身 rotation = endTextLayout 的 3π/2，但先挂在 rotation=π/2 的 transformGroup 下，再 decomposeTransform 到 group（echarts 6.1.0 `lib/component/axis/AxisBuilder.js:566-585`），世界角 2π ≡ 0。所以旧写法（按 textAlign 算左右边界）在这个配置下结论碰巧成立，但它只验了横向，y 轴名与刻度、plot 区的关系此前没有断言——现在有了。
+- plot 区占比：360 高时 198px / 55%（三档宽度相同）。**1200×220 时 58px / 26%**：top 60 + bottom 30 + nameGap 28 = 118px（220 的 54%），再扣类目行约 12 + y 轴名 27 → plot 58px，贴着 clamp 25%。这是结构性冲突，不是调参能解决的；40% 是 S 的经验值，不拿它逼改产品几何。跟踪见 issue #49。
+- **矮画布下刻度丢失**（数据完整性，单列）：1200×220 时 y 刻度 0 和 3 被 hideOverlap 吞掉，只剩 0.5–2.5，用户会误读数据范围。和"截断要自述"是同一性质，记在 #49。
 
 未做：
 - 截图的人眼验收（S）。
+- #49：矮画布 grid 固定开销 + 刻度丢失（e2e 里用 test.fail 钉着）。卡片高度不在第五步清单里，所以单独立 issue。
+- S 评审 PR #48 的四、五、六，随第五步做：
+  - 四：历史 spec 的几何没归一（旧 spec 还带 `outerBoundsContain: "axisLabel"`，也没有 nameLocation / nameTruncate，旧会话的 x 轴名照样出画布；换主题会让旧图换色，给人"已升级"的错觉）。S 倾向在 prepare 里把 grid.outerBounds* 和轴名参数一起归一到当前契约，理由和删 color 一样（渲染期归一，不动库），免得"哪些字段该归一"取决于当时有没有人想到。
+  - 五：主题 e2e 只验了背景像素，配色没在真 canvas 上验。补法：classic 与 soft 各截一张，断言左上角 10×10 以外的像素有差异。
+  - 六：LEGACY 余量豁免改成按 (theme, hex) 二元组，不按色值（否则任何主题复用 #1F6FB2 都会自动绕过 ≥22），和 error_kind 白名单同一套逻辑。
+- 本条 SHA 等 squash 合并后回填 squash SHA（不填分支上的 da96f4b，同 [34]→50e9add）。
 - `result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
 

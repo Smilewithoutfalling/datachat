@@ -225,6 +225,10 @@ test(`注入（主题 ${theme}）：图表各位置、tooltip、警告、结论�
     expect([k, drawn.some((t) => t.includes(D[k]))]).toEqual([k, true]);
   // x 轴名（P4）这一行确实存在且与类目行分开，否则 axisName 一格是从别处来的
   expect(st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "axisName" && d.align === "center").map((d) => d.text)).toContain(D.P4);
+  // 上面的分类器靠 |y - labelY| <= 2 区分两行，前提是轴名行与类目行至少隔 8px（nameGap 28 是实测调的；
+  // 主题将来加 axisLabel.fontSize 时，这里先红并直说"间距不够"，而不是只报 P4 位置不对）
+  const xNameRowY = Math.min(...st0.filter((d) => d.text === D.P4 && posOf(d, false, xLabelRow(st0)) === "axisName").map((d) => d.y));
+  expect(xNameRowY - xLabelRow(st0)).toBeGreaterThanOrEqual(8);
 
   // tooltip 新增绘制（悬停阶段出现、静态阶段没有的）
   const tipDraws = (chart: number, phase: string) => {
