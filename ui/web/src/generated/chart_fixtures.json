@@ -21,7 +21,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -33,11 +35,24 @@
        "深圳",
        "杭州"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "销量"
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -51,14 +66,6 @@
         6
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ],
      "title": {
       "text": "各城市销量",
@@ -87,7 +94,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -99,11 +108,24 @@
        "深圳",
        "杭州"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "销量"
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -117,14 +139,6 @@
         6
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -149,7 +163,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -161,11 +177,24 @@
        "深圳",
        "杭州"
       ],
-      "boundaryGap": false
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "销量"
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -180,14 +209,6 @@
        ],
        "showSymbol": true
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ],
      "title": {
       "text": "销量走势",
@@ -216,7 +237,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -228,11 +251,24 @@
        "深圳",
        "杭州"
       ],
-      "boundaryGap": false
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "销量"
+      "name": "销量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -248,14 +284,6 @@
        "areaStyle": {},
        "showSymbol": true
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ],
      "title": {
       "text": "销量面积",
@@ -317,14 +345,6 @@
        ]
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "销量占比",
       "left": "center"
@@ -352,17 +372,32 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "value",
       "name": "销量",
-      "scale": true
+      "scale": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
       "name": "利润",
-      "scale": true
+      "scale": true,
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -393,14 +428,6 @@
        "symbolSize": 9
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "销量与利润",
       "left": "center"
@@ -428,7 +455,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -466,13 +495,26 @@
        "2026-01-30"
       ],
       "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      },
       "axisLabel": {
        "hideOverlap": true
       }
      },
      "yAxis": {
       "type": "value",
-      "name": "访问"
+      "name": "访问",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -513,14 +555,6 @@
        "showSymbol": true
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "每日访问",
       "left": "center"
@@ -548,7 +582,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -586,13 +622,26 @@
        "2026-01-30"
       ],
       "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      },
       "axisLabel": {
        "hideOverlap": true
       }
      },
      "yAxis": {
       "type": "value",
-      "name": "访问"
+      "name": "访问",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -633,14 +682,6 @@
        "areaStyle": {},
        "showSymbol": true
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -665,7 +706,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -676,11 +719,24 @@
        "丙",
        "丁"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "值"
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -693,14 +749,6 @@
         4.0
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ],
      "title": {
       "text": "含缺失",
@@ -729,7 +777,9 @@
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -741,11 +791,24 @@
        "m3",
        "m4"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "量"
+      "name": "量",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -968,14 +1031,6 @@
         32
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -1212,14 +1267,6 @@
         }
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -1244,7 +1291,9 @@
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -1255,11 +1304,24 @@
        "Q3",
        "Q4"
       ],
-      "boundaryGap": false
+      "boundaryGap": false,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": ""
+      "name": "",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -1296,14 +1358,6 @@
        "showSymbol": true
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "多指标",
       "left": "center"
@@ -1331,7 +1385,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -6338,11 +6394,24 @@
        "k4998",
        "k4999"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "v"
+      "name": "v",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -11351,14 +11420,6 @@
         836
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -11383,7 +11444,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -16390,11 +16453,24 @@
        "k4998",
        "k4999"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "v"
+      "name": "v",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -21404,14 +21480,6 @@
        ]
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "截断柱图",
       "left": "center"
@@ -21439,17 +21507,32 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "value",
       "name": "x",
-      "scale": true
+      "scale": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
       "name": "y",
-      "scale": true
+      "scale": true,
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -41459,14 +41542,6 @@
        ],
        "symbolSize": 6
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
      ]
     }
    }
@@ -41491,17 +41566,32 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "value",
       "name": "x",
-      "scale": true
+      "scale": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
       "name": "y",
-      "scale": true
+      "scale": true,
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -61512,14 +61602,6 @@
        "symbolSize": 6
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "截断散点",
       "left": "center"
@@ -61547,7 +61629,9 @@
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -61561,11 +61645,24 @@
        "javascript:window.__pwned=3",
        "上 下"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": ""
+      "name": "",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -61595,14 +61692,6 @@
        ]
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "<img src=x onerror=\"window.__pwned=1\">",
       "left": "center"
@@ -61630,7 +61719,9 @@
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -61644,11 +61735,24 @@
        "javascript:window.__pwned=3",
        "上 下"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "\"><svg onload=\"window.__pwned=2\">"
+      "name": "\"><svg onload=\"window.__pwned=2\">",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -61743,14 +61847,6 @@
        ]
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "｛a｝｛b｝｛c｝ ｛x|富文本｝",
       "left": "center"
@@ -61819,14 +61915,6 @@
        ]
       }
      ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
-     ],
      "title": {
       "text": "<img src=x onerror=\"window.__pwned=1\">",
       "left": "center"
@@ -61854,7 +61942,9 @@
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
-      "outerBoundsContain": "axisLabel"
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
      },
      "xAxis": {
       "type": "category",
@@ -61864,11 +61954,24 @@
        "乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙乙",
        "丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙丙"
       ],
-      "boundaryGap": true
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "yAxis": {
       "type": "value",
-      "name": "值"
+      "name": "值",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
      },
      "series": [
       {
@@ -61880,14 +61983,201 @@
         2
        ]
       }
-     ],
-     "color": [
-      "#1F6FB2",
-      "#159A8C",
-      "#E2843B",
-      "#C0392B",
-      "#7E57C2",
-      "#3A7D44"
+     ]
+    }
+   }
+  },
+  {
+   "id": "long-axis-name-bar",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横横",
+      "data": [
+       "甲",
+       "乙",
+       "丙"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵纵",
+       "type": "bar",
+       "data": [
+        3,
+        1,
+        2
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "long-ascii-axis-name-bar",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "x_total_revenue_by_region_x_total_revenue_by_region_x_total_revenue_by_region_x_total_revenue_by_reg",
+      "data": [
+       "a",
+       "b",
+       "c"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_reg",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_reg",
+       "type": "bar",
+       "data": [
+        3,
+        1,
+        2
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "long-y-axis-name-bar",
+   "spec": {
+    "v": 1,
+    "kind": "bar",
+    "truncated": false,
+    "option": {
+     "tooltip": {
+      "trigger": "axis"
+     },
+     "legend": {
+      "show": false,
+      "top": "bottom"
+     },
+     "grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60,
+      "bottom": 30,
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+     },
+     "xAxis": {
+      "type": "category",
+      "name": "k",
+      "data": [
+       "a",
+       "b",
+       "c"
+      ],
+      "boundaryGap": true,
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "yAxis": {
+      "type": "value",
+      "name": "y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_reg",
+      "nameTextStyle": {
+       "align": "left"
+      },
+      "nameTruncate": {
+       "maxWidth": 120,
+       "ellipsis": "…"
+      }
+     },
+     "series": [
+      {
+       "name": "y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_region_y_total_revenue_by_reg",
+       "type": "bar",
+       "data": [
+        3,
+        1,
+        2
+       ]
+      }
      ]
     }
    }

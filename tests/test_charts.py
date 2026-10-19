@@ -177,7 +177,7 @@ def test_builder_output_passes_validation():
     (lambda o: o["series"][0].__setitem__("data", [1, "2"]), "数值或 null"),
     (lambda o: o["series"][0].__setitem__("data", [1]), "长度"),
     (lambda o: o["series"][0].__setitem__("type", "custom"), "不允许"),
-    (lambda o: o.__setitem__("color", ["red"]), "#RRGGBB"),
+    (lambda o: o.__setitem__("color", ["#1F6FB2"]), "不在白名单"),     # 配色归前端主题（F3 第四步）
     (lambda o: o["title"].__setitem__("text", "a\x00b"), "控制字符"),
     (lambda o: o["legend"].__setitem__("show", "yes"), "类型应为"),
     (lambda o: o["series"][0].__setitem__("data", [float("nan"), 1]), "数值或 null"),
@@ -379,17 +379,50 @@ def test_builder_slip_becomes_chart_bug_error(monkeypatch):
 
 
 def test_grid_uses_outer_bounds_and_contain_label_is_gone():
+    # 第四步改判：outerBoundsContain axisLabel → all（轴名也纳入外边界；'axisLabel' 时 x 轴名画出画布），
+    # clamp 显式写 25%（官方默认，不靠默认值）
     assert "containLabel" not in _ch._ALLOWED["grid"]
     assert _ch._ENUMS[("grid", "outerBoundsMode")] == {"same"}
-    assert _ch._ENUMS[("grid", "outerBoundsContain")] == {"axisLabel"}
+    assert _ch._ENUMS[("grid", "outerBoundsContain")] == {"all"}
+    want = {"outerBoundsMode": "same", "outerBoundsContain": "all",
+            "outerBoundsClampWidth": "25%", "outerBoundsClampHeight": "25%"}
     for kind in ("bar", "line", "area"):
         g = build_option(kind, pd.Series([1, 2], index=["a", "b"]))["option"]["grid"]
-        assert g["outerBoundsMode"] == "same" and g["outerBoundsContain"] == "axisLabel" and "containLabel" not in g
+        assert want.items() <= g.items() and "containLabel" not in g
     g = build_option("scatter", pd.DataFrame({"x": [1.0], "y": [2.0]}), x="x", y="y")["option"]["grid"]
-    assert g["outerBoundsMode"] == "same" and "containLabel" not in g
+    assert want.items() <= g.items() and "containLabel" not in g
     spec = copy.deepcopy(_ok_spec())
     spec["option"]["grid"]["containLabel"] = True
     assert any("grid.containLabel 不在白名单" in p for p in validate_spec(spec))
     spec = copy.deepcopy(_ok_spec())
-    spec["option"]["grid"]["outerBoundsContain"] = "all"
+    spec["option"]["grid"]["outerBoundsContain"] = "axisLabel"
     assert any("不允许" in p for p in validate_spec(spec))
+    spec = copy.deepcopy(_ok_spec())
+    spec["option"]["grid"]["outerBoundsClampWidth"] = "10%"
+    assert any("不允许" in p for p in validate_spec(spec))
+
+
+def test_option_has_no_color_and_palettes_agree():
+    """F3 第四步：echarts mergeTheme 在 option.color 存在时整条跳过主题配色，所以 option 不带 color；
+    两份 PALETTE（ECharts 主题导出 / matplotlib prop_cycle）测试钉住，只改一边就红。"""
+    from app.tools import plotting
+    assert _ch.PALETTE == plotting.PALETTE
+    assert "color" not in _ch._ALLOWED and not hasattr(_ch, "_HEX")
+    for kind, df, kw in [("bar", pd.Series([1, 2], index=["a", "b"]), {}),
+                         ("pie", pd.Series([1, 2], index=["a", "b"]), {}),
+                         ("scatter", pd.DataFrame({"x": [1.0], "y": [2.0]}), {"x": "x", "y": "y"})]:
+        assert "color" not in build_option(kind, df, **kw)["option"]
+
+
+def test_axis_names_truncate_with_ellipsis():
+    """F3 第四步：长轴名靠收缩 grid 包不住，按轴截断；省略号自述被截。"""
+    assert _ch._AXIS_NAME_TRUNCATE == {"maxWidth": 120, "ellipsis": "\u2026"}
+    o = build_option("bar", pd.Series([1, 2], index=["a", "b"]))["option"]
+    sc = build_option("scatter", pd.DataFrame({"x": [1.0], "y": [2.0]}), x="x", y="y")["option"]
+    for ax in (o["xAxis"], o["yAxis"], sc["xAxis"], sc["yAxis"]):
+        assert ax["nameTruncate"] == {"maxWidth": 120, "ellipsis": "\u2026"}
+    # 轴名横向不占宽：x 在轴下方居中，y 左对齐向右伸（320 宽画布上 plot 区 ≥ 50% 由 vitest 断言）
+    for x, y in ((o["xAxis"], o["yAxis"]), (sc["xAxis"], sc["yAxis"])):
+        assert x["nameLocation"] == "middle" and y["nameTextStyle"] == {"align": "left"}
+    assert o["xAxis"] is not sc["xAxis"] and o["yAxis"]["nameTextStyle"] is not sc["yAxis"]["nameTextStyle"]
+    assert "nameTruncate" not in build_option("pie", pd.Series([1, 2], index=["a", "b"]))["option"]["series"][0]

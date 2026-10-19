@@ -19,8 +19,10 @@ OUT_DIR = os.path.join(ROOT, "ui", "web", "src", "generated")
 
 
 def chart_schema() -> dict:
-    from app.tools.charts import _ALLOWED, _ENUMS, _KIND_SERIES_TYPE, KINDS
+    from app.tools.charts import _ALLOWED, _ENUMS, _KIND_SERIES_TYPE, AXIS_NAME_MAX_PX, KINDS, PALETTE
     return {"_generated_by": "scripts/gen_ui_types.py", "kinds": list(KINDS),
+            "palette": list(PALETTE),               # 前端默认主题（经典）的 color 从这里读（F3 第四步）
+            "axis_name_max_px": AXIS_NAME_MAX_PX,
             "kind_series_type": dict(_KIND_SERIES_TYPE),
             "top_level_keys": list(_ALLOWED),
             "enums": {".".join(k): sorted(v) for k, v in _ENUMS.items()}}
@@ -30,7 +32,10 @@ def chart_fixtures() -> dict:
     """固定合成数据 → build_option 的真实产出。只放成功例（validate_spec 的拒绝例在 tests/test_charts.py）。"""
     import numpy as np
     import pandas as pd
-    from app.tools.charts import MAX_PIE_SLICES, MAX_POINTS, MAX_SERIES, build_option
+    from app.tools.charts import MAX_PIE_SLICES, MAX_POINTS, MAX_SERIES, NAME_MAX, build_option
+
+    def _ascii_name(tag):
+        return (f"{tag}_total_revenue_by_region_" * 10)[:NAME_MAX]
     rng = np.random.RandomState(20261016)
     small = pd.DataFrame({"城市": ["北京", "上海", "广州", "深圳", "杭州"], "销量": [3, 5, 2, 8, 6],
                           "利润": [1.5, 2.25, 0.5, 3.75, 2.0]})
@@ -72,6 +77,13 @@ def chart_fixtures() -> dict:
         # F3 第三步：outerBounds 的 clamp 下限（默认 25%）在"类目少 + 标签超长"时最容易显形：3 个类目不会被 hideOverlap 隔开
         ("long-labels-bar", build_option("bar", pd.DataFrame({"名": [f"{c}" * 120 for c in "甲乙丙"], "值": [3, 1, 2]}),
                                          x="名", y="值")),
+        # F3 第四步：轴名纳入外边界 + nameTruncate。长度取 NAME_MAX；ASCII 是 CSV 列名的主流场景；y 单独一例（截断逐轴生效）
+        ("long-axis-name-bar", build_option("bar", pd.DataFrame({"横" * NAME_MAX: ["甲", "乙", "丙"], "纵" * NAME_MAX: [3, 1, 2]}),
+                                            x="横" * NAME_MAX, y="纵" * NAME_MAX)),
+        ("long-ascii-axis-name-bar", build_option("bar", pd.DataFrame({_ascii_name("x"): ["a", "b", "c"], _ascii_name("y"): [3, 1, 2]}),
+                                                  x=_ascii_name("x"), y=_ascii_name("y"))),
+        ("long-y-axis-name-bar", build_option("bar", pd.DataFrame({"k": ["a", "b", "c"], _ascii_name("y"): [3, 1, 2]}),
+                                              x="k", y=_ascii_name("y"))),
     ]
     return {"_generated_by": "scripts/gen_ui_types.py", "fixtures": [{"id": i, "spec": s} for i, s in cases]}
 

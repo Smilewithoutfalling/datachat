@@ -7,6 +7,15 @@
     "pie",
     "scatter"
   ],
+  "palette": [
+    "#1F6FB2",
+    "#159A8C",
+    "#CD7D28",
+    "#C0392B",
+    "#7E57C2",
+    "#3A7D44"
+  ],
+  "axis_name_max_px": 120,
   "kind_series_type": {
     "bar": "bar",
     "line": "line",
@@ -15,7 +24,6 @@
     "scatter": "scatter"
   },
   "top_level_keys": [
-    "color",
     "title",
     "tooltip",
     "legend",
@@ -54,7 +62,19 @@
       "same"
     ],
     "grid.outerBoundsContain": [
-      "axisLabel"
+      "all"
+    ],
+    "grid.outerBoundsClampWidth": [
+      "25%"
+    ],
+    "grid.outerBoundsClampHeight": [
+      "25%"
+    ],
+    "xAxis.nameLocation": [
+      "middle"
+    ],
+    "yAxis.nameTextStyle.align": [
+      "left"
     ]
   }
 }

@@ -1389,7 +1389,7 @@ Playwright：
 - 第三步要连带处理：后端 `_clean_str` / `_cat` 规范化 `{}` 和换行，`validate_spec` 加闸门：遍历整个 option，任何 string 值都不得含 `{`、`}`、`\n`，不按登记键逐个查；判定表的 `note()` 判据要跟着改（规范化后原串不再出现，判据不改的话会变成 raw 和 parsed 都为 false），改的是判据，不是期望值；重新生成 chart_fixtures 的注入例（inject.json 不变）。
 
 
-## [39] 2026-10-17 · 阶段 5 F3 第三步：渲染面规范化 + 闸门、outerBounds、prepare 管线骨架 · commit <待提交>
+## [39] 2026-10-17 · 阶段 5 F3 第三步：渲染面规范化 + 闸门、outerBounds、prepare 管线骨架 · commit 10e76ff（PR #46）
 
 当前阶段：**阶段 5 前端，F3 进行中**（第三步完成；下一步是第四步主题，人眼验收，单独一个 PR）。方案见 phase5-frontend.md「F3 第三步」（PR #45）。[38] 的 SHA 已回填 706e9b8（PR #43）。
 
@@ -1433,3 +1433,42 @@ Playwright：
 - `result.py:117` 有图时 chart_error 被丢弃（待定）；#44。
 - 截断警告里的标题现在取自规范化后的 option（`_spec_title`），名字含 `{}` 时警告里显示全角。这条警告给用户看，不会回到模型的列名流程，所以没动。
 - long-labels 在真实浏览器字体下的阈值没有测（SSR 是估算宽度）。
+
+## [40] 2026-10-19 · 阶段 5 F3 第四步：四套主题、配色归主题、轴名纳入外边界 · commit <待提交>
+
+当前阶段：**阶段 5 前端，F3 进行中**（第四步完成，等 S 人眼验收；下一步是第五步开关 + 换图型）。方案见 phase5-frontend.md「F3 第四步」（PR #47）。[39] 的 SHA 已回填 10e76ff（PR #46）。
+
+后端：
+- `app/tools/charts.py`：`build_option` 不再写顶层 `color`；`_ALLOWED["color"]`、`_HEX` 和 color 校验删除。原因：echarts 6.1.0 `mergeTheme` 在 `option.color` 存在时整条跳过主题配色。
+- 调色板第 3 色 `#E2843B` → `#CD7D28`，`charts.py` 和 `plotting.py` 两处同步（白底 2.76 → 3.20；对 #C0392B ΔE00 25.0）。`chart_schema.json` 新增 `palette`、`axis_name_max_px`，前端默认主题从这里读。
+- grid：`outerBoundsContain` `axisLabel` → `all`，显式写 `outerBoundsClampWidth/Height: "25%"`（白名单 + 枚举钉住）。
+- 轴名：x/y 都加 `nameTruncate {maxWidth: 120, ellipsis: "…"}`；**x 轴名 `nameLocation: "middle", nameGap: 28`，y 轴名 `nameTextStyle.align: "left"`**（见偏离第 1 条）。
+- 夹具：`long-axis-name-bar`（100 个汉字）、`long-ascii-axis-name-bar`（100 个 ASCII）、`long-y-axis-name-bar`（只有 y 长）。
+
+前端：
+- `src/charts/themes.ts`：经典（默认，color = schema.palette）、柔和、商务蓝、暗色画布（bg #15181C）。逐键写全，不含 rich / formatter / 被禁键。`resolveTheme` 收口未知名字；`localStorage["datachat.chartTheme"]` 持久化；全局订阅。
+- `register.ts`：`registerTheme` 四套；TOP_LEVEL 去掉 color；ENUMS 跟后端同步。
+- `prepare.ts` `cleanup`：删顶层 `color`（只为第四步之前存进库的 spec）。
+- `EChart.tsx`：`init(el, theme)`；主题变化只调 `setTheme`，不 dispose、不重设 option；`data-theme` 属性给 e2e 用。
+- `views/ThemePicker.tsx`：会话页头部的"图表主题"下拉框。
+
+偏离方案（及理由）：
+1. **轴名移位（方案没写）**。只换 `'all'` 时，轴名在默认位置（x 在轴末端右侧、y 居中骑在轴线上）会横向占宽：320 宽画布上，长轴名把 plot 区压到 31–39%（long-ascii 31%，long-axis 36%，inject-bar-series 39%），过不了"plot 区 ≥ 50%"。x 轴名挪到轴下方居中、y 轴名左对齐后，同样夹具 ≥ 82%。代价：x 轴名多占一行高度，400 高时 plot 区高 66% → 60%（640×200 时 32% → 19%，产品图高固定 360，不是实际档位）。另外 bar / bar-missing 的第一根柱子回到第三步取值（80.11 → 79.69、100.13 → 99.62），BEFORE 基线不用改。只换 'all' 不移位时会是 -7.7%。
+2. **注入 e2e 的 `posOf`**：x 轴名移位后，也是 `align=center` 并且在下半部，旧规则会把它算成类目标签（判定表 `P4 axisName` 一格丢失，前提断言也可能被轴名冒充）。改为按行区分：下半部 center 的最上一行（y=279）是类目标签，下一行（y=299）是 x 轴名。判定表期望值没动。
+3. 注入 e2e 改为经典、暗色画布两套主题各跑一遍，判定表相同。
+4. 主题 e2e 读像素用 `getImageData`，Chrome 会打 willReadFrequently 提示。这是测试自己引起的，console 过滤里单独排除，没有放宽其他告警。
+
+测试：
+- pytest：`test_option_has_no_color_and_palettes_agree`、`test_axis_names_truncate_with_ellipsis`、`test_grid_uses_outer_bounds_and_contain_label_is_gone`（改判 axisLabel → all + clamp）、拒绝例 color → "不在白名单"；`tests/test_web_f2.py::test_replay_returns_stored_chart_option_verbatim_without_validation`（重放原样下发、不调 validate_spec）。
+- vitest：`themes.test.ts`（结构 / 安全 / 必需键；文字 ≥ 4.5、系列 ≥ 3.0、相邻 ΔE00 ≥ 20，新色 ≥ 22；ΔE00 实现自检对 S 的数；暗色 bg 边界；4 主题 × 全部夹具零 [ECharts] log 且 series 0 颜色 = 主题 color[0]；历史 color 被删；setTheme 不重设 option；y 轴 nameTextStyle 深合并；持久化与回退）。`charts.test.ts`「轴名在画布内」：直角坐标夹具 × 320/640/1200 宽 + 640×200，轴名在画布内且 plot 宽 ≥ 50%；长轴名以 … 结尾、估算宽 ≤ 121；两条对照（第三步写法时 x 轴名出画布；只换 'all' 不移位时 plot < 50%）。
+- e2e `f3-themes.spec.ts`：四套主题逐个切换，背景像素 = 主题 bg，没有新的分析请求；刷新后保持；未知名回退经典；长轴名在 320/640/1200 下用真实字体 fillText + measureText 判：两个轴名都画了、以 … 结尾、宽 ≤ 121、按 textAlign 算的左右边界在画布内（只判最后一帧，resize 过渡里有旧布局帧）。
+- e2e `f3-inject.spec.ts`：Draw 记 `w`（measureText）；前提断言 P1–P7 都有 fillText 记录、x 轴名 P4 一行确实存在。
+
+实测：
+- 主题配色（对背景 / 相邻 ΔE00 最小值）：经典 ≥ 3.20 / 25.0；柔和 ≥ 3.16 / 25.7；商务蓝 ≥ 4.11 / 26.3；暗色画布 ≥ 5.44 / 39.9。
+- 真实字体下 320 宽：x 轴名 `x_total_revenue_by…` 宽 116.7，center x=172.2；y 轴名宽 116.7，left x=37.3。
+
+未做：
+- 截图的人眼验收（S）。
+- `result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
+
