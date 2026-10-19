@@ -16,7 +16,7 @@ function render(id: string, mutate: (o: Record<string, unknown>) => void = () =>
   const c = init(null, null, { renderer: "svg", ssr: true, width: 640, height: 400 });
   let thrown = false;
   try {
-    c.setOption(prepare(spec.option as Record<string, unknown>, {}), { notMerge: true });
+    c.setOption(prepare(spec), { notMerge: true });
     c.renderToSVGString();
   } catch {
     thrown = true;

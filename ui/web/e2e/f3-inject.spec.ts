@@ -43,12 +43,16 @@ async function stableShot(el: Locator, label: string): Promise<Buffer> {
 // y 轴名左对齐、在顶部（实测 y=66），归 axisName。
 type Pos = "title" | "legend" | "xAxisLabel" | "axisName" | "pieLabel" | "tooltip" | "yTick";
 function xLabelRow(st: Draw[]): number {
-  const ys = st.filter((d) => !d.font.startsWith("bold") && d.align === "center" && d.y > d.ch * 0.6).map((d) => d.y);
+  // 纯数字不算：第五步开关全开时，柱顶数值标签和极值标记也是下半部居中的文字，会被误当成类目行（实测 P4 因此被分到 axisName）
+  const ys = st.filter((d) => !d.font.startsWith("bold") && d.align === "center" && d.y > d.ch * 0.6 && !/^-?[\d.,]+$/.test(d.text)).map((d) => d.y);
   return ys.length ? Math.min(...ys) : Infinity;
 }
+// 第五步"开关全开"那一轮：图例位置开关把多系列图的图例挪到顶部（标题下方、y 轴名上方，实测 y < 40）
+let legendTop = false;
 function posOf(d: Draw, pie: boolean, labelY = Infinity): Pos {
   if (d.font.startsWith("bold")) return "title";
   if (pie) return d.x < 100 && d.align === "left" ? "legend" : "pieLabel";
+  if (legendTop && d.align === "left" && d.y < 40) return "legend";
   // 图例在底部；第三步起长表有 7 个系列，图例折成两行（实测 y=326、348，ch=360），所以不能只认最底下 30px。
   if (d.y > d.ch - 30 || (d.align === "left" && d.y > d.ch * 0.85)) return "legend";
   if (d.align === "right") return "yTick";
@@ -57,8 +61,10 @@ function posOf(d: Draw, pie: boolean, labelY = Infinity): Pos {
 }
 
 // 第四步：默认主题和暗色画布各跑一遍。主题不设 rich / formatter，判定表不随主题变；哪天主题配了 rich，这里变红是对的（纪律③）
-for (const theme of ["classic", "darkCanvas"] as const)
-test(`注入（主题 ${theme}）：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定`, async ({ page, baseURL }) => {
+// 第五步：再加一轮"经典 + 全部开关开启"（偏好按图型写进 localStorage）。开关只写字面量，判定表应不变。
+const ALL_ON = { label: true, legend: "top", stack: true, smooth: true, gradient: true, radius: true, sort: "desc", marks: true, zoom: true };
+for (const [theme, switchesOn] of [["classic", false], ["darkCanvas", false], ["classic", true]] as const)
+test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定`, async ({ page, baseURL }) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1600, height: 1000 }); // .view 最宽 1200px，图宽到顶；类目标签隔一个画一个（见 INJECT_ORDER）
   const origin = new URL(baseURL!).origin;
@@ -76,6 +82,9 @@ test(`注入（主题 ${theme}）：图表各位置、tooltip、警告、结论�
     void d.dismiss();
   });
   await page.addInitScript((t) => localStorage.setItem("datachat.chartTheme", t), theme);
+  legendTop = switchesOn;
+  if (switchesOn)
+    await page.addInitScript((sw) => { for (const k of ["bar", "pie"]) localStorage.setItem(`datachat.chartUi:${k}`, JSON.stringify(sw)); }, ALL_ON);
   await page.addInitScript(() => {
     const w = window as unknown as Win;
     w.__draws = [];

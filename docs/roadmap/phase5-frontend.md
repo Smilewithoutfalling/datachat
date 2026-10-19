@@ -373,7 +373,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时：1–1.5 天，人眼来回调色不计在内。
 
-**F3 第五步：开关 + 换图型（S 10-19 评审：A 同意、B 选 (a)、C 同意、D 改按图型存，另加三个结构点，已并入）**
+**F3 第五步：开关 + 换图型（S 10-19 评审：A 同意、B 选 (a)、C 同意、D 改按图型存，另加三个结构点；第三轮五条随实现并入；已实现，DEVLOG [41]）**
 
 输入：§3「开关」「换图型」；M13 §6.2、§6.3、§12；PR #48 评审里第四、五、六条（S 10-19 定：随第五步做）；issue #49（不在本步，见"不做"）。
 
@@ -419,7 +419,8 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
    - 兼容表在代码里是常量 `COMPAT`。UI 置灰和 `applySwitches` 的过滤都读这一张表。
 5. **dataZoom 只用 inside（S 10-19，A），并补两件事，否则不成立：**
    - **不劫持页面滚动**：写 `dataZoom: [{type: "inside", zoomOnMouseWheel: "shift", moveOnMouseWheel: false, moveOnMouseMove: true}]`。对话流里图占的屏幕面积不小，用默认值的话，用户在图上滚一下，缩放的是图，页面不动。开关旁边的提示改成"Shift + 滚轮缩放，拖动平移，双击还原"。
-   - **恢复入口**：`toolbox.feature.restore` 用不了，因为 `toolbox` 在 BANNED_KEYS 里。所以 `EChart` 自己接双击：`chart.getZr().on("dblclick", () => chart.dispatchAction({type: "dataZoom", start: 0, end: 100}))`。挂在 zr 上，不挂 `chart.on`，理由见上面的源码依据。只在 zoom 开着时注册，关掉或 dispose 时解绑。
+     **实现时实测推翻了"只靠 option 就不劫持"（DEVLOG [41] 偏离第 1 条）**：上面的 `'shift'` / `false` 只决定"缩不缩"，不决定"吞不吞"。roams.js:175-181 给 RoamController 的是统一配置（zoomOnMouseWheel / moveOnMouseWheel 都是 true），每个 dataZoom 的取值要到监听器里才判（roams.js:107）；RoamController 在触发监听器之前，只要指针在 grid 内就先 `eventTool.stop(e.event)`（RoamController.js:316-322）。探针：plot 区中心滚轮，window 上的监听器一次都没收到，`.main` 的 scrollTop 150 → 150；grid 外边缘则正常滚。所以 `EChart` 在容器上加 capture 阶段的 wheel 监听：不按 Shift 就 `stopPropagation`，事件到不了 zrender，默认动作（滚页面）照常；按 Shift 的放行。option 仍按本条写（Shift 时由它决定缩放）。
+   - **恢复入口**：`toolbox.feature.restore` 用不了，因为 `toolbox` 在 BANNED_KEYS 里。所以 `EChart` 自己接双击：`chart.getZr().on("dblclick", (e) => { if (e.target) return; chart.dispatchAction({type: "dataZoom", start: 0, end: 100}) })`。挂在 zr 上，不挂 `chart.on`，理由见上面的源码依据。**`e.target` 有值就不重置**（S 10-19 第三轮）：命中元素 = ECharts 自己的交互（图例双击切显隐也走 zr 层），空白才是我们的手势；缩到一个点时周围全是空白，总能点到。只在 zoom 开着时注册，关掉或 dispose 时解绑。
    - 不用 slider（理由见实测），代价是没有可见的缩放条。
 6. **渐变写在 series 层，不写顶层 `color`（S 10-19，B 选 (a)）。** 写顶层 color 会被 `mergeTheme` 整条跳过，等于把第四步修掉的问题带回来。写法：
    - `{type:"linear", x:0, y:0, x2:0, y2:1, colorStops:[{offset:0, color: theme.color[i % n]}, {offset:1, color: rgba(theme.color[i % n], 0)}]}`
@@ -428,7 +429,9 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 7. **`x_kind` 放在 spec 层，和 `option` 并列，不放进 option（S 10-19 结构点②）。**
    - option 是交给 ECharts 的东西，"能不能换成饼图"所需的信息不属于它。
    - spec 结构从 `{v, kind, truncated, option}` 变成 `{v, kind, truncated, x_kind, option}`，`x_kind ∈ {category, time, value}`。builder 总是产出它，`validate_spec` 的结构检查同步修改；`SPEC_VERSION` 不变，新字段只用于判断能否换图型，不影响渲染。
-   - 历史 spec 没有 `x_kind`（重放路径不过 validate_spec）。前端按"未知"保守处理：不可换饼图、不可排序，悬停原因写"旧图缺少类型信息"。不从 `axisLabel.hideOverlap` 反推。
+   - 历史 spec 没有 `x_kind`（重放路径不过 validate_spec）。前端按"未知"保守处理：**只有"不可换饼图"一条**（悬停原因"旧图缺少类型信息，不能换成饼图"）；排序的条件是"单系列且不是时间轴"，未知不拦（S 10-19 第三轮：别把没做的事写进降级规则）。不从 `axisLabel.hideOverlap` 反推。
+   - **两个同名真相**（S 10-19 第三轮）：`spec.kind` 是后端出的图型，`option.series[].type` 是当前显示的；换图型后两者有意不一致，这是"刷新回到后端图型"的实现基础。测试 `spec_kind_is_backend_truth` 钉住，防后来的人去"修"。
+   - **SPEC_VERSION 升版规则**（写在常量旁）：加字段不升（向后兼容）；改字段语义或删字段才升。判据是"老前端读到新 spec 会不会误判"。
 8. **换图型（S 10-19，C 同意放宽）**：一律从后端原始 option 出发，不链式转换，所以来回切换无损。
    - **bar ↔ line ↔ area**：条件是 category 轴，系列数不限。放宽 §6.3 的"单个数值 series"：柱换折线不丢信息，M13 那条是按饼图的口径写的。
    - **bar / line / area → pie**：单系列、`x_kind` 为 category、全部值非 null 且 ≥ 0、类目数 ≤ `MAX_PIE_SLICES`（导出）。
@@ -460,7 +463,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - **vitest**：
   - **COMPAT 45 格都测"生效"（S 10-19 结构点③）**：每格挑一个满足条件的夹具（缺的补上，例如多系列 scatter）。
     - ✅ 格：开关打开后，产物里该开关的键在、值对；关闭时该键不在。
-    - ❌ 格：开和关的产物逐字节相同。
+    - ❌ 格：开和关的产物相同。比较前**递归排序键再 stringify**（S 10-19 第三轮）：开关全关时对象可能被重建、键序变化，产品行为不变；排序后比较还能顺带发现重复键。
     - 条件格（多系列、单系列、非时间轴）：两边各一个夹具。
     - 用 `test.each` 展开，测试名带"开关 × 图型"，45 格一格不少（用一条计数断言钉住）。
   - 第 9 条的例外层机制测试；`FRONTEND_KEYS` = `FRONTEND_REG` = M13 §12 第三列；任何开关组合下 prepare 产物都不含被禁键。
@@ -483,7 +486,11 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 不做：层 1 面板（F4）；dataZoom slider；横 / 竖（v1 已删）；scatter 换图型；图例放左右；时间轴排序；"换成什么图型"的持久化；#49 的高度问题和矮画布刻度丢失；导出（第六步）。
 
-估时：2.5 天（加了例外层机制测试和 45 格生效测试）。
+估时：2.5 天（加了例外层机制测试和 45 格生效测试）。S 10-19 提醒偏乐观：机制测试比 UI 本身重；真超了不吞，可拆"开关"和"换图型"两个 PR（只共享 COMPAT 一张表）。
+
+实现时的偏离（DEVLOG [41] 有代码证据）：
+- `prepare` 的签名是 `prepare(spec, ui, theme)`，第一参数是 spec 不是 option：`changeKind` 要 `spec.kind`（源图型）和 `spec.x_kind`，从 option 反推图型和 x_kind 正是本步否掉的做法。
+- dataZoom 那一行在 M13 §12 里加了"前端实际写出"一列（没有覆盖原第三列"v1 `_ALLOWED`"），测试读这一列。
 
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。

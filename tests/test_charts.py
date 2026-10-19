@@ -193,7 +193,7 @@ def test_validation_rejects_callable_and_bad_envelope():
     spec = copy.deepcopy(_ok_spec())
     spec["option"]["title"]["text"] = lambda: 1
     assert validate_spec(spec)
-    assert validate_spec({"option": {}}) == ["spec 结构应为 {v, kind, truncated, option}"]
+    assert validate_spec({"option": {}}) == ["spec 结构应为 {v, kind, truncated, x_kind, option}"]
     spec = copy.deepcopy(_ok_spec())
     spec["option"]["series"] = []
     assert any("非空" in p for p in validate_spec(spec))
@@ -426,3 +426,62 @@ def test_axis_names_truncate_with_ellipsis():
         assert x["nameLocation"] == "middle" and y["nameTextStyle"] == {"align": "left"}
     assert o["xAxis"] is not sc["xAxis"] and o["yAxis"]["nameTextStyle"] is not sc["yAxis"]["nameTextStyle"]
     assert "nameTruncate" not in build_option("pie", pd.Series([1, 2], index=["a", "b"]))["option"]["series"][0]
+
+
+# ------------------------------------------------------------------ F3 第五步：x_kind、几何登记表
+def test_x_kind_sits_beside_option_and_is_correct():
+    """x_kind 在 spec 层和 option 并列（不进 option：option 只放交给 ECharts 的东西）。category / time / value 各一例。"""
+    from app.tools.charts import X_KINDS
+    cat = build_option("bar", pd.DataFrame({"城": ["a", "b"], "v": [1, 2]}), x="城", y="v")
+    tm = build_option("line", pd.DataFrame({"d": pd.date_range("2026-01-01", periods=3), "v": [1, 2, 3]}), x="d", y="v")
+    pie_tm = build_option("pie", pd.DataFrame({"d": pd.date_range("2026-01-01", periods=3), "v": [1, 2, 3]}), x="d", y="v")
+    sc = build_option("scatter", pd.DataFrame({"a": [1, 2], "b": [3, 4]}), x="a", y="b")
+    assert [cat["x_kind"], tm["x_kind"], pie_tm["x_kind"], sc["x_kind"]] == ["category", "time", "time", "value"]
+    assert set(X_KINDS) == {"category", "time", "value"}
+    for spec in (cat, tm, pie_tm, sc):
+        assert list(spec) == ["v", "kind", "truncated", "x_kind", "option"] and "x_kind" not in spec["option"]
+
+
+def test_validate_spec_checks_x_kind():
+    spec = build_option("bar", pd.DataFrame({"城": ["a", "b"], "v": [1, 2]}), x="城", y="v")
+    assert validate_spec(spec) == []
+    assert any("未知 x_kind" in p for p in validate_spec({**spec, "x_kind": "date"}))
+    assert any("x_kind 与图型不符" in p for p in validate_spec({**spec, "x_kind": "value"}))
+    no_xk = {k: v for k, v in spec.items() if k != "x_kind"}
+    assert validate_spec(no_xk) == ["spec 结构应为 {v, kind, truncated, x_kind, option}"]
+
+
+# 直角坐标里不是"契约归一"对象的键：每张图自己的内容或框架（bottom 随系列数变、name / data 来自数据）。
+# 不在这里也不在 GEOMETRY 里的键 = 新加了几何键却没登记，测试红（F3 第五步：normalize 靠 GEOMETRY 归一历史 spec）。
+_PER_CHART = {"grid": {"left", "right", "top", "bottom"},
+              "xAxis": {"type", "name", "data", "boundaryGap", "scale", "axisLabel"},
+              "yAxis": {"type", "name", "scale"}}
+
+
+def test_geometry_registry_matches_builder_both_ways():
+    from app.tools.charts import GEOMETRY
+    df = pd.DataFrame({"城": ["a", "b"], "v": [1, 2], "w": [3, 4]})
+    t = pd.DataFrame({"d": pd.date_range("2026-01-01", periods=2), "v": [1, 2]})
+    specs = [build_option("bar", df, x="城", y="v"), build_option("line", df, x="城", y=["v", "w"]),
+             build_option("area", t, x="d", y="v"), build_option("scatter", df, x="v", y="w")]
+    for spec in specs:
+        o = spec["option"]
+        for part, reg in GEOMETRY.items():
+            for k, v in reg.items():                       # 登记的每个键都在产物里，值相同
+                assert o[part][k] == v, (spec["kind"], part, k)
+            unknown = set(o[part]) - set(reg) - _PER_CHART[part]   # 产物里的每个键要么登记了、要么是逐图内容
+            assert not unknown, (spec["kind"], part, unknown)
+
+
+def test_schema_exports_step5_contract():
+    import importlib.util, os
+    from app.tools.charts import GEOMETRY, MAX_PIE_SLICES, SHOW_SYMBOL_MAX
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sp = importlib.util.spec_from_file_location("gen_ui_types", os.path.join(root, "scripts", "gen_ui_types.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    s = mod.chart_schema()
+    assert s["geometry"] == GEOMETRY and s["pie_max_slices"] == MAX_PIE_SLICES and s["show_symbol_max"] == SHOW_SYMBOL_MAX
+    groups = mod.kind_fixtures()["groups"]
+    assert set(groups["single"]) == {"bar", "line", "area", "pie"} and set(groups["holes"]) == {"bar", "line", "area"}
+    assert all(validate_spec(sp_) == [] for g in groups.values() for sp_ in g.values())

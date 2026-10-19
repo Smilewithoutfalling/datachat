@@ -16,6 +16,64 @@
     "#3A7D44"
   ],
   "axis_name_max_px": 120,
+  "geometry": {
+    "grid": {
+      "outerBoundsMode": "same",
+      "outerBoundsContain": "all",
+      "outerBoundsClampWidth": "25%",
+      "outerBoundsClampHeight": "25%"
+    },
+    "xAxis": {
+      "nameLocation": "middle",
+      "nameGap": 28,
+      "nameTruncate": {
+        "maxWidth": 120,
+        "ellipsis": "…"
+      }
+    },
+    "yAxis": {
+      "nameTextStyle": {
+        "align": "left"
+      },
+      "nameTruncate": {
+        "maxWidth": 120,
+        "ellipsis": "…"
+      }
+    }
+  },
+  "x_kinds": [
+    "category",
+    "time",
+    "value"
+  ],
+  "pie_max_slices": 50,
+  "show_symbol_max": 60,
+  "frame": {
+    "cartesian_grid": {
+      "left": "3%",
+      "right": "4%",
+      "top": 60
+    },
+    "cartesian_bottom": {
+      "single": 30,
+      "multi": 50
+    },
+    "pie_legend": {
+      "show": true,
+      "type": "scroll",
+      "orient": "vertical",
+      "left": "left",
+      "top": "middle"
+    },
+    "pie_radius": [
+      "0%",
+      "65%"
+    ],
+    "pie_center": [
+      "60%",
+      "55%"
+    ]
+  },
   "kind_series_type": {
     "bar": "bar",
     "line": "line",

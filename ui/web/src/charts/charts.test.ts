@@ -3,7 +3,9 @@ import { init, use as installEcharts } from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
 import fixtures from "../generated/chart_fixtures.json";
 import schema from "../generated/chart_schema.json";
-import { applyLayer1, applySwitches, BANNED_KEYS, type Json, type Option, prepare, runPipeline, type Step } from "./prepare";
+import { applyLayer1, applySwitches, BANNED_KEYS, type Ctx, DEFAULT_UI, type Json, type Option, prepare, runPipeline, type Step } from "./prepare";
+// 裸 option（不是夹具的手写对象）：kind 留空 = 不换图型、不开开关，只走 normalize + cleanup
+const bare = (option: Record<string, unknown>) => ({ kind: "", option });
 import { ENUMS, productExtensions, TOP_LEVEL } from "./register";
 
 type Spec = { v: number; kind: string; truncated: boolean; option: Record<string, unknown> };
@@ -39,7 +41,7 @@ describe("每个夹具 × 产品注册表：SSR SVG 渲染", () => {
     const log = vi.spyOn(console, "log");
     const c = init(null, null, { renderer: "svg", ssr: true, width: 640, height: 400 });
     try {
-      c.setOption(prepare(spec.option, {}), { notMerge: true });
+      c.setOption(prepare(spec), { notMerge: true });
       const svg = c.renderToSVGString();
       const series = (c as unknown as { getModel(): { getSeries(): unknown[] } }).getModel().getSeries();
       expect(series.length).toBe((spec.option.series as unknown[]).length);
@@ -60,9 +62,10 @@ describe("每个夹具 × 产品注册表：SSR SVG 渲染", () => {
 // SSR 的文字宽度是 zrender 的估算值，不是真实字体，所以这里断言的是布局逻辑，不是像素）
 type Rect = { x: number; y: number; width: number; height: number };
 type Zr = { storage: { getDisplayList(update: boolean): { parent?: { anid?: string }; style?: { text?: unknown }; getBoundingRect(): Rect & { clone(): Rect & { applyTransform(m: unknown): void } }; getComputedTransform(): unknown }[] } };
-function renderSSR(option: Record<string, unknown>, width = 640, height = 400) {
+// raw=true：跳过 normalize 等步骤只做 cleanup——对照用例要看"旧写法"本身的缺陷，normalize 会把它归一掉（F3 第五步）
+function renderSSR(option: Record<string, unknown>, width = 640, height = 400, raw = false) {
   const c = init(null, null, { renderer: "svg", ssr: true, width, height });
-  c.setOption(prepare(option, {}), { notMerge: true });
+  c.setOption(raw ? runPipeline(bare(option), DEFAULT_UI, "classic", []) : prepare(bare(option)), { notMerge: true });
   const texts = (c as unknown as { getZr(): Zr }).getZr().storage.getDisplayList(true).flatMap((el) => {
     if (typeof el.style?.text !== "string") return [];
     const r = el.getBoundingRect().clone();
@@ -145,8 +148,10 @@ describe("轴名在画布内（F3 第四步）", () => {
     delete old.xAxis.nameLocation;
     delete old.xAxis.nameGap;
     delete old.yAxis.nameTextStyle;
-    const xName = renderSSR(old).texts.find((t) => t.anid === "name" && t.text === (spec.option.xAxis as { name: string }).name)!;
+    const xName = renderSSR(old, 640, 400, true).texts.find((t) => t.anid === "name" && t.text === (spec.option.xAxis as { name: string }).name)!;
     expect(xName.x + xName.width).toBeGreaterThan(640.5);
+    const fixed = renderSSR(old).texts.find((t) => t.anid === "name" && t.text === (spec.option.xAxis as { name: string }).name)!;
+    expect(fixed.x + fixed.width).toBeLessThanOrEqual(640.5); // 产品路径：normalize 修好了历史 spec
   });
 
   test("对照：只换 'all'、轴名留在默认位置时，320 宽长轴名把 plot 区压到 50% 以下——轴名移位的理由", () => {
@@ -155,17 +160,20 @@ describe("轴名在画布内（F3 第四步）", () => {
     delete o.xAxis.nameLocation;
     delete o.xAxis.nameGap;
     delete o.yAxis.nameTextStyle;
-    expect(renderSSR(o, 320, 400).plot!.width / 320).toBeLessThan(0.5);
+    expect(renderSSR(o, 320, 400, true).plot!.width / 320).toBeLessThan(0.5);
+    // 同一个旧形状走产品路径：normalize 把几何归一到当前契约，plot 区回到 ≥ 50%（第四步评审第四条）
+    expect(renderSSR(o, 320, 400).plot!.width / 320).toBeGreaterThanOrEqual(0.5);
   });
 });
 
 describe("prepare 管线骨架（F3 第三步）", () => {
   const same = (a: unknown, b: unknown) => expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-  test("两个恒等步骤：每个夹具输出与输入逐字节相同", () => {
+  test("层 1 恒等、开关全关时恒等：每个夹具输出与输入逐字节相同", () => {
     for (const { spec } of FIX) {
       const o = JSON.parse(JSON.stringify(spec.option)) as Option;
-      same(applyLayer1(o, {}), spec.option);
-      same(applySwitches(o, {}), spec.option);
+      const ctx: Ctx = { src: null, kind: spec.kind as Ctx["kind"], xKind: null, ui: DEFAULT_UI, theme: "classic" };
+      same(applyLayer1(o, ctx), spec.option);
+      same(applySwitches(o, ctx), spec.option); // 开关全关时恒等（F3 第五步起它不再恒等，见 switches.test.ts）
     }
   });
   test("prepare 整体输出与 v0（深拷贝 → 删被禁键 → 强制 richText）逐字节相同", () => {
@@ -177,12 +185,12 @@ describe("prepare 管线骨架（F3 第三步）", () => {
       out.tooltip = { ...(out.tooltip as object), renderMode: "richText" };
       return out;
     };
-    for (const { spec } of FIX) same(prepare(spec.option, {}), v0(spec.option));
+    for (const { spec } of FIX) same(prepare(spec), v0(spec.option));
   });
   test("清理在最后：替身步骤塞进的被禁键和 renderMode=html，最终产物里都没有", () => {
     const evil: Step = (o) => ({ ...o, graphic: [{ type: "text" }], tooltip: { ...(o.tooltip as object), formatter: "{a}", renderMode: "html" } });
     for (const steps of [[evil, applySwitches], [applyLayer1, evil]]) {
-      const out = runPipeline(FIX[0].spec.option, {}, steps);
+      const out = runPipeline(FIX[0].spec, DEFAULT_UI, "classic", steps);
       expect(out.graphic).toBeUndefined();
       expect(out.tooltip).toEqual({ trigger: "axis", renderMode: "richText" });
     }
@@ -193,15 +201,15 @@ describe("prepare 管线骨架（F3 第三步）", () => {
       (o.series as Json[]).length = 0;
       return o;
     };
-    runPipeline(FIX[0].spec.option, {}, [mutating]);
+    runPipeline(FIX[0].spec, DEFAULT_UI, "classic", [mutating]);
     expect(JSON.stringify(FIX[0].spec.option)).toBe(before);
   });
   test("耗时记录：5000 点夹具跑 20 次取中位数（只记录，不设阈值）", () => {
-    const opt = FIX.find((f) => f.id === "bar-5000")!.spec.option;
+    const opt = FIX.find((f) => f.id === "bar-5000")!.spec;
     const ts: number[] = [];
     for (let i = 0; i < 20; i++) {
       const t0 = performance.now();
-      prepare(opt, {});
+      prepare(opt);
       ts.push(performance.now() - t0);
     }
     ts.sort((a, b) => a - b);
@@ -229,7 +237,7 @@ describe("prepare 清理（v0 起的断言，保持不变）", () => {
   test("每个夹具：清理后任何层级不含被禁键，renderMode 只在 tooltip 下且为 richText；不改输入", () => {
     for (const { spec } of FIX) {
       const before = JSON.stringify(spec.option);
-      const out = prepare(spec.option, {});
+      const out = prepare(spec);
       check(out);
       expect((out.tooltip as Record<string, unknown>).renderMode).toBe("richText");
       expect(JSON.stringify(spec.option)).toBe(before);
@@ -246,15 +254,15 @@ describe("prepare 清理（v0 起的断言，保持不变）", () => {
     evil.xAxis.axisLabel = { formatter: "x" };
     evil.graphic = [{ type: "text" }];
     evil.dataset = { source: [] };
-    const out = prepare(evil, {});
+    const out = prepare(bare(evil));
     check(out);
     expect(JSON.stringify(out)).not.toMatch(/"(formatter|extraCssText|graphic|dataset|rich|link)"|onerror|javascript/);
     expect(evil.tooltip.formatter).toBeDefined(); // 输入没被改
   });
 
   test("tooltip 缺失或是数组时也强制 richText", () => {
-    expect(prepare({ series: [] }, {}).tooltip).toEqual({ renderMode: "richText" });
-    expect(prepare({ tooltip: [{ trigger: "item", renderMode: "html" }, 3] }, {}).tooltip).toEqual([
+    expect(prepare(bare({ series: [] })).tooltip).toEqual({ renderMode: "richText" });
+    expect(prepare(bare({ tooltip: [{ trigger: "item", renderMode: "html" }, 3] })).tooltip).toEqual([
       { trigger: "item", renderMode: "richText" },
       { renderMode: "richText" },
     ]);

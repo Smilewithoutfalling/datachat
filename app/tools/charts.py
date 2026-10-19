@@ -11,7 +11,10 @@
 - validate_spec 是丢弃式白名单之前的最后一道：未知键、禁用键、非法类型、超量数据 → 整图拒绝并给出原因。
 
 返回的 spec 结构（v1）：
-    {"v": 1, "kind": "bar", "truncated": False, "option": {...ECharts option...}}
+    {"v": 1, "kind": "bar", "truncated": False, "x_kind": "category", "option": {...ECharts option...}}
+- option 是"交给 ECharts 的东西"；x_kind（category / time / value）是给前端判断能否换图型 / 排序用的元信息，
+  所以和 option 并列放在 spec 层，不进 option（F3 第五步，S 10-19）。spec.kind 是后端出的图型，前端换图型后
+  option.series[].type 会和它有意不一致（前端测试 spec_kind_is_backend_truth 钉住）。
 """
 from __future__ import annotations
 
@@ -25,7 +28,11 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
+# 升版规则（F3 第五步，S 10-19）：加字段不升（向后兼容）；改字段语义或删字段才升。
+# 判据是"老前端读到新 spec 会不会误判"——会才升。x_kind 是纯加法、老 spec 缺它时前端保守处理，所以没升。
 SPEC_VERSION = 1
+X_KINDS = ("category", "time", "value")
+SHOW_SYMBOL_MAX = 60       # 折线 / 面积类目数 ≤ 此值才画数据点（前端换图型沿用，经 schema 导出）
 KINDS = ("bar", "line", "area", "pie", "scatter")
 MAX_POINTS = 5000          # 每张图的数据点上限（类目数 × 系列数）
 MAX_SERIES = 20
@@ -218,7 +225,8 @@ def build_option(kind, df, *, x=None, y=None, series=None, title=None) -> dict:
     if title_txt:
         option["title"] = {"text": title_txt, "left": "center"}
     # 顺序写死：规范化在校验之前，否则闸门 _check_strings 会拒掉每一张图
-    spec = {"v": SPEC_VERSION, "kind": kind, "truncated": truncated, "option": _display_safe(option)}
+    x_kind = "value" if kind == "scatter" else _x_kind(xs)
+    spec = {"v": SPEC_VERSION, "kind": kind, "truncated": truncated, "x_kind": x_kind, "option": _display_safe(option)}
     problems = validate_spec(spec)
     if problems:                                  # builder 自身的 bug 也不能放出去
         raise ChartBugError("图表未通过校验：" + "；".join(problems[:3]))
@@ -273,6 +281,21 @@ _GRID_BOUNDS = {"outerBoundsMode": "same", "outerBoundsContain": "all",
 _X_NAME = {"nameLocation": "middle", "nameGap": 28}
 _Y_NAME = {"nameTextStyle": {"align": "left"}}
 
+# 几何契约登记表（F3 第五步）：后端改过、而重放路径原样下发历史 spec 的几何 / 外观键。前端 prepare 的 normalize
+# 用它把老 spec 归一到当前契约（经 gen_ui_types 导出为 chart_schema.json 的 geometry，前端不写第二份字面量）。
+# 以后后端改任何几何键都必须在这里登记；tests/test_charts.py 双向比对它和 _cartesian / _scatter 的产物，漏登记就红。
+GEOMETRY = {
+    "grid": _GRID_BOUNDS,
+    "xAxis": {**_X_NAME, "nameTruncate": _AXIS_NAME_TRUNCATE},
+    "yAxis": {**_Y_NAME, "nameTruncate": _AXIS_NAME_TRUNCATE},
+}
+# 每张图自己的框架值（不是契约归一的对象：bottom 随系列数变）。前端换图型要造出和 builder 一样的 option，从 schema 读这些值。
+_CART_GRID = {"left": "3%", "right": "4%", "top": 60}
+_CART_BOTTOM = {"single": 30, "multi": 50}
+_PIE_LEGEND = {"show": True, "type": "scroll", "orient": "vertical", "left": "left", "top": "middle"}
+_PIE_RADIUS = ["0%", "65%"]
+_PIE_CENTER = ["60%", "55%"]
+
 
 def _axis(which, **kw):
     return {**kw, **copy.deepcopy(_X_NAME if which == "x" else _Y_NAME), "nameTruncate": dict(_AXIS_NAME_TRUNCATE)}
@@ -296,15 +319,14 @@ def _cartesian(kind, frame, xs, ys, series_col):
         if kind == "area":
             s["areaStyle"] = {}
         if kind in ("line", "area"):
-            s["showSymbol"] = len(cats) <= 60
+            s["showSymbol"] = len(cats) <= SHOW_SYMBOL_MAX
         out_series.append(s)
     x_name = "" if xs.name is None else _clean_str(xs.name, NAME_MAX)
     y_name = _clean_str(ys[0], NAME_MAX) if (series_col is not None or not multi) else ""
     option = {
         "tooltip": {"trigger": "axis"},
         "legend": {"show": multi, "top": "bottom"},
-        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if multi else 30,
-                 **_GRID_BOUNDS},
+        "grid": {**_CART_GRID, "bottom": _CART_BOTTOM["multi" if multi else "single"], **_GRID_BOUNDS},
         "xAxis": _axis("x", type="category", name=x_name, data=cats, boundaryGap=kind == "bar"),
         "yAxis": _axis("y", type="value", name=y_name),
         "series": out_series,
@@ -326,9 +348,9 @@ def _pie(frame, xs, ys, series_col):
         raise ChartError(f"饼图扇区太多（{len(items)}），最多 {MAX_PIE_SLICES} 个；先取 Top-N 并合并为'其他'")
     option = {
         "tooltip": {"trigger": "item"},
-        "legend": {"show": True, "type": "scroll", "orient": "vertical", "left": "left", "top": "middle"},
-        "series": [{"name": _clean_str(ys[0], NAME_MAX), "type": "pie", "radius": ["0%", "65%"],
-                    "center": ["60%", "55%"], "data": items}],
+        "legend": dict(_PIE_LEGEND),
+        "series": [{"name": _clean_str(ys[0], NAME_MAX), "type": "pie", "radius": list(_PIE_RADIUS),
+                    "center": list(_PIE_CENTER), "data": items}],
     }
     return option, False
 
@@ -362,8 +384,7 @@ def _scatter(frame, xs, ys, series_col):
     option = {
         "tooltip": {"trigger": "item"},
         "legend": {"show": len(out) > 1, "top": "bottom"},
-        "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if len(out) > 1 else 30,
-                 **_GRID_BOUNDS},
+        "grid": {**_CART_GRID, "bottom": _CART_BOTTOM["multi" if len(out) > 1 else "single"], **_GRID_BOUNDS},
         "xAxis": _axis("x", type="value", name=_clean_str(xs.name, NAME_MAX) if xs.name is not None else "", scale=True),
         "yAxis": _axis("y", type="value", name=_clean_str(ys[0], NAME_MAX) if len(ys) == 1 else "", scale=True),
         "series": out,
@@ -403,6 +424,10 @@ _ALLOWED = {
 # 明确禁止（即使将来放宽白名单也不许出现）：会进 DOM 或执行代码的通道，以及数据层绕过面
 # 禁的是"由后端 / 模型决定这个键"。前端在校验之后自己加 tooltip.renderMode='richText'，所以最终渲染产物
 # 必然不过本白名单——这是有意的：白名单只校验 builder 输出（v2 起含 patch），最终产物永不回验。
+# F3 第五步起例外不止 renderMode 一个键：前端开关写的整层（dataZoom、series[].markLine / markPoint / label / stack /
+# smooth / itemStyle / areaStyle.color）都在白名单外，_check_strings 也管不到。约束改由前端 FRONTEND_KEYS（路径 → 值集合，
+# 只有字面量和主题色）承担，ui/web/src/charts/switches.test.ts 的"例外层"测试钉住：prepare 产物相对 builder 等价产物的
+# 新增 / 改动 ⊆ FRONTEND_KEYS，且不含任何字符串型用户数据（THREAT_MODEL §2.3）。
 # 将来回灌前端 option 的流程只回传样式差量重新走 builder；不得为了让回灌通过而删 renderMode（THREAT_MODEL §2.3）。
 BANNED_KEYS = {"link", "sublink", "graphic", "formatter", "renderItem", "dataset", "aria", "toolbox",
                "rich", "renderMode", "extraCssText", "target", "sublinkTarget"}
@@ -553,14 +578,18 @@ def _check_data(option, problems):
 def validate_spec(spec) -> list[str]:
     """返回问题列表；空列表 = 通过。任何问题都应整图拒绝（不做静默删改）。"""
     problems: list[str] = []
-    if not isinstance(spec, dict) or set(spec) != {"v", "kind", "truncated", "option"}:
-        return ["spec 结构应为 {v, kind, truncated, option}"]
+    if not isinstance(spec, dict) or set(spec) != {"v", "kind", "truncated", "x_kind", "option"}:
+        return ["spec 结构应为 {v, kind, truncated, x_kind, option}"]
     if spec["v"] != SPEC_VERSION:
         problems.append(f"不支持的 spec 版本 {spec['v']!r}")
     if spec["kind"] not in KINDS:
         problems.append(f"未知图型 {spec['kind']!r}")
     if not isinstance(spec["truncated"], bool):
         problems.append("truncated 应为布尔值")
+    if spec["x_kind"] not in X_KINDS:
+        problems.append(f"未知 x_kind {spec['x_kind']!r}")
+    elif (spec["kind"] == "scatter") != (spec["x_kind"] == "value"):
+        problems.append("x_kind 与图型不符（scatter 才是 value）")
     option = spec["option"]
     if not isinstance(option, dict) or not isinstance(option.get("series"), list) or not option["series"]:
         return problems + ["option.series 应为非空数组"]

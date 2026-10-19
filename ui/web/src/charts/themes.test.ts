@@ -59,7 +59,10 @@ const ADJ_DE_MIN = 20;
 // 余量：本步新引入的颜色 ≥ 阈值 × 1.1，吸收实现差异（kL、换库、色域处理）。PALETTE 里沿用的旧色不在此列。
 // #CD7D28 对 #C0392B 25.0：暖色带里"白底 ≥3:1"与"离红 ≥24"几乎互斥，25 左右是这一带的上限。
 const NEW_DE_MIN = ADJ_DE_MIN * 1.1;
-const LEGACY = new Set(["#1F6FB2", "#159A8C", "#C0392B", "#7E57C2", "#3A7D44"]);
+// 豁免按 (主题, 色值) 二元组（PR #48 评审第六条）：只有 classic 沿用的 5 个旧色互相之间按 20 判。别的主题复用同一个色值时
+// 仍按新色 ≥ 22 判——那是它新引入的配对，不该搭 classic 的便车。
+const LEGACY = new Set(["#1F6FB2", "#159A8C", "#C0392B", "#7E57C2", "#3A7D44"].map((h) => `classic:${h}`));
+const isLegacy = (theme: string, hex: string) => LEGACY.has(`${theme}:${hex.toUpperCase()}`);
 
 // 逐键：漏一个就红（不设 backgroundColor 画布透明，暗色画布会透出白页面；深底上不改轴线 / 文字色会黑叠黑）
 const AXIS = ["axisLine.lineStyle.color", "axisTick.lineStyle.color", "axisLabel.color", "splitLine.lineStyle.color", "nameTextStyle.color"];
@@ -102,7 +105,7 @@ describe.each(THEME_NAMES.map((n) => [n, THEMES[n].theme] as const))("主题 %s"
     expect(c.filter((x) => contrast(x, theme.backgroundColor) < SERIES_MIN)).toEqual([]);
     c.forEach((x, i) => {
       const y = c[(i + 1) % c.length];
-      const min = LEGACY.has(x.toUpperCase()) && LEGACY.has(y.toUpperCase()) ? ADJ_DE_MIN : NEW_DE_MIN;
+      const min = isLegacy(name, x) && isLegacy(name, y) ? ADJ_DE_MIN : NEW_DE_MIN;
       expect([x, y, de2000(x, y) >= min]).toEqual([x, y, true]);
     });
   });
@@ -137,7 +140,7 @@ describe.each(THEME_NAMES)("主题 %s × 全部夹具", (name) => {
     const spies = (["warn", "error", "log"] as const).map((k) => vi.spyOn(console, k));
     const c = init(null, name, { renderer: "svg", ssr: true, width: 640, height: 400 });
     try {
-      c.setOption(prepare(spec.option, {}), { notMerge: true });
+      c.setOption(prepare(spec), { notMerge: true });
       c.renderToSVGString();
       const want = THEMES[name].theme.color[0].toLowerCase();
       if (spec.kind !== "pie") expect(seriesColor0(c).toLowerCase()).toBe(want);
@@ -154,9 +157,9 @@ describe.each(THEME_NAMES)("主题 %s × 全部夹具", (name) => {
 test("历史 spec 里的 color 被 prepare 删掉，主题配色生效（第四步之前存进库的图）", () => {
   const spec = FIX.find((f) => f.id === "bar")!.spec;
   const old = { ...JSON.parse(JSON.stringify(spec.option)), color: ["#E2843B"] };
-  expect("color" in prepare(old, {})).toBe(false);
+  expect("color" in prepare({ kind: "bar", option: old })).toBe(false);
   const c = init(null, "soft", { renderer: "svg", ssr: true, width: 640, height: 400 });
-  c.setOption(prepare(old, {}), { notMerge: true });
+  c.setOption(prepare({ kind: "bar", option: old }), { notMerge: true });
   expect(seriesColor0(c).toLowerCase()).toBe(THEMES.soft.theme.color[0].toLowerCase());
   c.dispose();
 });
@@ -164,7 +167,7 @@ test("历史 spec 里的 color 被 prepare 删掉，主题配色生效（第四�
 test("setTheme 切换不重设 option：配色换掉，系列数不变", () => {
   const spec = FIX.find((f) => f.id === "line-wide")!.spec;
   const c = init(null, "classic", { renderer: "svg", ssr: true, width: 640, height: 400 });
-  c.setOption(prepare(spec.option, {}), { notMerge: true });
+  c.setOption(prepare(spec), { notMerge: true });
   c.setTheme("darkCanvas");
   const m = (c as unknown as { getModel(): { getSeries(): unknown[] } }).getModel();
   expect(m.getSeries().length).toBe((spec.option.series as unknown[]).length);
@@ -178,7 +181,7 @@ test("后端给 yAxis.nameTextStyle 设了 align，轴名颜色仍取主题的 n
   const spec = FIX.find((f) => f.id === "bar")!.spec;
   for (const name of THEME_NAMES) {
     const c = init(null, name, { renderer: "svg", ssr: true, width: 640, height: 400 });
-    c.setOption(prepare(spec.option, {}), { notMerge: true });
+    c.setOption(prepare(spec), { notMerge: true });
     const o = c.getOption() as { yAxis: { nameTextStyle: { color?: string; align?: string } }[] };
     expect([name, o.yAxis[0].nameTextStyle]).toEqual([name, expect.objectContaining({ align: "left", color: THEMES[name].theme.valueAxis.nameTextStyle.color })]);
     c.dispose();
@@ -203,4 +206,10 @@ describe("主题选择的持久化", () => {
     setChartTheme("nope");
     expect(getChartTheme()).toBe(DEFAULT_THEME);
   });
+});
+
+test("LEGACY 豁免按 (主题, 色值)：同一个旧色值放在别的主题里不豁免", () => {
+  expect(isLegacy("classic", "#1f6fb2")).toBe(true);
+  expect(isLegacy("soft", "#1F6FB2")).toBe(false);
+  expect(isLegacy("classic", "#CD7D28")).toBe(false); // 第四步新色本身也不豁免
 });

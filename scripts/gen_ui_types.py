@@ -1,6 +1,6 @@
 """把后端的事件类型、图表白名单与禁用键、图表夹具导出成前端用的 JSON（阶段 5 F2 / F3），前端不手抄、改了后端 CI 就报。
 
-    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys,chart_schema,chart_fixtures,inject}.json
+    python scripts/gen_ui_types.py            # 写 ui/web/src/generated/{events,banned_keys,chart_schema,chart_fixtures,kind_fixtures,inject}.json
     python scripts/gen_ui_types.py --check    # 只校验现有文件与重新生成的是否一致（CI 用）
 
 来源：app/core/events.py 的 EVENT_TYPES、ERROR_KINDS 和常量文案；app/server/db.py 的 MESSAGE_STATUSES；app/tools/charts.py 的 BANNED_KEYS（前端渲染 ECharts 前再过一遍）、
@@ -19,10 +19,19 @@ OUT_DIR = os.path.join(ROOT, "ui", "web", "src", "generated")
 
 
 def chart_schema() -> dict:
-    from app.tools.charts import _ALLOWED, _ENUMS, _KIND_SERIES_TYPE, AXIS_NAME_MAX_PX, KINDS, PALETTE
+    from app.tools.charts import (_ALLOWED, _CART_BOTTOM, _CART_GRID, _ENUMS, _KIND_SERIES_TYPE, _PIE_CENTER, _PIE_LEGEND,
+                                  _PIE_RADIUS, AXIS_NAME_MAX_PX, GEOMETRY, KINDS, MAX_PIE_SLICES, PALETTE, SHOW_SYMBOL_MAX,
+                                  X_KINDS)
     return {"_generated_by": "scripts/gen_ui_types.py", "kinds": list(KINDS),
             "palette": list(PALETTE),               # 前端默认主题（经典）的 color 从这里读（F3 第四步）
             "axis_name_max_px": AXIS_NAME_MAX_PX,
+            # F3 第五步：prepare 的 normalize 用 geometry 归一历史 spec；changeKind 用 frame / 阈值造出和 builder 一样的 option
+            "geometry": GEOMETRY,
+            "x_kinds": list(X_KINDS),
+            "pie_max_slices": MAX_PIE_SLICES,
+            "show_symbol_max": SHOW_SYMBOL_MAX,
+            "frame": {"cartesian_grid": _CART_GRID, "cartesian_bottom": _CART_BOTTOM,
+                      "pie_legend": _PIE_LEGEND, "pie_radius": _PIE_RADIUS, "pie_center": _PIE_CENTER},
             "kind_series_type": dict(_KIND_SERIES_TYPE),
             "top_level_keys": list(_ALLOWED),
             "enums": {".".join(k): sorted(v) for k, v in _ENUMS.items()}}
@@ -84,8 +93,42 @@ def chart_fixtures() -> dict:
                                                   x=_ascii_name("x"), y=_ascii_name("y"))),
         ("long-y-axis-name-bar", build_option("bar", pd.DataFrame({"k": ["a", "b", "c"], _ascii_name("y"): [3, 1, 2]}),
                                               x="k", y=_ascii_name("y"))),
+        # F3 第五步：COMPAT 的"多系列 scatter"格（图例位置开关）要一个真实夹具
+        ("scatter-multi", build_option("scatter", small.assign(组=["a", "b", "a", "b", "a"]), x="销量", y="利润",
+                                       series="组", title="分组散点")),
     ]
     return {"_generated_by": "scripts/gen_ui_types.py", "fixtures": [{"id": i, "spec": s} for i, s in cases]}
+
+
+def kind_fixtures() -> dict:
+    """F3 第五步换图型契约：同一份数据分别以 bar / line / area / pie 调 build_option。前端断言 changeKind(A, B) 等于这里的 B，
+    只允许 switches.ts 的 KIND_DIFF 列出的差异。组：单系列类目、单系列时间、多系列宽表、类目数超过 SHOW_SYMBOL_MAX、含空值。"""
+    import numpy as np
+    import pandas as pd
+    from app.tools.charts import MAX_PIE_SLICES, SHOW_SYMBOL_MAX, build_option
+    small = pd.DataFrame({"城市": ["北京", "上海", "广州", "深圳", "杭州"], "销量": [3, 5, 2, 8, 6]})
+    days = pd.DataFrame({"日期": pd.date_range("2026-01-01", periods=30, freq="D"), "访问": list(range(30, 60))})
+    wide = pd.DataFrame({"季度": ["Q1", "Q2", "Q3", "Q4"], "收入": [10, 12, 9, 15], "成本": [7, 8, 8, 9]})
+    many = pd.DataFrame({"k": [f"k{i:02d}" for i in range(SHOW_SYMBOL_MAX + 1)], "v": list(range(SHOW_SYMBOL_MAX + 1))})
+    pie_max = pd.DataFrame({"项": [f"项{i:02d}" for i in range(MAX_PIE_SLICES)], "值": list(range(1, MAX_PIE_SLICES + 1))})
+    over = pd.DataFrame({"项": [f"项{i:02d}" for i in range(MAX_PIE_SLICES + 1)], "值": list(range(1, MAX_PIE_SLICES + 2))})
+    holes = pd.DataFrame({"类": ["甲", "乙", "丙"], "值": [1.0, np.nan, 3.0]})
+    neg = pd.DataFrame({"类": ["甲", "乙", "丙"], "值": [1, -2, 3]})
+
+    def group(df, kinds, **kw):
+        return {k: build_option(k, df, **kw) for k in kinds}
+    four, three = ("bar", "line", "area", "pie"), ("bar", "line", "area")
+    return {"_generated_by": "scripts/gen_ui_types.py", "groups": {
+        "single": group(small, four, x="城市", y="销量", title="销量"),
+        "time": group(days, four, x="日期", y="访问"),
+        "wide": group(wide, three, x="季度", y=["收入", "成本"], title="收支"),
+        "many": group(many, three, x="k", y="v"),
+        "pie-max": group(pie_max, four, x="项", y="值"),
+        # 下面三组只有直角坐标：换饼图的条件不满足（类目超上限 / 有空值 / 有负值），前端断言饼图选项置灰
+        "pie-over": group(over, three, x="项", y="值"),
+        "holes": group(holes, three, x="类", y="值"),
+        "negative": group(neg, three, x="类", y="值"),
+    }}
 
 
 def inject() -> dict:
@@ -113,6 +156,7 @@ def build() -> dict[str, str]:
         "chart_schema.json": dump(chart_schema()),
         # indent=1：build_option 一改，diff 能看出改了哪个值（紧凑 JSON 一行，每次整份重写）。按字节比对。
         "chart_fixtures.json": json.dumps(chart_fixtures(), ensure_ascii=False, indent=1) + "\n",
+        "kind_fixtures.json": json.dumps(kind_fixtures(), ensure_ascii=False, indent=1) + "\n",
         "inject.json": dump(inject()),
     }
 
