@@ -577,11 +577,17 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - **人眼**：4 套主题各导出一张，加一张 darkCanvas 的浅色导出、一张缩放加点掉系列后的导出，给 S 看。
 - THREAT_MODEL §2.3 加两行：导出文件名是用户串离开画布的唯一出口，前端清洗，规则见本条第 3 点；系列显隐按 index 存，用户串不作为 UiState 的键或值。DEVLOG [42]，[41] 回填 d589d61。全部闸门在最后一次改动之后重跑。
 
-实现时的偏离（DEVLOG [42]，待 S 认可）：
-- 第 2 条"view 变化也走整体 setOption"改为：view 变化**不**触发 setOption，只在下一次重算（开关 / 主题）和导出时带上。屏幕上 ECharts 已经画成这样了，重设一遍结果相同，却会在拖动 / Shift + 滚轮途中重建 dataZoom 组件、打断手势；不 set 也就没有回环要防。
-- 验收"逐个打开，每一个的导出都和全关不同"在 zoom 上不成立：inside 型 dataZoom 不画任何东西，窗口是全量时开了也和全关逐字节相同。e2e 改为断言 zoom 单开时相同（写明原因），zoom 的"生效"由交互态那条用例证明（Shift + 滚轮缩过之后导出不同）。
-- FRONTEND_KEYS 的值集合加两种：range（`dataZoom[].start/end`，0–100）、legendItems（`legend.selected`，键必须是 option 里已有的图例项名）。饼图的图例项是扇区，hidden 存的是 `series[0].data` 的 index。
+实现时的偏离（DEVLOG [42]，S 10-19 第二轮评审后）：
+- 第 2 条"view 变化也走整体 setOption"改为：view 变化**不**触发 setOption（S 认可：datazoom 每个 mousemove 一次，notMerge 每次重建 dataZoom，手势当场断）。
+- **屏幕是真相源，view 是镜像（S 10-19 第二轮，取代"只在事件里写、从不读实例"）**：每次重算 setOption 之后从实例回读一次 view（`viewFromRendered(chart.getOption(), shown)`，只读 `dataZoom[0].start/end` 和 `legend[0].selected` 两处，名字当场换成 index）。开关关掉 dataZoom → 回读不到区间 → zoom 清空；图例项变了 → 只剩现存项。不维护"哪些变化要清空 view"的列表。换图型 / 换 spec 仍先清空再算。事件写入照旧（拖动途中不重算）。
+- 验收"逐个打开，每一个的导出都和全关不同"在 zoom 上不成立（inside 不画东西）。e2e 对 zoom 单开断言"相同"并写明原因；开关本身由对照钉住：**关着时 Shift + 滚轮后导出与初始相同，开着时不同**；关掉再打开后导出回到全量。
+- FRONTEND_KEYS 的值集合加两种：range（`dataZoom[].start/end`，0–100）、legendItems（`legend.selected`，键必须是 option 里已有的图例项名）。饼图的图例项是扇区，hidden 存 `series[0].data` 的 index。**存 index、按名字应用是有意的**：legend.selected 只认名字，同名项在 ECharts 里本来就一起显隐；index 换来的只是 UiState 里没有用户串（注释写在 switches.ts）。
 - e2e 要一张 matplotlib 图，fake 模型加了 `chart-matplotlib` 场景（tests/fake_llm.py，pytest 走真链路覆盖）。
+
+约束（补进第 1 条）：
+- **主题必须模块级注册**（`register.ts` 的 `registerCharts`，幂等），不能挂在组件生命周期里。离屏实例不经过任何组件，`init(div, name)` 遇到没注册的主题名会静默回退默认主题，导出配色全错且不报错。`exportPng` 在 init 之前自己调 `registerCharts`（exportPng.test「init 之前已注册」）。
+- **尺寸为 0（容器 display:none）抛错**，不回退默认尺寸、不让 getDataURL 产出坏图；UI 显示"导出失败"。
+- e2e 文件自带 beforeAll 预热（照 f3-stop），单独跑也不卡冷启动。
 
 不做：SVG / 矢量导出（第一步已说明这一步不做）；复制到剪贴板；批量导出；导出时改尺寸或分辨率；matplotlib png 的导出按钮；darkCanvas 的浅色变体（第 4 点）；view 持久化；Tauri 壳里的下载行为（到壳那一步再做）；#49。
 

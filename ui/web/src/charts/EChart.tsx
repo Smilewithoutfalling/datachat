@@ -6,7 +6,11 @@
 // F3 第六步：交互态（缩放窗口、图例显隐）在 datazoom / legendselectchanged 发生时写进 view，下一次重算（开关 / 主题）和导出
 // 都带上它，导出和屏幕走同一条 prepare。view 变化本身**不**触发 setOption：屏幕上 ECharts 已经画成这样了，再整体重设一遍
 // 结果相同，却会在拖动 / 滚轮途中重建 dataZoom 组件、打断手势（偏离方案第 2 条"view 变化也走整体 setOption"，DEVLOG [42]）。
-// view 在换图型、spec 变化时清空，不持久化。
+// 屏幕是真相源，view 是它的镜像（S 10-19 第二轮，同 F2"status 是真相源"）：每次重算 setOption 之后从实例回读一次
+// （viewFromRendered），开关关掉 dataZoom → 回读不到区间 → zoom 清空；图例项变了 → 只剩现存项。这样不需要维护
+// "哪些变化要清空 view"的列表。换图型、spec 变化时仍先清空再算：类目轴 / 系列都换了，旧区间不该带到新图上。
+// 回读只读 getOption() 的 dataZoom[0].start/end 和 legend[0].selected 两处（公开 API）；selected 的名字当场换成 index，
+// 不往外带。view 不持久化。
 import { init } from "echarts/core";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
@@ -14,7 +18,7 @@ import { safeFilename } from "./filename";
 import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState } from "./prepare";
 import { registerCharts } from "./register";
 import {
-  asKind, asXKind, asZoom, canChangeKind, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
+  asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
   SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme } from "./themes";
@@ -77,6 +81,7 @@ export function EChart({ spec }: { spec: ChartSpec }) {
     const option = prepare(spec, { ...ui, view: view.current }, theme);
     shown.current = option as Option;
     chart.setOption(option, { notMerge: true });
+    view.current = viewFromRendered(chart.getOption() as Option, option as Option);
   }, [spec, ui, theme, target]);
 
   // 交互态写进 view（只存数值：区间和 index）。datazoom 的参数两种形状：inside 漫游是 batch[0]，dispatchAction 是顶层。
@@ -137,7 +142,7 @@ export function EChart({ spec }: { spec: ChartSpec }) {
   const onExport = () => {
     try {
       const el = ref.current!;
-      const size = { width: el.clientWidth || 800, height: el.clientHeight || 450 };
+      const size = { width: el.clientWidth, height: el.clientHeight }; // 0（display:none）由 exportPng 抛错，显示导出失败
       const t = theme === "darkCanvas" && light ? "classic" : theme;
       const url = exportPng(spec, { ...ui, view: view.current }, t, size);
       const title = (spec.option.title as { text?: unknown } | undefined)?.text;

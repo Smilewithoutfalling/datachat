@@ -276,6 +276,9 @@ export const KIND_DIFF: readonly { from: "pie"; path: "xAxis.name"; why: string 
 // 缩放窗口和图例显隐在事件发生时写进 UiState.view（EChart 监听 datazoom / legendselectchanged），导出和屏幕走同一条
 // prepare，不从实例里捞（getOption 是渲染产物、带全部 data；getModel 是内部 API。S 10-19）。
 // hidden 存图例项的 index，不存名字：名字是用户串（列名 / 类目），不进 UiState。view 只有数值。
+// 存 index、按名字应用，是有意的不对称（S 10-19 第二轮）：ECharts 的 legend.selected 只认名字，所以 applyViewTo 把 index
+// 换回名字写进去。同名的两项（两个同名扇区 / 系列）在 ECharts 里本来就按名字一起显隐，index 换不来更细的精度；
+// 它换来的只是 UiState 里没有用户串。饼图的图例项是扇区（series[0].data[i]），其余是系列（series[i]）。
 export type ZoomWindow = { start: number; end: number };
 export type View = { zoom: ZoomWindow | null; hidden: number[] };
 export const EMPTY_VIEW: View = { zoom: null, hidden: [] };
@@ -322,4 +325,15 @@ export function applyViewTo(o: Option, view: View | undefined): Option {
     if (Object.keys(selected).length) o.legend.selected = selected;
   }
   return o;
+}
+
+/** 从实例回读 view（屏幕是真相源）：rendered 是 setOption 之后的 chart.getOption()（组件都归成数组），shown 是刚交给它的
+ *  prepare 产物（按它算图例项的 index）。没有 dataZoom → zoom 为 null；没有图例或图例不显示 → hidden 为空。 */
+export function viewFromRendered(rendered: Option, shown: Option): View {
+  const dz = Array.isArray(rendered.dataZoom) ? rendered.dataZoom[0] : rendered.dataZoom;
+  const zoom = isObj(dz) ? asZoom(dz.start, dz.end) : null;
+  const lg = Array.isArray(rendered.legend) ? rendered.legend[0] : rendered.legend;
+  const shownLegend = isObj(shown.legend) && shown.legend.show !== false;
+  const hidden = isObj(lg) && shownLegend ? hiddenFromSelected(shown, lg.selected) : [];
+  return { zoom, hidden };
 }

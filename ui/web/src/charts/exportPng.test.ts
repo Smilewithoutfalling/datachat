@@ -9,6 +9,7 @@ import { THEME_NAMES } from "./themes";
 const { fake } = vi.hoisted(() => ({
   fake: {
     initArgs: [] as unknown[][],
+    order: [] as string[],
     setOption: vi.fn(),
     getDataURL: vi.fn((): string => "data:image/png;base64,AAAA"),
     dispose: vi.fn(),
@@ -17,11 +18,17 @@ const { fake } = vi.hoisted(() => ({
 vi.mock("echarts/core", async (orig) => ({
   ...(await orig<typeof import("echarts/core")>()),
   init: vi.fn((...a: unknown[]) => {
+    fake.order.push("init");
     fake.initArgs.push(a);
     return { setOption: fake.setOption, getDataURL: fake.getDataURL, dispose: fake.dispose };
   }),
 }));
+vi.mock("./register", async (orig) => {
+  const real = await orig<typeof import("./register")>();
+  return { ...real, registerCharts: vi.fn(() => { fake.order.push("register"); real.registerCharts(); }) };
+});
 beforeEach(() => {
+  fake.order.length = 0;
   fake.initArgs.length = 0;
   fake.setOption.mockClear();
   fake.getDataURL.mockClear();
@@ -49,6 +56,19 @@ test("getDataURL 抛错：dispose 仍被调用，错误照常抛给调用方（U
   fake.getDataURL.mockImplementationOnce(() => { throw new Error("boom"); });
   expect(() => exportPng(spec("bar"), DEFAULT_UI, "classic", { width: 100, height: 100 })).toThrow("boom");
   expect(fake.dispose).toHaveBeenCalledTimes(1);
+});
+
+test("init 之前已注册（主题模块级注册、不依赖屏幕上的 EChart 先挂载；没注册的主题名会被 init 静默回退成默认主题）", () => {
+  exportPng(spec("bar"), DEFAULT_UI, "darkCanvas", { width: 100, height: 100 });
+  expect(fake.order.slice(0, 2)).toEqual(["register", "init"]);
+});
+
+test("尺寸为 0 或非有限数（容器 display:none）：抛错，不建实例、不出图", () => {
+  for (const size of [{ width: 0, height: 300 }, { width: 400, height: 0 }, { width: NaN, height: 300 }, { width: -1, height: 1 }]) {
+    expect(() => exportPng(spec("bar"), DEFAULT_UI, "classic", size)).toThrow(/export size/);
+  }
+  expect(fake.initArgs).toHaveLength(0);
+  expect(fake.getDataURL).not.toHaveBeenCalled();
 });
 
 test("animation 只写在导出路径：prepare 的产物里没有 animation（屏幕上的图不受影响）", () => {

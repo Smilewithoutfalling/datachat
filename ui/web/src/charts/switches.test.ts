@@ -11,7 +11,7 @@ import schema from "../generated/chart_schema.json";
 import { type ChartInput, DEFAULT_UI, type Json, normalize, type Option, prepare, type Ctx, type UiState } from "./prepare";
 import { FRONTEND_REG, productExtensions } from "./register";
 import {
-  applyViewTo, asZoom, canChangeKind, changeKind, COMPAT, DATA_ZOOM, DEFAULT_SWITCHES, hiddenFromSelected, FRONTEND_KEYS, gradient, KIND_DIFF, KINDS, type Kind, legendItems, rgba0,
+  applyViewTo, asZoom, canChangeKind, changeKind, COMPAT, DATA_ZOOM, DEFAULT_SWITCHES, hiddenFromSelected, FRONTEND_KEYS, viewFromRendered, gradient, KIND_DIFF, KINDS, type Kind, legendItems, rgba0,
   SWITCHES, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
 import { THEME_NAMES, THEMES, type ThemeName } from "./themes";
@@ -452,6 +452,17 @@ describe("交互态 view → applyView", () => {
     expect(hiddenFromSelected(o as Option, { [b]: 0 })).toEqual([]);
     expect(hiddenFromSelected(o as Option, null)).toEqual([]);
     expect(hiddenFromSelected(o as Option, { ["__proto__"]: false })).toEqual([]);
+  });
+  test("viewFromRendered：从 getOption() 的形状回读（组件是数组）；没有 dataZoom → zoom null，全量也归 null；图例不显示 → hidden 空", () => {
+    const o = prepare(multi, ui({ zoom: true })) as O;
+    const [a, b] = [o.series[0].name, o.series[1].name];
+    const rendered = { dataZoom: [{ start: 20, end: 70 }], legend: [{ selected: { [a]: true, [b]: false } }] };
+    expect(viewFromRendered(rendered as unknown as Option, o as Option)).toEqual({ zoom: { start: 20, end: 70 }, hidden: [1] });
+    expect(viewFromRendered({ legend: [{ selected: { [a]: true, [b]: true } }] } as unknown as Option, o as Option)).toEqual({ zoom: null, hidden: [] });
+    expect(viewFromRendered({ dataZoom: [{ start: 0, end: 100 }] } as unknown as Option, o as Option).zoom).toBeNull();
+    const noLegend = { ...o, legend: { ...o.legend, show: false } };
+    expect(viewFromRendered(rendered as unknown as Option, noLegend as Option).hidden).toEqual([]);
+    expect(viewFromRendered({} as Option, o as Option)).toEqual({ zoom: null, hidden: [] });
   });
   test("view 里只有数值（类型之外再用值钉一次）", () => {
     const strs = JSON.stringify([V1, V2]).match(/:"/g);

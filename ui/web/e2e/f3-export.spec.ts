@@ -77,6 +77,30 @@ async function sizeOf(chart: Locator) {
 }
 const CSV = "城市,销量\n北京,3\n上海,5\n广州,2\n深圳,8\n杭州,6\n成都,4\n武汉,7\n西安,1\n";
 
+// 预热（照 f3-stop.spec.ts）：后端进程第一次分析要 import pandas / matplotlib / langchain、建字体缓存，沙箱里 20 秒以上。
+// 单独跑这个文件时第一条曾卡在 60 秒的等待上；放在全套里能过，只是因为前面的文件已经把后端热好了（workers: 1、共用一个后端）。
+// 只走 API，用 ok 场景完整跑一轮，把冷启动挪出每条用例的超时窗口。
+test.beforeAll(async ({ request }) => {
+  test.setTimeout(150_000);
+  expect((await request.put("/settings", { headers: auth, data: { model: "ok" } })).ok()).toBe(true);
+  const ds = await (await request.post("/datasets", {
+    headers: auth, multipart: { files: { name: "warm.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) } },
+  })).json();
+  const s = await (await request.post("/sessions", { headers: auth, data: { dataset_id: ds.id } })).json();
+  const r = await request.post(`/sessions/${s.id}/messages`, { headers: auth, data: { content: "预热" }, timeout: 140_000 });
+  expect(await r.text()).toContain("event: done");
+});
+
+async function shiftWheel(page: Page, chart: Locator) {
+  await chart.scrollIntoViewIfNeeded();
+  const b = (await chart.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.keyboard.down("Shift");
+  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
+  await page.keyboard.up("Shift");
+  await page.mouse.move(5, 5);
+}
+
 test("导出 PNG：真下载拿到 PNG，宽高是容器的 2 倍、非空；文件名清洗；不发分析请求、零外部请求、console 干净", async ({ page, baseURL }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -128,7 +152,7 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   expect(w.bad).toEqual([]);
 });
 
-test("交互态：Shift + 滚轮缩放后导出不同；图例点掉一个系列后导出不同；刷新后 view 清空、导出回到初始", async ({ page, baseURL }) => {
+test("交互态：缩放开关关着时 Shift + 滚轮后导出与初始相同、开着时不同（钉住开关本身）；图例点掉一个系列后导出不同；刷新后 view 清空、导出回到初始", async ({ page, baseURL }) => {
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1400, height: 900 });
   const w = watch(page, new URL(baseURL!).origin);
@@ -138,17 +162,20 @@ test("交互态：Shift + 滚轮缩放后导出不同；图例点掉一个系列
   const sv = await ask(page, CSV, "zoom.csv", "chart-bar", "缩放导出");
   const chart = sv.getByTestId("echart").first();
   const ctl = sv.getByTestId("chart-controls").first();
+  // 对照（S 10-19 第二轮）：下面"缩过之后导出不同"的前提是开关真的开着；开关写坏成恒开 / 恒关时，只有这组对照会红
+  const initial = await exportOf(ctl);
+  await shiftWheel(page, chart);
+  expect((await exportOf(ctl)).bytes.equals(initial.bytes)).toBe(true);
   await ctl.getByRole("checkbox", { name: "缩放" }).check();
   const full = await exportOf(ctl);
-  await chart.scrollIntoViewIfNeeded();
-  const b = (await chart.boundingBox())!;
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
-  await page.keyboard.down("Shift");
-  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
-  await page.keyboard.up("Shift");
-  await page.mouse.move(5, 5);
+  expect(full.bytes.equals(initial.bytes)).toBe(true); // inside 不画东西：全量窗口时与关着相同
+  await shiftWheel(page, chart);
   const zoomed = await exportOf(ctl);
   expect(zoomed.bytes.equals(full.bytes)).toBe(false);
+  // 关掉再打开：屏幕是真相源，回读不到区间，窗口回到全量，不跳回刚才缩的位置（S 10-19 第二轮第一节）
+  await ctl.getByRole("checkbox", { name: "缩放" }).uncheck();
+  await ctl.getByRole("checkbox", { name: "缩放" }).check();
+  expect((await exportOf(ctl)).bytes.equals(full.bytes)).toBe(true);
 
   // 图例：多系列（注入场景的第一张是宽表，两个以上系列、图例在底部）。图例项的位置不读内部状态：沿底边扫，
   // 点一下、移开指针，画面变了就是点中了一项（点空白不变）

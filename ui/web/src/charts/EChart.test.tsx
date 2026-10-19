@@ -209,11 +209,16 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
 describe("F3 第六步：导出与交互态", () => {
   const exportSpy = vi.mocked(exp.exportPng);
   const downloadSpy = vi.mocked(exp.download);
+  let size = { w: 800, h: 450 }; // jsdom 不做布局，clientWidth / clientHeight 恒为 0：这里给容器一个尺寸
   beforeEach(() => {
     exportSpy.mockClear();
     downloadSpy.mockClear();
+    size = { w: 800, h: 450 };
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => size.w);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => size.h);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     localStorage.clear();
     resetPrefsForTest();
     act(() => setChartTheme("classic"));
@@ -228,7 +233,7 @@ describe("F3 第六步：导出与交互态", () => {
     expect(s).toBe(spec("bar"));
     expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, view: { zoom: null, hidden: [] } });
     expect(theme).toBe("classic");
-    expect(size).toEqual({ width: 800, height: 450 }); // jsdom 的 clientWidth 是 0，回退
+    expect(size).toEqual({ width: 800, height: 450 }); // 容器的 clientWidth × clientHeight，原样
     expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
     expect(created).toHaveLength(2); // 屏幕 1 + 离屏 1
     expect(created[1].isDisposed()).toBe(true);
@@ -266,6 +271,43 @@ describe("F3 第六步：导出与交互态", () => {
     expect(created[0].isDisposed()).toBeFalsy();
     clickExport();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  test("容器尺寸为 0（display:none）：不回退成默认尺寸，导出失败、不下载", () => {
+    render(<EChart spec={spec("bar")} />);
+    size = { w: 0, h: 0 };
+    clickExport();
+    expect(exportArgs()[3]).toEqual({ width: 0, height: 0 });
+    expect(screen.getByRole("alert").textContent).toBe("导出失败");
+    expect(downloadSpy).not.toHaveBeenCalled();
+  });
+
+  test("屏幕是真相源：缩放后关掉缩放开关再打开，窗口回到全量，不跳回旧区间（重算后从实例回读 view）", () => {
+    setPrefs("bar", { ...DEFAULT_SWITCHES, zoom: true });
+    render(<EChart spec={spec("bar")} />);
+    const c = created[0];
+    act(() => { c.dispatchAction({ type: "dataZoom", start: 20, end: 70 }); });
+    const box = () => screen.getByRole("checkbox", { name: "缩放" });
+    fireEvent.click(box()); // 关
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
+    fireEvent.click(box()); // 再开
+    const dz = (c.getOption() as { dataZoom: { start: number; end: number }[] }).dataZoom[0];
+    expect([dz.start, dz.end]).toEqual([0, 100]);
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
+  });
+
+  test("屏幕是真相源：图例点掉一项后重算，屏幕上仍隐藏、回读的 view 与屏幕一致", () => {
+    render(<EChart spec={spec("inject-bar")} />);
+    const c = created[0];
+    const name = (spec("inject-bar").option.series as { name: string }[])[1].name;
+    act(() => { c.dispatchAction({ type: "legendToggleSelect", name }); });
+    act(() => setChartTheme("soft")); // 重算：带上 hidden，再回读
+    const sel = (c.getOption() as { legend: { selected: Record<string, boolean> }[] }).legend[0].selected;
+    expect(sel[name]).toBe(false);
+    clickExport();
+    expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [1] });
   });
 
   test("缩放：datazoom 写进 view（本身不触发 setOption）；导出和下一次重算都带上；双击空白还原后清空", () => {
