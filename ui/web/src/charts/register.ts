@@ -4,15 +4,16 @@
 // 只从 echarts/core 按需引入（ESLint 禁止 import "echarts" 全量包）。产品只注册 CanvasRenderer；SVGRenderer 只在测试里注册。
 import { BarChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TitleComponent, TooltipComponent } from "echarts/components";
-import { use as installEcharts } from "echarts/core";
+import { use as installEcharts, registerTheme } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
+import { THEMES } from "./themes";
 
 type Ext = Exclude<Parameters<typeof installEcharts>[0], readonly unknown[]>;
 const NONE: Ext[] = [];
 
-// _ALLOWED 的顶层键。xAxis / yAxis 由 GridComponent 提供（直角坐标系）；color 是全局调色板；series 的组件按 series.type 定。
+// _ALLOWED 的顶层键。xAxis / yAxis 由 GridComponent 提供（直角坐标系）；series 的组件按 series.type 定。
+// color 不在其中（F3 第四步）：配色归主题，后端不再产出。
 export const TOP_LEVEL: Record<string, Ext[]> = {
-  color: NONE,
   title: [TitleComponent],
   tooltip: [TooltipComponent],
   legend: [LegendComponent],
@@ -34,7 +35,11 @@ export const ENUMS: Record<string, Record<string, Ext[]>> = {
   "yAxis.type": { value: [GridComponent] },
   "series.type": { bar: [BarChart], line: [LineChart], pie: [PieChart], scatter: [ScatterChart] },
   "grid.outerBoundsMode": { same: NONE },
-  "grid.outerBoundsContain": { axisLabel: NONE },
+  "grid.outerBoundsContain": { all: NONE },
+  "grid.outerBoundsClampWidth": { "25%": NONE },
+  "grid.outerBoundsClampHeight": { "25%": NONE },
+  "xAxis.nameLocation": { middle: NONE },
+  "yAxis.nameTextStyle.align": { left: NONE },
 };
 
 export const RENDERER: Ext = CanvasRenderer;
@@ -48,5 +53,6 @@ let done = false;
 export function registerCharts(): void {
   if (done) return;
   installEcharts([...productExtensions(), RENDERER]);
+  for (const [name, { theme }] of Object.entries(THEMES)) registerTheme(name, theme);
   done = true;
 }

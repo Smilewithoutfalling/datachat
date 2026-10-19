@@ -422,3 +422,28 @@ def test_real_tcp_disconnect_is_interrupted(home, sample_path):
     finally:
         server.should_exit = True
         th.join(timeout=10)
+
+
+def test_replay_returns_stored_chart_option_verbatim_without_validation(home, sample_path, monkeypatch):
+    """F3 第四步的前提：重放路径（GET /sessions/{id} → public_result → public_chart）原样下发库里的 option，
+    不过 validate_spec。老会话的 spec 带着第四步之前的 color（以及将来白名单外的键）；前端 prepare 负责删 color。
+    哪天有人在重放路径上加校验，这条先红——否则老会话的图会静默消失（前端只看到没有图）。"""
+    import json as _json
+    import app.tools.charts as _ch
+    called = []
+    monkeypatch.setattr(_ch, "validate_spec", lambda *a, **k: called.append(1) or [])
+    c = TestClient(create_app(home, TOKEN, chat_model_factory=lambda: wf_model(["result = 1"])))
+    ds = upload(c, sample_path)
+    sid = c.post("/sessions", json={"dataset_id": ds["id"]}, headers=H).json()["id"]
+    S = make_sessionmaker(os.path.join(home, "datachat.db"))
+    old = {"v": 1, "kind": "bar", "truncated": False,
+           "option": {"color": ["#E2843B"], "grid": {"containLabel": True},
+                      "xAxis": {"type": "category", "data": ["a"]}, "yAxis": {"type": "value"},
+                      "series": [{"type": "bar", "data": [1]}]}}
+    with S() as db:
+        db.add(Message(session_id=sid, role="assistant", status="ok", content="x",
+                       result_json=_json.dumps({"charts": [{"png": None, "option": old}]}, ensure_ascii=False)))
+        db.commit()
+    [m] = c.get(f"/sessions/{sid}", headers=H).json()["messages"]
+    assert m["result"]["charts"] == [{"png": None, "option": old}]
+    assert called == []

@@ -18,6 +18,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import copy
 import re
 from datetime import date, datetime
 
@@ -34,8 +35,16 @@ TITLE_MAX = 100
 NAME_MAX = 100             # 系列名、坐标轴名
 CATEGORY_MAX = 200         # 单个类目名
 
-# 与 matplotlib 风格（plotting.PALETTE）同一套主色，前端主题可整体覆盖
-PALETTE = ["#1F6FB2", "#159A8C", "#E2843B", "#C0392B", "#7E57C2", "#3A7D44"]
+# 与 matplotlib 风格（plotting.PALETTE）同一套主色，测试钉住两份相等。option 里不再带 color（F3 第四步）：
+# echarts 的 mergeTheme 在 option.color 存在时整条跳过主题配色，配色只能归主题。这份经 gen_ui_types 导出到
+# chart_schema.json 的 palette，前端默认主题（经典）从那里读。
+# 第 3 色 #CD7D28（原 #E2843B 对白底 2.76，不到 WCAG 1.4.11 的 3:1）：对白底 3.20、对 #C0392B ΔE00 25.0。
+# 暖色带里"白底 ≥3:1"与"离红 ≥24"几乎互斥，25 左右就是这一带的上限。
+PALETTE = ["#1F6FB2", "#159A8C", "#CD7D28", "#C0392B", "#7E57C2", "#3A7D44"]
+# 轴名截断宽度（px）：12px 字体下约 10 个汉字、约 18 个 ASCII 字符。轴名纳入外边界（outerBoundsContain='all'）后，
+# 长轴名在窄画布上靠收缩 grid 包不住（clamp 调到 10% 也不行，F3 第四步实测），只能截断；省略号自述被截。
+AXIS_NAME_MAX_PX = 120
+_AXIS_NAME_TRUNCATE = {"maxWidth": AXIS_NAME_MAX_PX, "ellipsis": "\u2026"}
 
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]")
 # 渲染面的不安全字符 → 显示替换（F3 第三步，THREAT_MODEL §2.3）。_display_safe 与闸门 _check_strings 共用这一份。
@@ -43,7 +52,6 @@ _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]")
 # - \n ：参与 tooltip 排版，能让真值配上攻击者的标签。
 # - \t 不在此列：第二步实测它作为整体绘制、不参与排版（_CTRL 同样放过了它）。
 DISPLAY_UNSAFE = {"{": "\uff5b", "}": "\uff5d", "\n": " "}
-_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 class ChartError(ValueError):
@@ -207,7 +215,6 @@ def build_option(kind, df, *, x=None, y=None, series=None, title=None) -> dict:
     else:
         option, truncated = _cartesian(kind, frame, xs, ys, series_col)
 
-    option["color"] = list(PALETTE)
     if title_txt:
         option["title"] = {"text": title_txt, "left": "center"}
     # 顺序写死：规范化在校验之前，否则闸门 _check_strings 会拒掉每一张图
@@ -254,6 +261,23 @@ def _wide(frame, xs, ys, series_col):
     return cats, [(_clean_str(g, NAME_MAX), [_num(v) for v in pv[g]]) for g in groups]
 
 
+# outerBoundsContain='all'：轴名也纳入外边界（'axisLabel' 时 x 轴名在 640 宽画布上起画于 x≈629，画出画布）。
+# clamp 显式写 25%（官方默认），不靠默认值：调小只是把"轴名出界"换成"图被压废"（F3 第四步）。
+_GRID_BOUNDS = {"outerBoundsMode": "same", "outerBoundsContain": "all",
+                "outerBoundsClampWidth": "25%", "outerBoundsClampHeight": "25%"}
+
+
+# 轴名的位置（F3 第四步实测后定）：默认 x 轴名在轴末端右侧、y 轴名居中骑在 y 轴线上，纳入外边界后它们横向占宽——
+# 320 宽画布上长轴名把 plot 区压到 31–39%。x 轴名放到轴下方居中（nameLocation='middle'），y 轴名左对齐向右伸，
+# 横向不再占宽：同样夹具 plot 区 ≥ 82%。代价是 x 轴名多占一行高度（400 高时 plot 区高 66% → 60%）。
+_X_NAME = {"nameLocation": "middle", "nameGap": 28}
+_Y_NAME = {"nameTextStyle": {"align": "left"}}
+
+
+def _axis(which, **kw):
+    return {**kw, **copy.deepcopy(_X_NAME if which == "x" else _Y_NAME), "nameTruncate": dict(_AXIS_NAME_TRUNCATE)}
+
+
 def _truncate(cats, sers):
     n = max(1, len(sers))
     cap = MAX_POINTS // n
@@ -280,10 +304,9 @@ def _cartesian(kind, frame, xs, ys, series_col):
         "tooltip": {"trigger": "axis"},
         "legend": {"show": multi, "top": "bottom"},
         "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if multi else 30,
-                 "outerBoundsMode": "same", "outerBoundsContain": "axisLabel"},
-        "xAxis": {"type": "category", "name": x_name, "data": cats,
-                  "boundaryGap": kind == "bar"},
-        "yAxis": {"type": "value", "name": y_name},
+                 **_GRID_BOUNDS},
+        "xAxis": _axis("x", type="category", name=x_name, data=cats, boundaryGap=kind == "bar"),
+        "yAxis": _axis("y", type="value", name=y_name),
         "series": out_series,
     }
     if _x_kind(xs) == "time":
@@ -340,9 +363,9 @@ def _scatter(frame, xs, ys, series_col):
         "tooltip": {"trigger": "item"},
         "legend": {"show": len(out) > 1, "top": "bottom"},
         "grid": {"left": "3%", "right": "4%", "top": 60, "bottom": 50 if len(out) > 1 else 30,
-                 "outerBoundsMode": "same", "outerBoundsContain": "axisLabel"},
-        "xAxis": {"type": "value", "name": _clean_str(xs.name, NAME_MAX) if xs.name is not None else "", "scale": True},
-        "yAxis": {"type": "value", "name": _clean_str(ys[0], NAME_MAX) if len(ys) == 1 else "", "scale": True},
+                 **_GRID_BOUNDS},
+        "xAxis": _axis("x", type="value", name=_clean_str(xs.name, NAME_MAX) if xs.name is not None else "", scale=True),
+        "yAxis": _axis("y", type="value", name=_clean_str(ys[0], NAME_MAX) if len(ys) == 1 else "", scale=True),
         "series": out,
     }
     return option, truncated
@@ -358,17 +381,19 @@ def _scatter(frame, xs, ys, series_col):
 _STR, _NUM, _BOOL = (str,), (int, float), (bool,)
 _POS = (str, int, float)                         # "3%" / 60 / "center"
 _ALLOWED = {
-    "color": {"*": _STR},
     "title": {"text": _STR, "left": _POS},
     "tooltip": {"trigger": _STR},
     "legend": {"show": _BOOL, "type": _STR, "top": _POS, "left": _POS, "orient": _STR},
-    # outerBounds 替代已弃用的 containLabel（官方注释称等价，'axisLabel' 更精确、与旧行为略有差异；
-    # 默认 outerBoundsClampWidth/Height=25%，有意不改）。containLabel 不在白名单，前端不再注册 LegacyGridContainLabel。
+    # outerBounds 替代已弃用的 containLabel；containLabel 不在白名单，前端不注册 LegacyGridContainLabel。
+    # 第四步起 'all'（轴名也纳入）+ 显式 clamp 25%，见 _GRID_BOUNDS。color 不在白名单：配色归前端主题。
     "grid": {"left": _POS, "right": _POS, "top": _POS, "bottom": _POS,
-             "outerBoundsMode": _STR, "outerBoundsContain": _STR},
+             "outerBoundsMode": _STR, "outerBoundsContain": _STR,
+             "outerBoundsClampWidth": _STR, "outerBoundsClampHeight": _STR},
     "xAxis": {"type": _STR, "name": _STR, "data": {"*": _STR}, "boundaryGap": _BOOL, "scale": _BOOL,
-              "axisLabel": {"hideOverlap": _BOOL}},
-    "yAxis": {"type": _STR, "name": _STR, "scale": _BOOL},
+              "axisLabel": {"hideOverlap": _BOOL}, "nameTruncate": {"maxWidth": _NUM, "ellipsis": _STR},
+              "nameLocation": _STR, "nameGap": _NUM},
+    "yAxis": {"type": _STR, "name": _STR, "scale": _BOOL, "nameTruncate": {"maxWidth": _NUM, "ellipsis": _STR},
+              "nameTextStyle": {"align": _STR}},
     "series": {"*": {
         "name": _STR, "type": _STR, "data": None,          # data 单独按图型校验
         "areaStyle": {}, "showSymbol": _BOOL, "symbolSize": _NUM,
@@ -389,7 +414,11 @@ _ENUMS = {
     ("yAxis", "type"): {"value"},
     ("series", "type"): {"bar", "line", "pie", "scatter"},
     ("grid", "outerBoundsMode"): {"same"},
-    ("grid", "outerBoundsContain"): {"axisLabel"},
+    ("grid", "outerBoundsContain"): {"all"},
+    ("grid", "outerBoundsClampWidth"): {"25%"},
+    ("grid", "outerBoundsClampHeight"): {"25%"},
+    ("xAxis", "nameLocation"): {"middle"},
+    ("yAxis", "nameTextStyle", "align"): {"left"},
 }
 
 
@@ -470,9 +499,6 @@ def _check_enums(option, problems):
             v = get(option, keys)
             if v is not None and v not in allowed:
                 problems.append(f"{'.'.join(keys)} 取值 {v!r} 不允许")
-    for i, c in enumerate(option.get("color") or []):
-        if isinstance(c, str) and not _HEX.match(c):
-            problems.append(f"color.{i} 必须是 #RRGGBB")
 
 
 _KIND_SERIES_TYPE = {"bar": "bar", "line": "line", "area": "line", "pie": "pie", "scatter": "scatter"}

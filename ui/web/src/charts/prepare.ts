@@ -4,6 +4,8 @@
 //   （包括将来的层 1 / 开关）塞进来的被禁键都会被删掉（charts.test.ts 用替身证明）。
 // 纵深防御：第一道是后端 validate_spec（app/tools/charts.py），这里只在后端校验有漏洞时兜底；不是前端校验，也不回验。
 // 用户字符串的渲染面规范化（{ } 换行）只在后端 _display_safe 做，这里不镜像一份，避免两处规则漂移（方案第三步第 4 条）。
+// 顶层 color 也在 cleanup 里删（F3 第四步）：配色归主题，后端已不产出；这条只为第四步之前存进库的 spec——重放路径
+// 原样下发 option、不过 validate_spec（tests/test_web_f2.py 钉住）。所有渲染路径（含第六步离屏导出）都走这一个 prepare。
 // 不修改输入。renderMode 本身也在禁用键里（后端不许决定它），删完之后由这里统一写成 richText（THREAT_MODEL §2.3）。
 import generated from "../generated/banned_keys.json";
 
@@ -32,6 +34,7 @@ export const applySwitches: Step = (option) => option;
 
 export function cleanup(option: Option): Option {
   const out = strip(option) as Option;
+  delete out.color;
   const t = out.tooltip;
   if (Array.isArray(t)) {
     out.tooltip = t.map((x) => (x !== null && typeof x === "object" && !Array.isArray(x) ? { ...x, renderMode: "richText" } : { renderMode: "richText" }));

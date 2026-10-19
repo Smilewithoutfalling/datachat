@@ -5,6 +5,7 @@ import { emptyTurn, reduce, replay, settle, type Turn } from "../turn";
 import type { Message, Session, SessionDetail } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
 import { FeedbackBar } from "./FeedbackBar";
+import { ThemePicker } from "./ThemePicker";
 import { TurnView } from "./TurnView";
 
 const STATUS: Record<string, string> = { ok: "", error: "失败", cancelled: "已取消", interrupted: "已中断", running: "分析中" };
@@ -155,6 +156,7 @@ export function SessionView({ c, id, datasetName, onChanged, onDeleted }: {
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         />
         <div className="actions">
+          <ThemePicker />
           <ConfirmButton
             label="删除会话"
             confirmLabel="再点一次确认删除"

@@ -60,8 +60,8 @@ describe("每个夹具 × 产品注册表：SSR SVG 渲染", () => {
 // SSR 的文字宽度是 zrender 的估算值，不是真实字体，所以这里断言的是布局逻辑，不是像素）
 type Rect = { x: number; y: number; width: number; height: number };
 type Zr = { storage: { getDisplayList(update: boolean): { parent?: { anid?: string }; style?: { text?: unknown }; getBoundingRect(): Rect & { clone(): Rect & { applyTransform(m: unknown): void } }; getComputedTransform(): unknown }[] } };
-function renderSSR(option: Record<string, unknown>) {
-  const c = init(null, null, { renderer: "svg", ssr: true, width: 640, height: 400 });
+function renderSSR(option: Record<string, unknown>, width = 640, height = 400) {
+  const c = init(null, null, { renderer: "svg", ssr: true, width, height });
   c.setOption(prepare(option, {}), { notMerge: true });
   const texts = (c as unknown as { getZr(): Zr }).getZr().storage.getDisplayList(true).flatMap((el) => {
     if (typeof el.style?.text !== "string") return [];
@@ -74,8 +74,10 @@ function renderSSR(option: Record<string, unknown>) {
   type L = { x: number; width: number };
   const m = (c as unknown as { getModel(): { getSeriesByIndex(i: number): { getData(): { getItemLayout(i: number): L } } } }).getModel();
   const bar0 = m.getSeriesByIndex(0).getData().getItemLayout(0);
+  const g = (m as unknown as { getComponent(t: string): { coordinateSystem?: { getRect(): Rect } } | undefined }).getComponent("grid");
+  const plot = g?.coordinateSystem?.getRect();
   c.dispose();
-  return { texts, bar0 };
+  return { texts, bar0, plot };
 }
 const CARTESIAN = FIX.filter((f) => ["bar", "line", "area", "scatter"].includes(f.spec.kind));
 
@@ -83,7 +85,7 @@ describe("outerBounds（F3 第三步）", () => {
   test.each(CARTESIAN.map((f) => [f.id, f.spec] as const))("%s：每个轴标签都在画布内", (id, spec) => {
     const cats = new Set(((spec.option.xAxis as { data?: string[] }).data ?? []) as string[]);
     const { texts } = renderSSR(spec.option);
-    const labels = texts.filter((t) => t.anid.startsWith("label_")); // 轴名（anid=name）不算：是否纳入 outerBounds 在第四步定
+    const labels = texts.filter((t) => t.anid.startsWith("label_")); // 轴名（anid=name）在下面第四步的用例里单独判
     expect(labels.length).toBeGreaterThan(0);
     const out = labels.filter((t) => t.x < -0.5 || t.y < -0.5 || t.x + t.width > 640.5 || t.y + t.height > 400.5);
     expect([id, out]).toEqual([id, []]);
@@ -93,7 +95,9 @@ describe("outerBounds（F3 第三步）", () => {
     else if (cats.size) expect(drawnCats).toBeGreaterThan(0);
   });
 
-  // 替换前的值：2213aac（containLabel: true + LegacyGridContainLabel）同一夹具、同样 640×400 SSR 取出的第一根柱子
+  // 替换前的值：2213aac（containLabel: true + LegacyGridContainLabel）同一夹具、同样 640×400 SSR 取出的第一根柱子。
+  // 第四步（'all' + 轴名移位）仍对这组基线判，没有改期望值：只换 'all' 时 width -7.7%（轴名在末端占宽），
+  // 把 x 轴名移到轴下方、y 轴名左对齐后回到 80.11 → 79.69、100.13 → 99.62。
   const BEFORE: Record<string, { x: number; width: number }> = {
     bar: { x: 51.91488, width: 80.10624 },
     "bar-missing": { x: 56.4136, width: 100.1328 },
@@ -103,6 +107,55 @@ describe("outerBounds（F3 第三步）", () => {
     console.info(`[outerBounds] ${id} 第一根柱子 x ${before.x.toFixed(2)} → ${bar0.x.toFixed(2)}，width ${before.width.toFixed(2)} → ${bar0.width.toFixed(2)}`);
     expect(Math.abs(bar0.width - before.width) / before.width).toBeLessThan(0.05);
     expect(Math.abs(bar0.x - before.x) / 640).toBeLessThan(0.05);
+  });
+});
+
+// ---- F3 第四步：轴名纳入外边界（outerBoundsContain='all'）+ nameTruncate
+// SSR 的文字宽度是 zrender 估算值（jsdom 无 canvas）；真实字宽由 e2e（fillText + measureText）复核。
+describe("轴名在画布内（F3 第四步）", () => {
+  const SIZES: [number, number][] = [[320, 400], [640, 400], [1200, 400], [640, 200]];
+  const cases = CARTESIAN.flatMap((f) => SIZES.map(([w, h]) => [f.id, w, h, f.spec] as const));
+  test.each(cases)("%s @ %dx%d：轴名在画布内，plot 区宽 ≥ 画布 50%", (id, w, h, spec) => {
+    const { texts, plot } = renderSSR(spec.option, w, h);
+    const names = texts.filter((t) => t.anid === "name");
+    const want = [(spec.option.xAxis as { name?: string }).name, (spec.option.yAxis as { name?: string }).name].filter(Boolean).length;
+    expect([id, names.length]).toEqual([id, want]);
+    const out = names.filter((t) => t.x < -0.5 || t.y < -0.5 || t.x + t.width > w + 0.5 || t.y + t.height > h + 0.5);
+    expect([id, w, h, out]).toEqual([id, w, h, []]);
+    // "把图压废了，轴名照样在画布内"不算通过
+    expect(plot!.width / w).toBeGreaterThanOrEqual(0.5);
+  });
+
+  test("长轴名被截断：以 … 结尾，估算宽度 ≤ maxWidth + ε", () => {
+    for (const id of ["long-axis-name-bar", "long-ascii-axis-name-bar", "long-y-axis-name-bar"]) {
+      const { texts } = renderSSR(FIX.find((f) => f.id === id)!.spec.option, 320, 400);
+      const long = texts.filter((t) => t.anid === "name" && t.text.length > 3);
+      expect([id, long.length > 0]).toEqual([id, true]);
+      for (const t of long) {
+        expect([id, t.text.endsWith("\u2026")]).toEqual([id, true]);
+        expect(t.width).toBeLessThanOrEqual(schema.axis_name_max_px + 1);
+      }
+    }
+  });
+
+  test("对照：改回第三步写法（'axisLabel'、轴名默认位置）时，x 轴名出画布——上面的断言能抓到这个缺陷", () => {
+    const spec = FIX.find((f) => f.id === "bar")!.spec;
+    const old = JSON.parse(JSON.stringify(spec.option));
+    old.grid.outerBoundsContain = "axisLabel";
+    delete old.xAxis.nameLocation;
+    delete old.xAxis.nameGap;
+    delete old.yAxis.nameTextStyle;
+    const xName = renderSSR(old).texts.find((t) => t.anid === "name" && t.text === (spec.option.xAxis as { name: string }).name)!;
+    expect(xName.x + xName.width).toBeGreaterThan(640.5);
+  });
+
+  test("对照：只换 'all'、轴名留在默认位置时，320 宽长轴名把 plot 区压到 50% 以下——轴名移位的理由", () => {
+    const spec = FIX.find((f) => f.id === "long-ascii-axis-name-bar")!.spec;
+    const o = JSON.parse(JSON.stringify(spec.option));
+    delete o.xAxis.nameLocation;
+    delete o.xAxis.nameGap;
+    delete o.yAxis.nameTextStyle;
+    expect(renderSSR(o, 320, 400).plot!.width / 320).toBeLessThan(0.5);
   });
 });
 
@@ -120,6 +173,7 @@ describe("prepare 管线骨架（F3 第三步）", () => {
       const strip = (n: unknown): unknown =>
         Array.isArray(n) ? n.map(strip) : n && typeof n === "object" ? Object.fromEntries(Object.entries(n).filter(([k]) => !BANNED_KEYS.has(k)).map(([k, v]) => [k, strip(v)])) : n;
       const out = strip(JSON.parse(JSON.stringify(option))) as Record<string, unknown>;
+      delete out.color; // 第四步：顶层 color 归主题（历史 spec 兼容），夹具里本来就没有
       out.tooltip = { ...(out.tooltip as object), renderMode: "richText" };
       return out;
     };

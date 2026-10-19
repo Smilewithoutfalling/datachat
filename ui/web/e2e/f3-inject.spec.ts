@@ -13,7 +13,8 @@ const P = inject.payloads;
 const D = inject.display;
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 
-type Draw = { m: string; text: string; x: number; y: number; font: string; align: string; chart: number; cw: number; ch: number; phase: string };
+// align 和 w（measureText 宽度）必须同时记：x 的含义取决于 textAlign（left 是起点、center 是中点、right 是终点），只记 x 判不了是否出界
+type Draw = { m: string; text: string; x: number; y: number; w: number; font: string; align: string; chart: number; cw: number; ch: number; phase: string };
 type Win = { __draws: Draw[]; __phase: string; __armed: boolean; __added: string[]; __badAttrs: string[]; __csp: string[]; __pwned?: unknown };
 
 async function setScenario(page: Page, model: string) {
@@ -35,21 +36,29 @@ async function stableShot(el: Locator, label: string): Promise<Buffer> {
 }
 
 // 渲染位置分类（echarts 6.1.0 默认布局，由本测试的记录确认）：标题是 bold 18px；tooltip 是悬停阶段新出现的绘制；
-// 饼图：左侧竖排是图例，其余是扇区标签；直角坐标系：底部是图例，align=center 且在下半部是类目轴标签，
-// align=right 是 y 轴刻度数字，剩下的是轴名。
+// 饼图：左侧竖排是图例，其余是扇区标签；直角坐标系：底部是图例，align=right 是 y 轴刻度数字。
+// 第四步改判（轴名移位）：x 轴名改为轴下方居中（nameLocation='middle'），同样是 align=center、在下半部——
+// 只按"center + 下半部"会把 x 轴名算成类目标签，P4（既是类目又是 x 轴名）的 axisName 一格就丢了，类目标签的前提也会被轴名冒充。
+// 所以按行分：下半部 align=center 的最上一行（labelY，实测 279）是类目标签，比它低的那一行（实测 299）是 x 轴名。
+// y 轴名左对齐、在顶部（实测 y=66），归 axisName。
 type Pos = "title" | "legend" | "xAxisLabel" | "axisName" | "pieLabel" | "tooltip" | "yTick";
-function posOf(d: Draw, pie: boolean): Pos {
+function xLabelRow(st: Draw[]): number {
+  const ys = st.filter((d) => !d.font.startsWith("bold") && d.align === "center" && d.y > d.ch * 0.6).map((d) => d.y);
+  return ys.length ? Math.min(...ys) : Infinity;
+}
+function posOf(d: Draw, pie: boolean, labelY = Infinity): Pos {
   if (d.font.startsWith("bold")) return "title";
   if (pie) return d.x < 100 && d.align === "left" ? "legend" : "pieLabel";
   // 图例在底部；第三步起长表有 7 个系列，图例折成两行（实测 y=326、348，ch=360），所以不能只认最底下 30px。
-  // x 轴名同样 align=left，但在轴线高度（实测 y=290），用 85% 高度分开
   if (d.y > d.ch - 30 || (d.align === "left" && d.y > d.ch * 0.85)) return "legend";
   if (d.align === "right") return "yTick";
-  if (d.align === "center" && d.y > d.ch * 0.6) return "xAxisLabel";
+  if (d.align === "center" && d.y > d.ch * 0.6) return Math.abs(d.y - labelY) <= 2 ? "xAxisLabel" : "axisName";
   return "axisName";
 }
 
-test("注入：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定", async ({ page, baseURL }) => {
+// 第四步：默认主题和暗色画布各跑一遍。主题不设 rich / formatter，判定表不随主题变；哪天主题配了 rich，这里变红是对的（纪律③）
+for (const theme of ["classic", "darkCanvas"] as const)
+test(`注入（主题 ${theme}）：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定`, async ({ page, baseURL }) => {
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1600, height: 1000 }); // .view 最宽 1200px，图宽到顶；类目标签隔一个画一个（见 INJECT_ORDER）
   const origin = new URL(baseURL!).origin;
@@ -66,6 +75,7 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
     dialogs.push(d.message());
     void d.dismiss();
   });
+  await page.addInitScript((t) => localStorage.setItem("datachat.chartTheme", t), theme);
   await page.addInitScript(() => {
     const w = window as unknown as Win;
     w.__draws = [];
@@ -82,7 +92,7 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
         const host = this.canvas.closest(".echart");
         const dpr = window.devicePixelRatio || 1;
         w.__draws.push({
-          m, text: String(text), x: Math.round(p.x / dpr), y: Math.round(p.y / dpr), font: this.font, align: this.textAlign,
+          m, text: String(text), x: Math.round(p.x / dpr), y: Math.round(p.y / dpr), w: this.measureText(String(text)).width, font: this.font, align: this.textAlign,
           chart: host ? [...document.querySelectorAll(".echart")].indexOf(host) : -1,
           cw: this.canvas.width / dpr, ch: this.canvas.height / dpr, phase: w.__phase,
         });
@@ -126,6 +136,7 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
   const msgs = sv.getByTestId("assistant-msg");
   const charts = sv.getByTestId("echart");
   await expect(charts).toHaveCount(3); // bar 宽表、bar 长表、pie
+  for (const el of await charts.all()) await expect(el).toHaveAttribute("data-theme", theme);
   await expect(msgs.nth(0).getByTestId("echart")).toHaveCount(2);
   await expect(msgs.nth(1).getByTestId("echart")).toHaveCount(1);
   await expect(msgs.nth(2).getByTestId("echart")).toHaveCount(0);
@@ -204,8 +215,20 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
   writeFileSync(test.info().outputPath("draws.json"), JSON.stringify(all));
 
   // 前提：P4–P7 都画在宽表的类目轴标签位置上（INJECT_ORDER 的排布），否则类目轴这个位置的结论不完整
-  const xLabels0 = all.filter((d) => d.chart === 0 && d.phase === "static" && posOf(d, false) === "xAxisLabel").map((d) => d.text);
+  const st0 = all.filter((d) => d.chart === 0 && d.phase === "static");
+  const xLabels0 = st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "xAxisLabel").map((d) => d.text);
   for (const k of ["P4", "P5", "P6", "P7"] as const) expect([k, xLabels0.includes(D[k])]).toEqual([k, true]);
+  // 前提（第四步，防假绿）：每个载荷都确实画出来了——没有 fillText 记录就谈不上"没被解析"。
+  // 'all' 会改变 hideOverlap 的类目标签集合，且集合依赖运行宽度：任何一个载荷掉出绘制，这里先红，而不是在判定表里静默变少
+  const drawn = all.filter((d) => d.phase === "static").map((d) => d.text);
+  for (const k of ["P1", "P2", "P3", "P4", "P5", "P6", "P7"] as const)
+    expect([k, drawn.some((t) => t.includes(D[k]))]).toEqual([k, true]);
+  // x 轴名（P4）这一行确实存在且与类目行分开，否则 axisName 一格是从别处来的
+  expect(st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "axisName" && d.align === "center").map((d) => d.text)).toContain(D.P4);
+  // 上面的分类器靠 |y - labelY| <= 2 区分两行，前提是轴名行与类目行至少隔 8px（nameGap 28 是实测调的；
+  // 主题将来加 axisLabel.fontSize 时，这里先红并直说"间距不够"，而不是只报 P4 位置不对）
+  const xNameRowY = Math.min(...st0.filter((d) => d.text === D.P4 && posOf(d, false, xLabelRow(st0)) === "axisName").map((d) => d.y));
+  expect(xNameRowY - xLabelRow(st0)).toBeGreaterThanOrEqual(8);
 
   // tooltip 新增绘制（悬停阶段出现、静态阶段没有的）
   const tipDraws = (chart: number, phase: string) => {
@@ -245,7 +268,8 @@ test("注入：图表各位置、tooltip、警告、结论、代码面板都不�
     const st = all.filter((d) => d.chart === chart && d.phase === "static");
     const stKeys = new Set(st.map((d) => `${d.text}|${d.x}|${d.y}|${d.font}`));
     const byPos = new Map<Pos, Draw[]>();
-    for (const d of st) byPos.set(posOf(d, pie), [...(byPos.get(posOf(d, pie)) ?? []), d]);
+    const ly = xLabelRow(st);
+    for (const d of st) byPos.set(posOf(d, pie, ly), [...(byPos.get(posOf(d, pie, ly)) ?? []), d]);
     byPos.set("tooltip", all.filter((d) => d.chart === chart && d.phase.startsWith("t-") && !stKeys.has(`${d.text}|${d.x}|${d.y}|${d.font}`)));
     for (const [pos, ds] of byPos) {
       if (pos === "yTick") continue;
