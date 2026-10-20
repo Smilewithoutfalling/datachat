@@ -1712,6 +1712,13 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 比对项补上 python、pandas、use_dictionary。
 - 复跑行用 attempt + duration_s，不用 time。
 
+**S 第三轮改定**：
+- match 按三态处理：executed=False 算答错；executed=True 且 match=None 是比较器自己崩了，算无效观测，需要补跑。
+- 回归和 flaky 都要人工签字（签在 reruns 行的 human_correct 上）。match 只用来决定人工先看哪几行；删掉了我补的"match=false 直接定回归"。
+- 退出码分四档：0 通过 / 1 有回归 / 2 无法判定 / 3 前提不满足。run_gate.py 的前提失败统一改为 3。m13 / phase35 成功路径的退出码有意不改，这一点写进方案和 gate README。
+- 防抽签只拦默认路径；`--only` 加 `--reason` 可以替换该题的复跑结果，并记一条 rerun_history。
+- 每跑完一行原子落盘一次。
+
 **偏离**：dataset 失败归为无效复跑。S 草案的 INVALID 里没有 dataset；这样做的理由和 flaky_cause=env 一致：闸门数据是冻结的本地文件，读取失败属于环境问题。
 
 **已知前提偏弱，不修**：run() 没有把 data_path 传给 run_metadata，报告里没有 data_sha256。
