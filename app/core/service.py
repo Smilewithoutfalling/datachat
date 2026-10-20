@@ -235,6 +235,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 if node == "executor":
                     res.executed = not upd.get("error")
                     _tally_charts(res, upd)
+                    if res.executed:   # 工作流只在失败时重试，最后一次成功的执行就是展示图的那次
+                        res.chart_errors_shown = list(upd.get("chart_errors") or [])
                 ev = _workflow_event(em, node, upd, dt, state)
                 if ev is not None:
                     yield ev
@@ -495,6 +497,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     res.charts = list(sink["charts"])
     for e in execs:
         _tally_charts(res, e)
+        if not e["error"]:   # ReAct 展示所有成功执行的图（react_agent 成功时 extend sink["charts"]），错误也按这些执行收
+            res.chart_errors_shown += e.get("chart_errors") or []
     res.timings["execution"] = round(sum(e["duration_s"] for e in execs), 4)
     refusal = refusal_from_answer(res.answer)
     if out_of_steps and refusal is not None and res.error is None:
