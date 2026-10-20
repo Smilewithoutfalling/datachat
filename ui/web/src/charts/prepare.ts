@@ -5,7 +5,7 @@
 //   分界规则：后端契约改了、而重放路径又原样下发的键，一律在这里归一；后端以后改任何几何 / 外观键都必须在 GEOMETRY 登记
 //   （tests/test_charts.py 双向比对登记表与 builder 产物）。在渲染期归一，不动库。
 // - changeKind：从后端原始 option 换图型（switches.ts）；开关的兼容性按换完后的图型算，所以排在开关之前。
-// - applyLayer1：恒等，F4 填层 1 样式。applySwitches：前端开关，只写 FRONTEND_KEYS 里的值（switches.ts）。
+// - applyLayer1：F4 层 1 样式（layer1.ts）。applySwitches：前端开关，只写 FRONTEND_KEYS 里的值（switches.ts）。
 // - applyView（F3 第六步）：交互态（缩放窗口、图例显隐，UiState.view）写回 option。排在开关之后：缩放只在 zoom 开关已经写出
 //   dataZoom 时生效。导出（exportPng.ts）和屏幕走同一条管线，导出结果只由 (spec, ui, theme, size) 决定。
 // - cleanup 永远最后：按 banned_keys.json 递归删被禁键 → 删顶层 color → 强制 tooltip.renderMode='richText'。放在最后，
@@ -22,13 +22,14 @@ import {
   type Switches, type View, type XKind,
 } from "./switches";
 import { DEFAULT_THEME, type ThemeName } from "./themes";
+import { applyLayer1To, type Edit } from "./layer1";
 
 export const BANNED_KEYS: ReadonlySet<string> = new Set(generated.banned_keys);
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type Option = { [k: string]: Json };
 /** 前端 UI 状态：kind = 用户选的目标图型（null = 后端原图型），sw = 开关，view = 交互态（F3 第六步；不持久化，只有数值）。 */
-export type UiState = { kind: Kind | null; sw: Switches; view?: View };
+export type UiState = { kind: Kind | null; sw: Switches; view?: View; edit?: Edit };
 export const DEFAULT_UI: UiState = { kind: null, sw: DEFAULT_SWITCHES };
 /** 进管线的图：spec.kind 是后端出的图型（后端真相，换图型不改它）；x_kind 历史 spec 可能没有。 */
 export type ChartInput = { kind: string; x_kind?: string | null; option: Record<string, unknown> };
@@ -60,8 +61,8 @@ export const normalize: Step = (option) => {
 export const changeKind: Step = (option, ctx) =>
   ctx.src && ctx.kind && ctx.kind !== ctx.src ? changeKindOf(option, ctx.src, ctx.kind, ctx.xKind) : option;
 
-// 恒等步骤不声明 ctx 形参：TS 允许少参数的函数赋给 Step；F4 真正用到时再加。
-export const applyLayer1: Step = (option) => option;
+// F4：层 1 样式（layer1.ts）。排在开关之前：渐变开关以系列自己的 itemStyle.color（用户选的主题色）为底色。
+export const applyLayer1: Step = (option, ctx) => applyLayer1To(option, ctx.kind, ctx.theme, ctx.ui.edit);
 
 export const applySwitches: Step = (option, ctx) => {
   if (!ctx.kind) return option;

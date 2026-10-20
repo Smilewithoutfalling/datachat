@@ -21,7 +21,9 @@ import {
   asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
   SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
-import { getChartTheme, subscribeChartTheme } from "./themes";
+import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
+import { getEdit, type Edit, EMPTY_EDIT, setEdit, subscribeEdits } from "./layer1";
+import { MarksCard } from "./MarksCard";
 import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
 
 export type ChartSpec = { v: number; kind: string; truncated: boolean; x_kind?: string; option: Record<string, unknown> };
@@ -31,7 +33,8 @@ const CHOICE_LABEL: Partial<Record<SwitchName, Record<string, string>>> = {
   sort: { off: "不排序", desc: "降序", asc: "升序" },
 };
 
-export function EChart({ spec }: { spec: ChartSpec }) {
+/** editKey：层 1 改动的存储键（<message_id>:<图序号>）；没有就不持久化（直播中的回合还没有 message id 时也能改，只是不存）。 */
+export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const inst = useRef<ReturnType<typeof init> | null>(null);
   const theme = useSyncExternalStore(subscribeChartTheme, getChartTheme);
@@ -46,7 +49,14 @@ export function EChart({ spec }: { spec: ChartSpec }) {
   const kind = effectiveKind(spec, { kind: target, sw: getPrefs(src ?? "bar") });
   const prefKind = kind ?? "bar";
   const sw = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
-  const ui: UiState = useMemo(() => ({ kind: target, sw }), [target, sw]);
+  const stored = useSyncExternalStore(subscribeEdits, () => getEdit(editKey));
+  const [local, setLocal] = useState<Edit>(EMPTY_EDIT);
+  const edit = editKey ? stored : local;
+  const changeEdit = (e: Edit) => (editKey ? setEdit(editKey, e) : setLocal(e));
+  const [marksOpen, setMarksOpen] = useState(false);
+  const ui: UiState = useMemo(() => ({ kind: target, sw, edit: editKey ? stored : local }), [target, sw, editKey, stored, local]);
+  // 颜色面板列的名字：按当前图型渲染出来的系列名（饼图是扇区名，合并后含'其他'）。只在面板打开时算。
+  const items = marksOpen ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {} } }, theme) as Option, kind) : [];
 
   // 兼容性按"换完之后"的 option 算（系列数、图型）；换图型的可选项按后端原始 option 算
   const base = useMemo(() => normalize(JSON.parse(JSON.stringify(spec.option)) as Option, {} as Ctx), [spec]);
@@ -193,6 +203,8 @@ export function EChart({ spec }: { spec: ChartSpec }) {
               </label>
             );
           })}
+          <button type="button" className={`marks-toggle${marksOpen ? " on" : ""}`} aria-expanded={marksOpen}
+            onClick={() => setMarksOpen(!marksOpen)}>样式</button>
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}
           <span className="chart-export">
             <button type="button" onClick={onExport}>导出 PNG</button>
@@ -206,10 +218,19 @@ export function EChart({ spec }: { spec: ChartSpec }) {
           </span>
         </div>
       )}
+      {src && kind && marksOpen && (
+        <MarksCard kind={kind} edit={edit} onChange={changeEdit} items={items} palette={THEMES[theme].theme.color} />
+      )}
     </div>
   );
 }
 
 function seriesCount(o: Option): number {
   return Array.isArray(o.series) ? o.series.length : 0;
+}
+
+function itemNames(o: Option, kind: Kind | null): string[] {
+  const s = Array.isArray(o.series) ? (o.series as { name?: unknown; data?: unknown }[]) : [];
+  if (kind === "pie" && s[0] && Array.isArray(s[0].data)) return (s[0].data as { name?: unknown }[]).map((d, i) => String(d?.name ?? `第 ${i + 1} 项`));
+  return s.map((x, i) => String(x?.name ?? `系列 ${i + 1}`));
 }

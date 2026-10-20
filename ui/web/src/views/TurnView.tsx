@@ -48,10 +48,11 @@ function EventView({ ev }: { ev: Ev }) {
   }
 }
 
-export function TurnView({ turn, onRetry, chartSrc }: {
+export function TurnView({ turn, onRetry, chartSrc, messageId }: {
   turn: Turn;
   onRetry?: () => void;
   chartSrc?: (path: string) => string | null;
+  messageId?: string; // F4：层 1 改动按 <message_id>:<图序号> 存
 }) {
   const o = outcome(turn);
   const answer = answerText(turn);
@@ -104,7 +105,7 @@ export function TurnView({ turn, onRetry, chartSrc }: {
       {o.kind === "ok" && r?.charts?.length ? (
         <div className="charts">
           {r.charts.map((c, i) => {
-            if (c.option) return <EChart key={i} spec={c.option as unknown as ChartSpec} />;
+            if (c.option) return <EChart key={i} spec={c.option as unknown as ChartSpec} editKey={messageId ? `${messageId}:${i}` : undefined} />;
             const src = c.png && chartSrc ? chartSrc(c.png) : null;
             // matplotlib 的静态图没有导出按钮：标注出来，免得和旁边带"导出 PNG"的交互图比着以为按钮坏了（F3 第六步，S 10-19）
             return src ? (

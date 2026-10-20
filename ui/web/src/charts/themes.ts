@@ -63,15 +63,24 @@ const DARK: Tones = {
   tipBg: "#22262C", tipBorder: "#3A3F47", inactive: "#5C636E",
 };
 
+// Tableau 风：白底、很浅的网格（#EDEDED）、浅灰轴线，文字偏灰但仍 ≥4.5（#595959 白底 7.0，#666666 5.74）。
+const TABLEAU: Tones = {
+  bg: "#FFFFFF", text: "#595959", title: "#333333", label: "#666666", line: "#C8C8C8", split: "#EDEDED",
+  tipBg: "#FFFFFF", tipBorder: "#D4D4D4", inactive: "#C4C4C4",
+};
+
 export const THEMES = {
   /** 经典（默认）：与 matplotlib 同一套主色，从 chart_schema.json 的 palette 读，不另抄一份。 */
   classic: { label: "经典", theme: build(schema.palette, LIGHT) },
   /** 柔和：低饱和配色。 */
-  soft: { label: "柔和", theme: build(["#4E79A7", "#9C755F", "#59A14F", "#B07AA1", "#76716A", "#E15759"], LIGHT) },
+  soft: { label: "柔和", theme: build(["#4E79A7", "#9C755F", "#59A14F", "#B07AA1", "#76716A", "#E15759", "#541F7A", "#732626", "#267366", "#BB26D9"], LIGHT) },
   /** 商务蓝：藏青为主、冷色为辅（单一蓝色阶在白底 3:1 下相邻 ΔE00 到不了 20，所以不是纯色阶）。 */
-  business: { label: "商务蓝", theme: build(["#1D3F72", "#2E86AB", "#8C6D1F", "#5B6B7A", "#8E3B46", "#1B7F79"], LIGHT) },
+  business: { label: "商务蓝", theme: build(["#1D3F72", "#2E86AB", "#8C6D1F", "#5B6B7A", "#8E3B46", "#1B7F79", "#47A329", "#D926CA", "#CC6633", "#4D6B2E"], LIGHT) },
   /** 暗色画布：只有图是暗的，应用本身没有暗色模式——名字直说。 */
-  darkCanvas: { label: "暗色画布", theme: build(["#5B9BD5", "#E5675A", "#3CC0AE", "#E39B4E", "#A887DB", "#6BB37A"], DARK) },
+  darkCanvas: { label: "暗色画布", theme: build(["#5B9BD5", "#E5675A", "#3CC0AE", "#E39B4E", "#A887DB", "#6BB37A", "#E4E467", "#5252E0", "#DD3C8C", "#D1A394"], DARK) },
+  /** Tableau 风（F4，S 10-20）：Tableau 10 的色相，逐色压暗到白底 ≥3.0（原色 #EDC948 只有 1.61），再重排使循环相邻 ΔE00 ≥27；
+   *  浅灰网格、浅灰轴线、偏灰的文字，贴近 Tableau 的观感。 */
+  tableau: { label: "Tableau 风", theme: build(["#4E79A7", "#E15759", "#B18E11", "#B07AA1", "#E1770E", "#FF5869", "#539F99", "#9E908B", "#59A14F", "#9C755F"], TABLEAU) },
 } as const satisfies Record<string, { label: string; theme: Theme }>;
 
 export type ThemeName = keyof typeof THEMES;

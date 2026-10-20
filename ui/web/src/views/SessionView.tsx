@@ -122,7 +122,7 @@ export function SessionView({ c, id, datasetName, onChanged, onDeleted }: {
     const q = questionBefore(i);
     return (
       <>
-        <TurnView turn={t} chartSrc={c.chartSrc} onRetry={!running && q ? () => void ask(q) : undefined} />
+        <TurnView turn={t} messageId={m.id} chartSrc={c.chartSrc} onRetry={!running && q ? () => void ask(q) : undefined} />
         {m.status === "running" ? (
           <button type="button" className="stop" disabled={stopping} onClick={() => void stop(m.id)}>
             停止

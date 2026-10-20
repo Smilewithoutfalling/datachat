@@ -29,7 +29,7 @@ export default defineConfig({
   use: { ...devices["Desktop Chrome"] },
   projects: [
     { name: "nokey", testMatch: /f[012]\.spec\.ts/, use: { baseURL: `http://127.0.0.1:${PORT}` } },
-    { name: "fake", testMatch: /f3.*\.spec\.ts/, use: { baseURL: `http://127.0.0.1:${FAKE_BACKEND_PORT}` } },
+    { name: "fake", testMatch: /f[34].*\.spec\.ts/, use: { baseURL: `http://127.0.0.1:${FAKE_BACKEND_PORT}` } },
   ],
   webServer: [
     {
