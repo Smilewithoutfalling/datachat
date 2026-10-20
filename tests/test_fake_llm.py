@@ -279,3 +279,12 @@ def test_real_chain_inject_error_reaches_warnings(agent, fake_url, inject_path):
     assert r.ok and not [c for c in r.charts if c.get("option")], (r.error_kind, r.error)
     w = [x for x in r.warnings if x.startswith("图表未生成：")]
     assert len(w) == 1 and INJECT_PAYLOADS["P1"] in w[0] and all(c in w[0] for c in INJECT_COLUMNS), r.warnings
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+def test_real_chain_partial_chart_error_reported(agent, fake_url, sample_path):
+    """[43] chart-partial：一次成功执行里一张 bar 成功、一张列名错 → 1 张图 + 「另有 1 张图未生成」。"""
+    r = analyze(sample_path, "画个图", agent=agent, llm_config=cfg(fake_url, "chart-partial"))
+    assert r.ok and len([c for c in r.charts if c.get("option")]) == 1, (r.error_kind, r.error)
+    w = [x for x in r.warnings if "未生成" in x]
+    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "__nope__" in w[0], r.warnings

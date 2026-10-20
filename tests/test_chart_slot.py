@@ -208,3 +208,54 @@ def test_chart_row_detects_plt_in_any_attempt(sample_path):
     res = analyze(sample_path, "q", chat_model=wf_model([bad], fixes=["result = 1"]), llm_config=FAST)
     c = chart_row(res)
     assert c["used_plt"] and c["drew"] and c["pngs"] == 0 and c["chart_calls"] == 0
+
+
+# ---------------------------------------------------------------- [43] chart_errors 按执行记账（result.py:117）
+GOOD_BAR = "chart('bar', df.head(2), x='region', y='units')\n"
+BAD_BAR = "chart('bar', df, x='nope', y='units')\n"
+
+
+def _not_made(res):
+    return [w for w in res.warnings if "未生成" in w]
+
+
+def test_workflow_partial_chart_error_reported(sample_path):
+    """同一次成功执行一对一错：旧条件 not has_option 会吞掉错误，现在报「另有 1 张图未生成」。"""
+    res = analyze(sample_path, "画图", chat_model=wf_model([GOOD_BAR + BAD_BAR + "result = 1"]), llm_config=FAST)
+    assert res.ok and len(res.charts) == 1 and len(res.chart_errors_shown) == 1
+    w = _not_made(res)
+    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "nope" in w[0], res.warnings
+
+
+def test_react_partial_chart_error_reported(sample_path):
+    m = ScriptedChatModel(replies=[tool_call(GOOD_BAR + BAD_BAR + "result = 1"), "好"], calls=[])
+    res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
+    assert res.ok and len(res.charts) == 1
+    w = _not_made(res)
+    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "nope" in w[0], res.warnings
+
+
+def test_workflow_failed_exec_chart_error_not_reported(sample_path):
+    """失败执行里的 chart_error 不报：那次的图已由"已丢弃"覆盖。chart_errors（评测口径）仍累加。"""
+    bad = BAD_BAR + "result = df['nope']"
+    good = GOOD_BAR + "result = 1"
+    res = analyze(sample_path, "画图", chat_model=wf_model([bad], fixes=[good]), llm_config=FAST)
+    assert res.ok and len(res.charts) == 1 and len(res.chart_errors) == 1 and res.chart_errors_shown == []
+    assert _not_made(res) == [], res.warnings
+
+
+def test_react_failed_exec_chart_error_not_reported(sample_path):
+    m = ScriptedChatModel(replies=[tool_call(BAD_BAR + "result = df['nope']"), tool_call(GOOD_BAR + "result = 1"), "好"],
+                          calls=[])
+    res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
+    assert res.ok and len(res.charts) == 1 and len(res.chart_errors) == 1 and res.chart_errors_shown == []
+    assert _not_made(res) == [], res.warnings
+
+
+def test_react_two_ok_execs_first_error_still_reported(sample_path):
+    """ReAct 两次都成功：两次的图都展示，第一次的错误仍成立。"""
+    m = ScriptedChatModel(replies=[tool_call(BAD_BAR + "result = 1"), tool_call(GOOD_BAR + "result = 2"), "好"], calls=[])
+    res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
+    assert res.ok and len(res.charts) == 1
+    w = _not_made(res)
+    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成："), res.warnings

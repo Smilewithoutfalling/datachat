@@ -1565,3 +1565,18 @@ Playwright：
 - 人眼验收（S）：截图已出（4 主题 × 5 图型、darkCanvas 屏幕 / 导出 / 浅色导出、缩放 + 点掉一项的屏幕 / 导出）。截图里看到：饼图类目多于调色板 6 色时颜色循环，第 7 项和第 1 项同色（8 城市里北京、武汉同色），不是本步引入，待 S 定归属。
 - Windows 真鼠标 Shift + 滚轮（[41] 留下的）仍待 S 手试；Tauri 壳里的下载行为到壳那一步。
 - #49、`result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
+
+## [43] 2026-10-20 · chart_errors 按执行记账（result.py:117）· commit <待提交>
+
+方案见 phase5-frontend.md §7（PR #54，f7739ca）。
+
+改了什么：
+- `AnalysisResult.chart_errors_shown`：只收图被展示的执行（error 为空）自己的 ChartError。workflow 取最后一次成功 executor（只在失败时重试）；ReAct 取所有成功 exec（与 sink["charts"] 的口径一致）。`chart_errors` 原语义不变（评测计数）。
+- `chart_warnings` 只看 `chart_errors_shown`：无图 →「图表未生成：…」（文案不变）；有图 →「另有 N 张图未生成：…」；只在失败执行里的错误不报（已由"已丢弃"覆盖）。
+- fake 新场景 chart-partial：同一段代码一张 bar 成功、一张列名 `__nope__` 错。
+
+测试（全走 analyze 完整路径）：test_chart_slot.py 的 test_workflow_partial_chart_error_reported、test_react_partial_chart_error_reported、test_workflow_failed_exec_chart_error_not_reported、test_react_failed_exec_chart_error_not_reported、test_react_two_ok_execs_first_error_still_reported；test_fake_llm.py 的 test_real_chain_partial_chart_error_reported[workflow/react]。
+
+判定表：现有期望没有改。test_react_chart_error_reaches_model_and_warnings、test_real_chain_inject_error_reaches_warnings 的错误都出在成功执行里，而且没有出图，所以仍然是「图表未生成：」。
+
+未做：前端不用改，exec 事件里的 chart_errors 本来就是单次执行的；饼图 >6 色归 F4。

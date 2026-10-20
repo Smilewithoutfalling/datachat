@@ -57,12 +57,16 @@ ANSWER = "（fake）结论：数据共有若干行。"
 
 
 MATPLOTLIB = "matplotlib"   # chart-matplotlib：走 plt，产出 png 项（F3 第六步测静态图的标注）
+PARTIAL = "partial"         # chart-partial：同一段代码一张 bar 成功、一张列名错（[43] chart_errors 按执行记账）
 
 
 def chart_code(kind: str) -> str:
     """chart-<kind> 场景的代码：类目列取第一个非数值列，数值列取第一个（scatter 取前两个数值列）。"""
     if kind == MATPLOTLIB:
         return "plt.plot([1, 3, 2])\nplt.title('fake matplotlib')\n" + CODE
+    if kind == PARTIAL:
+        return (chart_code("bar").replace(CODE, "")
+                + "chart('bar', df, x='__nope__', y=num[0], title='fake partial')\n" + CODE)
     xy = "x=num[0], y=num[1]" if kind == "scatter" else "x=cat[0], y=num[0]"
     return (f"num = list(df.select_dtypes('number').columns)\n"
             f"cat = [c for c in df.columns if c not in num]\n"
@@ -157,8 +161,8 @@ _MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<val>\d+)(?P<unit>s?
 def parse_model(name: str) -> Scenario:
     c = _CHART_RE.match(name or "")
     if c:
-        if c["kind"] not in KINDS + (MATPLOTLIB,):
-            raise FakeError(f"未知图型 {c['kind']!r}：可选 {', '.join(KINDS)}, {MATPLOTLIB}")
+        if c["kind"] not in KINDS + (MATPLOTLIB, PARTIAL):
+            raise FakeError(f"未知图型 {c['kind']!r}：可选 {', '.join(KINDS)}, {MATPLOTLIB}, {PARTIAL}")
         if c["step"] is not None:
             raise FakeError(f"chart 作用于写代码的那一步，不带 @step：{name!r}")
         return Scenario("chart", chart=c["kind"])

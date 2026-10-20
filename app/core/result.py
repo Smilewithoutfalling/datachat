@@ -39,6 +39,7 @@ class AnalysisResult:
     charts: list = field(default_factory=list)  # 本次的全部图表：[{"png": 路径或 None, "option": spec 或 None}]（[26]）
     chart_calls: int = 0                        # chart() 被调用的次数（chart_option 链路的分母口径，[23]）
     chart_errors: list = field(default_factory=list)  # ChartError：模型参数问题，计为未通过
+    chart_errors_shown: list = field(default_factory=list)  # 图被展示的执行（error 为空）自己的 ChartError；警告只看它（[43]）
     chart_internal_errors: list = field(default_factory=list)  # 非 ChartError：我们的 bug，单列报警，必须清零
     charts_discarded: int = 0                   # exec 失败时丢弃的结构化图张数（[23]）
     plan: str = ""                              # 工作流版的分析计划
@@ -114,8 +115,13 @@ def chart_warnings(res: "AnalysisResult", truncation: list) -> list:
     if res.charts_discarded:
         tail = "，展示的是成功那次执行的图" if res.executed and res.charts else ""
         out.append(f"有代码执行失败，失败那次用 chart() 画的 {res.charts_discarded} 张图已丢弃，不展示{tail}")
-    if res.chart_errors and not has_option:
-        out.append(f"图表未生成：{res.chart_errors[-1]}")
+    # 只报展示出来的那（几）次执行自己的 chart_error：失败执行的图已由上一条"已丢弃"覆盖，它的旧错误不再成立；
+    # 同一次成功执行里一张成功一张失败，失败那张必须报（[23]/[24] 不静默丢弃；result.py:117 旧条件 not has_option 会吞掉它）。
+    shown = res.chart_errors_shown
+    if shown and not has_option:
+        out.append(f"图表未生成：{shown[-1]}")
+    elif shown:
+        out.append(f"另有 {len(shown)} 张图未生成：{shown[-1]}")
     if res.chart_internal_errors:
         out.append("图表生成遇到内部错误，已记录")
     return out
