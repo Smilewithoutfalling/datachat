@@ -232,8 +232,8 @@ describe("F3 第六步：导出与交互态", () => {
     clickExport();
     const [s, ui, theme, size] = exportArgs();
     expect(s).toBe(spec("bar"));
-    // F4：UiState 多了 edit（层 1 改动），导出要带上它才能和屏幕上一致；没改过时是 EMPTY_EDIT
-    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, edit: EMPTY_EDIT, view: { zoom: null, hidden: [] } });
+    // F4：UiState 多了 edit（层 1 改动），#49 多了 compact（矮画布），导出要带上它们才能和屏幕一致；这里是未改、450 高
+    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, edit: EMPTY_EDIT, compact: false, view: { zoom: null, hidden: [] } });
     expect(theme).toBe("classic");
     expect(size).toEqual({ width: 800, height: 450 }); // 容器的 clientWidth × clientHeight，原样
     expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
@@ -408,4 +408,22 @@ describe("F4 层 1 面板（标记卡）", () => {
     render(<TurnView turn={turn} messageId="msg-9" />);
     expect(fontSize()).toBe(12);
   });
+});
+
+test("#49：ResizeObserver 量到容器矮于 300 → 紧凑几何（grid.top 36）；回到 360 → 恢复 60", () => {
+  let h = 360;
+  const spy = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => h);
+  render(<EChart spec={spec("bar")} />);
+  const top = () => ((created.at(-1)!.getOption() as { grid: { top: number }[] }).grid[0].top);
+  const fire = () => act(() => observers.forEach((o) => o.cb([], {} as ResizeObserver)));
+  fire();
+  expect(top()).toBe(60);
+  h = 220;
+  fire();
+  expect(top()).toBe(36);
+  h = 360;
+  fire();
+  expect(top()).toBe(60);
+  spy.mockRestore();
+  cleanup();
 });

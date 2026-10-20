@@ -649,3 +649,9 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - workflow、ReAct 各一条：第一次执行 chart() 列名错 + 代码报错，重试成功并出图 → 只有"已丢弃"警告，没有"未生成"。
 - ReAct：两次成功执行，第一次 chart 错、第二次出图 → 警告「另有 1 张图未生成」（两次的图都展示，第一次的错误仍成立）。
 - fake 模型复用现有场景，必要时加一个 chart-partial 场景（同一段代码一对一错）；真链路 workflow/react 参数化各一条。
+
+### issue #49：矮画布紧凑几何（已定，S 10-20 让直接修；规则与实现同 PR，DEVLOG [45]）
+
+1. 触发：容器高 < 300px（默认卡片 360 不触发）。由 EChart 的 ResizeObserver 量出来，写进 UiState.compact；导出用同一个 ui。
+2. 收紧：grid.top 有标题 36 / 无标题 16；grid.bottom −16（下限 14）；x 轴 nameGap 22；y 值轴 splitNumber 3、showMinLabel / showMaxLabel。只收紧不放宽，饼图不动。键登记在 COMPACT_KEYS。
+3. 验收：1200×220 长轴名夹具 plot 区 ≥ 40%，值轴首末刻度（0 和 3）都画出来；长轴名那条 e2e 的全部断言在 220 高下照旧成立；360 高时产物和修之前逐字节相同。

@@ -24,6 +24,7 @@ import {
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
 import { getEdit, type Edit, EMPTY_EDIT, setEdit, subscribeEdits } from "./layer1";
 import { MarksCard } from "./MarksCard";
+import { isCompact } from "./compact";
 import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
 
 export type ChartSpec = { v: number; kind: string; truncated: boolean; x_kind?: string; option: Record<string, unknown> };
@@ -54,7 +55,9 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const edit = editKey ? stored : local;
   const changeEdit = (e: Edit) => (editKey ? setEdit(editKey, e) : setLocal(e));
   const [marksOpen, setMarksOpen] = useState(false);
-  const ui: UiState = useMemo(() => ({ kind: target, sw, edit: editKey ? stored : local }), [target, sw, editKey, stored, local]);
+  // issue #49：容器矮于 COMPACT_BELOW 时走紧凑几何（ResizeObserver 量；只在跨阈值时变，不随每个像素重算）
+  const [compact, setCompact] = useState(false);
+  const ui: UiState = useMemo(() => ({ kind: target, sw, edit: editKey ? stored : local, compact }), [target, sw, editKey, stored, local, compact]);
   // 颜色面板列的名字：按当前图型渲染出来的系列名（饼图是扇区名，合并后含'其他'）。只在面板打开时算。
   const items = marksOpen ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {} } }, theme) as Option, kind) : [];
 
@@ -68,7 +71,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
     const chart = init(el, themeApplied.current, { renderer: "canvas" });
     inst.current = chart;
     el.dataset.instance = chart.id;
-    const ro = new ResizeObserver(() => chart.resize());
+    const ro = new ResizeObserver(() => {
+      chart.resize();
+      setCompact(isCompact(el.clientHeight));
+    });
     ro.observe(el);
     return () => {
       ro.disconnect();

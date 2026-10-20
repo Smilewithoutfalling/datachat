@@ -181,11 +181,15 @@ test("长轴名：320 / 640 / 1200 宽与 1200×220 矮画布下截断为 …，
   }
 });
 
-// 已知缺陷（DEVLOG [40]，issue 见那里）：矮画布下 grid 固定开销挤压 plot 区。只放这一个数，其余断言都在上一条里。
-// top 60 + bottom 30 + nameGap 28 = 118px（220 的 54%），再扣类目行与 y 轴名 → plot 58px ≈ 26%。哪天修好了这条会反过来报错。
-test.fail("已知缺陷：1200×220 下 plot 区高 ≥ 画布 40%", async ({ page }) => {
+// issue #49（原 test.fail，DEVLOG [40]）：矮画布紧凑几何（compact.ts）。修之前 top 60 + bottom 30 + nameGap 28 = 118px（220 的 54%），
+// plot 58px ≈ 26%，且值轴 0 和 3 两个刻度被 hideOverlap 吞掉。判定表：这条从 test.fail 翻成 test，期望值不变（plot ≥ 40%），
+// 另加刻度完整：数据范围 [0, 3] 的两端刻度都画出来。360 高不触发紧凑（上一条的 1200×360 / 640×360 照旧）。
+test("#49：1200×220 下 plot 区高 ≥ 画布 40%，值轴首末刻度 0 和 3 都在", async ({ page }) => {
   test.setTimeout(120_000);
   const chart = await longAxisChart(page);
   const m = await measure(page, chart, 1200, 220);
+  writeFileSync(test.info().outputPath("issue49-1200x220.png"), await chart.screenshot());
   expect(m.plotRatio).toBeGreaterThanOrEqual(0.4);
+  expect(m.tickTexts).toContain("0");
+  expect(m.tickTexts).toContain("3");
 });

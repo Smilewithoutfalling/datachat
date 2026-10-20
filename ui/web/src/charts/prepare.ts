@@ -23,13 +23,14 @@ import {
 } from "./switches";
 import { DEFAULT_THEME, type ThemeName } from "./themes";
 import { applyLayer1To, type Edit } from "./layer1";
+import { applyCompactTo } from "./compact";
 
 export const BANNED_KEYS: ReadonlySet<string> = new Set(generated.banned_keys);
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type Option = { [k: string]: Json };
 /** 前端 UI 状态：kind = 用户选的目标图型（null = 后端原图型），sw = 开关，view = 交互态（F3 第六步；不持久化，只有数值）。 */
-export type UiState = { kind: Kind | null; sw: Switches; view?: View; edit?: Edit };
+export type UiState = { kind: Kind | null; sw: Switches; view?: View; edit?: Edit; compact?: boolean };
 export const DEFAULT_UI: UiState = { kind: null, sw: DEFAULT_SWITCHES };
 /** 进管线的图：spec.kind 是后端出的图型（后端真相，换图型不改它）；x_kind 历史 spec 可能没有。 */
 export type ChartInput = { kind: string; x_kind?: string | null; option: Record<string, unknown> };
@@ -103,7 +104,10 @@ export function runPipeline(spec: ChartInput, ui: UiState, theme: ThemeName, ste
   return cleanup(out);
 }
 
-export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches, applyView];
+// issue #49：矮画布紧凑几何（compact.ts）。排最后：开关可能改 grid.bottom（图例），紧凑只在最终值上收紧。
+export const applyCompact: Step = (option, ctx) => (ctx.ui.compact ? applyCompactTo(option) : option);
+
+export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches, applyView, applyCompact];
 
 export function prepare(spec: ChartInput, ui: UiState = DEFAULT_UI, theme: ThemeName = DEFAULT_THEME): Record<string, unknown> {
   return runPipeline(spec, ui, theme, STEPS);
