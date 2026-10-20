@@ -1654,7 +1654,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 偏离：字符集从 app/server/app.py 挪到 app/core/text.py，不是让 core 直接 import server。理由是 core → server 会形成反向依赖；挪过去之后仍然只有一份。
 
-## [48] 2026-10-20 · T11 错误文案脱敏：实现 · commit <待提交>
+## [48] 2026-10-20 · T11 错误文案脱敏：实现 · commit 87d49d2（PR #61）
 
 **结论**：到界面的错误串唯一出口是 `app/core/errors.py` 的 `user_error`，返回 `UserText`，由 `Emitter.error` 机械断言。方案（phase5「T11」，含 S 第三轮补充）列出的生成点全部改完，keystore 也已纳入。
 
@@ -1689,3 +1689,29 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 这三条的理由相同：分类不变，内部枚举不再进入界面。
 
 **未做**：执行错误（error_kind=execution，exec 原文）按规则不经 user_error，会照原样进入 content。
+
+## [49] 2026-10-20 · A1 错题自动复跑：方案 · commit <待提交>
+
+**结论**：方案写在 phase5「A1 错题自动复跑」，已按 S 第二轮评审改定。本 PR 只有方案。
+
+**依据**：
+- [28]：m09 / s06 当时按"复跑都对"认定为波动，S 已追溯承认。
+- [30]：S 10-15 定的规则。
+- review-v1 A1：参照基线被自己的 m13 判成了"有回归"。
+
+**S 第二轮改定**：
+- 基线验收改为"除 thresholds_sha256 外逐字节相同"，另加断言 `m13r.agents == m13.agents`。
+- match 只当筛选器：复跑全部 match=true 时落进 pending_review，人工签字后才写 flaky。
+- valid 改用白名单，并和 ERROR_KINDS 做全覆盖断言。
+- 复跑次数从 2 改为 3（p=0.5 时假阴性率 12.5%，p=0.7 时 34%），另记 observed_pass_rate。
+- flaky 记 flaky_cause（model / env）。
+- 结论分三种，退出码 0 / 1 / 2，rerun_invalid 不压成回归。
+- sha 带 ? 时默认警告，加 `--require-sha` 才收紧。
+- 选题用人工判定，`--only` 补进比较器漏判的题。
+- `--rerun` 跑完直接写 verdict。
+- 比对项补上 python、pandas、use_dictionary。
+- 复跑行用 attempt + duration_s，不用 time。
+
+**偏离**：dataset 失败归为无效复跑。S 草案的 INVALID 里没有 dataset；这样做的理由和 flaky_cause=env 一致：闸门数据是冻结的本地文件，读取失败属于环境问题。
+
+**已知前提偏弱，不修**：run() 没有把 data_path 传给 run_metadata，报告里没有 data_sha256。

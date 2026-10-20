@@ -622,7 +622,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
-- A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
+- A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。方案见下文「A1 错题自动复跑」。
 - [30] 的 SHA（4497d2b）随 F0 一起回填（已做，见 DEVLOG [31]）。
 - 饼图类目 >6 时颜色循环（调色板 6 色，第 7 项与第 1 项同色；F3 第六步截图发现，非第六步引入）：S 10-19 定归 F4，写 F4 方案时给出规则（扩色 / 合并"其他" / 二者结合）和验收。
 - chart_errors 按执行记账（result.py:117，单独一个 PR）。方案见下。
@@ -708,3 +708,77 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - 列名保留：上游 message 里带列名时，列名原样保留。
 - fake_llm 加场景 `fail-echo-<code>`：上游 message 回显请求里的用户问题（整句一种、截断半句一种），e2e 走完整路径验证界面上看不到。
 - 判定表：`tests/test_fake_llm.py` 里的 `"[fake_llm]" in r.error` 保留（上游 message 照常透出），另外断言不再带 `APIStatusError:` 前缀，并且有编号。F2 的常量文案（cancelled / interrupted / stream_aborted）保持不变：它们不经 user_error，也不加编号。
+
+### A1 错题自动复跑（S 10-20 第二轮评审改定；DEVLOG [49]）
+
+**问题**（代码证据）：
+- m13 的 `allowed_fail` 是逐题登记的（thresholds.json），`_verdict_regression`（run_gate.py:205）把 `failed - allowed` 直接列为回归。
+- m09 / m10 这类在 temperature 0 下也会翻的题，因此每次跑闸门都会随机报一次假回归（review-v1 A1：两份参照基线 162428 / 163133 都被判成"有回归"）。
+- [28] 那次是手工单题复跑，证据是事后补进仓库的（[30]）。
+
+**S 10-15 定（[30]）**：
+- 名单外错题复跑，全对记为波动，有一次错记为回归，取代 [28] 的 ≥4/5。
+- 复跑存原始 answer / result_text，并且人工签字（B68）。
+- 上游 / 生命周期类失败算无效复跑，可以补跑，不算答错。
+- verdict 写明假阴性率。
+
+**已定**：
+1. **新增 profile `m13r`，m13 不动**：thresholds.json 的规矩是"改门槛只能新增 profile"。m13r 复制 m13 的 `agents`（allowed_fail 和 why），另加 `"rerun": {"times": 3, "max_makeup": 1, …}`。phase35 不接复跑。
+   - 复制会产生两份来源，所以加一条断言 `m13r["agents"] == m13["agents"]` 钉住副本（S 第二轮 一）。
+2. **复跑次数 3（S 第二轮 四）**：p² ≤ 25% 只在 p ≤ 0.5 时成立；p=0.7 时两次都对的概率是 49%。改为 3 次后，p=0.5 时假阴性率 12.5%，p=0.7 时 34%。代价是每道错题多 1 次调用。verdict 里写明这张表的前提，不再只写一个"25%"。
+   - 另外每题记 `observed_pass_rate`：主报告那次加上有效复跑，一共答对几次 / 共几次。
+3. **"对"由谁判（S 第二轮 二）**：比较器的 `match` 只当筛选器，flaky 必须有人签字。
+   | 步 | 判据 |
+   |---|---|
+   | 复跑 | 每行自动算 `match`，人工字段留空 |
+   | 有效复跑里有一次 match=false | 直接记为回归（比较器判错不需要人再确认；人如果认为比较器误判，可以把 human_correct 填 true 推翻） |
+   | 有效复跑全部 match=true | 落进 `{g}_pending_review`，不直接出 flaky |
+   | 人工把这几题的复跑行填上 human_correct（+ reason） | 全部是 true 才写进 `{g}_flaky`；有一行是 false 就记为回归 |
+   - 工作量是错题数乘以复跑次数（大约 5 题 × 3 行），而且只看复跑行的原始答案，不用重看整份报告。
+   - 某一行一旦填了 human_correct，就以人工为准，覆盖 match。
+4. **有效性用白名单（S 第二轮 三）**：
+   - `RERUN_VALID_KINDS = (None, "execution", "agent")`：题目本身的结果，交给人判对错。
+   - `RERUN_INVALID_KINDS = ("llm", "cancelled", "interrupted", "dataset")`：上游、生命周期或环境问题，不是题目错。
+   - 断言：`set(ERROR_KINDS) | {None}` 必须恰好等于两者的并集，而且两者不相交。将来新增 kind 时不登记，这条测试就会红。
+   - **偏离 S 的草案**：dataset 也放进无效。理由和第 5 条一致：闸门数据是冻结的本地文件，读取失败属于环境抖动，跟模型无关。
+   - 每题跑满 3 次，其中有无效的就补跑 1 次，所以每题最多 4 次。
+5. **flaky 分原因（S 第二轮 五）**：每道 flaky 题记 `flaky_cause`。主报告那次的 error_kind 在 RERUN_INVALID_KINDS 里时记 `env`（比如主报告是 dataset 失败、复跑成功），否则记 `model`。统计模型稳定性时只看 `model`。
+6. **结论有三个，退出码分开（S 第二轮 ②）**：
+   - `0` 无回归：已复跑的题全部是 flaky。措辞是「已复跑的 N 题里没有回归」，并附 flaky 名单和原因。
+   - `1` 有回归：任意一题落进 regressions。
+   - `2` 无法判定：有题落进 `rerun_invalid`（补跑后有效次数仍不足 3 次，比如没有 Key、上游 429），或还有 `pending_review` 没签字。报告里写明原因。
+   - 「没有 Key / 上游 429」和「代码有回归」是两件事，不能压成同一盏红灯。这和 interrupted 不能并进 cancelled 是同一条原则。
+7. **sha 带 `?`（S 第二轮 ③）**：沿用 run()（:118）的先例，默认警告并继续，报告的复跑段写 `sha_verified: false`。需要严格复现时显式加 `--require-sha`，带 `?` 就退出。
+8. **复跑的前提**：复跑前逐项比对，有一项不一致就拒绝。比对项是主报告的 `git_sha`、`agent`、`use_dictionary`，以及 run_metadata 的 `model`、`temperature`、`base_url_host`、`python`、`pandas`（S 第二轮：pandas 版本会改 result_text 的浮点格式和排序稳定性）。
+   - 已知前提比看上去弱：run() 没有把 data_path 传给 run_metadata，报告里没有 data_sha256，只能靠 answers.json 的 sources 间接判断（那是生成 answers 时的哈希，不是这次实际读的文件）。A1 不修，记在这里。
+9. **复跑写在同一份报告里**：报告加一个 `reruns: [...]` 数组，每行和 cases 行同构（answer / result_text / code / error_kind / match / duration_s 都在），另加 `attempt`（每题内从 1 开始）和 `valid`。人工字段 human_correct / failure_class / reason 留空。不用 `time` 这个字段名（顶层 `time` 是报告时间戳）。复跑段的元数据（`rerun_meta`：时间、sha_verified、profile）放在顶层。
+10. **一条命令、一个顺序（S 第二轮 结构洞）**：
+    - `--rerun REPORT --profile m13r [--only s02 m10] [--require-sha]`：先要求主报告的 human_correct 全部填完，再选出名单外的错题，加上 `--only` 手工指定的题（比较器漏判的那类，B66 / B68），逐题复跑，追加写进 reruns，最后**直接算出 verdict 写回**，并按第 6 条给退出码。
+    - 人工签完 pending_review 之后，再跑一次 `--verdict REPORT --profile m13r`，只重算结论，不重复跑模型。
+    - `--verdict` 遇到 m13r，但报告里还没有 reruns 时，结论写「待复跑」并给出命令，退出码 2。
+    - `--verdict` 加 m13 / phase35 时，路径一字不动。
+    - 对已经复跑过的题再跑 `--rerun`：拒绝（防止反复抽签直到全对）。要重来就从新的主报告开始。
+
+**选题用什么（S 第二轮 ①）**：用人工判定（B），也就是主报告的 human_correct 必须先填完。比较器漏判的题用 `--only` 补进来。两个入口共用同一套复跑和结论逻辑。不做"跑完立刻按比较器复跑"：那样选题只能靠 match，等于把比较器当成真相源。
+
+**验收**（tests/test_gate.py，全部用合成报告，analyze 打桩，不需要数据和 Key，CI 上会跑）：
+- 选题：只复跑名单外的错题，加上 `--only` 指定的题；allowed_fail 里的错题和意外答对的题都不复跑；已经复跑过的题再跑会被拒绝。
+- 次数：3 次都有效时不补跑；有 1 次无效时补跑 1 次；补跑后仍无效时停在 4 次，结论是 rerun_invalid，退出码 2。
+- 前提：git_sha、agent、use_dictionary、model、temperature、base_url_host、python、pandas 逐项改一个，都会被拒绝；sha 带 ? 时默认警告并写 `sha_verified: false`，加 `--require-sha` 时退出；主报告有未判定的题时拒绝。
+- 判定：
+  - 有效复跑里有一次 match=false → regressions，退出码 1。
+  - 全部 match=true 且没签字 → pending_review，退出码 2。
+  - 签字全部是 true → flaky，退出码 0。
+  - 签字里有一个 false → regressions。
+  - 人工填 true 推翻 match=false。
+  - `flaky_cause` 两种值各一条测试。
+  - `observed_pass_rate` 的分子分母正确。
+- 白名单：`set(ERROR_KINDS) | {None} == VALID | INVALID`，并且两者不相交。
+- 顺序：`--rerun` 跑完就把 verdict 写好；`--verdict` 加 m13r 但没有 reruns 时出「待复跑」，退出码 2。
+- 回归保护：
+  - 两份参照基线用 m13 重跑 verdict，除 `thresholds_sha256` 外逐字节相同。加 m13r 后这个哈希必然会变，而且应该变。
+  - `m13r["agents"] == m13["agents"]`。
+  - `test_phase35_profile_reproduces_final_verdict` 不变。
+- 不做：真模型复跑（S 跑）；把 [28] 的 4 份复跑报告迁到新格式；补 data_sha256。
+
+估时：大半天。
