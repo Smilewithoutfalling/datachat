@@ -597,3 +597,28 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。
 - [30] 的 SHA（4497d2b）随 F0 一起回填（已做，见 DEVLOG [31]）。
+- 饼图类目 >6 时颜色循环（调色板 6 色，第 7 项与第 1 项同色；F3 第六步截图发现，非第六步引入）：S 10-19 定归 F4，写 F4 方案时给出规则（扩色 / 合并"其他" / 二者结合）和验收。
+- chart_errors 按执行记账（result.py:117，单独一个 PR）。方案见下。
+
+### chart_errors 按执行记账（result.py:117）
+
+现状（代码证据）：
+- `_tally_charts`（service.py:265）把每次执行的 `chart_errors` 累加进 `res.chart_errors`，失败的执行也算。
+- `chart_warnings`（result.py:117）只在 `not has_option` 时报"图表未生成"。这个条件同时干了两件事：挡掉失败那次执行留下的旧错误（对），也吞掉了成功那次执行里"一张成功、一张失败"的错误（错，违反 [23]/[24] 不静默丢弃）。
+- chart() 参数错误不让执行失败（test_react_chart_error_reaches_model_and_warnings：res.ok 且 result==1），所以"展示的那次执行里有 chart_error"是常见情况，不是边角。
+- 展示哪些图：workflow 是最后一次 executor 的 state（只有失败才重试，所以就是唯一成功那次）；ReAct 是所有成功执行的图之和（react_agent.py:202 在成功时 extend sink["charts"]）。
+
+已定（待 S 评审）：
+1. 新字段 `res.chart_errors_shown`：只收"图被展示的执行"自己的 chart_errors，即 error 为空的执行。workflow 取最后一次成功 executor；ReAct 取所有成功 exec。`res.chart_errors` 保留原语义（全部累加，评测计数用，chart_smoke 不动）。
+2. `chart_warnings` 只看 `chart_errors_shown`：
+   - 没有展示的 option 且有错 → 「图表未生成：<最后一条>」（文案不变）。
+   - 有展示的 option 且有错 → 「另有 N 张图未生成：<最后一条>」，N = len(chart_errors_shown)。
+   - 错误只出现在失败的执行里 → 不报（那次的图已由"已丢弃"警告覆盖）。
+3. 判定表纪律：test_react_chart_error_reaches_model_and_warnings、test_real_chain_inject_error_reaches_warnings 期望不变（错误都在成功执行里，无图）。若有现存测试依赖"失败执行的旧错误被报出"，改期望并写明原因：那次的图已丢弃，旧错误对用户不再成立。
+4. 事件不变：exec 事件里的 chart_errors 本来就是单次执行的（_chart_event_fields），前端不用改。
+
+验收：
+- workflow、ReAct 各一条：同一次成功执行里两次 chart()，一次成功一次列名错 → 1 张图 + 警告「另有 1 张图未生成：…」。
+- workflow、ReAct 各一条：第一次执行 chart() 列名错 + 代码报错，重试成功并出图 → 只有"已丢弃"警告，没有"未生成"。
+- ReAct：两次成功执行，第一次 chart 错、第二次出图 → 警告「另有 1 张图未生成」（两次的图都展示，第一次的错误仍成立）。
+- fake 模型复用现有场景，必要时加一个 chart-partial 场景（同一段代码一对一错）；真链路 workflow/react 参数化各一条。
