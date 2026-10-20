@@ -113,4 +113,8 @@ input, select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 
 .chart-controls label:has(:disabled) { opacity: 0.45; }
 .chart-hint { color: #8c959f; }
 .theme-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-right: 8px; }
-.chart-png { max-width: 100%; }
+.chart-png { max-width: 100%; display: block; }
+.chart-export { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.chart-export button { font: inherit; padding: 2px 8px; }
+.chart-static-wrap { margin: 0; }
+.chart-static { margin: 2px 0 12px; font-size: 12px; color: #5f6368; }

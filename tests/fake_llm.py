@@ -11,6 +11,7 @@ model 名语法（解析器严格，见 parse_model）：
       chart-<kind> 同 ok，但写代码的那一步（codegen / fix / act）多调一次 chart('<kind>', df, …)（F3 图表测试）；
                   kind 取 app/tools/charts.py 的 KINDS，列按 dtype 选（chart_code），任何 CSV 只要有一个类目列和
                   一个数值列（scatter 要两个数值列）都能画。不带 @step。
+                  另有 chart-matplotlib（F3 第六步）：不调 chart()，用 plt 画一张，结果里是 png 项（静态图）。
       inject-<kind> F3 第二步注入实测：写代码的那一步对 inject_csv() 这份数据出图，标题、列名、类目、系列名都是
                   INJECT_PAYLOADS；cartesian / scatter 出两张（宽表多 y：列名进图例；长表 series=：单元格值进图例），
                   pie 出一张；结论拼上 P1–P3（含一个 javascript: 链接）。不带 @step。
@@ -55,8 +56,13 @@ PLAN = "（fake）统计行数。"
 ANSWER = "（fake）结论：数据共有若干行。"
 
 
+MATPLOTLIB = "matplotlib"   # chart-matplotlib：走 plt，产出 png 项（F3 第六步测静态图的标注）
+
+
 def chart_code(kind: str) -> str:
     """chart-<kind> 场景的代码：类目列取第一个非数值列，数值列取第一个（scatter 取前两个数值列）。"""
+    if kind == MATPLOTLIB:
+        return "plt.plot([1, 3, 2])\nplt.title('fake matplotlib')\n" + CODE
     xy = "x=num[0], y=num[1]" if kind == "scatter" else "x=cat[0], y=num[0]"
     return (f"num = list(df.select_dtypes('number').columns)\n"
             f"cat = [c for c in df.columns if c not in num]\n"
@@ -151,8 +157,8 @@ _MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<val>\d+)(?P<unit>s?
 def parse_model(name: str) -> Scenario:
     c = _CHART_RE.match(name or "")
     if c:
-        if c["kind"] not in KINDS:
-            raise FakeError(f"未知图型 {c['kind']!r}：可选 {', '.join(KINDS)}")
+        if c["kind"] not in KINDS + (MATPLOTLIB,):
+            raise FakeError(f"未知图型 {c['kind']!r}：可选 {', '.join(KINDS)}, {MATPLOTLIB}")
         if c["step"] is not None:
             raise FakeError(f"chart 作用于写代码的那一步，不带 @step：{name!r}")
         return Scenario("chart", chart=c["kind"])
