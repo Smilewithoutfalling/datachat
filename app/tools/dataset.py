@@ -18,6 +18,31 @@ import pandas as pd
 from app.tools.csv_io import read_csv_with_encoding
 from app.tools.schema import clip, describe_df, MAX_NAME_CHARS
 
+
+class DatasetError(Exception):
+    """数据集结构错误，文案是用户可读、不带路径的中文（T11：错误文案不带文件路径）。
+    filename 只放文件名：多表数据集里某张表读坏时，用户要知道是哪一张。"""
+
+    def __init__(self, message: str, *, filename: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.filename = filename
+
+    def __str__(self):   # OSError 子类（NoCSVError）的 str 不是 message，统一以 message 为准
+        return self.message
+
+
+class NoCSVError(DatasetError, FileNotFoundError):
+    pass
+
+
+class DuplicateTableError(DatasetError, ValueError):
+    pass
+
+
+class TableReadError(DatasetError):
+    """多表里某张表读取失败：带文件名，原异常在 __cause__（user_error 用它选常量文案）。"""
+
 SINGLE_ACCESS = "数据已加载到变量 df（pandas DataFrame），不要重新读取文件。"
 REVIEW_SINGLE_ACCESS = "用变量 df，不要重新读文件；"   # reviewer 的原措辞，单表时 prompt 与阶段 3 逐字一致
 
@@ -37,12 +62,13 @@ def table_paths(dataset) -> list[tuple[str, str]] | None:
         paths = [os.path.join(dataset, f) for f in os.listdir(dataset)
                  if f.lower().endswith(".csv") and not is_dict_file(f)]
         if not paths:
-            raise FileNotFoundError(f"目录里没有 CSV 文件：{dataset}")
+            raise NoCSVError("目录里没有 CSV 文件")
     out = {}
     for p in paths:
         name = os.path.splitext(os.path.basename(p))[0]
         if name in out:
-            raise ValueError(f"表名重复：{name}（{out[name]} 与 {p}）")
+            raise DuplicateTableError(
+                f"表名重复：{name}（{os.path.basename(out[name])} 与 {os.path.basename(p)}）")
         out[name] = p
     return sorted(out.items())
 
@@ -61,7 +87,10 @@ def load_data(dataset, encoding: str | None = None):
         return df, f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}"
     data, parts = {}, []
     for name, path in tables:
-        df, enc = read_csv_with_encoding(path, encoding)
+        try:
+            df, enc = read_csv_with_encoding(path, encoding)
+        except Exception as e:  # T11：多表里定位到是哪张表，只带文件名
+            raise TableReadError(str(e), filename=os.path.basename(path)) from e
         data[name] = df
         parts.append(f"{name} {len(df)}×{len(df.columns)}（{enc}）")
     return data, f"{len(data)} 张表：" + "，".join(parts)

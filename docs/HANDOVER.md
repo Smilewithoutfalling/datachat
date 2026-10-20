@@ -75,7 +75,7 @@ S 是仓库主人（GitHub `Smilewithoutfalling`），用中文交流。下面�
    - 增量渲染测试用 `slow-Ns`。图表场景可能要给假服务加一个产出 `chart()` 代码的剧本，加的时候也要遵守 fail loud。
 3. F4 层 1 面板；F5 S 验收、删除 Streamlit。
 4. 与 F 路径并行的两个**独立 PR**：
-   - **T11 错误文案脱敏**：先和 S 定规则，再改阶段 3/4 的代码。现在错误里会带上游的原始响应，`tests/test_fake_llm.py` 有断言 `"[fake_llm]" in r.error`，到时一起改。
+   - **T11 错误文案脱敏**：已做（DEVLOG [48]）。新增的错误文案一律经 `app/core/errors.py` 的 `user_error` 生成，不要再拼 `{type(e).__name__}: {e}`。
    - **A1 自动复跑 ×2 的闸门规则**：赶在下一次跑闸门之前做。
 5. 已知未做（DEVLOG [34] 有记）：messages 表没有 error_kind 列，几种失败落库后都塌成 status=error；late-cancel 没有端到端测试，假服务造不出这个时序。
 

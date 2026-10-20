@@ -85,7 +85,7 @@ def test_workflow_llm_timeout_is_captured_not_raised(sample_path):
     req = httpx2.Request("POST", "https://x")
     m = ScriptedChatModel(responder=lambda _: openai.APITimeoutError(request=req), calls=[])
     res = analyze(sample_path, "总销量", chat_model=m, llm_config=FAST)
-    assert res.error_kind == "llm" and "timeout" in res.error
+    assert res.error_kind == "llm" and res.error.startswith("请求超时，共尝试 3 次")   # T11 判定表：kind 仍是 timeout，文案换中文映射
     assert len(m.calls) == 3 and res.usage.retries == 2       # 1 次 + 2 次重试
 
 
@@ -209,5 +209,5 @@ def test_react_gateway_error_json_is_llm_error(sample_path):
     m = ScriptedChatModel(replies=['{"message":"prompt: A user\'s message must contain at least one image."}'] * 3,
                           calls=[])
     res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
-    assert res.answer == "" and res.error_kind == "llm" and "gateway_error" in res.error
+    assert res.answer == "" and res.error_kind == "llm" and res.error.startswith("接口返回错误内容：")   # T11 判定表：分类不变，gateway_error 是内部枚举不再进界面
     assert not res.executed

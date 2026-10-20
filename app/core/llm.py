@@ -113,11 +113,15 @@ class UsageCallbackHandler(BaseCallbackHandler):
 class LLMError(RuntimeError):
     """重试用尽或遇到不可重试错误后抛出。kind 便于上层区分"基础设施失败"和"答错"。"""
 
-    def __init__(self, message: str, *, kind: str, attempts: int, cause: BaseException | None = None):
+    def __init__(self, message: str, *, kind: str, attempts: int, cause: BaseException | None = None,
+                 upstream: str | None = None):
         super().__init__(message)
         self.kind = kind
         self.attempts = attempts
         self.cause = cause
+        # T11：上游 error.message 原文（未剥离）。用户可见文案由 service.py 经 user_error 生成，
+        # 回显剥离要用到问题原文，只有 service.py 的作用域里有
+        self.upstream = upstream
 
 
 _TRUNCATED_ERROR_RE = re.compile(r'^\{\s*"(message|error|detail|msg)"\s*:\s*"([^"\\]*)"?\s*\}?$')
@@ -229,13 +233,18 @@ class LLMClient:
                 bad = api_error_text(getattr(msg, "content", None))
                 if bad is not None:
                     self.tracker.add_message(msg)
-                    raise GatewayErrorContent(f"接口返回错误内容：{bad}")
+                    raise GatewayErrorContent(bad)
             except Exception as e:  # noqa: BLE001
                 kind, retryable = classify_error(e)
                 if not retryable or attempts > self.config.max_retries:
+                    from app.core.errors import upstream_message
+                    up = upstream_message(e)
+                    if isinstance(e, GatewayErrorContent):
+                        up = f"接口返回错误内容：{up}"
+                    # message 只给日志看（不进界面）；界面文案由 service.py 经 user_error 生成（T11）
                     raise LLMError(
                         f"LLM 调用失败（{kind}，共尝试 {attempts} 次）：{type(e).__name__}: {e}",
-                        kind=kind, attempts=attempts, cause=e,
+                        kind=kind, attempts=attempts, cause=e, upstream=up,
                     ) from e
                 self.tracker.add_retry()
                 self._sleep(self._delay(attempts - 1))

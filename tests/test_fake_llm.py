@@ -13,7 +13,7 @@ from app.tools.charts import KINDS, MAX_POINTS, validate_spec
 from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, INJECT_ANSWER, INJECT_COLUMNS, INJECT_ORDER, INJECT_PAYLOADS,
                             INJECT_ROWS,
                             inject_csv, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
-                            REACT_STEPS, WORKFLOW_STEPS, Scenario, handle, make_server, parse_model)
+                            REACT_STEPS, WORKFLOW_STEPS, FakeError, Scenario, handle, make_server, parse_model)
 
 WF_PLAN = [{"role": "user", "content": MARK_PLAN + "……"}]
 WF_CODEGEN = [{"role": "user", "content": MARK_CODEGEN + "……"}]
@@ -151,6 +151,9 @@ def test_real_chain_fail_loud(agent, fake_url, sample_path):
     """拼错的场景名在真链路上也是立刻失败（400 不重试），不是走默认剧本成功。"""
     r = analyze(sample_path, "有多少行", agent=agent, llm_config=cfg(fake_url, "hang-30"))
     assert not r.ok and r.error_kind == "llm" and "[fake_llm]" in r.error
+    # T11 判定表：上游 message 照常透出（[fake_llm] 还在）；行为变化是不再带 "BadRequestError: " 之类的类型名前缀，
+    # 末尾追加编号（trace_id 前 8 位）
+    assert "Error" not in r.error and r.error.endswith(f"（编号 {r.trace_id[:8]}）")
 
 
 def test_real_chain_fail_code_goes_through_product_classification(fake_url, sample_path):
@@ -159,10 +162,11 @@ def test_real_chain_fail_code_goes_through_product_classification(fake_url, samp
     c = LLMConfig(model="fail-500@codegen", api_key="k", base_url=fake_url, max_retries=2, timeout=20,
                   backoff_base=0.01, backoff_max=0.02)
     r = analyze(sample_path, "有多少行", agent="workflow", llm_config=c)
-    assert not r.ok and r.error_kind == "llm" and "server" in r.error and "共尝试 3 次" in r.error
+    # T11 判定表：分类不变（kind=server / auth），界面文案换成中文映射（LLM_KIND_TEXT），内部枚举不再进界面
+    assert not r.ok and r.error_kind == "llm" and r.error.startswith("模型服务出错，共尝试 3 次")
     assert r.plan == PLAN                                    # plan 正常，挂在 codegen
     r = analyze(sample_path, "有多少行", agent="workflow", llm_config=c.with_(model="fail-401"))
-    assert not r.ok and "auth" in r.error and "共尝试 1 次" in r.error
+    assert not r.ok and r.error.startswith("鉴权失败，请检查 API Key，共尝试 1 次")
 
 
 def test_real_chain_slow_delays_every_call(fake_url, sample_path):
@@ -288,3 +292,23 @@ def test_real_chain_partial_chart_error_reported(agent, fake_url, sample_path):
     assert r.ok and len([c for c in r.charts if c.get("option")]) == 1, (r.error_kind, r.error)
     w = [x for x in r.warnings if "未生成" in x]
     assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "__nope__" in w[0], r.warnings
+
+
+# ---------------------------------------------------------------- T11：上游回显用户问题（真链路）
+ECHO_Q = "请按城市统计二零二五年每个季度的销量并画出柱状图"
+
+
+@pytest.mark.parametrize("agent", ["workflow", "react"])
+@pytest.mark.parametrize("echo", ["echo", "echocut"])
+def test_real_chain_upstream_echo_is_stripped(agent, echo, fake_url, sample_path):
+    r = analyze(sample_path, ECHO_Q, agent=agent, llm_config=cfg(fake_url, f"fail-{echo}-400"))
+    assert not r.ok and r.error_kind == "llm" and "[fake_llm] 按场景返回 400" in r.error, r.error
+    assert ECHO_Q[:12] not in r.error and "…" in r.error
+    assert r.error.endswith(f"（编号 {r.trace_id[:8]}）")
+
+
+def test_echo_scenario_parse():
+    assert parse_model("fail-echo-400").echo == "echo"
+    assert parse_model("fail-echocut-500@codegen") == Scenario("fail", 500, "codegen", echo="echocut")
+    with pytest.raises(FakeError):
+        parse_model("hang-echo-3s")

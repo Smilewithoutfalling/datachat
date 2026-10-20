@@ -126,7 +126,15 @@ tests/test_charts.py 里的 HTML 用例同样只证明载荷能原样到达前�
 2. **用户可操作的诊断 → 保留原文、脱敏**：上游（网关 / 模型服务）返回的 message 是用户自救的依据（余额不足、模型不存在、context 超限），保留。**但要先查上游会不会回显请求内容**（SQL、表名、列名、用户问题原文、数据片段）：回显部分属于 PII 面，要剥掉或截断，不是所有上游原文都原样透出。
 3. **内部实现细节 → 去掉**：文件路径、`type(e).__name__`（对用户零信息量，还暴露内部结构，如 `FileNotFoundError` 直接说明是本地文件读取）、堆栈。
 
-现状：dataset / llm / agent / execution 的文案仍带 `{type(e).__name__}: {e}`（阶段 3/4 的写法）。待办：定义脱敏规则（保留什么、剥到什么粒度、上游回显怎么识别），单独一个 PR 改 `app/core/service.py`，带测试。
+现状（T11 已做，DEVLOG [48]，规则见 phase5「T11 错误文案脱敏」）：到界面的错误串唯一出口是 `app/core/errors.py` 的 `user_error`，按生成点纳入：
+- dataset / agent 转常量，llm 和网关保留上游 `error.message`。上游原文依次做四步：只取 message → 剥用户问题（整串，加最长前缀兜截断）→ 打码 Key / URL query / 路径 → 洗控制符、截到 200 字。
+- 末尾统一追加`（编号 trace_id 前 8 位）`，对应 server.log。
+- 沙箱 exec 原文（execution）不经这里，按 T9 只当文本渲染。
+- 列名、代码、字典不剥：它们在屏幕上本来就可见。
+- 文案只写详情，种类由 error_kind 承担。
+- `Emitter.error` 机械断言 message 必须是 `UserText`（exec 原文除外）。
+- keystore 的 400 文案在源头不拼类型名和后端名。
+- 验收靠断言跑出来的串：`tests/test_t11_errors.py`，以及 `ui/web/e2e/f3-errors.spec.ts`。
 
 ## 3. 结论：T1 / T2 在阶段 8 之前不算解决
 - "keyring 上线 = 偷 Key 已解决"是**错误**的读法。

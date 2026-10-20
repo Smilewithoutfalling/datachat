@@ -100,7 +100,7 @@ def test_react_gateway_error_retried(sample_path):
 def test_react_gateway_error_persistent_is_llm_error(sample_path):
     m = ScriptedChatModel(replies=['{"message":"prompt 必须包含字符串内容'] * 3, calls=[])
     res = analyze(sample_path, "q", agent="react", chat_model=m, llm_config=FAST)
-    assert res.answer == "" and res.error_kind == "llm" and "gateway_error" in res.error
+    assert res.answer == "" and res.error_kind == "llm" and res.error.startswith("接口返回错误内容：")   # T11 判定表：分类不变，gateway_error 是内部枚举不再进界面
 
 
 def test_react_gateway_error_not_retried_with_memory(sample_path):

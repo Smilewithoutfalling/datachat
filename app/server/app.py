@@ -46,6 +46,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.core.errors import user_error
+from app.core.text import BIDI_CONTROLS as _BIDI_CONTROLS, CONTROL_CHARS as _CONTROL_CHARS
 from app.core.events import CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE
 from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback, Message, Setting, make_sessionmaker, now
 
@@ -58,12 +60,8 @@ PREVIEW_DEFAULT_ROWS = 20    # 上传后随响应带回的预览行数
 PREVIEW_CELL_MAX = 200       # 单元格超长截断（按文本渲染，T9）
 CHART_NAME = re.compile(r"^chart_[0-9_]+_[0-9a-f]{6}\.png$")
 FEEDBACK_NOTE_MAX = 1000
-# 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）
-# 方向控制符（LRM/RLM、嵌入 / 覆盖、隔离）：数据里没有合法用途，却能让后面的文本视觉重排（THREAT_MODEL §2.3）
-_BIDI = "\u200e\u200f\u202a-\u202e\u2066-\u2069"
-_BIDI_CONTROLS = re.compile(f"[{_BIDI}]")
-# 标题、note：C0/C1 控制字符（保留 \t \n）+ 方向控制符。预览只用 _BIDI_CONTROLS（数据里 \r \t \n 合法）
-_CONTROL_CHARS = re.compile(f"[\x00-\x08\x0b-\x1f\x7f-\x9f{_BIDI}]")
+# 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）。
+# 字符集只有一份，在 app/core/text.py（T11 起错误文案也用它）
 # index.html 的内容安全策略（阶段 5 方案 §1）。构建产物里不能有内联 <script>（CI 检查），所以 script-src 只要 'self'；
 # ECharts / React 会写行内 style，故 style-src 带 'unsafe-inline'；图表导出用 data: / blob:。
 CSP = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -210,7 +208,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         try:
             tp = table_paths(target)
         except Exception as e:  # noqa: BLE001 —— 目录空、表名重复：分析同样会失败
-            out["error"] = f"{type(e).__name__}: {e}"
+            out["error"] = user_error("dataset", e, trace_id=secrets.token_hex(16),   # T11：编号对应 server.log
+                                      context=f"dataset={ds.id}")
             return out
         multi = tp is not None
         cols, parts, errors, previews = {}, [], [], []
@@ -219,7 +218,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             try:
                 df, enc = read_csv_with_encoding(path)
             except Exception as e:  # noqa: BLE001
-                msg = f"{type(e).__name__}: {e}"
+                msg = user_error("dataset", e, trace_id=secrets.token_hex(16),
+                                 context=f"dataset={ds.id} file={filename}")
                 errors.append(f"{filename}：{msg}")
                 parts.append(f"{name} 读取失败")
                 previews.append({"name": name, "filename": filename, "error": msg})
