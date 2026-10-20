@@ -1581,7 +1581,7 @@ Playwright：
 
 未做：前端不用改，exec 事件里的 chart_errors 本来就是单次执行的；饼图 >6 色归 F4。
 
-## [44] 2026-10-20 · F4 层 1 面板（标记卡）+ Tableau 风主题 + 10 色 · commit <待提交>
+## [44] 2026-10-20 · F4 层 1 面板（标记卡）+ Tableau 风主题 + 10 色 · commit 05e2e1d
 
 方案见 phase5-frontend.md「F4：层 1 面板」（PR #56，aedf5bc）。
 
@@ -1602,3 +1602,25 @@ Playwright：
 - e2e `f4-panel.spec.ts`（新，2 条，fake 项目的 testMatch 放宽到 f[34]）：柱图上字号、y 轴上限、系列色各自改变真导出的字节，min ≥ max 时报错且导出不变，存储键是 `datachat.chartEdit:<message_id>:0` 并且值逐字段相等，重置后回到原图的字节、键被删除；饼图 12 类上轴范围禁用，合并改变导出，并出 Tableau 风截图（f4-tableau-pie.png）。两条都断言零外部请求、console 干净。
 
 未做：人眼验收 S 10-20 看过截图，结论是"很不好看"。这一版先提交，让 S 跑起来再反馈；标记卡和 Tableau 风的视觉设计后面迭代。
+
+## [45] 2026-10-20 · issue #49 矮画布紧凑几何 · commit <待提交>
+
+S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一起写在本条和 phase5「#49」小节里，和实现同一个 PR（偏离"方案先行"，理由是 S 要求快）。
+
+问题（issue #49）：grid.top 60 + grid.bottom 30 + x 轴 nameGap 28 都是固定像素，1200×220 时一共 118px（54%），plot 区只剩 26%；值轴按 0.5 一档分出 7 个刻度，在 58px 里重叠，hideOverlap 把 0 和 3 吞掉，看起来数据范围只有 0.5–2.5。
+
+改了什么：
+- `charts/compact.ts`（新）：容器高 < 300（COMPACT_BELOW）时启用紧凑几何。grid.top：有标题收到 36、无标题 16；grid.bottom 减 16（最低 14，所以 30→14、50→34）；x 轴 nameGap 28→22；y 值轴 splitNumber 3，并设 showMinLabel / showMaxLabel。只收紧不放宽，饼图原样不动。
+- `prepare.ts`：UiState 加 compact；STEPS 末尾加 applyCompact（排在开关之后，开关可能改 grid.bottom）。
+- `EChart.tsx`：ResizeObserver 回调里量 clientHeight，跨过阈值才 setCompact。导出用同一个 ui，所以导出和屏幕一致。
+- 后端 spec 和几何契约 GEOMETRY 不动，纯渲染期处理。写出的键登记在 COMPACT_KEYS，有机制测试。
+
+实测（e2e，长轴名夹具）：1200×220 plot 区 26% → 46%，刻度 0 / 1 / 2 / 3 齐全（修之前只剩 0.5–2.5）。1200×360 不触发紧凑，仍是 55%，刻度 0–3 每 0.5 一档。截图 issue49-1200x220.png。
+
+判定表：
+- f3-themes.spec.ts 里原来的 `test.fail("已知缺陷：1200×220 下 plot 区高 ≥ 画布 40%")` 翻成 `test`，期望值不变；另外加了首末刻度 0 和 3 的断言。
+- EChart.test.tsx 导出断言的 ui 加上 `compact: false`（UiState 新增字段，测试容器 450 高）。
+
+测试：compact.test.ts（新，7 条：阈值、单系列数值、无标题 / 多系列、饼图原样、time 轴只动 y、默认关时逐字节相同、机制）；EChart.test.tsx 新增「#49：ResizeObserver…」（360→220→360，grid.top 60→36→60）。长轴名那条 e2e 在 1200×220 下仍然满足 x 轴名和类目行间隔 ≥ 8、bbox 在画布内。
+
+未做：卡片高度本身没有改（仍是 360），紧凑只在用户把窗口 / 容器缩矮时生效。
