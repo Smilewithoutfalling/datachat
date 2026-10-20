@@ -22,6 +22,7 @@ from functools import lru_cache
 
 from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
+from app.core.errors import NO_EXEC_MESSAGE, user_error
 from app.core.events import CANCELLED_MESSAGE, Emitter, Event
 from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, format_result, last_png,
                              refusal_from_answer)
@@ -172,7 +173,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     try:
         df, load_desc = load_data(dataset, encoding)   # 单表 DataFrame 或多表 {表名: DataFrame}
     except Exception as e:  # noqa: BLE001  文件不存在 / 编码无法识别 / CSV 解析失败
-        res.error, res.error_kind = f"数据集读取失败：{type(e).__name__}: {e}", "dataset"
+        res.error, res.error_kind = user_error("dataset", e, trace_id=res.trace_id), "dataset"
         res.steps.append(Step("load", error=res.error))
         return
     schema = describe_data(df)
@@ -181,7 +182,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
         try:
             notes = retrieve_notes(question, load_retriever(dataset))
         except Exception as e:  # noqa: BLE001  字典坏了不影响主流程，但要留痕
-            res.steps.append(Step("dictionary", error=f"数据字典读取失败，已跳过：{e}"))
+            res.steps.append(Step("dictionary", error=user_error("dictionary", e, trace_id=res.trace_id)))
             yield em.error(res.steps[-1].error, "dataset", fatal=False)
     res.field_notes = notes
     res.timings["load"] = round(time.perf_counter() - t, 4)
@@ -191,8 +192,8 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     # 2. 模型
     cfg = llm_config or LLMConfig.from_env()
     if chat_model is None and not cfg.api_key:
-        res.error, res.error_kind = ("未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
-                                             "或设置环境变量 DEEPSEEK_API_KEY。"), "llm"
+        res.error, res.error_kind = user_error("text", "未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
+                                               "或设置环境变量 DEEPSEEK_API_KEY。", trace_id=res.trace_id), "llm"
         return
 
     notes_text = format_notes(notes) if notes else ""
@@ -241,9 +242,9 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 if ev is not None:
                     yield ev
     except LLMError as e:
-        res.error, res.error_kind = str(e), "llm"
+        res.error, res.error_kind = user_error("llm", e, trace_id=res.trace_id, question=question), "llm"
     except Exception as e:  # noqa: BLE001
-        res.error, res.error_kind = f"工作流异常：{type(e).__name__}: {e}", "agent"
+        res.error, res.error_kind = user_error("agent", e, trace_id=res.trace_id), "agent"
 
     res.timings.update({k: round(v, 4) for k, v in node_time.items()})
     res.plan = state.get("plan", "")
@@ -409,26 +410,28 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         except Exception as e:  # noqa: BLE001
             kind, _ = classify_error(e)
             if kind != "unknown":
-                res.error, res.error_kind = f"LLM 调用失败（{kind}）：{type(e).__name__}: {e}", "llm"
+                res.error, res.error_kind = user_error("llm", e, trace_id=res.trace_id, question=question), "llm"
             else:
-                res.error, res.error_kind = f"ReAct 异常：{type(e).__name__}: {e}", "agent"
+                res.error, res.error_kind = user_error("agent", e, trace_id=res.trace_id), "agent"
         if sink.get("nudges"):
             res.steps.append(Step("nudge", content="模型没执行代码也没按契约拒答就要结束，已提醒一次（B70）"))
         # B62：网关以错误 JSON 充当回复（可能被截断）→ 整轮重跑
         # B69：一次代码都没执行、也没按契约拒答就收尾（回归 m09 只回了一个 'B'）→ 同样整轮重跑
         final = _final_text(messages)
-        why = None
+        why = None   # T11：重跑原因进界面，经 user_error；模型答案原文只进日志
         if rec_err is None and res.error is None:
             if api_error_text(final) is not None:
-                why = f"接口返回错误内容：{api_error_text(final)}"
+                why = ("llm", user_error("upstream", api_error_text(final), trace_id=res.trace_id,
+                                         question=question, prefix="重跑本轮：接口返回错误内容："))   # 非致命，界面不加种类前缀
             # 带 history 时追问可以只凭上下文作答（"解释一下上面的结果"），不按 B69 判为异常
             elif not history and not sink["execs"] and refusal_from_answer(final) is None \
                     and not final.strip().startswith("Sorry, need more steps"):
-                why = f"模型没有执行代码也没有按契约拒答：{final[:200]!r}"
+                logger.warning("react no-exec trace=%s answer=%r", res.trace_id, final[:500])
+                why = ("agent", user_error("text", f"重跑本轮：{NO_EXEC_MESSAGE}", trace_id=res.trace_id))
         if why and attempt < retries:
             tracker.add_retry()
-            res.steps.append(Step("retry", error=f"重跑本轮：{why}"))
-            yield em.error(res.steps[-1].error, "llm" if why.startswith("接口") else "agent", fatal=False)
+            res.steps.append(Step("retry", error=why[1]))
+            yield em.error(res.steps[-1].error, why[0], fatal=False)
             time.sleep(min(cfg.backoff_base * 2 ** attempt, cfg.backoff_max))
             continue
         break
@@ -461,7 +464,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         # 网关以错误 JSON 充当回复（B45 / B62）：不是答案，按 LLM 基础设施失败记
         res.answer = ""
         if res.error is None:
-            res.error = f"LLM 调用失败（gateway_error）：接口返回错误内容：{bad}"
+            res.error = user_error("upstream", bad, trace_id=res.trace_id, question=question,
+                                   prefix="接口返回错误内容：")
             res.error_kind = "llm"
 
     # B61：步数用完（GraphRecursionError，或 langgraph 塞进来的英文占位答复 B39）→ 不再只给一句报错，
@@ -488,7 +492,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
             res.steps.append(Step("forced_answer", content=forced))
             res.warnings.append(f"ReAct 达到步数上限（recursion_limit={recursion_limit}），已根据已有执行结果强制收尾")
         elif res.error is None:
-            res.error = f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论"
+            res.error = user_error("text", f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论",
+                                   trace_id=res.trace_id)
             res.error_kind = "agent"
 
     ok = [e for e in execs if not e["error"]]
@@ -522,7 +527,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
             res.error, res.error_kind = execs[-1]["error"], "execution"
     elif res.error is None and memory is None and not history:
         # B69：单轮分析里没有执行结果、也不是拒答，不能算成功（多轮追问可以只用文字回答，不在此列）
-        res.error = f"ReAct 未执行任何代码也未按契约拒答（结论：{res.answer[:100]!r}）"
+        logger.warning("react no-exec trace=%s answer=%r", res.trace_id, res.answer[:500])
+        res.error = user_error("text", NO_EXEC_MESSAGE, trace_id=res.trace_id)
         res.error_kind = "agent"
 
     res.warnings += chart_warnings(res, [w for e in ok for w in e.get("chart_warnings") or []])

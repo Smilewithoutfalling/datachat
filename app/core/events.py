@@ -21,6 +21,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from app.core.errors import UserText
+
 EVENT_TYPES = ("plan", "code", "exec", "answer", "error", "done")
 # error 事件的 kind / AnalysisResult.error_kind。前端只按 kind / status 分支，不对文案做匹配（阶段 5 F2）。
 # - cancelled：用户点了停止（POST /messages/{id}/cancel）。只有用户动作才用它。
@@ -29,10 +31,10 @@ EVENT_TYPES = ("plan", "code", "exec", "answer", "error", "done")
 #   （error_kind=interrupted）并给重试入口。两种原因文案不同，但前端不按文案分支。
 ERROR_KINDS = ("dataset", "llm", "execution", "agent", "cancelled", "interrupted")
 # 以下文案是常量，不带任何内部异常或堆栈（详情只进日志）。
-CANCELLED_MESSAGE = "已取消"
-INTERRUPTED_MESSAGE = "分析已中断（服务已重启）"
-DISCONNECTED_MESSAGE = "分析已中断（连接已断开）"
-STREAM_ABORTED_MESSAGE = "分析异常中断（服务端错误）"     # 流里没收到 done 就抛异常（status=error）
+CANCELLED_MESSAGE = UserText("已取消")
+INTERRUPTED_MESSAGE = UserText("分析已中断（服务已重启）")
+DISCONNECTED_MESSAGE = UserText("分析已中断（连接已断开）")
+STREAM_ABORTED_MESSAGE = UserText("分析异常中断（服务端错误）")     # 流里没收到 done 就抛异常（status=error）
 
 
 @dataclass
@@ -78,7 +80,10 @@ class Emitter:
         return self._make("answer", {"text": text, "forced": forced})
 
     def error(self, message, kind, *, fatal):
-        return self._make("error", {"message": message, "kind": kind, "fatal": fatal})
+        # T11 机械约束：界面文案只能来自 user_error（或 F2 常量）。exec 原文（kind=execution）按 T9 原样，例外
+        if kind != "execution" and not isinstance(message, UserText):
+            raise TypeError(f"error 事件的 message 必须经 app.core.errors.user_error 生成（kind={kind}）")
+        return self._make("error", {"message": str(message), "kind": kind, "fatal": fatal})
 
     def done(self, result):
         return self._make("done", {}, result)

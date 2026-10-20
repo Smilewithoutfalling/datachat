@@ -658,6 +658,14 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 ### T11 错误文案脱敏（已定，S 10-20 第二轮；THREAT_MODEL §2.4）
 
+> 实现：DEVLOG [48]。偏离见 [48]。S 10-20 第三轮补充（实现时落地，覆盖下文对应条目）：
+> - **文案只写详情，种类由 error_kind 承担**：界面渲染为「{KIND}失败：{文案}」（TurnView.tsx KIND），所以文案里不写「LLM 调用失败」「分析流程」「数据集读取失败」这类前缀。classify_error 的内部枚举经 `LLM_KIND_TEXT` 映射成中文，unknown 省略。常量相应改为：agent →「内部错误」，dataset 兜底 →「无法读取文件」，解析 →「CSV 第 N 行无法解析」。
+> - **机械约束**：user_error 返回 `UserText(str)`，F2 常量也是 UserText；`Emitter.error` 断言 message 是 UserText，只有 kind=execution（exec 原文）例外。
+> - **dataset_message 判定顺序**：精确类在前，宽类（ValueError）兜底在后。每一类用只属于它的异常构造测试。
+> - **数据集预览**：日志行带 dataset id 和文件名。
+> - **keystore 纳入，改源头**：keystore.py 的 :40、:49、:86/:97、:90 不再拼类型名或后端全限定名，细节进日志；app.py 只负责转成 400。CLI status 仍显示后端全名（本地终端，不进界面）。
+> - **charts._CTRL 不并**：它和 text.py 里的集合用途不同，原因写在 text.py 的注释里。
+
 **纳入原则：按生成点算，不按字段算**。凡是经 `user_error` 生成的串都已脱敏，不管它最后落在 `res.error`、`Step.error`，还是非致命 error 事件里。exec 原文一律不经过 `user_error`。所以：
 - `service.py:176` 的 `Step("load", error=res.error)` 是 res.error 的拷贝，要脱敏。
 - `service.py:290` 的 `s.error = upd.get("error")` 是沙箱 exec 原文，按 T9 只当文本渲染，**不脱敏**。代码面板 / observation 里的 traceback 同理。

@@ -19,6 +19,8 @@ model 名语法（解析器严格，见 parse_model）：
                   （app/core/result.py chart_warnings 的 `not has_option`），所以单独一个场景。
       hang-<N>s   在目标调用上先睡 N 秒再正常回复（测停止）
       fail-<code> 目标调用返回 HTTP <code>（400/401/403/404/429/500/502/503）
+      fail-echo-<code>    同 fail，但错误 message 回显本次请求里的用户问题整句（T11 回显剥离）
+      fail-echocut-<code> 同上，但只回显问题的前 2/3（≥12 字），模拟网关截断 body 后的半句回显
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
     step：plan | codegen | fix | answer（工作流）、act | final（ReAct）
       不写 @step 时目标调用是"第一次调用"：工作流的 plan、ReAct 的 act（无状态可判定，不需要计数）。
@@ -146,6 +148,7 @@ class Scenario:
     value: int = 0               # 秒数或 HTTP 状态码
     step: Optional[str] = None   # 目标步骤；None = 第一次调用
     chart: Optional[str] = None  # chart / inject 场景的图型（inject 另有 "error"）
+    echo: Optional[str] = None   # fail 场景的回显方式：None | "echo" | "echocut"（T11）
 
     def targets(self, agent: str, step: str) -> bool:
         if self.step is not None and self.step not in (WORKFLOW_STEPS if agent == "workflow" else REACT_STEPS):
@@ -155,7 +158,8 @@ class Scenario:
 
 _CHART_RE = re.compile(r"^chart-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _INJECT_RE = re.compile(r"^inject-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
-_MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
+_MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<echo>echo|echocut))?"
+                       r"(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
 
 
 def parse_model(name: str) -> Scenario:
@@ -177,6 +181,8 @@ def parse_model(name: str) -> Scenario:
     if not m:
         raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns|chart-KIND|inject-KIND>[@step]")
     kind, val, unit, step = m["kind"], m["val"], m["unit"], m["step"]
+    if m["echo"] and kind != "fail":
+        raise FakeError(f"-{m['echo']} 只能跟 fail：{name!r}")
     if step is not None and step not in WORKFLOW_STEPS + REACT_STEPS:
         raise FakeError(f"未知步骤 @{step}：可选 {', '.join(WORKFLOW_STEPS + REACT_STEPS)}")
     if kind == "ok":
@@ -198,7 +204,7 @@ def parse_model(name: str) -> Scenario:
         raise FakeError(f"fail 的参数是 HTTP 状态码，不带单位：{name!r}")
     if n not in FAIL_CODES:
         raise FakeError(f"fail 只支持 {FAIL_CODES}：{name!r}")
-    return Scenario("fail", n, step)
+    return Scenario("fail", n, step, echo=m["echo"])
 
 
 def _text(content) -> str:
@@ -223,6 +229,16 @@ def recognize(messages: list) -> tuple[str, str]:
         if mark in whole:
             return "workflow", step
     raise FakeError("无法识别当前步骤，提示词可能已变（更新 tests/fake_llm.py 的 MARK_*）")
+
+
+def question_of(agent: str, messages: list) -> str:
+    """本次请求里的用户问题：工作流取提示词里的「用户问题：」一行，ReAct 取最后一条 user 消息。"""
+    if agent == "react":
+        users = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
+        return _text(users[-1].get("content")).strip() if users else ""
+    whole = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
+    m = re.search(r"用户问题：(.*)", whole)
+    return m.group(1).strip() if m else ""
 
 
 def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None, inject: bool = False) -> dict:
@@ -257,8 +273,14 @@ def handle(body: dict, sleep=time.sleep) -> tuple[int, dict]:
     if sc.kind == "slow" or (sc.kind == "hang" and hit):
         sleep(sc.value)
     if sc.kind == "fail" and hit:
-        return sc.value, {"error": {"message": f"[fake_llm] 按场景返回 {sc.value}", "type": "fake_failure",
-                                    "code": str(sc.value)}}
+        text = f"[fake_llm] 按场景返回 {sc.value}"
+        if sc.echo:
+            q = question_of(agent, body["messages"])
+            if len(q) < 18:
+                return 400, {"error": {"message": f"[fake_llm] {sc.echo} 要求问题 ≥18 字（截断回显要留 ≥12 字前缀）",
+                                       "type": "invalid_request_error", "code": "fake_llm"}}
+            text += f"：{q}" if sc.echo == "echo" else f'：{{"content":"{q[:len(q) * 2 // 3]}'
+        return sc.value, {"error": {"message": text, "type": "fake_failure", "code": str(sc.value)}}
     msg = reply_for(agent, step, body["messages"], sc.chart, sc.kind == "inject")
     return 200, {
         "id": f"chatcmpl-fake-{uuid.uuid4().hex[:8]}", "object": "chat.completion", "created": int(time.time()),

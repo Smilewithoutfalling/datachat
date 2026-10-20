@@ -1642,7 +1642,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 未做：Tauri 壳还不存在（阶段 6），壳侧的读取代码到时候按这份契约写。
 
-## [47] 2026-10-20 · T11 错误文案脱敏：方案 · commit <待提交>
+## [47] 2026-10-20 · T11 错误文案脱敏：方案 · commit d878ad2
 
 方案写在 phase5「T11 错误文案脱敏」。S 10-20 第二轮评审后改定：
 - 剥离只剥用户问题：整串匹配，≥ 4 字才判；另加最长前缀 ≥ 12 字兜截断回显。列名、代码、字典不剥，因为它们在屏幕上本来就可见，剥掉还会和「可用列」保持原文那条规则冲突。
@@ -1653,3 +1653,39 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 验收改成断言跑出来的串，不 grep 源码。
 
 偏离：字符集从 app/server/app.py 挪到 app/core/text.py，不是让 core 直接 import server。理由是 core → server 会形成反向依赖；挪过去之后仍然只有一份。
+
+## [48] 2026-10-20 · T11 错误文案脱敏：实现 · commit <待提交>
+
+**结论**：到界面的错误串唯一出口是 `app/core/errors.py` 的 `user_error`，返回 `UserText`，由 `Emitter.error` 机械断言。方案（phase5「T11」，含 S 第三轮补充）列出的生成点全部改完，keystore 也已纳入。
+
+**新文件**：
+- `app/core/errors.py`：user_error / scrub / upstream_message / dataset_message / UserText / LLM_KIND_TEXT
+- `app/core/text.py`：界面文案用的控制符字符集，app.py 从这里 import。charts._CTRL 故意不并，原因写在注释里。
+- `tests/test_t11_errors.py`
+- `ui/web/e2e/f3-errors.spec.ts`
+
+**改动**：
+- `service.py`：175、184、244/246、412/414、431（重跑原因）、464（网关）、525 都改为经 user_error 生成。
+  - 525 不再带答案的 repr，答案只进日志。
+  - 三条自写文案（未配置 Key、步数上限、no-exec）经 `user_error("text")` 追加编号。
+  - 文案只写详情，不再写种类前缀。
+- `llm.py`：LLMError 新增 `upstream` 字段。GatewayErrorContent 只带上游原文。LLMError 的 message 只给日志用。
+- `events.py`：F2 四个常量改为 UserText；`Emitter.error` 在 kind≠execution 时断言 message 是 UserText。
+- `app.py`：数据集预览的两处改为 user_error，日志带 `dataset=<id> file=<名>`。
+- `keystore.py`：:40、:49、:86/:97、:90 去掉类型名和后端全限定名，细节写进 `datachat.keystore` 日志。
+- `dataset.py`：load_data 逐表捕获，抛 TableReadError(filename)；table_paths 的自写文案去掉完整路径。
+- `fake_llm`：新增 `fail-echo-<code>` / `fail-echocut-<code>`。
+
+**偏离和理由**：
+1. 工作流里，模型抛出的异常经 `LLMClient.invoke_message` 的 `except Exception`（llm.py:239）包成 LLMError，走 llm 出口。节点自身代码的异常（strip_code 解析、state 取键）不经过模型，会落到 service.py:247 的 agent 常量。`test_agent_unknown_exception_constant[workflow]` 用图本身抛异常模拟的就是这条真实路径。
+2. 数据集预览没有 trace_id，所以每条错误随机生成一个编号；日志行带 dataset id 和文件名，查到编号后能找到是哪个数据集的哪个文件。
+3. DatasetError 系列放在 `app/tools/dataset.py`，因为 tools 不依赖 core。TableReadError 只继承 DatasetError(Exception)。dataset_message 的判定顺序是精确类在前、ValueError 兜底在后（pandas 实测：ParserError 和 EmptyDataError 都是 ValueError，但 EmptyDataError 不是 ParserError 的子类）。
+
+**判定表**：
+- `test_fake_llm::test_real_chain_fail_loud`：保留 `"[fake_llm]" in r.error`，并新增两条断言：不含 `Error`，以编号结尾。行为变化：去掉了类型名前缀，加上了编号。
+- `test_fake_llm::test_real_chain_fail_code_goes_through_product_classification`：`"server" in r.error` 改为 `startswith("模型服务出错，共尝试 3 次")`，auth 同理。分类本身不变（kind 仍是 server / auth），只是界面文案从内部枚举换成了中文映射。
+- `test_core_analyze::test_workflow_llm_timeout_is_captured_not_raised`：`"timeout" in res.error` 改为 `startswith("请求超时，共尝试 3 次")`。
+- `test_core_analyze` 和 `test_phase36` 里两条网关用例：`"gateway_error" in res.error` 改为 `startswith("接口返回错误内容：")`。
+- 这三条的理由相同：分类不变，内部枚举不再进入界面。
+
+**未做**：执行错误（error_kind=execution，exec 原文）按规则不经 user_error，会照原样进入 content。

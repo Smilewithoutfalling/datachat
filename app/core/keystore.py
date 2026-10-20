@@ -19,6 +19,7 @@ Key 不再以明文写在 .env 里。
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from typing import Optional
@@ -29,7 +30,11 @@ ENV_VAR = "DEEPSEEK_API_KEY"
 
 
 class KeyStoreError(RuntimeError):
-    """钥匙串不可用或写入失败。消息里不含 Key。"""
+    """钥匙串不可用或写入失败。消息里不含 Key，也不含异常类型名、后端全限定名（T11：这条会经 400 到界面）；
+    细节只进日志。"""
+
+
+_log = logging.getLogger("datachat.keystore")
 
 
 def _keyring():
@@ -37,7 +42,8 @@ def _keyring():
         import keyring
         return keyring
     except Exception as e:  # noqa: BLE001
-        raise KeyStoreError(f"keyring 不可用：{type(e).__name__}") from None
+        _log.warning("keyring import failed: %s: %s", type(e).__name__, e)
+        raise KeyStoreError("钥匙串组件不可用") from None
 
 
 def backend_name() -> str:
@@ -46,7 +52,8 @@ def backend_name() -> str:
         b = kr.get_keyring()
         return f"{type(b).__module__}.{type(b).__name__}"
     except Exception as e:  # noqa: BLE001
-        return f"不可用（{type(e).__name__}）"
+        _log.warning("keyring backend unavailable: %s: %s", type(e).__name__, e)
+        return "不可用"
 
 
 def _usable(kr) -> bool:
@@ -83,18 +90,21 @@ def set_api_key(key: str) -> None:
         raise KeyStoreError("Key 里不应有空白字符（可能粘贴了多余内容）")
     kr = _keyring()
     if not _usable(kr):
-        raise KeyStoreError(f"系统钥匙串不可用（后端：{backend_name()}）")
+        _log.warning("keyring unusable, backend=%s", backend_name())
+        raise KeyStoreError("系统钥匙串不可用")
     try:
         kr.set_password(SERVICE, ACCOUNT, key)
     except Exception as e:  # noqa: BLE001
-        raise KeyStoreError(f"写入钥匙串失败：{type(e).__name__}") from None
+        _log.warning("keyring set_password failed: %s: %s", type(e).__name__, e)
+        raise KeyStoreError("写入系统钥匙串失败") from None
 
 
 def delete_api_key() -> bool:
     """删除成功返回 True；本来就没有返回 False。"""
     kr = _keyring()
     if not _usable(kr):
-        raise KeyStoreError(f"系统钥匙串不可用（后端：{backend_name()}）")
+        _log.warning("keyring unusable, backend=%s", backend_name())
+        raise KeyStoreError("系统钥匙串不可用")
     try:
         kr.delete_password(SERVICE, ACCOUNT)
         return True
