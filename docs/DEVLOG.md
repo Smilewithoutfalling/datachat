@@ -1566,7 +1566,7 @@ Playwright：
 - Windows 真鼠标 Shift + 滚轮（[41] 留下的）仍待 S 手试；Tauri 壳里的下载行为到壳那一步。
 - #49、`result.py:117`、#44、T11、A1、闸门 25 条上 CI，照旧。
 
-## [43] 2026-10-20 · chart_errors 按执行记账（result.py:117）· commit <待提交>
+## [43] 2026-10-20 · chart_errors 按执行记账（result.py:117）· commit ff7b8dc（PR #55）
 
 方案见 phase5-frontend.md §7（PR #54，f7739ca）。
 
