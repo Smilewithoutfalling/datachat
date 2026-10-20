@@ -655,3 +655,48 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 1. 触发：容器高 < 300px（默认卡片 360 不触发）。由 EChart 的 ResizeObserver 量出来，写进 UiState.compact；导出用同一个 ui。
 2. 收紧：grid.top 有标题 36 / 无标题 16；grid.bottom −16（下限 14）；x 轴 nameGap 22；y 值轴 splitNumber 3、showMinLabel / showMaxLabel。只收紧不放宽，饼图不动。键登记在 COMPACT_KEYS。
 3. 验收：1200×220 长轴名夹具 plot 区 ≥ 40%，值轴首末刻度（0 和 3）都画出来；长轴名那条 e2e 的全部断言在 220 高下照旧成立；360 高时产物和修之前逐字节相同。
+
+### T11 错误文案脱敏（已定，S 10-20 第二轮；THREAT_MODEL §2.4）
+
+**纳入原则：按生成点算，不按字段算**。凡是经 `user_error` 生成的串都已脱敏，不管它最后落在 `res.error`、`Step.error`，还是非致命 error 事件里。exec 原文一律不经过 `user_error`。所以：
+- `service.py:176` 的 `Step("load", error=res.error)` 是 res.error 的拷贝，要脱敏。
+- `service.py:290` 的 `s.error = upd.get("error")` 是沙箱 exec 原文，按 T9 只当文本渲染，**不脱敏**。代码面板 / observation 里的 traceback 同理。
+- keystore 的 CLI 输出不在渲染面上，不纳入。
+
+**规则**：
+1. **唯一出口**：新增 `app/core/errors.py` 的 `user_error(kind, exc_or_text, *, trace_id, question=None)`，所有到界面的错误串都由它生成。原始的 `{type(e).__name__}: {e}` 和堆栈只按 trace_id 写进 server.log。
+2. **编号统一追加、不设例外**：由 `user_error` 在文案末尾追加`（编号 xxxxxxxx）`，取 trace_id 的前 8 位，并写进 messages.content。content 是跨会话唯一保留下来的载体，也是用户唯一会复制、截图的东西；如果由前端渲染 message.id[:8]，用户复制不到。可查性：`app.py:412` 里 trace_id=msg_id，`__main__.py:47` 把日志落盘到 home/server.log，编号能和日志里的 trace= 对上。各处常量文案**不要**自己写编号。
+3. **dataset：已知异常转成常量**，不带路径和类型名。
+   - 文件不存在 →「数据文件不见了，请重新上传」
+   - 编码 →「无法识别文件编码」，保留试过的编码列表
+   - pandas ParserError →「CSV 解析失败」，可以保留"第 N 行"（正则只取行号）
+   - EmptyDataError →「文件是空的」
+   - 我们自己抛的中文校验文案原样保留
+   - 其他一律 →「数据集读取失败」
+   - 多表数据集：`dataset.py:63-66` 的 `load_data` 要逐表捕获，把**文件名**（只带文件名，不带路径）带进异常，常量文案前面加「表 x.csv：」。否则多表时"文件不存在"定位不到是哪一张。
+4. **上游原文（llm / gateway）：保留，并做固定的四步处理**。这是用户自救的依据，比如余额、模型名、context 超限。
+   - (a) 只取 `error.message`，不要异常 repr，也不要 `{type}:` 前缀。
+   - (b) **只剥用户问题**：问题整串在上游文本里出现就换成 `…`（问题 ≥ 4 字才判）；另外兜一条截断回显：问题的最长前缀（≥ 12 字）出现在上游文本里也换掉，网关截断 body 时只会剩半句。**不剥**列名、代码、数据字典：它们在表头、轴标签、图例、代码面板里本来就按设计显示，剥掉不会减少任何泄漏面，还会和 ChartError「可用列」必须保持原文那条规则冲突（短列名被剥成 … 后，「列 price 不存在」会变成「列 … 不存在」）。
+   - (c) 打码：`sk-` 加 ≥ 8 位的 Key、带 query 的 URL、文件路径（盘符或 / 开头）。
+   - (d) 洗控制符：复用**同一份**字符集（`app/server/app.py:66` 的 `_CONTROL_CHARS`，含 C1 和 bidi）。core 不能反向依赖 server，所以把它挪到 `app/core/text.py`，app.py 改成 import，仓库里不新增第三份；`charts._CTRL` 维持现状不动。然后截到 200 字。
+   - **剥离放在 service.py 做，不放 llm.py**：LLMClient 手里只有拼好的 prompt，分不出哪段是问题。`LLMError` 新增 `upstream: str | None`，放上游 message 的原文；`service.py:244` 的 `str(e)` 改成 `user_error("llm", e, question=...)`。kind 和尝试次数由我们自己生成，保留。
+5. **agent / 未知异常 → 常量**：「分析流程内部出错」。
+6. **必须一起改的生成点**（第一轮漏掉了下面四处）：
+   - `service.py:175`、`246`、`412`、`414`
+   - `llm.py:237`（只改它的 message 结构，用户串由 service.py 生成）
+   - `app.py:213`、`222`（数据集预览）
+   - `service.py:184`（字典非致命）
+   - `service.py:464`：「接口返回错误内容：{bad}」。bad 是上游原文，最常见的失败路径（B45 / B62），走第 4 条。
+   - `service.py:431`：非致命 error 事件用的 why 里含有 `api_error_text(final)`，走第 4 条。
+   - `service.py:525`：「结论：{res.answer[:100]!r}」把模型答案的 repr 塞进了错误文案。改成常量「模型没有执行代码也没有按契约拒答」，答案本身只进日志。
+
+**验收：断言跑出来的串，不扫源码**。grep `type(e).__name__` 扫不到 f-string、`str(e)`、`.format` 拼出来的串，和 AST 扫描器只能扫字面量是同一类问题。
+- 场景表驱动：dataset（文件不存在、编码、解析、空文件、多表缺一张）、llm（fake_llm `fail-<code>`、超时、gateway 错误内容）、agent（注入异常）、字典非致命、数据集预览、`service.py:431` 和 `525` 两条路径。每个场景都跑完，取**所有界面文案**（error 事件、done、messages.content、Step.error 里经 user_error 生成的部分、预览 error），断言：
+  - 不含 `Error`、`Exception`、`Traceback`、盘符或绝对路径、`sk-`、C0 / C1 / bidi 控制符；
+  - 末尾正好有一个`（编号 xxxxxxxx）`，并且等于 trace_id 的前 8 位；
+  - 用户问题不出现（另有一条载荷是问题前缀被截断的回显）；
+  - 长度 ≤ 200 + 编号。
+- 对照：沙箱 exec 报错的场景里，Step.error **仍然**是 traceback 原文（钉住"exec 原文不脱敏"）。
+- 列名保留：上游 message 里带列名时，列名原样保留。
+- fake_llm 加场景 `fail-echo-<code>`：上游 message 回显请求里的用户问题（整句一种、截断半句一种），e2e 走完整路径验证界面上看不到。
+- 判定表：`tests/test_fake_llm.py` 里的 `"[fake_llm]" in r.error` 保留（上游 message 照常透出），另外断言不再带 `APIStatusError:` 前缀，并且有编号。F2 的常量文案（cancelled / interrupted / stream_aborted）保持不变：它们不经 user_error，也不加编号。
