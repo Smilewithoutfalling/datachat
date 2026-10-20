@@ -1603,7 +1603,7 @@ Playwright：
 
 未做：人眼验收 S 10-20 看过截图，结论是"很不好看"。这一版先提交，让 S 跑起来再反馈；标记卡和 Tableau 风的视觉设计后面迭代。
 
-## [45] 2026-10-20 · issue #49 矮画布紧凑几何 · commit <待提交>
+## [45] 2026-10-20 · issue #49 矮画布紧凑几何 · commit 0fc4891
 
 S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一起写在本条和 phase5「#49」小节里，和实现同一个 PR（偏离"方案先行"，理由是 S 要求快）。
 
@@ -1624,3 +1624,20 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 测试：compact.test.ts（新，7 条：阈值、单系列数值、无标题 / 多系列、饼图原样、time 轴只动 y、默认关时逐字节相同、机制）；EChart.test.tsx 新增「#49：ResizeObserver…」（360→220→360，grid.top 60→36→60）。长轴名那条 e2e 在 1200×220 下仍然满足 x 轴名和类目行间隔 ≥ 8、bbox 在画布内。
 
 未做：卡片高度本身没有改（仍是 360），紧凑只在用户把窗口 / 容器缩矮时生效。
+
+## [46] 2026-10-20 · issue #44 sidecar 契约：壳必须用 --port 0 · commit <待提交>
+
+定性沿用 S 10-17 的结论：这不是产品 bug，是测试工具的问题，外加契约文档有缺口。产品代码一行都没改，只改了 docstring。
+
+改了什么：
+- `docs/sidecar-contract.md`（新）：写清楚启动方式（--port 0）、握手（stdout 第一行 JSON + /health）、端口独占（不加 SO_REUSEADDR 的理由）和测试工具。HANDOVER §6 启动命令旁边加了指向这份文档的链接。
+- `app/server/__main__.py` docstring：第一行的 JSON 补上 home，写明壳必须用 --port 0，默认的 8765 只给命令行调试用。
+- `tests/test_sidecar_contract.py`（新，3 条，真起子进程）：
+  - `test_port0_first_line_is_json_with_port_token_home`：第一行能 json.loads，键正好是 {port, token, home}，port > 0，token ≥ 16 位，/health 返回 200。
+  - `test_port_is_exclusive_while_running`：sidecar 运行期间，另一个 socket bind 同一个端口会报 OSError。
+  - `test_main_sets_no_reuse_options`：`__main__.py` 里没有 setsockopt 和 SO_REUSE。
+- `ui/web/playwright.config.ts`：E2E_PORT 不设时，在主进程里随机选 10000 + 3k 作为一组端口，写回 env，worker 继承同一组。显式设了就用设的值（gates.sh 不用改）。
+
+偏离：issue 里说 e2e"也可以改成 --port 0 加读 stdout"。但 Playwright 的 webServer 在启动前就要知道端口和 url，所以改用随机端口组；理由写在 config 注释和契约文档里。
+
+未做：Tauri 壳还不存在（阶段 6），壳侧的读取代码到时候按这份契约写。
