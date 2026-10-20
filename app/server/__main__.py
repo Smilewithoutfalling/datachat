@@ -1,7 +1,9 @@
 """python -m app.server [--port 8765] [--home 目录] [--token xxx] [--open]
 
-只监听 127.0.0.1。启动后打印一行 JSON：{"port": ..., "token": ...}，桌面外壳读这一行拿到端口和 token；
-命令行调试时把 token 填进 Authorization: Bearer 头即可。--port 0 表示自动选空闲端口。
+只监听 127.0.0.1。启动后 stdout 第一行打印 JSON：{"port": ..., "token": ..., "home": ...}；命令行调试时把 token 填进
+Authorization: Bearer 头即可。--port 0 表示自动选空闲端口。
+契约（#44，docs/sidecar-contract.md）：桌面壳必须用 --port 0 启动并读这一行；默认 8765 只给命令行调试用。
+bind 前不设 SO_REUSEADDR（Windows 上它允许别的进程抢同一端口），固定端口撞 TIME_WAIT 的解法是 --port 0。
 --open：启动后用默认浏览器打开 http://127.0.0.1:端口/#token=…（token 放 fragment：不发给服务器、不进访问日志，
 前端读出后立即从地址栏抹掉）。
 """

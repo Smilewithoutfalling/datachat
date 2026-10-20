@@ -5,7 +5,12 @@ import { defineConfig, devices } from "@playwright/test";
 //   nokey：没有 Key（f0/f1/f2），期望"模型调用失败"那条路径。
 //   fake ：base_url 指向假模型服务（tests/fake_llm.py，独立进程、无状态），场景由 model 名决定（每个测试用
 //          PUT /settings 设 model），F3 起的停止 / 图表 / 重试测试都走这里。
-const PORT = Number(process.env.E2E_PORT ?? 8766);
+// #44：不用固定端口。上一轮的端口可能还在 TIME_WAIT，后端按契约不开 SO_REUSEADDR（docs/sidecar-contract.md），
+// 固定端口连跑会撞 Address already in use。webServer 要求端口事先已知，没法像壳那样 --port 0 后读 stdout，
+// 所以在主进程里随机挑一组（P、P+1、P+2），写回 process.env：worker 进程继承环境、重新加载本文件时读到同一组。
+// 显式设了 E2E_PORT 就用它。
+process.env.E2E_PORT ??= String(10000 + 3 * Math.floor(Math.random() * 6000));
+const PORT = Number(process.env.E2E_PORT);
 const FAKE_BACKEND_PORT = PORT + 1;
 const FAKE_LLM_PORT = PORT + 2;
 export const E2E_TOKEN = "e2e-token-not-secret";
