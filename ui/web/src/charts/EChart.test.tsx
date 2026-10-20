@@ -1,5 +1,6 @@
 // EChart 组件：挂载 / 卸载配对、resize 由 ResizeObserver 触发；TurnView 截断夹具：图和后端截断警告同时出现（单一来源）。
 // jsdom 没有 canvas，测试里把 init 换成真 init + SVG renderer + 固定尺寸，其余（setOption、dispose、getInstanceByDom）都是真 ECharts。
+import { EDIT_PREFIX, EMPTY_EDIT, resetEditsForTest } from "./layer1";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import * as core from "echarts/core";
 import fixtures from "../generated/chart_fixtures.json";
@@ -231,7 +232,8 @@ describe("F3 第六步：导出与交互态", () => {
     clickExport();
     const [s, ui, theme, size] = exportArgs();
     expect(s).toBe(spec("bar"));
-    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, view: { zoom: null, hidden: [] } });
+    // F4：UiState 多了 edit（层 1 改动），导出要带上它才能和屏幕上一致；没改过时是 EMPTY_EDIT
+    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, edit: EMPTY_EDIT, view: { zoom: null, hidden: [] } });
     expect(theme).toBe("classic");
     expect(size).toEqual({ width: 800, height: 450 }); // 容器的 clientWidth × clientHeight，原样
     expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
@@ -349,5 +351,61 @@ describe("F3 第六步：导出与交互态", () => {
     rerender(<EChart spec={spec("bar-untitled")} />);
     clickExport();
     expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
+  });
+});
+
+describe("F4 层 1 面板（标记卡）", () => {
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+    resetEditsForTest();
+    act(() => setChartTheme("classic"));
+  });
+  const opt = () => created.at(-1)!.getOption() as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const fontSize = () => { const t = opt().textStyle; return (Array.isArray(t) ? t[0] : t)?.fontSize; };
+  const open = () => fireEvent.click(screen.getByRole("button", { name: "样式" }));
+  const tile = (n: string) => screen.getByRole("tab", { name: new RegExp(n) });
+
+  test("字号：点'大 16' → 渲染出 textStyle.fontSize 16，存进 localStorage；重置后删键", () => {
+    render(<EChart spec={spec("bar")} editKey="m1:0" />);
+    open();
+    fireEvent.click(tile("字号"));
+    fireEvent.click(screen.getByRole("button", { name: "大 16" }));
+    expect(fontSize()).toBe(16);
+    expect(localStorage.getItem(EDIT_PREFIX + "m1:0")).toContain('"font":"l"');
+    fireEvent.click(screen.getByRole("button", { name: "重置" }));
+    expect(localStorage.getItem(EDIT_PREFIX + "m1:0")).toBeNull();
+  });
+  test("轴范围：合法写进 yAxis；min ≥ max 报错且不生效", () => {
+    render(<EChart spec={spec("bar")} editKey="m1:1" />);
+    open();
+    fireEvent.click(tile("轴范围"));
+    fireEvent.change(screen.getByLabelText("y 轴最大值"), { target: { value: "40" } });
+    expect(opt().yAxis[0].max).toBe(40);
+    fireEvent.change(screen.getByLabelText("y 轴最小值"), { target: { value: "50" } });
+    expect(screen.getByRole("alert").textContent).toBe("最小值要小于最大值");
+    expect(opt().yAxis[0].min).not.toBe(50);
+  });
+  test("饼图：轴范围按钮禁用，合并按钮可用", () => {
+    render(<EChart spec={spec("pie")} editKey="m1:2" />);
+    open();
+    expect((tile("轴范围") as HTMLButtonElement).disabled).toBe(true);
+    expect((tile("合并") as HTMLButtonElement).disabled).toBe(false);
+  });
+  test("颜色：点色块写系列色；换主题跟着主题的同一 index", () => {
+    render(<EChart spec={spec("bar")} editKey="m1:3" />);
+    open();
+    fireEvent.click(tile("颜色"));
+    fireEvent.click(screen.getAllByRole("button", { name: /颜色 4$/ })[0]);
+    expect(opt().series[0].itemStyle.color).toBe(THEMES.classic.theme.color[3]);
+    act(() => setChartTheme("tableau"));
+    expect(opt().series[0].itemStyle.color).toBe(THEMES.tableau.theme.color[3]);
+  });
+  test("TurnView 按 <message_id>:<图序号> 传存储键：读回之前存的改动", () => {
+    localStorage.setItem(EDIT_PREFIX + "msg-9:0", JSON.stringify({ font: "s" }));
+    const turn = { status: "ok", events: [],
+      result: { ok: true, answer: "", error: null, error_kind: null, warnings: [], charts: [{ png: null, option: spec("bar") }] } } as unknown as Turn;
+    render(<TurnView turn={turn} messageId="msg-9" />);
+    expect(fontSize()).toBe(12);
   });
 });

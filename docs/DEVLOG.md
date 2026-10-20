@@ -1580,3 +1580,25 @@ Playwright：
 判定表：现有期望没有改。test_react_chart_error_reaches_model_and_warnings、test_real_chain_inject_error_reaches_warnings 的错误都出在成功执行里，而且没有出图，所以仍然是「图表未生成：」。
 
 未做：前端不用改，exec 事件里的 chart_errors 本来就是单次执行的；饼图 >6 色归 F4。
+
+## [44] 2026-10-20 · F4 层 1 面板（标记卡）+ Tableau 风主题 + 10 色 · commit <待提交>
+
+方案见 phase5-frontend.md「F4：层 1 面板」（PR #56，aedf5bc）。
+
+改了什么：
+- `charts/layer1.ts`（新）：Edit = yMin / yMax / colors（系列或扇区 index → 主题调色板 index）/ font（s/m/l = 12/14/16）/ other；applyLayer1To、parseEdit 逐字段校验、mergeOther（前 9 + '其他'，加 title.subtext 标注）、localStorage `datachat.chartEdit:<message_id>:<图序号>`。
+- `prepare.ts`：UiState 加 edit；applyLayer1 不再恒等。`switches.ts`：渐变以系列自己的 itemStyle.color（用户选的主题色）为底。
+- `charts/MarksCard.tsx`（新）+ styles.css：Tableau「标记」卡外观——浅灰底、细边框、4 个小方块按钮（颜色 / 轴范围 / 字号 / 合并），点开各自浮层，右上角重置。饼图禁用轴范围；非饼图禁用合并。柱图 y 最小值 > 0 时提示"会夸大差异"。
+- EChart 加 `editKey` 和工具栏"样式"按钮；TurnView / SessionView 传 `<message_id>:<图序号>`。没有 message id 时只在本页生效、不存。
+- 主题加 `tableau`（Tableau 风）：10 色为 Tableau 10 色相压暗重排的候选（相邻 ΔE00 最小约 27.8），浅灰网格和轴线。其余 4 套各补到 10 色。
+- PALETTE 两份（charts.py / plotting.py）同步扩到 10 色，前 6 色不动；chart_schema.json 重新生成。
+
+偏离：
+1. 层 1 的键单独登记在 `LAYER1_KEYS`，没有并进 `FRONTEND_KEYS`。理由：FRONTEND_KEYS 要和 M13 §12 开关表逐字比对（switches.test.ts），层 1 不在那张表里。机制测试另写在 layer1.test.ts，并且断言表里没有死条目。
+2. 判定表：themes.test.ts「暗色画布 bg 边界」改为只比较 PALETTE 前 6 色。原因：这条边界当初就是为第四步的 6 色推出来的；新增的后 4 色是按白底选的（如 #172082），darkCanvas 用的是它自己的提亮色板。
+
+测试：layer1.test.ts（新）——四种图型的轴范围、饼图不写 yAxis、min ≥ max 不生效、5 套主题 × index 取色、饼图扇区色、渐变底色、字号、合并（总和 / 降序 / ≤10 不合并 / pie-50）、空改动和原产物逐字节相同、机制测试、存储逐字段 / 坏 JSON / 重置删键。EChart.test.tsx 加「F4 层 1 面板」5 条：字号落到实例和存储、轴范围报错不生效、饼图按钮禁用、换主题后颜色跟着 index、TurnView 存储键读回。导出断言的 ui 加上 edit。
+
+- e2e `f4-panel.spec.ts`（新，2 条，fake 项目的 testMatch 放宽到 f[34]）：柱图上字号、y 轴上限、系列色各自改变真导出的字节，min ≥ max 时报错且导出不变，存储键是 `datachat.chartEdit:<message_id>:0` 并且值逐字段相等，重置后回到原图的字节、键被删除；饼图 12 类上轴范围禁用，合并改变导出，并出 Tableau 风截图（f4-tableau-pie.png）。两条都断言零外部请求、console 干净。
+
+未做：人眼验收 S 10-20 看过截图，结论是"很不好看"。这一版先提交，让 S 跑起来再反馈；标记卡和 Tableau 风的视觉设计后面迭代。

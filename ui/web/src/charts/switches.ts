@@ -149,7 +149,9 @@ export function applySwitchesTo(o: Option, { shape, theme, sw }: SwitchCtx): Opt
   if (on("gradient")) {
     const palette = THEMES[theme].theme.color;
     series.forEach((s, i) => {
-      const g = gradient(palette[i % palette.length]);
+      // 层 1 选过系列色（applyLayer1 写的主题色）就以它为底，否则按序取主题色；两者都在当前主题 color 里
+      const own = (s.itemStyle as { color?: unknown } | undefined)?.color;
+      const g = gradient(typeof own === "string" && palette.includes(own) ? own : palette[i % palette.length]);
       if (shape.kind === "area") sub(s, "areaStyle").color = g;
       else sub(s, "itemStyle").color = g;
     });

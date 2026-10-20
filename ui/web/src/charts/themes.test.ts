@@ -126,8 +126,11 @@ test("默认主题的 color 就是 chart_schema.json 的 palette（与 matplotli
 
 test("暗色画布：bg 不亮于 #1B1F24（PALETTE 最弱色在其上 ≥ 3.0 的边界）", () => {
   expect(lum(THEMES.darkCanvas.theme.backgroundColor)).toBeLessThanOrEqual(lum("#1B1F24"));
-  expect(Math.min(...schema.palette.map((c) => contrast(c, "#1B1F24")))).toBeGreaterThanOrEqual(SERIES_MIN);
-  expect(Math.min(...schema.palette.map((c) => contrast(c, "#20242A")))).toBeLessThan(SERIES_MIN); // 再亮一档就破线
+  // 判定表纪律：F4 把 PALETTE 扩到 10 色，后 4 色是按白底选的（#6B2E47、#172082 在暗底上不到 3.0）。这条边界当初只为前 6 色
+  // （第四步时的全部 PALETTE）推出 darkCanvas bg 上限；darkCanvas 一直用自己的提亮色板，所以这里只比前 6 色，边界含义不变。
+  const first6 = schema.palette.slice(0, 6);
+  expect(Math.min(...first6.map((c) => contrast(c, "#1B1F24")))).toBeGreaterThanOrEqual(SERIES_MIN);
+  expect(Math.min(...first6.map((c) => contrast(c, "#20242A")))).toBeLessThan(SERIES_MIN); // 再亮一档就破线
 });
 
 // ---- 主题真的生效：每套主题 × 全部夹具，零 [ECharts] log，第一个系列的颜色 = 主题 color[0]（没被 option 压住）
