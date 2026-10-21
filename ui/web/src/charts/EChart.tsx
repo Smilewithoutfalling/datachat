@@ -12,27 +12,44 @@
 // 回读只读 getOption() 的 dataZoom[0].start/end 和 legend[0].selected 两处（公开 API）；selected 的名字当场换成 index，
 // 不往外带。view 不持久化。
 import { init } from "echarts/core";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
 import { safeFilename } from "./filename";
 import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState } from "./prepare";
 import { registerCharts } from "./register";
 import {
   asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
-  SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
+  SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
 import { getEdit, type Edit, EMPTY_EDIT, setEdit, subscribeEdits } from "./layer1";
-import { MarksCard } from "./MarksCard";
+import { MarksCard, type Placement } from "./MarksCard";
 import { isCompact } from "./compact";
 import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
 
 export type ChartSpec = { v: number; kind: string; truncated: boolean; x_kind?: string; option: Record<string, unknown> };
 
-const CHOICE_LABEL: Partial<Record<SwitchName, Record<string, string>>> = {
-  legend: { bottom: "图例在下", top: "图例在上" },
-  sort: { off: "不排序", desc: "降序", asc: "升序" },
-};
+const SORT_LABEL: Record<Switches["sort"], string> = { off: "不排序", desc: "降序", asc: "升序" };
+
+// F4 迭代 V1 第 6 条：整页同一时间只开一张标记卡。打开另一张图的卡时，这张自动关。
+let openCard: string | null = null;
+const cardListeners = new Set<() => void>();
+function setOpenCard(id: string | null) {
+  openCard = id;
+  cardListeners.forEach((l) => l());
+}
+const subscribeCard = (l: () => void) => (cardListeners.add(l), () => void cardListeners.delete(l));
+export function resetMarksForTest(): void {
+  openCard = null;
+}
+const CARD_MAX = 420;
+const UP_MIN = 160;
+/** 第 6 条：可用高度按 .main 可视区算（没有 .main 时按视口）；向上不足 160 改向下。 */
+export function placeCard(controls: DOMRect, area: { top: number; bottom: number }): Placement {
+  const up = controls.top - area.top - 8;
+  if (up >= UP_MIN) return { dir: "up", maxHeight: Math.min(CARD_MAX, up) };
+  return { dir: "down", maxHeight: Math.max(0, Math.min(CARD_MAX, area.bottom - controls.bottom - 8)) };
+}
 
 /** editKey：层 1 改动的存储键（<message_id>:<图序号>）；没有就不持久化（直播中的回合还没有 message id 时也能改，只是不存）。 */
 export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string }) {
@@ -54,12 +71,19 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const [local, setLocal] = useState<Edit>(EMPTY_EDIT);
   const edit = editKey ? stored : local;
   const changeEdit = (e: Edit) => (editKey ? setEdit(editKey, e) : setLocal(e));
-  const [marksOpen, setMarksOpen] = useState(false);
+  const cardId = useId();
+  const marksOpen = useSyncExternalStore(subscribeCard, () => openCard === cardId);
+  const setMarksOpen = (o: boolean) => setOpenCard(o ? cardId : openCard === cardId ? null : openCard);
+  const ctlRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<Placement>({ dir: "up", maxHeight: CARD_MAX });
   // issue #49：容器矮于 COMPACT_BELOW 时走紧凑几何（ResizeObserver 量；只在跨阈值时变，不随每个像素重算）
   const [compact, setCompact] = useState(false);
   const ui: UiState = useMemo(() => ({ kind: target, sw, edit: editKey ? stored : local, compact }), [target, sw, editKey, stored, local, compact]);
   // 颜色面板列的名字：按当前图型渲染出来的系列名（饼图是扇区名，合并后含'其他'）。只在面板打开时算。
   const items = marksOpen ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {} } }, theme) as Option, kind) : [];
+  // 第 8 条：饼图合并前的类目数（提示"颜色会重复"用）
+  const pieCount = marksOpen && kind === "pie"
+    ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {}, other: false } }, theme) as Option, kind).length : 0;
 
   // 兼容性按"换完之后"的 option 算（系列数、图型）；换图型的可选项按后端原始 option 算
   const base = useMemo(() => normalize(JSON.parse(JSON.stringify(spec.option)) as Option, {} as Ctx), [spec]);
@@ -155,6 +179,37 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
 
   const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...sw, [s]: v });
 
+  // 标记卡浮层：打开时（以及 .main 滚动、窗口 resize 时）量一次位置；Esc、点卡外关闭（第 6 条）
+  useLayoutEffect(() => {
+    if (!marksOpen) return;
+    const ctl = ctlRef.current;
+    if (!ctl) return;
+    const main = ctl.closest(".main");
+    const place = () => {
+      const r = main?.getBoundingClientRect();
+      const area = r ? { top: r.top, bottom: r.bottom } : { top: 0, bottom: window.innerHeight };
+      const next = placeCard(ctl.getBoundingClientRect(), area);
+      setPlacement((p) => (p.dir === next.dir && p.maxHeight === next.maxHeight ? p : next));
+    };
+    place();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMarksOpen(false);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (!ctl.contains(e.target as Node)) setMarksOpen(false); // 卡和"样式"按钮都在 chart-controls 里
+    };
+    main?.addEventListener("scroll", place, { passive: true });
+    window.addEventListener("resize", place);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      main?.removeEventListener("scroll", place);
+      window.removeEventListener("resize", place);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [marksOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onExport = () => {
     try {
       const el = ref.current!;
@@ -173,7 +228,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
     <div className="echart-wrap">
       <div ref={ref} className="echart" data-testid="echart" data-kind={spec.kind} data-shown-kind={kind ?? ""} data-theme={theme} />
       {src && shape && (
-        <div className="chart-controls" data-testid="chart-controls">
+        <div className="chart-controls" data-testid="chart-controls" ref={ctlRef}>
           <label>
             图型{" "}
             <select aria-label="图型" value={kind ?? ""} onChange={(e) => setTarget(asKind(e.target.value))}>
@@ -187,28 +242,13 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
               })}
             </select>
           </label>
-          {SWITCHES.map((s) => {
-            const v = compat(s, shape);
-            const title = v.ok ? undefined : v.reason;
-            const choices = CHOICE_LABEL[s];
-            if (choices) {
-              return (
-                <label key={s} title={title}>
-                  <select aria-label={SWITCH_LABEL[s]} disabled={!v.ok} value={String(sw[s])}
-                    onChange={(e) => set(s, e.target.value as Switches[typeof s])}>
-                    {(SWITCH_VALUES[s] as readonly string[]).map((x) => <option key={x} value={x}>{choices[x]}</option>)}
-                  </select>
-                </label>
-              );
-            }
-            return (
-              <label key={s} title={title}>
-                <input type="checkbox" aria-label={SWITCH_LABEL[s]} disabled={!v.ok} checked={sw[s] === true}
-                  onChange={(e) => set(s, e.target.checked as Switches[typeof s])} />
-                {SWITCH_LABEL[s]}
-              </label>
-            );
-          })}
+          {compat("sort", shape).ok && (
+            <label>
+              <select aria-label={SWITCH_LABEL.sort} value={sw.sort} onChange={(e) => set("sort", e.target.value as Switches["sort"])}>
+                {SWITCH_VALUES.sort.map((x) => <option key={x} value={x}>{SORT_LABEL[x]}</option>)}
+              </select>
+            </label>
+          )}
           <button type="button" className={`marks-toggle${marksOpen ? " on" : ""}`} aria-expanded={marksOpen}
             onClick={() => setMarksOpen(!marksOpen)}>样式</button>
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}
@@ -222,10 +262,11 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
             )}
             {exportFailed && <span className="warn small" role="alert">导出失败</span>}
           </span>
+          {marksOpen && (
+            <MarksCard shape={shape} sw={sw} onSwitch={set} edit={edit} onChange={changeEdit} items={items}
+              palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement} />
+          )}
         </div>
-      )}
-      {src && kind && marksOpen && (
-        <MarksCard kind={kind} edit={edit} onChange={changeEdit} items={items} palette={THEMES[theme].theme.color} />
       )}
     </div>
   );

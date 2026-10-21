@@ -51,7 +51,16 @@ function watch(page: Page) {
 }
 const CSV = "类目,值\n" + Array.from({ length: 30 }, (_, i) => `k${String(i).padStart(2, "0")},${(i * 37) % 101 + 5}`).join("\n") + "\n";
 
-test("开关：逐个打开像素有变化、不发新的分析请求；不兼容的 disabled；刷新后偏好保持；同图型的新图继承", async ({ page }) => {
+// F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
+async function group(ctl: Locator, name: string): Promise<Locator> {
+  const btn = ctl.getByRole("button", { name: "样式" });
+  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
+  const card = ctl.getByTestId("marks-card");
+  const t = card.getByRole("button", { name: new RegExp("^" + name) });
+  if ((await t.getAttribute("aria-pressed")) !== "true") await t.click();
+  return card;
+}
+test("开关：逐个打开像素有变化、不发新的分析请求；不兼容的不渲染；刷新后偏好保持；同图型的新图继承", async ({ page }) => {
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1400, height: 900 });
   const { posts, bad } = watch(page);
@@ -62,8 +71,10 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   const instance = await chart.getAttribute("data-instance");
   const base = await snap(chart);
 
+  // F4 迭代 V1：开关搬进标记卡，作用域从 chart-controls 改成卡（先开卡、再展开所在组）。卡盖在图上不影响 canvas 取像素
+  const where: Record<string, string> = { 数值标签: "标签", 渐变: "颜色", 圆角: "形状", 平均线和极值: "轴" };
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值"]) {
-    const box = ctl.getByRole("checkbox", { name });
+    const box = (await group(ctl, where[name])).getByRole("checkbox", { name });
     await box.check();
     expect([name, (await snap(chart)) !== base]).toEqual([name, true]);
     await box.uncheck();
@@ -72,21 +83,28 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   await ctl.getByLabel("排序").selectOption("desc");
   expect((await snap(chart)) !== base).toBe(true);
   await ctl.getByLabel("排序").selectOption("off");
-  // 单系列柱图：堆叠 / 平滑 / 图例位置不兼容
-  for (const name of ["堆叠", "平滑"]) await expect(ctl.getByRole("checkbox", { name })).toBeDisabled();
-  await expect(ctl.getByLabel("图例位置")).toBeDisabled();
+  // 单系列柱图：堆叠 / 平滑 / 图例位置不兼容 → F4 迭代 V1 起不渲染（判定表改动，DEVLOG [54]）。
+  // 作用域必须是卡且组已展开：照旧在 ctl 上查，开关搬家后永远是 0 个，会无条件绿。圆角是正向对照。
+  const card = await group(ctl, "形状");
+  await group(ctl, "标签");
+  for (const name of ["堆叠", "平滑"]) await expect(card.getByRole("checkbox", { name })).toHaveCount(0);
+  await expect(card.getByRole("group", { name: "图例位置" })).toHaveCount(0);
+  await expect(card.getByRole("checkbox", { name: "圆角" })).toHaveCount(1);
+  await expect(card.getByRole("checkbox", { name: "数值标签" })).toHaveCount(1);
+  await expect(card.getByRole("button", { name: /^形状/ })).not.toHaveAttribute("aria-disabled", "true");
   expect(posts).toHaveLength(1);
   await expect(chart).toHaveAttribute("data-instance", instance!);
 
   // 偏好按图型存：刷新后保持；同一会话再出一张柱图，直接继承
-  await ctl.getByRole("checkbox", { name: "数值标签" }).check();
+  await card.getByRole("checkbox", { name: "数值标签" }).check();
   await page.reload();
   await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /开关柱图/ }).first().click();
   const sv2 = page.getByTestId("session-view");
-  await expect(sv2.getByTestId("chart-controls").first().getByRole("checkbox", { name: "数值标签" })).toBeChecked();
+  await expect((await group(sv2.getByTestId("chart-controls").first(), "标签")).getByRole("checkbox", { name: "数值标签" })).toBeChecked();
+  await page.keyboard.press("Escape");
   await askAgain(page, "再来一张", 2);
   await expect(sv2.getByTestId("chart-controls")).toHaveCount(2);
-  await expect(sv2.getByTestId("chart-controls").nth(1).getByRole("checkbox", { name: "数值标签" })).toBeChecked();
+  await expect((await group(sv2.getByTestId("chart-controls").nth(1), "标签")).getByRole("checkbox", { name: "数值标签" })).toBeChecked();
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("datachat.chartUi:bar")))!).label).toBe(true);
   expect(bad).toEqual([]);
 });
@@ -125,7 +143,8 @@ test("缩放：普通滚轮滚页面、图不动；Shift + 滚轮缩放；双击
   await page.goto(`/#token=${E2E_TOKEN}`);
   const sv = await ask(page, CSV, "zoom.csv", "chart-bar", "缩放柱图");
   const chart = sv.getByTestId("echart").first();
-  await sv.getByTestId("chart-controls").first().getByRole("checkbox", { name: "缩放" }).check();
+  await (await group(sv.getByTestId("chart-controls").first(), "轴")).getByRole("checkbox", { name: "缩放" }).check();
+  await page.keyboard.press("Escape"); // 卡盖在图上，滚轮测试前关掉
   await expect(sv.getByText("Shift + 滚轮缩放，拖动平移，双击空白处还原")).toBeVisible();
   const main = page.locator(".main");
   await main.evaluate((m) => (m.scrollTop = 0));
@@ -187,7 +206,7 @@ test("渐变开着切主题：实例不重建、不发分析请求，画面跟�
   }
   expect(diffOutside).toBeGreaterThan(100);
 
-  await sv.getByTestId("chart-controls").first().getByRole("checkbox", { name: "渐变" }).check();
+  await (await group(sv.getByTestId("chart-controls").first(), "颜色")).getByRole("checkbox", { name: "渐变" }).check();
   const softGrad = await snap(chart);
   await picker.selectOption("business");
   const businessGrad = await snap(chart);
