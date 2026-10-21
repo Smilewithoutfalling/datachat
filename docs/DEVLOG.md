@@ -1723,7 +1723,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 **已知前提偏弱，不修**：run() 没有把 data_path 传给 run_metadata，报告里没有 data_sha256。
 
-## [50] 2026-10-21 · A1 错题自动复跑：实现 · commit <待提交>
+## [50] 2026-10-21 · A1 错题自动复跑：实现 · commit cc4905d（PR #63，tests run 39523711448）
 
 **结论**：按 [49] / phase5「A1」实现。scripts/gate/run_gate.py 新增 `--rerun`、profile m13r（docs/gate/thresholds.json）和退出码 0/1/2/3；m13 / phase35 的结论路径不变。
 
@@ -1751,3 +1751,39 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 变异检查：去掉"executed=True 且 match=None 判无效"后，tristate 用例变红；去掉 pending 排序后，签字用例变红。
 
 **未做**：真模型复跑（S 跑）；[28] 的旧复跑报告不迁移；data_sha256 仍缺。
+
+## [51] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：方案 · commit <待提交>
+
+**结论**：方案写在 phase5「G1」。本 PR 只有方案。
+
+**依据**：
+- tests/test_gate.py:234 / :302：没有数据时 25 条全部跳过，CI 上从来没跑过。
+- HANDOVER §3：要求"改内核时一定要在本地跑"，但没有任何东西强制。
+
+**本地实测**：
+- data/gate 共 173 MB，下载约 90 MB。
+- oracle 25 passed，耗时 65 s（其中 fixture 36 s）。
+- verify_gate 36 s，重算出的 answers.json 和库里的逐字节相同。
+
+**S 第一轮改定**：
+- 新增 `build_gate_data.py --check`：只读现场文件，和指纹比对。缓存命中和未命中两条路径都要跑；源指纹和产物指纹分成两组常量。
+- 缓存命中时完全跳过 build，避免 to_csv 随 pandas 变化导致指纹天天对不上。
+- 数量断言改为 junitxml 加 python 解析（Windows 默认 shell 是 pwsh，没有 grep）；用 node id 精确选中测试，不用 `-k`。
+- skipif 自己感知 REQUIRE 开关，缺数据时 `pytest.fail("闸门数据缺失…")`，不再靠数量断言间接报错。
+- 写明缓存作用域和 7 天淘汰规则：合并后在 master 上 workflow_dispatch 预热一次；冷启动和 UCI 挂掉时的表现写进 README。
+- timeout 改为 20 分钟。HANDOVER 改为"主矩阵 skip、gate-oracle 必跑"。.gitignore 注释从 110 MB 改为 173 MB。
+- 许可补一条边界：将来商用时要重审 NC 条款。
+**S 第二轮改定**：
+- 显式 `read_excel(engine="openpyxl")`；单份 PRODUCT_SHA12 是否同时适用两个 OS，要在首次运行时实测，不等就拆成按 OS 两份。
+- cache key 加入 requirements*.txt 和 fingerprints.py；不设 restore-keys；restore 和 save 拆开，save 只看 build 和 --check 的结果。
+- `--check` 改为校验目录集合相等；放在 pytest 之前。
+- junit 期望值取 `len(QUESTIONS)`。
+- `DATACHAT_GATE_DATA_ROOT` 用一个 helper 统一提供，HAVE_DATA 和 fixture 共用。
+- 验收：每个 OS 各跑一次 miss 和一次 hit；Windows 上验证非 ASCII 文件名经过缓存往返后不变。
+**S 第三轮改定**：
+- verify_gate.py 改了之后，verify_script_sha256 必然会变。选 A：在同一个 PR 里重新生成 answers.json，只允许这一个字段变化，并在 PR 描述里贴出这行 diff。
+- check_junit.py 直接 `import questions`（scripts/gate 不是包）。
+- 两处 read_excel（build:129、verify:56）都写死 engine="openpyxl"。
+- 缓存命中时，用机器断言 build 被 skipped（shell: bash）。
+- 验收要区分两跑和三跑：第一跑 --check 红算采样，不算失败；master 预热同理。
+- timeout 改为 25；--check 只放在 gate-oracle 里；cancel-in-progress 的成本写明，不改。

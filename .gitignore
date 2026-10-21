@@ -14,7 +14,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# 阶段 3.5 闸门的外部数据（scripts/gate/build_gate_data.py 下载，约 110 MB）
+# 阶段 3.5 闸门的外部数据（scripts/gate/build_gate_data.py 下载约 90 MB、生成后磁盘约 173 MB）
 data/gate/
 
 # 阶段 4 sidecar 打包产物
