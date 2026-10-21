@@ -1,7 +1,8 @@
 """阶段 3.5 外部验证闸门：下载外部数据并构造"脏表"（只改呈现，不改数据值）。
 
-用法（在仓库根目录，约 90 MB 下载，生成物在 data/gate/，不入库）：
-    python scripts/gate/build_gate_data.py
+用法（在仓库根目录，约 90 MB 下载，生成物在 data/gate/ 约 173 MB，不入库）：
+    python scripts/gate/build_gate_data.py           # 下载 + 生成，结束时按指纹校验整个目录
+    python scripts/gate/build_gate_data.py --check   # 只校验现场：不下载、不写文件、不读 Excel（G1）
 
 产出：
 - data/gate/raw/Online Retail.xlsx            UCI Online Retail（CC BY 4.0），原始文件，verify_gate.py 用它算标准答案
@@ -17,6 +18,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
 import os
@@ -26,24 +28,15 @@ import zipfile
 
 import pandas as pd
 
+from fingerprints import OLIST_FILES, PRODUCT_SHA12, UCI_XLSX_SHA256
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "data", "gate")
 
 UCI_URL = "https://archive.ics.uci.edu/static/public/352/online+retail.zip"
-UCI_XLSX_SHA256 = "43465a06f2cc"   # sha256 前 12 位（2026-10-12 下载）
 
 OLIST_COMMIT = "d9e49802f3e92d09ee94ab9ccc5e457f207a8959"
 OLIST_BASE = f"https://raw.githubusercontent.com/olist/work-at-olist-data/{OLIST_COMMIT}/datasets/"
-OLIST_FILES = {   # 文件名 -> sha256 前 12 位（2026-10-12 下载时）
-    "olist_customers_dataset.csv": "c26c17f59f30",
-    "olist_order_items_dataset.csv": "4f6abdbbc940",
-    "olist_order_payments_dataset.csv": "61674868ed7b",
-    "olist_order_reviews_dataset.csv": "012b61c7593e",
-    "olist_orders_dataset.csv": "8df58ef3d2d7",
-    "olist_products_dataset.csv": "3e6569628a17",
-    "olist_sellers_dataset.csv": "31eb9bd50d68",
-    "product_category_name_translation.csv": "a81f0d1f27b2",
-}
 # 表名 = 文件名去扩展名；datachat 里用 dfs['orders'] 这类短名更自然，这里改成短名
 OLIST_SHORT = {
     "olist_customers_dataset.csv": "customers.csv",
@@ -126,7 +119,7 @@ def write_csv(df: pd.DataFrame, path: str, header_rows: list[list[str]] | None =
 
 
 def build_retail():
-    raw = pd.read_excel(ensure_uci())
+    raw = pd.read_excel(ensure_uci(), engine="openpyxl")   # 引擎写死，与 verify_gate 一致（G1）
     df = dirty_retail(raw)
     write_csv(df, os.path.join(OUT, "retail", "零售明细.csv"))
     # 报表导出变体：两行表头（第一行是合并单元格导出后的分组名，空格位置留空），末尾一行合计
@@ -150,6 +143,52 @@ def build_olist():
         print(f"  {rel(target)}  sha256[:12]={sha12(open(target, 'rb').read())}")
 
 
+def expected_files() -> dict[str, str]:
+    """data/gate 下应当恰好存在的文件（相对路径，/ 分隔）-> sha256 前 12 位。"""
+    exp = {"raw/Online Retail.xlsx": UCI_XLSX_SHA256}
+    exp.update({f"olist/{OLIST_SHORT[n]}": h for n, h in OLIST_FILES.items()})
+    exp.update(PRODUCT_SHA12)
+    return exp
+
+
+def check(out: str = OUT, expected: dict[str, str] | None = None) -> list[str]:
+    """只读校验现场：集合相等（不多不少）+ 逐个指纹。不下载、不写文件、xlsx 只算哈希。返回问题列表，空 = 通过。"""
+    expected = expected_files() if expected is None else expected
+    if not os.path.isdir(out):
+        return [f"目录不存在：{rel(out)}"]
+    dirs = {"/".join(k.split("/")[:i]) for k in expected for i in range(1, k.count("/") + 1)}
+    actual_files, extra = set(), []
+    for d, subdirs, files in os.walk(out):
+        r = os.path.relpath(d, out).replace(os.sep, "/")
+        r = "" if r == "." else r + "/"
+        extra += [r + x + "/" for x in subdirs if r + x not in dirs]
+        subdirs[:] = [x for x in subdirs if r + x in dirs]
+        for f in files:
+            (actual_files.add if r + f in expected else extra.append)(r + f)
+    problems = [f"多余：{x}" for x in sorted(extra)]
+    problems += [f"缺失：{k}" for k in sorted(set(expected) - actual_files)]
+    for k in sorted(actual_files):
+        h = sha12(open(os.path.join(out, *k.split("/")), "rb").read())
+        if h != expected[k]:
+            problems.append(f"指纹不符：{k}  期望 {expected[k]}  实际 {h}")
+        else:
+            print(f"  ok  {k}  {h}")
+    return problems
+
+
+def run_check(out: str = OUT) -> int:
+    problems = check(out)
+    for p in problems:
+        print("  ✗ " + p)
+    print(f"闸门数据校验{'失败' if problems else '通过'}：{rel(out)}（{len(expected_files())} 个文件）")
+    return 1 if problems else 0
+
+
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true", help="只校验 data/gate 现场，不下载不写")
+    if ap.parse_args().check:
+        sys.exit(run_check())
     build_retail()
     build_olist()
+    sys.exit(run_check())

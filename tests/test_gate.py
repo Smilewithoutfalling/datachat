@@ -2,7 +2,8 @@
 
 1) 脏化只改呈现（CI 里跑，用合成的小表，不下载）：脏表经 datachat 读入后能逐值还原成原表。
 2) 题目 / 标准答案 / 判定规则自洽（CI 里跑）：25 题齐全、分布符合预登记、answers.json 的题面哈希与 questions.py 一致。
-3) 真实数据上的"oracle"（需要先跑 scripts/gate/build_gate_data.py；数据不在仓库里，没下载就跳过）：
+3) 真实数据上的"oracle"（需要先跑 scripts/gate/build_gate_data.py；数据不在仓库里，没下载就跳过；
+   设 DATACHAT_REQUIRE_GATE_DATA=1 时缺数据直接判红 —— CI 的 gate-oracle job 就是这么跑的，G1）：
    在**脏表**上手写一份正确解，经沙箱执行后比较器必须判对 —— 证明每道题在 datachat 能看到的数据上确实可解、
    标准答案与脏表一致、比较器认得出正确答案。它不说明模型能答对。
 """
@@ -231,8 +232,15 @@ def test_phase35_profile_reproduces_final_verdict(tmp_path, name):
 
 
 # ------------------------------------------------------------------ 3. 真实数据上的 oracle
-HAVE_DATA = all(os.path.exists(os.path.join(ROOT, p)) for p in
-                (questions.RETAIL, questions.REPORT, questions.OLIST))
+def _gate_path(rel):
+    """闸门数据路径的唯一出口：HAVE_DATA 与 gate_data fixture 共用（G1）。
+    DATACHAT_GATE_DATA_ROOT 只给子进程单测用，指向空目录时本机有真数据也必须报缺失。"""
+    return os.path.join(os.environ.get("DATACHAT_GATE_DATA_ROOT") or ROOT, rel)
+
+
+REQUIRE_DATA = os.environ.get("DATACHAT_REQUIRE_GATE_DATA") == "1"
+MISSING_DATA = [p for p in (questions.RETAIL, questions.REPORT, questions.OLIST) if not os.path.exists(_gate_path(p))]
+HAVE_DATA = not MISSING_DATA
 
 _PREP_R = """d = df.copy()
 d['amt'] = d['数量'] * d['单价（英镑）']
@@ -294,20 +302,146 @@ def gate_data():
 
     def get(path):
         if path not in cache:
-            cache[path] = load_data(os.path.join(ROOT, path))[0]
+            cache[path] = load_data(_gate_path(path))[0]
         return cache[path]
     return get
 
 
-@pytest.mark.skipif(not HAVE_DATA, reason="闸门数据未下载（python scripts/gate/build_gate_data.py）")
+# skipif 在函数体之前生效，所以开关要让 skipif 自己知道：要求数据时不 skip，进函数体第一行报"数据缺失"。
+# gate_data 是惰性 fixture（返回闭包、不碰磁盘），这一行一定先于任何 load_data。
+@pytest.mark.skipif(not HAVE_DATA and not REQUIRE_DATA, reason="闸门数据未下载（python scripts/gate/build_gate_data.py）")
 @pytest.mark.parametrize("q", questions.QUESTIONS, ids=lambda q: q["id"])
 def test_oracle_solvable_on_dirty_data(q, gate_data, chart_path):
+    if MISSING_DATA:
+        pytest.fail(f"闸门数据缺失：{MISSING_DATA}（DATACHAT_REQUIRE_GATE_DATA=1；先跑 python scripts/gate/build_gate_data.py）")
     from app.tools.dataset import copy_data
     from app.tools.sandbox import run_code
     result, _, err = run_code(ORACLE[q["id"]], copy_data(gate_data(q["dataset"])), chart_path, timeout=120)
     assert err is None, err
     match = run_gate.auto_judge(result, q, ANSWERS["answers"][q["id"]])
     assert match is not None, f"{q['id']}: {result!r}"
+
+
+# ------------------------------------------------------------------ 3b. G1：oracle 上 CI 的守卫
+import subprocess  # noqa: E402
+
+ORACLE_NODE = "tests/test_gate.py::test_oracle_solvable_on_dirty_data"
+
+
+def _run_oracle_subprocess(tmp_path, require):
+    env = {k: v for k, v in os.environ.items() if k != "DATACHAT_REQUIRE_GATE_DATA"}
+    env["DATACHAT_GATE_DATA_ROOT"] = str(tmp_path / "empty")   # 空目录：本机有真数据也必须视为缺失
+    (tmp_path / "empty").mkdir()
+    if require:
+        env["DATACHAT_REQUIRE_GATE_DATA"] = "1"
+    xml = tmp_path / "gate.xml"
+    r = subprocess.run([sys.executable, "-m", "pytest", ORACLE_NODE, "-q", "-p", "no:cacheprovider",
+                        f"--junitxml={xml}"], cwd=ROOT, env=env, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=300)
+    check_junit = _load("check_junit")
+    return r, check_junit.counts(str(xml))
+
+
+def test_g1_require_data_fails_with_plain_message(tmp_path):
+    r, n = _run_oracle_subprocess(tmp_path, require=True)
+    assert r.returncode != 0
+    assert "闸门数据缺失" in r.stdout
+    assert n == {"tests": len(questions.QUESTIONS), "failures": len(questions.QUESTIONS), "errors": 0, "skipped": 0}
+
+
+def test_g1_without_require_still_skips(tmp_path):
+    r, n = _run_oracle_subprocess(tmp_path, require=False)
+    assert r.returncode == 0, r.stdout[-2000:]
+    assert n == {"tests": len(questions.QUESTIONS), "failures": 0, "errors": 0, "skipped": len(questions.QUESTIONS)}
+
+
+_FAKE = {"raw/a.xlsx": b"xlsx-bytes", "olist/x.csv": b"x", "olist/y.csv": b"y", "retail/r.csv": "零售".encode("gb18030")}
+
+
+def _fake_tree(root):
+    # root 用 tmp_path / "gate"：conftest 的 autouse fixture 会在 tmp_path 下建 charts/
+    for k, data in _FAKE.items():
+        p = root.joinpath(*k.split("/"))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    return {k: build.sha12(v) for k, v in _FAKE.items()}
+
+
+def test_g1_check_passes_on_exact_tree(tmp_path):
+    assert build.check(str(tmp_path / "gate"), _fake_tree(tmp_path / "gate")) == []
+
+
+@pytest.mark.parametrize("mutate,expect", [
+    (lambda r: (r / "olist" / "y.csv").unlink(), "缺失：olist/y.csv"),
+    (lambda r: (r / "olist" / "x.csv").write_bytes(b"X"), "指纹不符：olist/x.csv"),
+    (lambda r: (r / "olist" / "z.csv").write_bytes(b"z"), "多余：olist/z.csv"),
+    (lambda r: (r / "retail" / "残留.csv").write_bytes(b"z"), "多余：retail/残留.csv"),
+    (lambda r: (r / "stray.txt").write_bytes(b"z"), "多余：stray.txt"),
+    (lambda r: (r / "junk").mkdir(), "多余：junk/"),
+], ids=["missing", "byte", "extra-olist", "extra-retail", "extra-top-file", "extra-top-dir"])
+def test_g1_check_rejects(tmp_path, mutate, expect):
+    exp = _fake_tree(tmp_path / "gate")
+    mutate(tmp_path / "gate")
+    problems = build.check(str(tmp_path / "gate"), exp)
+    assert any(p.startswith(expect) for p in problems), problems
+    if expect.startswith("指纹不符"):
+        p = next(p for p in problems if p.startswith(expect))
+        assert exp["olist/x.csv"] in p and build.sha12(b"X") in p     # 期望值与实际值都打出来
+
+
+def test_g1_check_is_read_only_and_never_fetches(tmp_path, monkeypatch):
+    exp = _fake_tree(tmp_path / "gate")
+    monkeypatch.setattr(build, "fetch", lambda url: (_ for _ in ()).throw(AssertionError("check 不许下载")))
+    monkeypatch.setattr(build.pd, "read_excel", lambda *a, **k: (_ for _ in ()).throw(AssertionError("check 不许读 Excel")))
+    snap = lambda: sorted((str(p), p.stat().st_mtime_ns, p.read_bytes() if p.is_file() else b"") for p in (tmp_path / "gate").rglob("*"))
+    (tmp_path / "gate" / "olist" / "x.csv").write_bytes(b"X")   # 让它走一遍"不符"的分支
+    before = snap()
+    assert build.check(str(tmp_path / "gate"), exp)
+    assert snap() == before
+
+
+def test_g1_expected_files_cover_registered_constants():
+    exp = build.expected_files()
+    assert set(exp) == ({"raw/Online Retail.xlsx"} | {f"olist/{v}" for v in build.OLIST_SHORT.values()}
+                        | {"retail/零售明细.csv", "retail_report/零售报表.csv"})
+    assert questions.RETAIL.endswith(next(k for k in exp if k.startswith("retail/")))
+    assert questions.REPORT.endswith(next(k for k in exp if k.startswith("retail_report/")))
+
+
+def _junit(tmp_path, tests, failures=0, errors=0, skipped=0, wrapped=True):
+    suite = f'<testsuite name="pytest" tests="{tests}" failures="{failures}" errors="{errors}" skipped="{skipped}"/>'
+    p = tmp_path / "j.xml"
+    p.write_text(f"<testsuites>{suite}</testsuites>" if wrapped else suite, encoding="utf-8")
+    return p
+
+
+def _check_junit_cli(path):
+    # 用真实的命令行形状跑：证明 scripts/gate 不是包时裸 import questions 可用
+    return subprocess.run([sys.executable, os.path.join(GATE, "check_junit.py"), str(path)], cwd=ROOT,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_g1_check_junit_accepts_all_passed(tmp_path, wrapped):
+    r = _check_junit_cli(_junit(tmp_path, len(questions.QUESTIONS), wrapped=wrapped))
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("kw", [
+    {"skipped": None}, {"tests": -1}, {"failures": 1}, {"errors": 1},
+], ids=["all-skipped", "one-param-lost", "one-failed", "one-error"])
+def test_g1_check_junit_rejects(tmp_path, kw):
+    n = len(questions.QUESTIONS)
+    args = {"tests": n, "failures": 0, "errors": 0, "skipped": 0}
+    if "skipped" in kw:
+        args["skipped"] = n
+    elif "tests" in kw:
+        args["tests"] = n - 1
+    else:
+        args.update(kw)
+    r = _check_junit_cli(_junit(tmp_path, **args))
+    assert r.returncode == 1
+    assert f"'tests': {n}" in r.stdout and f"实际 {args}" in r.stdout     # 期望与实际都打出来
 
 
 # ------------------------------------------------------------------ 4. A1 错题复跑（m13r）

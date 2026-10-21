@@ -1752,7 +1752,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 **未做**：真模型复跑（S 跑）；[28] 的旧复跑报告不迁移；data_sha256 仍缺。
 
-## [51] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：方案 · commit <待提交>
+## [51] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：方案 · commit e2d6fe6（PR #64，tests run 39528333970）
 
 **结论**：方案写在 phase5「G1」。本 PR 只有方案。
 
@@ -1787,3 +1787,32 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 缓存命中时，用机器断言 build 被 skipped（shell: bash）。
 - 验收要区分两跑和三跑：第一跑 --check 红算采样，不算失败；master 预热同理。
 - timeout 改为 25；--check 只放在 gate-oracle 里；cancel-in-progress 的成本写明，不改。
+
+## [52] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：实现 · commit <待提交>
+
+**结论**：按 [51] / phase5「G1」第三轮定稿实现。tests.yml 新增 gate-oracle job（ubuntu + windows × 3.12），缺数据报红；主矩阵里 25 条照旧 skip。
+
+**改了什么**：
+- `scripts/gate/fingerprints.py`（新）：源指纹 `UCI_XLSX_SHA256` / `OLIST_FILES` 原样从 build_gate_data.py 移过来；新登记产物指纹 `PRODUCT_SHA12`（零售明细 dbb0119d94e1、零售报表 ab8c674de110，本机 pandas 3.0.6 / openpyxl）。
+- `build_gate_data.py`：`--check`（`check(out, expected)`：目录集合恰好相等，多余文件/目录、缺失、指纹不符逐条列出期望与实际；不下载、不写、xlsx 只算哈希）；build 结束时自动跑同一个校验；`read_excel(engine="openpyxl")`。
+- `verify_gate.py:56`：`read_excel(engine="openpyxl")`。→ `answers.json` 重生成，**diff 只有 `verify_script_sha256` 一行**（69b9d43982d2 → 361020316d58），其余逐字节不变。
+- `scripts/gate/check_junit.py`（新）：期望 = `len(questions.QUESTIONS)`，裸 `import questions`。
+- `tests/test_gate.py`：`_gate_path()`（读 `DATACHAT_GATE_DATA_ROOT`）供 HAVE_DATA 和 gate_data fixture 共用；`skipif(not HAVE_DATA and not REQUIRE_DATA)` + 函数首行 `pytest.fail("闸门数据缺失…")`；新增 17 条 G1 测试（子进程 REQUIRE 红 / 不设照旧 skip；check 通过 + 6 种拒绝；check 只读且不下载不读 Excel；expected_files 覆盖登记常量；check_junit 以真实命令行跑，2 正 4 反）。
+- `.github/workflows/tests.yml`：gate-oracle job（restore/save 拆开、精确 key v2、命中断言 build=skipped、--check 在 pytest 前、junit 断言、ubuntu 答案冻结、timeout 25）。
+- docs/gate/README.md（CI 小节、怎么读红、缓存作用域、许可边界）、HANDOVER（主矩阵 skip / gate-oracle 必跑）。
+
+**变异检查**：
+- skipif 去掉 `not REQUIRE_DATA` → `test_g1_require_data_fails_with_plain_message` 红。
+- fixture 改回写死 ROOT 且去掉首行 fail → 同一条红（子进程读到本机真数据、25 passed）：证明 helper 两处都要。
+- check 不收集多余文件 → `test_g1_check_rejects` 的 4 个 extra 用例红。
+
+**实测**：本地 `--check` 11 个文件全 ok；build（缓存未命中路径，本机已有源文件）30 s，产物指纹与登记一致；verify_gate 27 s；REQUIRE=1 下 oracle 25 passed + check_junit exit 0。CI（PR #65，tests run 39533487774）：
+- **走的是两跑分支**：attempt 1 缓存未命中，两个 OS 都绿。ubuntu 的 gate-oracle job 119004615630 用时 2m22s，windows 的 job 119004616113 用时 3m05s，两边都打出 "Cache saved"。
+- **两个 OS 的产物哈希相同**：零售明细 dbb0119d94e1，零售报表 ab8c674de110，都等于本机登记的值。所以单份 PRODUCT_SHA12 成立，不用拆成每个 OS 一份。
+- attempt 2 用 re-run 触发，两个 OS 都命中缓存：ubuntu job 119007564605 用时 1m41s，windows job 119007564737 用时 1m59s。"命中时必须跳过 build" 这一步执行的是 `test "skipped" = "skipped"`，结果为绿。Windows 上非 ASCII 文件名经过一次缓存往返后，`--check` 11 个文件全部 ok。
+
+**反向演示**（都只在 PR 分支上做，已 revert，squash 后不进 master）：
+- **改坏 s01 的 oracle**（b79dddf，run 39535329095）：两个 OS 的 gate-oracle 都变红。日志依次出现 `FAILED …[s01]`、`1 failed, 24 passed`，check_junit 打出"实际 failures=1"并 exit 1。这次命中了缓存。
+- **改产物指纹**（7ec10bc，run 39535612173）：两个 OS 都变红，报错为 `✗ 指纹不符：retail/零售明细.csv 期望 dbb0119d94e0 实际 dbb0119d94e1`。
+  - 和方案的偏离：指纹改动会进 cache key，所以这次必然未命中，红在 build 末尾的同一个 `check()` 上，独立的 --check 步骤是 skipped。缓存命中路径上 --check 的拒绝逻辑，由 `test_g1_check_rejects` 的 6 个用例覆盖；常量改了却仍然命中的情况，按设计不会出现。
+  - 同一次 run 里 save 也是 skipped，说明坏数据没有写进缓存。

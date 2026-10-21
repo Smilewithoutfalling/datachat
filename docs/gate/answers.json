@@ -1,6 +1,6 @@
 {
  "questions_sha256": "75a559642e4e",
- "verify_script_sha256": "69b9d43982d2",
+ "verify_script_sha256": "361020316d58",
  "pandas": "3.0.6",
  "sources": {
   "uci_online_retail": {
