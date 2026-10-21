@@ -803,7 +803,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时：大半天。
 
-### G1 闸门 25 条 oracle 上 CI（S 10-21 第三轮评审改定；DEVLOG [51]）
+### G1 闸门 25 条 oracle 上 CI（S 10-21 第三轮评审改定；DEVLOG [51]，PR #64；实现 [52]）
 
 **问题**（代码证据）：
 - `tests/test_gate.py:234` 的 `HAVE_DATA` 在 data/gate/ 不存在时，`:302` 的 skipif 会把 25 条 `test_oracle_solvable_on_dirty_data` 全部跳过。

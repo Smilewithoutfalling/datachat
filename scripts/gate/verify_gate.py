@@ -53,7 +53,7 @@ def alt(ans, why):
 
 # ------------------------------------------------------------------ 单表：UCI Online Retail
 def retail_answers():
-    r = pd.read_excel(RAW_XLSX)
+    r = pd.read_excel(RAW_XLSX, engine="openpyxl")   # 与 build_gate_data 同一引擎（G1）
     r["amt"] = r["Quantity"] * r["UnitPrice"]
     cancel = r["InvoiceNo"].astype(str).str.startswith("C")
     y2011 = r["InvoiceDate"].dt.year == 2011

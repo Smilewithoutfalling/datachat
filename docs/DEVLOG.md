@@ -1752,7 +1752,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 **未做**：真模型复跑（S 跑）；[28] 的旧复跑报告不迁移；data_sha256 仍缺。
 
-## [51] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：方案 · commit <待提交>
+## [51] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：方案 · commit e2d6fe6（PR #64，tests run 39528333970）
 
 **结论**：方案写在 phase5「G1」。本 PR 只有方案。
 
@@ -1787,3 +1787,23 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 缓存命中时，用机器断言 build 被 skipped（shell: bash）。
 - 验收要区分两跑和三跑：第一跑 --check 红算采样，不算失败；master 预热同理。
 - timeout 改为 25；--check 只放在 gate-oracle 里；cancel-in-progress 的成本写明，不改。
+
+## [52] 2026-10-21 · G1 闸门 25 条 oracle 上 CI：实现 · commit <待提交>
+
+**结论**：按 [51] / phase5「G1」第三轮定稿实现。tests.yml 新增 gate-oracle job（ubuntu + windows × 3.12），缺数据报红；主矩阵里 25 条照旧 skip。
+
+**改了什么**：
+- `scripts/gate/fingerprints.py`（新）：源指纹 `UCI_XLSX_SHA256` / `OLIST_FILES` 原样从 build_gate_data.py 移过来；新登记产物指纹 `PRODUCT_SHA12`（零售明细 dbb0119d94e1、零售报表 ab8c674de110，本机 pandas 3.0.6 / openpyxl）。
+- `build_gate_data.py`：`--check`（`check(out, expected)`：目录集合恰好相等，多余文件/目录、缺失、指纹不符逐条列出期望与实际；不下载、不写、xlsx 只算哈希）；build 结束时自动跑同一个校验；`read_excel(engine="openpyxl")`。
+- `verify_gate.py:56`：`read_excel(engine="openpyxl")`。→ `answers.json` 重生成，**diff 只有 `verify_script_sha256` 一行**（69b9d43982d2 → 361020316d58），其余逐字节不变。
+- `scripts/gate/check_junit.py`（新）：期望 = `len(questions.QUESTIONS)`，裸 `import questions`。
+- `tests/test_gate.py`：`_gate_path()`（读 `DATACHAT_GATE_DATA_ROOT`）供 HAVE_DATA 和 gate_data fixture 共用；`skipif(not HAVE_DATA and not REQUIRE_DATA)` + 函数首行 `pytest.fail("闸门数据缺失…")`；新增 17 条 G1 测试（子进程 REQUIRE 红 / 不设照旧 skip；check 通过 + 6 种拒绝；check 只读且不下载不读 Excel；expected_files 覆盖登记常量；check_junit 以真实命令行跑，2 正 4 反）。
+- `.github/workflows/tests.yml`：gate-oracle job（restore/save 拆开、精确 key v2、命中断言 build=skipped、--check 在 pytest 前、junit 断言、ubuntu 答案冻结、timeout 25）。
+- docs/gate/README.md（CI 小节、怎么读红、缓存作用域、许可边界）、HANDOVER（主矩阵 skip / gate-oracle 必跑）。
+
+**变异检查**：
+- skipif 去掉 `not REQUIRE_DATA` → `test_g1_require_data_fails_with_plain_message` 红。
+- fixture 改回写死 ROOT 且去掉首行 fail → 同一条红（子进程读到本机真数据、25 passed）：证明 helper 两处都要。
+- check 不收集多余文件 → `test_g1_check_rejects` 的 4 个 extra 用例红。
+
+**实测**：本地 `--check` 11 个文件全 ok；build（缓存未命中路径，本机已有源文件）30 s，产物指纹与登记一致；verify_gate 27 s；REQUIRE=1 下 oracle 25 passed + check_junit exit 0。CI 的 miss/hit 两跑（或三跑）run id 与两 OS 产物哈希待 PR 上回填。

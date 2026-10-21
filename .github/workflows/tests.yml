@@ -1,4 +1,4 @@
-# 阶段 3：每次推送与 PR 在 GitHub 云端跑 pytest（Linux + Windows × Python 3.11 / 3.12）。
+# 阶段 3：每次推送与 PR 在 GitHub 云端跑 pytest（Linux + Windows × Python 3.11 / 3.12）；G1 起另有 gate-oracle job。
 # 公开仓库的 Actions 分钟数免费；不调用任何模型，不需要 Key（oracle 自检在 tests/test_eval_cases.py 里）。
 name: tests
 
@@ -86,3 +86,59 @@ jobs:
           name: playwright-results
           path: ui/web/test-results
           retention-days: 7
+
+  # G1：闸门 25 条 oracle 必跑（主矩阵里这 25 条照旧 skip，是设计）。数据不入库，走 Actions cache；
+  # 缺数据报红、不降级成 skip；--check 管"数据对不对"，DATACHAT_REQUIRE_GATE_DATA 管"pytest 别降级"。
+  # 细则见 docs/roadmap/phase5-frontend.md「G1」与 docs/gate/README.md。
+  gate-oracle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: "1"
+      DATACHAT_REQUIRE_GATE_DATA: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements-dev.txt
+      - name: 恢复闸门数据缓存（只用精确 key）
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: data/gate
+          key: gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}
+      - name: 生成闸门数据（仅缓存未命中）
+        id: build
+        if: steps.restore.outputs.cache-hit != 'true'
+        run: python scripts/gate/build_gate_data.py
+      - name: 命中时必须跳过 build
+        if: steps.restore.outputs.cache-hit == 'true'
+        shell: bash
+        run: test "${{ steps.build.outcome }}" = "skipped"
+      - name: 校验闸门数据现场（集合相等 + 指纹）
+        id: check
+        run: python scripts/gate/build_gate_data.py --check
+      - name: 保存闸门数据缓存（只看数据，不看 oracle 结果）
+        if: steps.restore.outputs.cache-hit != 'true' && steps.build.outcome == 'success' && steps.check.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: data/gate
+          key: ${{ steps.restore.outputs.cache-primary-key }}
+      - name: oracle
+        run: python -m pytest tests/test_gate.py::test_oracle_solvable_on_dirty_data -q -p no:cacheprovider --junitxml=gate.xml
+      - name: oracle 数量 = len(QUESTIONS)，0 失败 0 跳过
+        if: always() && hashFiles('gate.xml') != ''
+        run: python scripts/gate/check_junit.py gate.xml
+      - name: 标准答案冻结
+        if: runner.os == 'Linux'
+        run: |
+          python scripts/gate/verify_gate.py
+          git diff --exit-code docs/gate/answers.json

@@ -92,7 +92,7 @@ python scripts/gen_ui_types.py --check
 python -m pytest -q                          # 约 8 分钟，654 passed（前提：已下载闸门数据，见下）；建议后台跑
 python -m app.server --port 8765             # 第一行打印 {"port","token","home"}；API 要 Bearer token。桌面壳必须用 --port 0，见 docs/sidecar-contract.md
 ```
-闸门数据（`data/gate/`，不入库）：先跑 `python scripts/gate/build_gate_data.py`。没下载的话，`tests/test_gate.py` 里会有 25 条跳过（629 passed, 25 skipped）。这 25 条是"闸门题在原始脏数据上能解出来"的 oracle 守卫，改内核时一定要在本地跑。CI 不生成这份数据，所以在 CI 上它们一直是跳过的。
+闸门数据（`data/gate/`，不入库）：先跑 `python scripts/gate/build_gate_data.py`。没下载的话，`tests/test_gate.py` 里会有 25 条跳过（629 passed, 25 skipped）。这 25 条是"闸门题在原始脏数据上能解出来"的 oracle 守卫，改内核时一定要在本地跑。G1 起 CI 分两处：**主 pytest 矩阵里这 25 条照旧 skip；独立的 `gate-oracle` job 必跑**（数据走 Actions cache，缺数据报红，不降级成 skip），细则见 `docs/gate/README.md`。
 前端（`ui/web`）：
 ```bash
 npm ci
