@@ -1819,7 +1819,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 合并后预热（master，db7147f）：第一次 workflow_dispatch（run 39537520731）两个 OS 都未命中缓存，Cache saved，oracle 25 passed；第二次（run 39538582322）两个 OS 都命中，"命中时 build 必须 skipped"为绿，25 passed。合并触发的 push run 39537509967 被 concurrency 取消，符合预期。G1 完成。
 
-## [53] 2026-10-21 · F4 迭代 V1：工具栏和标记卡的视觉（方案）· commit <待提交>
+## [53] 2026-10-21 · F4 迭代 V1：工具栏和标记卡的视觉（方案）· commit 6167278（PR #66，tests run 39552676693）
 
 方案见 phase5-frontend.md「F4 迭代 V1」。依据是 S 10-20 对 MVP 的评价"很不好看"，以及 10-21 的实拍截图（1400×900；柱图 8 类、饼图 12 类）。截图里看到的五个问题，S 在代码里逐条核对过。
 
@@ -1844,3 +1844,34 @@ S 第二轮评审提了 6 处问题和 3 处澄清，改定如下：
 - 向下展开的 e2e 要把工具栏滚到贴顶才能触发。
 - right: 0 对齐的是工具栏右缘，这是有意的，不是对齐按钮。
 
+
+## [54] 2026-10-21 · F4 迭代 V1：工具栏和标记卡的视觉（实现）· commit <待提交>
+
+按 phase5「F4 迭代 V1」实现。[53] 已回填 6167278。
+
+**改了什么**
+- 新增 `marksGroups.ts`：5 组 12 项（GROUP_ITEMS）、项可见性 `itemOn`（只读 compat() / hasAxis()）、组状态 `groupStates`、理由行 `whyLine`。
+- `MarksCard.tsx` 重写：tile 行 role=group（"样式分组"），每个 tile 是 toggle button（aria-pressed + aria-controls），展开区 role=region；整组不可用用 aria-disabled，理由常显在 `.marks-why`（aria-describedby）。8 个 F3 开关搬进卡；legend 改成两段按钮"下 / 上"；饼图类目多于色数时颜色 tile 有提示点、颜色组首行写「N 类，多于 M 色，颜色会重复」。
+- `EChart.tsx`：工具栏只渲染图型、排序（compat 不过就不渲染）、样式、导出 PNG（+ chart-hint、暗色导出勾选）。卡挂在 `.chart-controls` 里（relative 锚点），`placeCard()` 按 .main 可视区算方向和 max-height；Esc、mousedown 在 chart-controls 之外、再点样式都关；整页只开一张卡（模块级 openCard + useSyncExternalStore）。
+- `styles.css`：--ctl-* token；卡宽 380、标签列 88、色块 16、间隔 4、`--row-h` 24、色块列表 max-height calc(8 × 24px)。
+- phase5 §3 第 65 行、F3 第二步 404/419 行"置灰"改为"不渲染（F4 迭代 V1 起）"；F4 第 9 条 tile 列表指向 5 组。
+
+**判定表改动（行为为什么变了）**
+- f3-switches「开关」：开关定位作用域从 chart-controls 改成卡（先开卡、再展开组），因为开关搬进了卡。:76-77 的 `toBeDisabled()` 改成卡内 `toHaveCount(0)`：不兼容开关从置灰改为不渲染；卡和组都先展开，并加圆角、数值标签 `toHaveCount(1)` 正向对照和形状 tile 无 aria-disabled。刷新后、同图型新图两处同样先开卡和标签组。
+- f3-switches「缩放」「渐变切主题」：缩放 / 渐变 checkbox 改到卡内；缩放勾上后按 Esc 关卡，因为卡向上展开会盖住图中心，Shift + 滚轮要落在图上。
+- f3-export「✅ 集合」：从"isEnabled"改成"渲染出来的个数 = 1"，因为不兼容的不再渲染（集合本身不变，仍是六个）；排序仍在工具栏。
+- f3-export「交互态」：缩放 checkbox 改到卡内，勾完按 Esc（同上，滚轮和图例点击要落在图上）。期望字节不变。
+- f4-panel：:109 tab /字号/ → button /^文字/；:117 → button /^轴/；:118 合并改为颜色组里的 "合并为'其他'" checkbox；:120 → button /^颜色/。饼图的轴 tile 从 `toBeDisabled()` 改为 aria-disabled（第 4 条不用 disabled 属性）。选主题后只在卡关着时才再点"样式"（selectOption 不一定派发 mousedown）。
+- EChart.test：helper `tile` 改为 getByRole("button", { name: ^n })；「不兼容的开关 disabled」改为「不渲染：单系列柱图的形状组只有圆角；工具栏只有四个控件」；饼图那条改为形状、轴 aria-disabled + 理由行全文；数值标签、缩放的 4 处改到卡内对应组。
+
+**偏离和理由**
+- 验收里"色块列表 8/9 条滚动""marks-why 柱图饼图同高"写在 vitest 一栏，jsdom 没有布局（scrollHeight / 高度都是 0），改放 e2e（f4-panel「色块列表」「浮层」两条）。
+- "色块的 ✓"是 CSS ::after，vitest 只断言 aria-pressed；✓ 在截图里人眼核。
+- "自动"色块按下态不用 2px 外环，改用强调色边框和浅蓝底：实拍里饼图 8 行全是"自动"时，8 个粗黑环很抢眼。选中的调色板色块仍是外环 + ✓。
+- 工具栏里的图型 select 显示偏灰：选中项是当前图型，canChangeKind(当前→当前) 不 ok，所以选中的 option 本身是 disabled 的样式。这是改前就有的（10-21 实拍里也是灰的），属于本步"不做：图型 select 的置灰选项"，没动，记一笔。
+
+**测试**
+- vitest 新增：marksGroups.test.ts 4 条（三种组不可用情形逐格枚举、颜色和文字恒可用、12 项并集且不含排序、理由行「 · 」连接）；EChart.test「F4 迭代 V1：标记卡」10 条（组多开、整页一张卡、三种关闭、placeCard 上下与 max-height、10 类不提示 / 11 类提示 / 合并后消失、散点标签组理由、工具栏控件集合 9 个夹具、隐藏不改生效、色块 aria-pressed）以及散点排序不渲染 1 条。
+- e2e 新增：f4-panel「浮层：不推开文档流、压在最上层…」「工具栏滚到 .main 顶部时改向下展开」「色块列表：8 个条目不滚动，9 个起滚动」。
+
+**实测**（最后一次改动之后全部重跑）：pytest 814 passed；vitest 750 passed（18 files，原 736，+14）；e2e 32 passed（原 29，+3；跑前执行了 prep.sh）；lint、tsc、gen --check、build 都过。

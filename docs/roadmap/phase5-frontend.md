@@ -62,7 +62,7 @@
 - 开关 [v2]：
   - **去掉横 / 竖**
   - 保留数值标签、图例位置、堆叠、平滑、渐变（用普通对象写法）、圆角、排序（仅用户）、平均线和极值、dataZoom，产出键以 **M13 §12** 为准
-  - 开关状态保留，不兼容的开关置灰且不生效
+  - 开关状态保留，不兼容的开关不渲染且不生效（F4 迭代 V1 起；之前是置灰）
 - 换图型：按 §6.3 的条件，**同步 boundaryGap**，换完重算开关兼容性 [v2]
 - 层 1 面板：只能改 §3.2 的样式键，加 yAxis.min/max 和排序；改动存在 localStorage。
 - 导出 [v2]：
@@ -401,7 +401,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
      - 键名取 `changeKind` 之后的图型，也就是用户眼前看到的图型。
      - 读取时逐字段校验，不认识的字段或值丢弃并回退默认；**读写都包在 try/catch 里**（F2 token.ts 的教训：隐私模式或配额满时会抛错）。写失败只是不持久化，不影响渲染。
    - **"换成什么图型"不持久化**，只存在组件状态里，刷新后回到后端出的图型。它是对某一张图的操作，按 messageId 存会重新带回 D 否掉的三个问题。
-   - 开关状态在换图型时保留；不兼容的开关置灰且不生效（§3），换回来后恢复。
+   - 开关状态在换图型时保留；不兼容的开关不渲染且不生效（§3；F4 迭代 V1 起，之前是置灰），换回来后恢复。
 4. **兼容表**（"多系列"指 ≥ 2 个 series；"时间轴"见第 7 条的 `x_kind`）：
 
 | 开关 | bar | line | area | pie | scatter | 写入的键 |
@@ -416,7 +416,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 | 平均线和极值 | ✅ | ✅ | ✅ | ❌ | ❌ | `series[].markLine.data=[{type:'average'}]`、`series[].markPoint.data=[{type:'max'},{type:'min'}]` |
 | dataZoom | ✅ | ✅ | ✅ | ❌ | ❌ | 见第 5 条 |
 
-   - 兼容表在代码里是常量 `COMPAT`。UI 置灰和 `applySwitches` 的过滤都读这一张表。
+   - 兼容表在代码里是常量 `COMPAT`。UI 是否渲染（F4 迭代 V1 起；之前是置灰）和 `applySwitches` 的过滤都读这一张表。
 5. **dataZoom 只用 inside（S 10-19，A），并补两件事，否则不成立：**
    - **不劫持页面滚动**：写 `dataZoom: [{type: "inside", zoomOnMouseWheel: "shift", moveOnMouseWheel: false, moveOnMouseMove: true}]`。对话流里图占的屏幕面积不小，用默认值的话，用户在图上滚一下，缩放的是图，页面不动。开关旁边的提示改成"Shift + 滚轮缩放，拖动平移，双击还原"。
      **实现时实测推翻了"只靠 option 就不劫持"（DEVLOG [41] 偏离第 1 条）**：上面的 `'shift'` / `false` 只决定"缩不缩"，不决定"吞不吞"。roams.js:175-181 给 RoamController 的是统一配置（zoomOnMouseWheel / moveOnMouseWheel 都是 true），每个 dataZoom 的取值要到监听器里才判（roams.js:107）；RoamController 在触发监听器之前，只要指针在 grid 内就先 `eventTool.stop(e.event)`（RoamController.js:316-322）。探针：plot 区中心滚轮，window 上的监听器一次都没收到，`.main` 的 scrollTop 150 → 150；grid 外边缘则正常滚。所以 `EChart` 在容器上加 capture 阶段的 wheel 监听：不按 Shift 就 `stopPropagation`，事件到不了 zrender，默认动作（滚页面）照常；按 Shift 的放行。option 仍按本条写（Shift 时由它决定缩放）。
@@ -610,7 +610,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 7. **存储**：键是 `datachat.chartEdit:<message_id>:<图序号>`，读写都包 try/catch，按合法取值逐字段校验，不合法的字段丢掉。重放历史会话时读回来。删除会话时不清理（localStorage 小，留个技术债记一笔）。
 8. **安全**：面板的输入只有有限数、调色板 index、枚举三类，没有一个用户字符串会进 option。新写的键（yAxis.min / max、itemStyle.color、textStyle.fontSize、legend 不动）加进 FRONTEND_KEYS，复用第五步的机制测试：写出的值只能是数字、主题色或枚举。（实现偏离：单独登记在 layer1.ts 的 LAYER1_KEYS，因为 FRONTEND_KEYS 要和 M13 §12 逐字比对，见 DEVLOG [44]。）
 
-9. **界面风格借鉴 Tableau 的「标记」卡（S 10-20 提）**：面板做成一张竖排卡片，一排小方块按钮：颜色 / 标签 / 文字 / 轴，点一下展开它自己的小浮层；配色用浅灰底、细边框、低饱和的强调色，这些都是 Tableau 的风格。只借外观和点选交互。Tableau 那种把字段拖到行、列、颜色架上「拼接」出图的玩法**不借**：那是在改数据映射，换列、换聚合都属于层 2 或重新分析，按 M13 §3.2 只能走模型和后端。我们的面板只改样式键。
+9. **界面风格借鉴 Tableau 的「标记」卡（S 10-20 提）**：面板做成一张竖排卡片，一排小方块按钮（F4 迭代 V1 起为 5 组：颜色 / 标签 / 形状 / 轴 / 文字，见「F4 迭代 V1」第 3 条），点一下展开它自己的小浮层；配色用浅灰底、细边框、低饱和的强调色，这些都是 Tableau 的风格。只借外观和点选交互。Tableau 那种把字段拖到行、列、颜色架上「拼接」出图的玩法**不借**：那是在改数据映射，换列、换聚合都属于层 2 或重新分析，按 M13 §3.2 只能走模型和后端。我们的面板只改样式键。
    - Tableau 10 调色板不能直接搬：在白底上实测对比度 ≥3.0 的只有 6 色（#4E79A7 4.55、#9C755F 4.10、#E15759 3.68、#B07AA1 3.42、#59A14F 3.16 等），#EDC948 只有 1.61、#76B7B2 只有 2.29。S 10-20 定：新增第五套主题「Tableau 风」，保留 Tableau 10 的色相，加深到对白底 ≥3.0，并通过相邻 ΔE00 ≥20 的检查；S 也说现有主题偏单调，这套主题要更有层次（浅灰网格、细轴线、柔和底色）。S 还要求先尽快出一版能跑的，自己跑过再提修改意见。
 
 验收：

@@ -42,6 +42,15 @@ function watch(page: Page, origin: string) {
 
 type Png = { name: string; bytes: Buffer; width: number; height: number };
 /** 点导出，拿到真下载的文件：PNG 签名、IHDR 宽高。 */
+// F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
+async function group(ctl: Locator, name: string): Promise<Locator> {
+  const btn = ctl.getByRole("button", { name: "样式" });
+  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
+  const card = ctl.getByTestId("marks-card");
+  const t = card.getByRole("button", { name: new RegExp("^" + name) });
+  if ((await t.getAttribute("aria-pressed")) !== "true") await t.click();
+  return card;
+}
 async function exportOf(ctl: Locator): Promise<Png> {
   const page = ctl.page();
   const [dl] = await Promise.all([page.waitForEvent("download"), ctl.getByRole("button", { name: "导出 PNG" }).click()]);
@@ -127,16 +136,19 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   const sv = await ask(page, CSV, "sw.csv", "chart-bar", "开关导出");
   const ctl = sv.getByTestId("chart-controls").first();
   // ✅ 集合由 compat() 决定，UI 上就是 enabled；❌ 格的全开 == 全关，断言恒真，所以先把集合钉死（S 10-19）
+  // F4 迭代 V1 起不兼容的不渲染：集合 = 卡里（五组全展开）渲染出来的开关 + 工具栏上的排序
+  for (const g of ["颜色", "标签", "形状", "轴"]) await group(ctl, g);
+  const card = ctl.getByTestId("marks-card");
   const boxes = ["数值标签", "堆叠", "平滑", "渐变", "圆角", "平均线和极值", "缩放"];
   const enabled: string[] = [];
-  for (const name of boxes) if (await ctl.getByRole("checkbox", { name }).isEnabled()) enabled.push(name);
-  if (await ctl.getByLabel("图例位置").isEnabled()) enabled.push("图例位置");
-  if (await ctl.getByLabel("排序").isEnabled()) enabled.push("排序");
+  for (const name of boxes) if ((await card.getByRole("checkbox", { name }).count()) === 1) enabled.push(name);
+  if ((await card.getByRole("group", { name: "图例位置" }).count()) === 1) enabled.push("图例位置");
+  if ((await ctl.getByLabel("排序").count()) === 1) enabled.push("排序");
   expect(enabled.sort()).toEqual(["数值标签", "渐变", "圆角", "平均线和极值", "缩放", "排序"].sort());
 
   const off = await exportOf(ctl);
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) {
-    const box = ctl.getByRole("checkbox", { name });
+    const box = card.getByRole("checkbox", { name });
     await box.check();
     const on = await exportOf(ctl);
     await box.uncheck();
@@ -146,7 +158,7 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   }
   await ctl.getByLabel("排序").selectOption("desc");
   expect((await exportOf(ctl)).bytes.equals(off.bytes)).toBe(false);
-  for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) await ctl.getByRole("checkbox", { name }).check();
+  for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) await card.getByRole("checkbox", { name }).check();
   expect((await exportOf(ctl)).bytes.equals(off.bytes)).toBe(false);
   expect(w.posts).toHaveLength(1);
   expect(w.bad).toEqual([]);
@@ -166,15 +178,18 @@ test("交互态：缩放开关关着时 Shift + 滚轮后导出与初始相同�
   const initial = await exportOf(ctl);
   await shiftWheel(page, chart);
   expect((await exportOf(ctl)).bytes.equals(initial.bytes)).toBe(true);
-  await ctl.getByRole("checkbox", { name: "缩放" }).check();
+  const zoom = (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" });
+  await zoom.check();
+  await page.keyboard.press("Escape"); // 卡盖在图上，滚轮前关掉
   const full = await exportOf(ctl);
   expect(full.bytes.equals(initial.bytes)).toBe(true); // inside 不画东西：全量窗口时与关着相同
   await shiftWheel(page, chart);
   const zoomed = await exportOf(ctl);
   expect(zoomed.bytes.equals(full.bytes)).toBe(false);
   // 关掉再打开：屏幕是真相源，回读不到区间，窗口回到全量，不跳回刚才缩的位置（S 10-19 第二轮第一节）
-  await ctl.getByRole("checkbox", { name: "缩放" }).uncheck();
-  await ctl.getByRole("checkbox", { name: "缩放" }).check();
+  await (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" }).uncheck();
+  await (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" }).check();
+  await page.keyboard.press("Escape");
   expect((await exportOf(ctl)).bytes.equals(full.bytes)).toBe(true);
 
   // 图例：多系列（注入场景的第一张是宽表，两个以上系列、图例在底部）。图例项的位置不读内部状态：沿底边扫，

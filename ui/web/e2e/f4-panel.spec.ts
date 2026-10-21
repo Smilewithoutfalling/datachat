@@ -83,12 +83,12 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   const card = sv.getByTestId("marks-card").first();
   await expect(card).toBeVisible();
 
-  await card.getByRole("tab", { name: /字号/ }).click();
+  await card.getByRole("button", { name: /^文字/ }).click(); // F4 迭代 V1：tile 改名、role 从 tab 改成 toggle button
   await card.getByRole("button", { name: "大 16" }).click();
   const big = await exportOf(ctl);
   expect(big.bytes.equals(base.bytes)).toBe(false);
 
-  await card.getByRole("tab", { name: /轴范围/ }).click();
+  await card.getByRole("button", { name: /^轴/ }).click();
   await card.getByLabel("y 轴最大值").fill("20");
   const capped = await exportOf(ctl);
   expect(capped.bytes.equals(big.bytes)).toBe(false);
@@ -97,7 +97,7 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   expect((await exportOf(ctl)).bytes.equals(capped.bytes)).toBe(true);
   await card.getByLabel("y 轴最小值").fill("");
 
-  await card.getByRole("tab", { name: /颜色/ }).click();
+  await card.getByRole("button", { name: /^颜色/ }).click();
   await card.getByRole("button", { name: /颜色 5$/ }).first().click();
   expect((await exportOf(ctl)).bytes.equals(capped.bytes)).toBe(false);
 
@@ -114,7 +114,7 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   expect(w.bad).toEqual([]);
 });
 
-test("饼图 12 类：轴范围禁用；合并为'其他'改变导出；Tableau 风主题截图", async ({ page, baseURL }, info) => {
+test("饼图 12 类：轴组 aria-disabled；重复色提示，合并为'其他'改变导出且提示消失；Tableau 风主题截图", async ({ page, baseURL }, info) => {
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1400, height: 900 });
   const w = watch(page, new URL(baseURL!).origin);
@@ -124,16 +124,120 @@ test("饼图 12 类：轴范围禁用；合并为'其他'改变导出；Tableau 
   const base = await exportOf(ctl);
   await ctl.getByRole("button", { name: "样式" }).click();
   const card = sv.getByTestId("marks-card").first();
-  await expect(card.getByRole("tab", { name: /轴范围/ })).toBeDisabled();
-  await card.getByRole("tab", { name: /合并/ }).click();
-  await card.getByRole("checkbox").check();
+  await expect(card.getByRole("button", { name: /^轴/ })).toHaveAttribute("aria-disabled", "true");
+  // 合并已不是独立 tile：在颜色组里（F4 迭代 V1 第 3 条）
+  await card.getByRole("button", { name: /^颜色/ }).click();
+  await expect(card.getByTestId("marks-repeat")).toHaveText("12 类，多于 10 色，颜色会重复");
+  await card.getByRole("checkbox", { name: "合并为'其他'" }).check();
+  await expect(card.getByTestId("marks-repeat")).toHaveCount(0);
   const merged = await exportOf(ctl);
   expect(merged.bytes.equals(base.bytes)).toBe(false);
 
   await page.getByLabel("图表主题").selectOption({ label: "Tableau 风" });
-  await card.getByRole("tab", { name: /颜色/ }).click();
+  // selectOption 不一定派发 mousedown，卡可能还开着：只在关着时再点"样式"，颜色组只在收起时再点
+  const btn = ctl.getByRole("button", { name: "样式" });
+  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
+  const colors = card.getByRole("button", { name: /^颜色/ });
+  if ((await colors.getAttribute("aria-pressed")) !== "true") await colors.click();
   await page.waitForTimeout(300);
   await sv.getByTestId("assistant-msg").last().screenshot({ path: info.outputPath("f4-tableau-pie.png") });
   expect(w.external).toEqual([]);
   expect(w.bad).toEqual([]);
+});
+
+// ---- F4 迭代 V1：浮层（phase5「F4 迭代 V1」第 5–8 条）-----------------------------------------------------------------
+const PIE = (n: number) => "品类,销量\n" + Array.from({ length: n }, (_, i) => `品类${i + 1},${(i + 1) * 3}`).join("\n") + "\n";
+
+test("浮层：不推开文档流、压在最上层、正常位置向上展开；组多开；理由行一行且柱图饼图同高；5 套主题色块行不溢出", async ({ page }, info) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  const sv = await ask(page, CSV, "pop.csv", "chart-bar", "浮层");
+  const ctl = sv.getByTestId("chart-controls").first();
+  await sv.getByTestId("echart").first().scrollIntoViewIfNeeded();
+  const input = sv.getByLabel("提问");
+  const before = await input.boundingBox();
+  await page.screenshot({ path: info.outputPath("v1-bar-default.png") });
+  await ctl.getByRole("button", { name: "样式" }).click();
+  const card = ctl.getByTestId("marks-card");
+  await expect(card).toHaveAttribute("data-dir", "up");
+  expect(await input.boundingBox()).toEqual(before);
+  const top = await card.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+  expect(top).toBe(true);
+  // 组多开
+  await card.getByRole("button", { name: /^颜色/ }).click();
+  await card.getByRole("button", { name: /^轴/ }).click();
+  await expect(card.getByRole("region")).toHaveCount(2);
+  await card.getByRole("button", { name: /^颜色/ }).click();
+  await expect(card.getByRole("region")).toHaveCount(1);
+  await card.getByRole("button", { name: /^颜色/ }).click();
+  await page.screenshot({ path: info.outputPath("v1-bar-card.png") });
+  // 理由行：柱图为空，但占一行高
+  const why = card.getByTestId("marks-why");
+  await expect(why).toHaveText("");
+  const barWhyH = (await why.boundingBox())!.height;
+  // 色块行不溢出（卡宽账的实测）
+  for (const t of ["classic", "soft", "business", "darkCanvas", "tableau"]) {
+    await page.getByLabel("图表主题").selectOption(t);
+    if ((await ctl.getByRole("button", { name: "样式" }).getAttribute("aria-expanded")) !== "true") await ctl.getByRole("button", { name: "样式" }).click();
+    const colors = card.getByRole("button", { name: /^颜色/ });
+    if ((await colors.getAttribute("aria-pressed")) !== "true") await colors.click();
+    const over = await card.locator(".marks-swatch-list .marks-item").evaluateAll((rows) => rows.filter((r) => r.scrollWidth > r.clientWidth).length);
+    expect([t, over]).toEqual([t, 0]);
+  }
+  await page.getByLabel("图表主题").selectOption("classic");
+
+  const sv2 = await ask(page, PIE12, "pop-pie.csv", "chart-pie", "浮层饼图");
+  const ctl2 = sv2.getByTestId("chart-controls").first();
+  await sv2.getByTestId("echart").first().scrollIntoViewIfNeeded();
+  await ctl2.getByRole("button", { name: "样式" }).click();
+  const why2 = ctl2.getByTestId("marks-why");
+  await expect(why2).toHaveText("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
+  const h2 = (await why2.boundingBox())!.height;
+  expect(h2).toBe(barWhyH);
+  expect(await why2.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true); // 一行放得下，没有被截断
+  await ctl2.getByRole("button", { name: /^颜色/ }).click();
+  await page.screenshot({ path: info.outputPath("v1-pie12-card.png") });
+});
+
+test("浮层：工具栏滚到 .main 顶部时改向下展开，整体落在 .main 可视区内", async ({ page }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  const sv = await ask(page, CSV, "down.csv", "chart-bar", "向下");
+  const ctl = sv.getByTestId("chart-controls").first();
+  // 撑出可滚动的余量后，把工具栏滚到贴着 .main 可视区顶部
+  await page.locator(".main").evaluate((m, sel) => {
+    const pad = document.createElement("div");
+    pad.style.height = "1200px";
+    m.appendChild(pad);
+    const c = m.querySelector(sel)!;
+    m.scrollTop += c.getBoundingClientRect().top - m.getBoundingClientRect().top;
+  }, '[data-testid="chart-controls"]');
+  await ctl.getByRole("button", { name: "样式" }).click();
+  const card = ctl.getByTestId("marks-card");
+  await expect(card).toHaveAttribute("data-dir", "down");
+  const [c, m] = await Promise.all([card.boundingBox(), page.locator(".main").boundingBox()]);
+  expect(c!.y).toBeGreaterThanOrEqual(m!.y);
+  expect(c!.y + c!.height).toBeLessThanOrEqual(m!.y + m!.height);
+});
+
+test("色块列表：8 个条目不滚动，9 个起滚动", async ({ page }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  for (const [n, scroll] of [[8, false], [9, true]] as const) {
+    const sv = await ask(page, PIE(n), `sw${n}.csv`, "chart-pie", `色块${n}`);
+    const ctl = sv.getByTestId("chart-controls").last();
+    await sv.getByTestId("echart").last().scrollIntoViewIfNeeded();
+    await ctl.getByRole("button", { name: "样式" }).click();
+    await ctl.getByRole("button", { name: /^颜色/ }).click();
+    const list = ctl.locator(".marks-swatch-list");
+    await expect(list.locator(".marks-item")).toHaveCount(n);
+    expect([n, await list.evaluate((el) => el.scrollHeight > el.clientHeight)]).toEqual([n, scroll]);
+    await page.keyboard.press("Escape");
+  }
 });
