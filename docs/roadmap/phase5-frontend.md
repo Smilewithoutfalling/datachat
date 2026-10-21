@@ -705,6 +705,49 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时 1.5 天，一个 PR。
 
+### F5：S 验收走查（草案，待 S 评审；DEVLOG [55]）
+
+F5 不是回归清单，而是一次真 Key 的手动走查加观感判断，预计一小时内跑完。32 条 e2e 已经覆盖的内容这里不重抄，只列"看什么、什么算过、截图留哪"。启动命令：`python -m app.server --open`。
+
+**截图不入库**（仓库策略，S 10-21 定）：S 本机自存，文件名用 `<条号>-<要点>.png`。验收证据是 DEVLOG [55] 走查记录里的文字结论；只有暴露问题的截图才贴到对应的 PR 或 issue 上。理由：每轮迭代往 docs/ 里堆 PNG，仓库只增不减；e2e 截图照旧走 test-results/（gitignore）。所有发现记在 DEVLOG [55] 的"走查记录"里：观感问题单列，不在 F5 里当场修。
+
+**五条操作路径（S 动手）**
+
+| # | §0 | 谁 | 看什么 | 什么算过 | 截图 |
+|---|---|---|---|---|---|
+| 1 | ① | S | 填真 Key → 上传单表（GBK）和多表 → 看预览 | 列名、中文、行数和数据源对得上；预览按文本渲染，没有乱码；**多表时每个文件各一份预览（F1 按 dataset_files 逐文件预览），每份都要对，不能只看第一份** | 1-preview-single.png、1-preview-multi.png |
+| 2 | ② | S（agent 先用假模型过一遍 UI） | workflow、ReAct 各问一题，题目要能出图 → 展开步骤和代码 → 换主题、开关、开标记卡 | 两种 agent 都给出结论和图；步骤和代码可展开；5 套主题和开关观感可接受（观感结论单列） | 2-workflow.png、2-react.png、2-themes.png |
+| 3 | ③ | S，只验真机手感 | 导出 PNG → 去下载目录找文件 → 双击打开 → 👍👎 | 文件真落在下载目录，文件名已清洗，能正常打开且非空；👍👎 刷新后还在 | 3-export.png |
+| 4 | ④ | S，只验真机手感 | 关掉后端进程 → 重新 `--open` → 打开原会话 | 历史会话和图都在（走重放）；关掉前正在跑的那轮显示"已中断"，不是"已取消" | 4-replay.png |
+| 5 | ⑤ | S | 真模型提问 → 中途按停 → 立刻重问 | 按钮同一帧变成"正在停止…"；最终是"已取消"；重问不撞 409；后端延迟从程序里取数，不用秒表（见下），只记录，不设门槛 | 5-stop.png |
+
+①的输入限制：上传框是 `accept=".csv" multiple`（views/Shell.tsx:157），xlsx / xls 传不进来。验 GBK 要用 Excel「另存为 CSV」导出的文件。解码顺序是 BOM → utf-8 严格 → gb18030 严格（csv_io.py），GBK 没问题。**已知局限**：Big5（繁体）会被 gb18030 静默读成错字，不报错。手上有繁体表的话顺便验一下，并在走查记录里定要不要处理（处理就单独立项，不在 F5 里修）。
+
+⑤的后端延迟取法：秒表会把人的反应时间和网络往返都算进去，所以不用。改用 DevTools Network：取 `POST /messages/{id}/cancel` 的完成时刻，和 EventStream 里 error(kind=cancelled) 的到达时刻，两者之差就是后端延迟。如果该轮事件已落库，可以用 `GET /sessions/{id}` 返回的 events[].ts 交叉核对。
+
+已有的技术覆盖（③④ 只验真机，不重复这些断言）：
+- ③：f3-export「导出 PNG：真下载拿到 PNG…文件名清洗…」、f2「提问 → SSE → 失败原因 → 👍 → 刷新重放一致」。Playwright 的下载是模拟的，真实下载目录和双击打开只有 S 能验。
+- ④：pytest `test_full_flow_workflow_and_restart`（test_server.py:49）、`test_restart_marks_interrupted_not_cancelled`（test_web_f2.py:265）、`test_replay_returns_stored_chart_option_verbatim_without_validation`（test_web_f2.py:427）；e2e f3-charts「五种图型…刷新重放仍在」。注意 e2e 只刷新页面，没有重启后端；重启后端由 pytest 覆盖。
+- ⑤：f3-stop「停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重问不撞 409」，用的是假模型挂住 3 秒。真模型下的感知延迟只有 S 能验。
+
+**两条已闭环，只复核文档**
+
+| # | §0 | 证据 | S 复核 |
+|---|---|---|---|
+| 6 | ⑥ v1 库迁移 | `test_v1_database_gains_feedback_table_without_touching_old_tables`（tests/test_web.py:149）：drop feedback 还原成 v1 后重启，6 张旧表的 count(*) 和 pragma table_info 前后相等，旧消息能直接评价 | 不用复核，测试本身就是证明（S 10-21） |
+| 7 | ⑦ 注入结论 | THREAT_MODEL §2.3（命中率、落点、_display_safe、7 个后端测试 + f3-inject 的 P6/P7）；f3-inject 在后端托管的 dist 上跑 | 确认 §2.3 已写全 |
+
+**通过与收尾**
+- 1–5 全过，6、7 复核无异议 → F5 通过。随后单独开一个 PR 删除 Streamlit（`ui/streamlit_app.py`、`ui/chat_app.py` 及其引用），HANDOVER 和 plan.md 里标阶段 5 完成。
+- 观感问题不阻断 F5，记成"F4 迭代 V2"的输入，进阶段 6 之前处理完：进了 Tauri 壳再改，要重打包、重签名、重发版。
+- 代码签名证书挪到**阶段 6 前置事项**。它需要实名主体、付款和 CA 审核，agent 和评审都办不了，要由有主体的人申请；周期长，而且不依赖 F5 的结论，主体一旦确定就可以启动。目标是「Windows 一键安装不弹 SmartScreen 黄条」，所以大概率要 OV 起步。选型：
+  - DV / 个人验证：最快，但 SmartScreen 信誉要靠下载量慢慢攒。
+  - OV：需要营业执照和电话回访，签名后信誉建立比 DV 快。
+  - EV：私钥放在硬件 token 或云 HSM 上，对 SmartScreen 立刻生效。
+  材料清单在阶段 6 方案里给出。
+
+**F5 覆盖不到的：#49 矮画布紧凑几何**。在产品里不可达：`.echart` 固定 `height: 360px`（styles.css:110），EChart.tsx 用 `isCompact(el.clientHeight)`，而 COMPACT_BELOW = 300，所以 isCompact(360) 恒为 false，COMPACT_KEYS 在真实用户路径上从来不会下发。窗口变矮只会出现滚动条，图本身不会变矮。f3-themes 里 #49 的用例能绿，是因为 measure() 人为把 style.height 设成了 220px，**测试绿不等于产品生效**。要人工验只能在 devtools 里改 style.height。#49 的状态是：契约、单测、e2e 都已完成，产品行为不变。
+
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
 - A1 自动复跑规则：单独一个闸门 PR，赶在下一次跑闸门之前做（比如验证 B70 时）。方案见下文「A1 错题自动复跑」。
@@ -720,7 +763,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - chart() 参数错误不让执行失败（test_react_chart_error_reaches_model_and_warnings：res.ok 且 result==1），所以"展示的那次执行里有 chart_error"是常见情况，不是边角。
 - 展示哪些图：workflow 是最后一次 executor 的 state（只有失败才重试，所以就是唯一成功那次）；ReAct 是所有成功执行的图之和（react_agent.py:202 在成功时 extend sink["charts"]）。
 
-已定（待 S 评审）：
+已实现（#55 / ff7b8dc，DEVLOG [43]；本段状态 10-21 更正）：
 1. 新字段 `res.chart_errors_shown`：只收"图被展示的执行"自己的 chart_errors，即 error 为空的执行。workflow 取最后一次成功 executor；ReAct 取所有成功 exec。`res.chart_errors` 保留原语义（全部累加，评测计数用，chart_smoke 不动）。
 2. `chart_warnings` 只看 `chart_errors_shown`：
    - 没有展示的 option 且有错 → 「图表未生成：<最后一条>」（文案不变）。
