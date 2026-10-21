@@ -1690,7 +1690,7 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 
 **未做**：执行错误（error_kind=execution，exec 原文）按规则不经 user_error，会照原样进入 content。
 
-## [49] 2026-10-20 · A1 错题自动复跑：方案 · commit <待提交>
+## [49] 2026-10-20 · A1 错题自动复跑：方案 · commit aec166d（PR #62）
 
 **结论**：方案写在 phase5「A1 错题自动复跑」，已按 S 第二轮评审改定。本 PR 只有方案。
 
@@ -1722,3 +1722,32 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 **偏离**：dataset 失败归为无效复跑。S 草案的 INVALID 里没有 dataset；这样做的理由和 flaky_cause=env 一致：闸门数据是冻结的本地文件，读取失败属于环境问题。
 
 **已知前提偏弱，不修**：run() 没有把 data_path 传给 run_metadata，报告里没有 data_sha256。
+
+## [50] 2026-10-21 · A1 错题自动复跑：实现 · commit <待提交>
+
+**结论**：按 [49] / phase5「A1」实现。scripts/gate/run_gate.py 新增 `--rerun`、profile m13r（docs/gate/thresholds.json）和退出码 0/1/2/3；m13 / phase35 的结论路径不变。
+
+**改了什么**：
+- run_gate.py：
+  - 抽出 `_case_row`，主报告和复跑行同构；`_analyze` / `_current_env` 单独一层，供测试打桩。
+  - `rerun()`：检查主报告已判完 → 逐项比对环境 → 选题（名单外错题 + `--only`）→ 逐题跑到 3 次有效或 4 次封顶 → 每行原子落盘 → 直接写 verdict。
+  - `_verdict_rerun()`：复跑题分为 regressions / flaky / pending_review / rerun_invalid / not_rerun；flaky 带 flaky_cause 和 observed_pass_rate；verdict 写明假阴性率 p^3。
+  - 前提失败统一走 `_fail()`（stderr + 退出码 3）。
+- thresholds.json：新增 m13r（agents 和 m13 相同，另加 `rerun: {times: 3, max_makeup: 1}`）。
+- docs/gate/README.md：补上用法和退出码，写明 m13 / phase35 的 0 不表示通过。
+
+**实现细节（方案没写死的地方）**：
+- `--rerun` 用 `--agent` / `--no-dict` 声明本次环境，再和报告比对，所以 agent 和 use_dictionary 能比出不一致。
+- 带 `--only` 时，选题 = 尚未复跑的名单外错题 + `--only` 指定的题；`--only` 里已复跑过的题，旧行整组搬进 rerun_history 后替换。
+- m13r 下 `{g}_regressions` 是复跑后人工确认的回归；名单外错题另列为 `{g}_rerun_candidates`。
+- 有回归时退出码为 1，即使其他题还没签完也是 1。
+
+**验收**：tests/test_gate.py 新增
+- 用法与流程：`test_rerun_selection`、`test_rerun_refuses_undeclared_repeat_and_only_replaces`、`test_rerun_interrupted_keeps_complete_rows_and_resumes`、`test_rerun_attempt_counts`、`test_rerun_match_tristate`
+- 判定：`test_rerun_verdict_requires_signatures`、`test_rerun_signed_false_is_regression`、`test_rerun_invalid_rows_need_no_signature_and_flaky_cause_env`、`test_m13r_without_reruns_is_pending`
+- 前提：`test_rerun_env_mismatch_refused`（8 项）、`test_rerun_dirty_sha`、`test_rerun_requires_labeled_main_report`
+- 结构约束：`test_cli_exit_codes`（子进程实测 0/1/2/3）、`test_m13_baseline_verdict_unchanged`（162428 / 163133）、`test_rerun_kinds_whitelist_covers_error_kinds`、`test_m13r_agents_equal_m13`
+
+变异检查：去掉"executed=True 且 match=None 判无效"后，tristate 用例变红；去掉 pending 排序后，签字用例变红。
+
+**未做**：真模型复跑（S 跑）；[28] 的旧复跑报告不迁移；data_sha256 仍缺。
