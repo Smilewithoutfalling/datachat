@@ -1773,3 +1773,10 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - 写明缓存作用域和 7 天淘汰规则：合并后在 master 上 workflow_dispatch 预热一次；冷启动和 UCI 挂掉时的表现写进 README。
 - timeout 改为 20 分钟。HANDOVER 改为"主矩阵 skip、gate-oracle 必跑"。.gitignore 注释从 110 MB 改为 173 MB。
 - 许可补一条边界：将来商用时要重审 NC 条款。
+**S 第二轮改定**：
+- 显式 `read_excel(engine="openpyxl")`；单份 PRODUCT_SHA12 是否同时适用两个 OS，要在首次运行时实测，不等就拆成按 OS 两份。
+- cache key 加入 requirements*.txt 和 fingerprints.py；不设 restore-keys；restore 和 save 拆开，save 只看 build 和 --check 的结果。
+- `--check` 改为校验目录集合相等；放在 pytest 之前。
+- junit 期望值取 `len(QUESTIONS)`。
+- `DATACHAT_GATE_DATA_ROOT` 用一个 helper 统一提供，HAVE_DATA 和 fixture 共用。
+- 验收：每个 OS 各跑一次 miss 和一次 hit；Windows 上验证非 ASCII 文件名经过缓存往返后不变。

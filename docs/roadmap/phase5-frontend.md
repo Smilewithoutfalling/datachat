@@ -803,7 +803,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时：大半天。
 
-### G1 闸门 25 条 oracle 上 CI（S 10-21 第一轮评审改定；DEVLOG [51]）
+### G1 闸门 25 条 oracle 上 CI（S 10-21 第二轮评审改定；DEVLOG [51]）
 
 **问题**（代码证据）：
 - `tests/test_gate.py:234` 的 `HAVE_DATA` 在 data/gate/ 不存在时，`:302` 的 skipif 会把 25 条 `test_oracle_solvable_on_dirty_data` 全部跳过。
@@ -815,7 +815,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - 25 条 oracle 用时 65 s，其中 36 s 是 fixture 读表。
 - `verify_gate.py` 重算标准答案用时 36 s，写出的 answers.json 和库里的**逐字节相同**（git status 干净，pandas 3.0.6）。
 
-**已定（S 10-21 第一轮评审改定）**：
+**已定（S 10-21 第一、二轮评审改定）**：
 1. **单独开一个 job：`gate-oracle`**，放在 tests.yml 里，不进现有的 pytest 矩阵。
    - 矩阵只有 `ubuntu-latest`、`windows-latest` × Python 3.12。S 本机是 Windows，GB18030 解码、中文路径、PYTHONUTF8 在 Windows 上的行为差异，都要在 Windows 上跑过才算数。3.11 和 3.12 的差异已经由主矩阵覆盖。
    - 主矩阵不动，那 25 条在主矩阵里照旧 skip。所以 CI 里会同时出现两个 25：**主矩阵 25 skipped，gate-oracle 25 passed**。HANDOVER §3 照这个写，避免有人看到主矩阵的 skip 就以为 G1 没落地。
@@ -828,20 +828,35 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
        if not HAVE_DATA:
            pytest.fail("闸门数据缺失：data/gate/ 下缺 …（DATACHAT_REQUIRE_GATE_DATA=1）")
    ```
-   报红时直接写"数据缺失"和缺的是哪几个路径，而不是靠末尾断言的"数量不对"间接暴露。HAVE_DATA 的路径根改成可以用 `DATACHAT_GATE_DATA_ROOT` 覆盖，供子进程单测使用。
+   缺数据时直接报"数据缺失"，并列出缺了哪几个路径，不再靠末尾断言的"数量不对"间接暴露。
+   - gate_data 是返回闭包的惰性 fixture，不碰磁盘，所以函数第一行的 fail 一定先于任何 load_data 执行（S 第二轮已核）。
+   - **数据根统一由一个 helper 给出（第二轮 小 3）**：`_gate_path(rel)` 读 `DATACHAT_GATE_DATA_ROOT`（默认是仓库根）。HAVE_DATA（:234）和 gate_data 里的 `os.path.join(ROOT, path)`（:297）都改用它。如果只改 HAVE_DATA，子进程单测会读到本机的真实数据，等于白测。
 3. **数量断言用 junitxml，不解析人类可读的输出（S 第一轮 三）**：
    - Windows runner 的默认 shell 是 pwsh，没有 grep；pytest 的文字输出格式也会随版本变化。
    - pytest 用精确的 node id 选中这 25 条：`tests/test_gate.py::test_oracle_solvable_on_dirty_data`，不用 `-k oracle`。`-k` 是子串匹配，今天只选中这一个测试是巧合，不是约束。
-   - 加 `--junitxml=gate.xml`，下一步用 `python -c` 解析 testsuite，断言 `{tests: 25, failures: 0, errors: 0, skipped: 0}`。不依赖 shell，两个 OS 用同一条命令。
+   - 加 `--junitxml=gate.xml`，下一步由 `scripts/gate/check_junit.py` 解析 testsuite。不依赖 shell，两个 OS 用同一条命令。
+   - **期望数不硬编码 25（第二轮 四）**：`expect = len(questions.QUESTIONS)`，断言 `{tests: expect, failures: 0, errors: 0, skipped: 0}`，失败时把 expect 和实际值都打出来。parametrize 和期望值取自同一个来源，这样抓的是"collection 掉了 params"，而不是"题目数变了"；以后加一题不用改 CI。
 4. **缓存覆盖整个 data/gate/，命中时完全跳过 build（S 第一轮 二）**：
    - `build_retail()`（:128-136）每次都会无条件 read_excel 再重写两份 CSV，而 to_csv 的输出会随 pandas 版本变化。如果缓存命中也照跑 build，pandas 一升级指纹就不符，CI 会红，但原因是依赖变了，不是代码坏了。
-   - 因此 job 写成 `if: steps.cache.outputs.cache-hit != 'true'` 时才运行 `build_gate_data.py`。命中时不下载、不 read_excel、不重写。173 MB 在仓库 10 GB 的缓存额度内。
-   - key：`gate-data-v1-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py') }}`。按 OS 分开，不用 enableCrossOsArchive。
+   - 因此 job 写成 `if: steps.restore.outputs.cache-hit != 'true'` 时才运行 `build_gate_data.py`。命中时不下载、不 read_excel、不重写。173 MB 在仓库 10 GB 的缓存额度内。
+   - **key 带上依赖和指纹（第二轮 二）**：`gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}`。
+     - 加 requirements：bump pandas 或 openpyxl 的那个 PR 会当场 miss、重跑 build，产物如果变了就红在这个 PR 上。作者在同一个 PR 里重登指纹，并在 DEVLOG 写明原因。如果不加，风险会一直藏着，直到某次缓存淘汰后，红在一个跟依赖无关的 PR 上。
+     - 加 fingerprints.py：重登指纹后缓存一定失效，不会出现旧产物去撞新常量的情况。
+     - 代价是每次依赖变动多下一次 90 MB、多跑一次 read_excel，是一次性的。
+   - **只用精确 key，不设 restore-keys（第二轮 小 1）**：部分命中时 cache-hit 是 false，build 照样会跑并重写产物，等于拿一套可能对不上的输入去撞指纹。
+   - **restore 和 save 拆开（第二轮 小 2）**：`actions/cache/restore` 和 `actions/cache/save` 分成两步。save 的条件是 `if: steps.restore.outputs.cache-hit != 'true' && steps.build.outcome == 'success' && steps.check.outcome == 'success'`，只看数据，不看 oracle 的结果。否则一个把 oracle 判红的 PR 每次 push 都要重下 90 MB。save 只在 --check 通过后才写，坏数据不会被冻进缓存。
+   - 按 OS 分开缓存，不用 enableCrossOsArchive。
 5. **独立的校验入口：`build_gate_data.py --check`（S 第一轮 一）**：
    - actions/cache 不可变，同一个 key 写入后不能覆盖。key 只能保证生成脚本没变，**不能保证缓存里的内容是对的**。
    - `--check` 只读 data/gate/ 下已有的文件，和期望指纹逐个比对：不下载、不写文件、不读 Excel（只对 xlsx 算哈希）。缺文件或指纹不符就 exit 1，并列出每个文件的期望值和实际值。
    - 缓存命中和未命中两条路径**都要**跑 `--check`：命中时校验现场；未命中时 build 之后再校验一次，顺带发现生成逻辑的漂移。上面那条"pandas 2.1 生成的旧 CSV 被命中"的路径，就是靠它拦下的。
-   - 两组常量分开放：`SOURCE_SHA12`（源文件：UCI xlsx 加 8 张 Olist 表，即现有的 `UCI_XLSX_SHA256` / `OLIST_FILES`，原样保留）和 `PRODUCT_SHA12`（产物：零售明细.csv、零售报表.csv，新登记，取值来自本地 pandas 3.0.6 生成的文件）。`build` 写完产物后也按 `PRODUCT_SHA12` 比对；pandas 升级导致产物变化时会在这里红，处理办法是重登指纹并在 DEVLOG 写明原因。
+   - **集合相等，不是"包含"（第二轮 三）**：中断的 run 留下的残余文件会被冻进缓存，而且永远不会被发现。所以 `--check` 要求 `data/gate/olist/` 的文件集合恰好等于 8 张 Olist 表，`retail/` 和 `retail_report/` 各恰好 1 个文件，`data/gate/` 顶层恰好是登记过的那几项（UCI xlsx 和三个子目录）。多出来的文件逐个列出，并 exit 1。
+   - 常量放进 `scripts/gate/fingerprints.py`（它也进 cache key）。分两组：`SOURCE_SHA12`（源文件：UCI xlsx 加 8 张 Olist 表，即现有的 `UCI_XLSX_SHA256` / `OLIST_FILES`，原样保留）和 `PRODUCT_SHA12`（产物：零售明细.csv、零售报表.csv，新登记，取值来自本地 pandas 3.0.6 生成的文件）。`build` 写完产物后也按 `PRODUCT_SHA12` 比对；pandas 升级导致产物变化时会在这里红，处理办法是重登指纹并在 DEVLOG 写明原因。
+   - **单份 PRODUCT_SHA12 同时服务两个 OS，这一点要实测（第二轮 一）**：
+     - 已经钉住的：`write_csv` 写死了 `lineterminator="\r\n"` 和 `encoding="gb18030"`，表头和合计行也是手拼的 `\r\n`；requirements 锁定 pandas 3.0.6、numpy 2.4.6、openpyxl 3.1.5（S 第二轮已核）。
+     - 唯一的隐式前提是 Excel 引擎：`read_excel`（:129）没指定 engine，现在能跑只是因为碰巧没装 calamine。改为 `pd.read_excel(ensure_uci(), engine="openpyxl")`。
+     - 首次运行两个 OS 时，把 `--check` 打印的实际值原样记进 DEVLOG 比对。如果两边不等，立刻把常量改成按 OS 分两份 `{"Linux": …, "Windows": …}`，**不去调参数让两边相等**。
+   - **--check 放在 pytest 之前（第二轮 小 4）**：缓存坏了只出一条人话，不用去 25 条失败里找原因。它和 REQUIRE 是两层：--check 管"数据对不对"，REQUIRE 管"pytest 自己不要降级成 skip"。
 6. **答案冻结检查（只在 ubuntu 上跑）**：先 `python scripts/gate/verify_gate.py`，再 `git diff --exit-code docs/gate/answers.json`。Windows 不跑，因为 autocrlf 签出会带来行尾噪声，而答案本身和平台无关。
 7. **上游不可达时直接红**：缓存未命中且 UCI 或 GitHub raw 不可达时，job 红在下载这一步，错误信息写明 URL。不重试成绿，也不降级成 skip，由 S 手动 re-run。
 8. **缓存预热和淘汰（S 第一轮 五）**：
@@ -861,34 +876,49 @@ gate-oracle:
   env: {PYTHONUTF8: "1", DATACHAT_REQUIRE_GATE_DATA: "1"}
   steps:
     - checkout / setup-python 3.12 / pip install -r requirements-dev.txt
-    - id: cache
-      uses: actions/cache@v4
-      with: {path: data/gate, key: gate-data-v1-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py') }}}
-    - if: steps.cache.outputs.cache-hit != 'true'
+    - id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: data/gate
+        key: gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}
+        # 不设 restore-keys
+    - id: build
+      if: steps.restore.outputs.cache-hit != 'true'
       run: python scripts/gate/build_gate_data.py
-    - run: python scripts/gate/build_gate_data.py --check
+    - id: check
+      run: python scripts/gate/build_gate_data.py --check
+    - if: steps.restore.outputs.cache-hit != 'true' && steps.build.outcome == 'success' && steps.check.outcome == 'success'
+      uses: actions/cache/save@v4
+      with: {path: data/gate, key: ${{ steps.restore.outputs.cache-primary-key }}}
     - run: python -m pytest tests/test_gate.py::test_oracle_solvable_on_dirty_data -q -p no:cacheprovider --junitxml=gate.xml
-    - run: python scripts/gate/check_junit.py gate.xml --expect 25      # 或内联 python -c，跨平台
+    - run: python scripts/gate/check_junit.py gate.xml      # 期望数 = len(QUESTIONS)
     - if: runner.os == 'Linux'
       run: python scripts/gate/verify_gate.py && git diff --exit-code docs/gate/answers.json
 ```
 
 **验收**：
 - 单测（tests/test_gate.py，CI 主矩阵上跑）：
-  - 子进程 pytest，`DATACHAT_GATE_DATA_ROOT` 指向空目录：
+  - 子进程 pytest，`DATACHAT_GATE_DATA_ROOT` 指向空目录（本机有真实数据时也必须报缺失，证明 helper 覆盖了 HAVE_DATA 和 fixture 两处）：
     - 设了 `REQUIRE`：返回码非 0，输出含"闸门数据缺失"，junit 里 failures=25、skipped=0。
     - 不设：skipped=25，返回码 0。
   - `--check`：
-    - 用合成小目录，登记一组假指纹（指纹常量可以注入）：全部吻合时退出 0；缺一个文件、改一个字节，都退出 1，并且输出里有期望值和实际值。
+    - 用合成小目录，登记一组假指纹（指纹常量可以注入）：
+      - 全部吻合时退出 0。
+      - 缺一个文件、改一个字节，都退出 1，并且输出里有期望值和实际值。
+      - 在 olist/、retail/ 或顶层多放一个文件，都退出 1，并且输出里点名那个多余的文件。
     - `--check` 不写文件（目录 mtime 和内容前后一致），不调用 fetch（打桩成抛异常）。
-  - junit 断言脚本：25/0/0/0 时退出 0；skipped=25 或 tests=24 时退出 1。
+  - junit 断言脚本：expect/0/0/0 时退出 0；skipped=expect、tests=expect-1、failures=1 时都退出 1，并且输出里有 expect 和实际值。期望值来自 `len(QUESTIONS)`，当前是 25。
 - CI 实测（本 PR 触发）：
   - gate-oracle 两个 OS 都是 25/0/0/0，ubuntu 上 answers.json 无 diff。
-  - 第一次缓存未命中、第二次 re-run 命中，各记一次耗时和 run id；命中那次的日志里没有"下载"。
+  - **每个 OS 跑两次（第二轮 五）**：
+    - 第一次缓存未命中，记 run id 和耗时，并把两个 OS 上 `--check` 打印的产物实际哈希原样记进 DEVLOG 比对。
+    - 第二次必须 `cache-hit == 'true'`，也记 run id 和耗时，日志里不能出现下载和 build 步骤。
+    - Windows 命中路径要专门验：`零售明细.csv` 这类非 ASCII 文件名经过一次 tar/zstd 往返后仍能被 `--check` 找到并对上指纹。如果解出来是乱码目录名，这里会红成"缺文件"加"多余文件"，一眼就能认出来。
+    - 第二次可以是 PR 上的 re-run，也可以是合并后 master 上的预热 run，两种都记。
 - 反向演示（只在 PR 分支上做，不合入）：
   - 临时改坏一个 oracle，确认 gate-oracle 变红，记下 run id 后 revert。
   - 临时改一个 `PRODUCT_SHA12`，确认 `--check` 变红，记下 run id 后 revert。
-- 合并后：在 master 上用 workflow_dispatch 预热一次，记下 run id。
+- 合并后：在 master 上用 workflow_dispatch 预热一次（master 作用域下第一次未命中、写入缓存），再 dispatch 一次确认命中。两次的 run id 都记下。
 - HANDOVER §3 改为"主矩阵 skip、gate-oracle 必跑"。
 
 **不做**：闸门真模型评测上 CI（要 Key，由 S 跑）；把数据放进 Release 或 LFS；用 3.11 跑 oracle；补 data_sha256（另立）。
