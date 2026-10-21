@@ -21,6 +21,6 @@ OLIST_FILES = {   # 上游文件名 -> sha256 前 12 位
 
 # ---- 产物：相对 data/gate 的路径 -> sha256 前 12 位（pandas 3.0.6 / openpyxl 3.1.5，engine=openpyxl）
 PRODUCT_SHA12 = {
-    "retail/零售明细.csv": "dbb0119d94e0",   # 反向演示，revert
+    "retail/零售明细.csv": "dbb0119d94e1",
     "retail_report/零售报表.csv": "ab8c674de110",
 }
