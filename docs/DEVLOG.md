@@ -1780,3 +1780,10 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - junit 期望值取 `len(QUESTIONS)`。
 - `DATACHAT_GATE_DATA_ROOT` 用一个 helper 统一提供，HAVE_DATA 和 fixture 共用。
 - 验收：每个 OS 各跑一次 miss 和一次 hit；Windows 上验证非 ASCII 文件名经过缓存往返后不变。
+**S 第三轮改定**：
+- verify_gate.py 改了之后，verify_script_sha256 必然会变。选 A：在同一个 PR 里重新生成 answers.json，只允许这一个字段变化，并在 PR 描述里贴出这行 diff。
+- check_junit.py 直接 `import questions`（scripts/gate 不是包）。
+- 两处 read_excel（build:129、verify:56）都写死 engine="openpyxl"。
+- 缓存命中时，用机器断言 build 被 skipped（shell: bash）。
+- 验收要区分两跑和三跑：第一跑 --check 红算采样，不算失败；master 预热同理。
+- timeout 改为 25；--check 只放在 gate-oracle 里；cancel-in-progress 的成本写明，不改。

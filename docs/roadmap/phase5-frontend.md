@@ -803,7 +803,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时：大半天。
 
-### G1 闸门 25 条 oracle 上 CI（S 10-21 第二轮评审改定；DEVLOG [51]）
+### G1 闸门 25 条 oracle 上 CI（S 10-21 第三轮评审改定；DEVLOG [51]）
 
 **问题**（代码证据）：
 - `tests/test_gate.py:234` 的 `HAVE_DATA` 在 data/gate/ 不存在时，`:302` 的 skipif 会把 25 条 `test_oracle_solvable_on_dirty_data` 全部跳过。
@@ -815,7 +815,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 - 25 条 oracle 用时 65 s，其中 36 s 是 fixture 读表。
 - `verify_gate.py` 重算标准答案用时 36 s，写出的 answers.json 和库里的**逐字节相同**（git status 干净，pandas 3.0.6）。
 
-**已定（S 10-21 第一、二轮评审改定）**：
+**已定（S 10-21 第一至三轮评审改定）**：
 1. **单独开一个 job：`gate-oracle`**，放在 tests.yml 里，不进现有的 pytest 矩阵。
    - 矩阵只有 `ubuntu-latest`、`windows-latest` × Python 3.12。S 本机是 Windows，GB18030 解码、中文路径、PYTHONUTF8 在 Windows 上的行为差异，都要在 Windows 上跑过才算数。3.11 和 3.12 的差异已经由主矩阵覆盖。
    - 主矩阵不动，那 25 条在主矩阵里照旧 skip。所以 CI 里会同时出现两个 25：**主矩阵 25 skipped，gate-oracle 25 passed**。HANDOVER §3 照这个写，避免有人看到主矩阵的 skip 就以为 G1 没落地。
@@ -834,7 +834,8 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 3. **数量断言用 junitxml，不解析人类可读的输出（S 第一轮 三）**：
    - Windows runner 的默认 shell 是 pwsh，没有 grep；pytest 的文字输出格式也会随版本变化。
    - pytest 用精确的 node id 选中这 25 条：`tests/test_gate.py::test_oracle_solvable_on_dirty_data`，不用 `-k oracle`。`-k` 是子串匹配，今天只选中这一个测试是巧合，不是约束。
-   - 加 `--junitxml=gate.xml`，下一步由 `scripts/gate/check_junit.py` 解析 testsuite。不依赖 shell，两个 OS 用同一条命令。
+   - 加 `--junitxml=gate.xml`，下一步由 `scripts/gate/check_junit.py` 解析 testsuite。
+   - **import 形状（第三轮 二）**：`scripts/` 和 `scripts/gate/` 都不是包（没有 `__init__.py`），`from scripts.gate import questions` 会抛 ModuleNotFoundError。改为用 `python scripts/gate/check_junit.py` 运行，此时 `sys.path[0]` 就是 scripts/gate，直接 `import questions`，和 run_gate.py:135 的写法一致。单测里按 test_gate.py 现有的 `spec_from_file_location` + `sys.path.insert(GATE)` 方式导入。不依赖 shell，两个 OS 用同一条命令。
    - **期望数不硬编码 25（第二轮 四）**：`expect = len(questions.QUESTIONS)`，断言 `{tests: expect, failures: 0, errors: 0, skipped: 0}`，失败时把 expect 和实际值都打出来。parametrize 和期望值取自同一个来源，这样抓的是"collection 掉了 params"，而不是"题目数变了"；以后加一题不用改 CI。
 4. **缓存覆盖整个 data/gate/，命中时完全跳过 build（S 第一轮 二）**：
    - `build_retail()`（:128-136）每次都会无条件 read_excel 再重写两份 CSV，而 to_csv 的输出会随 pandas 版本变化。如果缓存命中也照跑 build，pandas 一升级指纹就不符，CI 会红，但原因是依赖变了，不是代码坏了。
@@ -854,25 +855,33 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
    - 常量放进 `scripts/gate/fingerprints.py`（它也进 cache key）。分两组：`SOURCE_SHA12`（源文件：UCI xlsx 加 8 张 Olist 表，即现有的 `UCI_XLSX_SHA256` / `OLIST_FILES`，原样保留）和 `PRODUCT_SHA12`（产物：零售明细.csv、零售报表.csv，新登记，取值来自本地 pandas 3.0.6 生成的文件）。`build` 写完产物后也按 `PRODUCT_SHA12` 比对；pandas 升级导致产物变化时会在这里红，处理办法是重登指纹并在 DEVLOG 写明原因。
    - **单份 PRODUCT_SHA12 同时服务两个 OS，这一点要实测（第二轮 一）**：
      - 已经钉住的：`write_csv` 写死了 `lineterminator="\r\n"` 和 `encoding="gb18030"`，表头和合计行也是手拼的 `\r\n`；requirements 锁定 pandas 3.0.6、numpy 2.4.6、openpyxl 3.1.5（S 第二轮已核）。
-     - 唯一的隐式前提是 Excel 引擎：`read_excel`（:129）没指定 engine，现在能跑只是因为碰巧没装 calamine。改为 `pd.read_excel(ensure_uci(), engine="openpyxl")`。
+     - 唯一的隐式前提是 Excel 引擎：read_excel 没指定 engine，现在能跑只是因为碰巧没装 calamine。**两处都写死 `engine="openpyxl"`（第三轮 四）**：`build_gate_data.py:129`（产物）和 `verify_gate.py:56`（标准答案）。产物和答案必须用同一个引擎；指纹检查只看产物，如果只改一处，引擎有差异的那天会出现产物对、答案错的情况，而且发现不了。
      - 首次运行两个 OS 时，把 `--check` 打印的实际值原样记进 DEVLOG 比对。如果两边不等，立刻把常量改成按 OS 分两份 `{"Linux": …, "Windows": …}`，**不去调参数让两边相等**。
    - **--check 放在 pytest 之前（第二轮 小 4）**：缓存坏了只出一条人话，不用去 25 条失败里找原因。它和 REQUIRE 是两层：--check 管"数据对不对"，REQUIRE 管"pytest 自己不要降级成 skip"。
 6. **答案冻结检查（只在 ubuntu 上跑）**：先 `python scripts/gate/verify_gate.py`，再 `git diff --exit-code docs/gate/answers.json`。Windows 不跑，因为 autocrlf 签出会带来行尾噪声，而答案本身和平台无关。
+   - **本 PR 的合法变更（第三轮 一，选 A）**：`verify_gate.py:175-176` 会把脚本自身的哈希写进 answers.json 的 `verify_script_sha256`。本步要给 verify_gate.py 加 engine 参数，这个字段一定会变；如果不处理，冻结检查在本 PR 自己身上就会红，而且看起来和"标准答案被改了"一模一样。
+   - 做法：同一个 PR 里重新生成 answers.json 并提交，**只允许 `verify_script_sha256` 这一个字段变化**。PR 描述里贴出这一行的 diff，本地用 `git diff --word-diff docs/gate/answers.json` 确认只有这一处改动。其余字段（answers、sources、pandas、questions_sha256）必须逐字节不变。
+   - 不选 B（剔掉这个字段再比对），因为那样"重跑一遍就能过"会变成默认路径，等于给掩盖改动开了口子。
+   - 已有的覆盖：answers.json 本身就记录了 `pandas` 版本和 `sources`（9 个源文件的指纹，olist 由 os.listdir 枚举），所以源文件身份和 pandas 版本已经被 ubuntu 上的冻结检查间接管住，不需要再加机制。
 7. **上游不可达时直接红**：缓存未命中且 UCI 或 GitHub raw 不可达时，job 红在下载这一步，错误信息写明 URL。不重试成绿，也不降级成 skip，由 S 手动 re-run。
 8. **缓存预热和淘汰（S 第一轮 五）**：
    - 作用域：PR 的 run 能读 master 的缓存；PR 自己写的缓存只给该 PR 后续的 run 用，不会污染 master；7 天没访问就自动淘汰。
    - 操作：G1 实现合并后，**先在 master 上用 workflow_dispatch 跑一次预热**，在日志里确认 "Cache saved"，run id 记进 DEVLOG。
    - 预期表现，写进 docs/gate/README.md：master 冷了一周以上，下一个 PR 的 gate-oracle 会重新下载，首次大约 5–8 分钟（Windows 更慢）；如果这时 UCI 挂了，这个 job 会红。看到这种红，先看是不是下载步骤，不用去查代码。
 9. **许可**：Olist 是 CC BY-NC-SA 4.0，UCI 是 CC BY 4.0。数据只在 runner 上用于评测：不入库、不上传 artifact（失败时也不传 data/gate/）、不放 LFS 或 Release。actions cache 只对本仓库的 workflow 可见。边界：**如果 datachat 将来有商业用途，NC 条款要重新审**。这几条写进 docs/gate/README.md。
-10. **超时 20 分钟（S 第一轮 小 1）**：Windows 冷路径要算上下载 90 MB（UCI 在境外）、pip、读 54 万行 read_excel、写两份 CSV，估计 6–8 分钟，UCI 不稳时可能超过 12 分钟。超时设大只是晚一点报警，设小了会随机变红。
-11. **顺手修**：.gitignore 里 data/gate 的注释"约 110 MB"改为实测的 173 MB（本 PR 已改）。
+10. **超时 25 分钟（第三轮 六，和主 job 一致）**：Windows 冷路径要依次跑 pip install -r requirements-dev.txt（matplotlib、numpy、cryptography 的 wheel）、下载 90 MB（UCI 在境外）、read_excel 读 54 万行、oracle、抄表，估计 10–14 分钟，UCI 不稳时会顶格。超时设大只是晚 5 分钟报警，设小了会随机变红。
+    - `--check` **只放在 gate-oracle job 里**，不进主矩阵。主矩阵没有 data/gate，加进去 4 个 job 会全红。主矩阵保持"25 skipped"是设计，不是缺陷。
+11. **concurrency 的预期成本（第三轮 七，不改，只写明）**：tests.yml 开了 `cancel-in-progress: true`（:11-13），feebcb7 那次 run 就是这样被取消的。
+    - 同一分支连续 push 时，中间那次的 gate-oracle 结果拿不到，只看最后一次。
+    - 被取消的 run 不会执行 save，所以频繁 push 的分支可能一直存不下缓存。PR 的缓存本来也不给 master 用，所以损失只是"这个分支下次再下 90 MB"。
+12. **顺手修**：.gitignore 里 data/gate 的注释"约 110 MB"改为实测的 173 MB（本 PR 已改）。
 
 **job 草图**：
 ```yaml
 gate-oracle:
   strategy: {fail-fast: false, matrix: {os: [ubuntu-latest, windows-latest]}}
   runs-on: ${{ matrix.os }}
-  timeout-minutes: 20
+  timeout-minutes: 25
   env: {PYTHONUTF8: "1", DATACHAT_REQUIRE_GATE_DATA: "1"}
   steps:
     - checkout / setup-python 3.12 / pip install -r requirements-dev.txt
@@ -887,6 +896,10 @@ gate-oracle:
       run: python scripts/gate/build_gate_data.py
     - id: check
       run: python scripts/gate/build_gate_data.py --check
+    - name: 命中时必须跳过 build
+      if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      run: test "${{ steps.build.outcome }}" = "skipped"
     - if: steps.restore.outputs.cache-hit != 'true' && steps.build.outcome == 'success' && steps.check.outcome == 'success'
       uses: actions/cache/save@v4
       with: {path: data/gate, key: ${{ steps.restore.outputs.cache-primary-key }}}
@@ -895,6 +908,8 @@ gate-oracle:
     - if: runner.os == 'Linux'
       run: python scripts/gate/verify_gate.py && git diff --exit-code docs/gate/answers.json
 ```
+
+**命中断言（第三轮 五）**："命中时没跑 build"要由机器断言，不靠人看日志。上面那步 `test steps.build.outcome = skipped` 显式写了 `shell: bash`，这样 Windows runner 上也能跑（默认 shell 是 pwsh）。如果将来 if 写错、build 又跑了一遍，重写出的产物和缓存里一致，`--check` 照样绿，只有这一步能发现缓存其实没起作用。
 
 **验收**：
 - 单测（tests/test_gate.py，CI 主矩阵上跑）：
@@ -910,15 +925,21 @@ gate-oracle:
   - junit 断言脚本：expect/0/0/0 时退出 0；skipped=expect、tests=expect-1、failures=1 时都退出 1，并且输出里有 expect 和实际值。期望值来自 `len(QUESTIONS)`，当前是 25。
 - CI 实测（本 PR 触发）：
   - gate-oracle 两个 OS 都是 25/0/0/0，ubuntu 上 answers.json 无 diff。
-  - **每个 OS 跑两次（第二轮 五）**：
-    - 第一次缓存未命中，记 run id 和耗时，并把两个 OS 上 `--check` 打印的产物实际哈希原样记进 DEVLOG 比对。
-    - 第二次必须 `cache-hit == 'true'`，也记 run id 和耗时，日志里不能出现下载和 build 步骤。
+  - **每个 OS：两次 run 或三次 run（第二、三轮 五/三）**。`PRODUCT_SHA12` 先按本机登记，而 save 的条件是"未命中、build 成功、--check 成功"，--check 失败时后面的步骤默认跳过。所以分两种情况：
+    | 情况 | run 1 | run 2 | run 3 |
+    |---|---|---|---|
+    | 本机登记的值和 runner 字节一致 | 未命中，绿，存缓存 | **命中**，绿 | — |
+    | 不一致 | 未命中，`--check` 红，不存缓存。**这次红是采样，不算失败** | 按 run 1 的输出重登，或拆成按 OS 两份（会改 fingerprints.py，key 跟着变），然后未命中，绿，存缓存 | **命中**，绿 |
+    - 每一跑都记 run id 和耗时。把两个 OS 上 `--check` 打印的产物实际哈希原样记进 DEVLOG 比对。
+    - 最后一跑必须 `cache-hit == 'true'`，并且"命中时必须跳过 build"这一步是绿的。
     - Windows 命中路径要专门验：`零售明细.csv` 这类非 ASCII 文件名经过一次 tar/zstd 往返后仍能被 `--check` 找到并对上指纹。如果解出来是乱码目录名，这里会红成"缺文件"加"多余文件"，一眼就能认出来。
-    - 第二次可以是 PR 上的 re-run，也可以是合并后 master 上的预热 run，两种都记。
+    - 命中那一跑可以是 PR 上的 re-run，也可以是合并后 master 上的预热 run，两种都记。
 - 反向演示（只在 PR 分支上做，不合入）：
   - 临时改坏一个 oracle，确认 gate-oracle 变红，记下 run id 后 revert。
   - 临时改一个 `PRODUCT_SHA12`，确认 `--check` 变红，记下 run id 后 revert。
-- 合并后：在 master 上用 workflow_dispatch 预热一次（master 作用域下第一次未命中、写入缓存），再 dispatch 一次确认命中。两次的 run id 都记下。
+- 合并后：在 master 上用 workflow_dispatch 预热，第一次未命中并写入缓存，再 dispatch 一次确认命中，run id 都记下。PR 上已经把指纹定好了，正常是两次；如果 master 的第一次也红了（采样），就按上表走到第三次。
+- answers.json：本 PR 的 diff 只能是 `verify_script_sha256` 一行，PR 描述贴出这一行，ubuntu 上的冻结检查要绿。
+- `check_junit.py` 用 `python scripts/gate/check_junit.py` 实际跑一次，exit 0（证明裸 import 可用）。
 - HANDOVER §3 改为"主矩阵 skip、gate-oracle 必跑"。
 
 **不做**：闸门真模型评测上 CI（要 Key，由 S 跑）；把数据放进 Release 或 LFS；用 3.11 跑 oracle；补 data_sha256（另立）。
