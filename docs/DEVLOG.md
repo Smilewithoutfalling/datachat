@@ -1806,4 +1806,13 @@ S 10-20 说"先去修 49"。这次没有单独开方案 PR：规则和验收一�
 - fixture 改回写死 ROOT 且去掉首行 fail → 同一条红（子进程读到本机真数据、25 passed）：证明 helper 两处都要。
 - check 不收集多余文件 → `test_g1_check_rejects` 的 4 个 extra 用例红。
 
-**实测**：本地 `--check` 11 个文件全 ok；build（缓存未命中路径，本机已有源文件）30 s，产物指纹与登记一致；verify_gate 27 s；REQUIRE=1 下 oracle 25 passed + check_junit exit 0。CI 的 miss/hit 两跑（或三跑）run id 与两 OS 产物哈希待 PR 上回填。
+**实测**：本地 `--check` 11 个文件全 ok；build（缓存未命中路径，本机已有源文件）30 s，产物指纹与登记一致；verify_gate 27 s；REQUIRE=1 下 oracle 25 passed + check_junit exit 0。CI（PR #65，tests run 39533487774）：
+- **走的是两跑分支**：attempt 1 缓存未命中，两个 OS 都绿。ubuntu 的 gate-oracle job 119004615630 用时 2m22s，windows 的 job 119004616113 用时 3m05s，两边都打出 "Cache saved"。
+- **两个 OS 的产物哈希相同**：零售明细 dbb0119d94e1，零售报表 ab8c674de110，都等于本机登记的值。所以单份 PRODUCT_SHA12 成立，不用拆成每个 OS 一份。
+- attempt 2 用 re-run 触发，两个 OS 都命中缓存：ubuntu job 119007564605 用时 1m41s，windows job 119007564737 用时 1m59s。"命中时必须跳过 build" 这一步执行的是 `test "skipped" = "skipped"`，结果为绿。Windows 上非 ASCII 文件名经过一次缓存往返后，`--check` 11 个文件全部 ok。
+
+**反向演示**（都只在 PR 分支上做，已 revert，squash 后不进 master）：
+- **改坏 s01 的 oracle**（b79dddf，run 39535329095）：两个 OS 的 gate-oracle 都变红。日志依次出现 `FAILED …[s01]`、`1 failed, 24 passed`，check_junit 打出"实际 failures=1"并 exit 1。这次命中了缓存。
+- **改产物指纹**（7ec10bc，run 39535612173）：两个 OS 都变红，报错为 `✗ 指纹不符：retail/零售明细.csv 期望 dbb0119d94e0 实际 dbb0119d94e1`。
+  - 和方案的偏离：指纹改动会进 cache key，所以这次必然未命中，红在 build 末尾的同一个 `check()` 上，独立的 --check 步骤是 skipped。缓存命中路径上 --check 的拒绝逻辑，由 `test_g1_check_rejects` 的 6 个用例覆盖；常量改了却仍然命中的情况，按设计不会出现。
+  - 同一次 run 里 save 也是 skipped，说明坏数据没有写进缓存。
