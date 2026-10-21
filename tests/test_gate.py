@@ -308,3 +308,313 @@ def test_oracle_solvable_on_dirty_data(q, gate_data, chart_path):
     assert err is None, err
     match = run_gate.auto_judge(result, q, ANSWERS["answers"][q["id"]])
     assert match is not None, f"{q['id']}: {result!r}"
+
+
+# ------------------------------------------------------------------ 4. A1 错题复跑（m13r）
+import subprocess
+from types import SimpleNamespace
+
+ENV = {"git_sha": "abc1234", "agent": "react", "use_dictionary": True, "model": "deepseek-chat",
+       "temperature": 0.0, "base_url_host": "api.deepseek.com", "python": "3.12.0", "pandas": "2.2.3"}
+
+
+def _rerun_report(tmp_path, wrong, agent="react", name="r.json", main_kind=None, **extra):
+    """合成主报告：题号取真实的 25 题（复跑要从 questions.py / answers.json 取题面），人工已判完。"""
+    rows = []
+    for q in questions.QUESTIONS:
+        ok = q["id"] not in wrong
+        rows.append({"id": q["id"], "group": q["group"], "executed": True, "match": ok,
+                     "error_kind": (main_kind or {}).get(q["id"]),
+                     "human_correct": ok, "failure_class": None if ok else 2})
+    data = {**ENV, "agent": agent, "labeled_by": "S 终审通过", "cases": rows, **extra}
+    p = tmp_path / name
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return str(p)
+
+
+def _res(match=True, executed=True, error_kind=None):
+    """analyze 的桩：result 里带上希望比较器给出的 match（auto_judge 一并打桩）。"""
+    return SimpleNamespace(executed=executed, error_kind=error_kind, error=None if executed else "x",
+                           answer="答", result={"want": match} if executed else None, code="result = 1",
+                           attempts=1, usage=SimpleNamespace(total_tokens=1, reported=True), warnings=[],
+                           unverified_numbers=[], charts=[], chart_calls=0, chart_errors=[],
+                           chart_internal_errors=[], charts_discarded=0, steps=[])
+
+
+@pytest.fixture
+def stub(monkeypatch):
+    """按题号排好的结果队列；calls 记录每次调用的题号。"""
+    state = SimpleNamespace(queue={}, default=lambda: _res(True), calls=[], env=dict(ENV))
+    qtext = {q["question"]: q["id"] for q in questions.QUESTIONS}
+
+    def fake_analyze(path, question, **kw):
+        qid = qtext[question]
+        state.calls.append(qid)
+        q = state.queue.get(qid)
+        r = q.pop(0) if q else state.default()
+        if isinstance(r, BaseException):
+            raise r
+        return r
+
+    monkeypatch.setattr(run_gate, "_analyze", lambda: fake_analyze)
+    monkeypatch.setattr(run_gate, "_current_env", lambda agent, use_dict: (None, {**state.env, "agent": agent,
+                                                                                  "use_dictionary": use_dict}))
+    monkeypatch.setattr(run_gate, "auto_judge",
+                        lambda actual, q, ans: actual.get("want") if isinstance(actual, dict) else None)
+    return state
+
+
+def _rr(path, **kw):
+    kw.setdefault("agent", "react")
+    kw.setdefault("use_dictionary", True)
+    return run_gate.rerun(path, "m13r", **kw)
+
+
+def _load_json(path):
+    return json.load(open(path, encoding="utf-8"))
+
+
+def _sign(path, value=True, ids=None, failure_class=None, only_attempts=None):
+    d = _load_json(path)
+    for r in d["reruns"]:
+        if r["valid"] and (ids is None or r["id"] in ids) and (only_attempts is None or r["attempt"] in only_attempts):
+            r["human_correct"] = value
+            if value is False and failure_class:
+                r["failure_class"] = failure_class
+    json.dump(d, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+
+
+def _exit_code(excinfo):
+    return excinfo.value.code
+
+
+def test_rerun_kinds_whitelist_covers_error_kinds():
+    from app.core.events import ERROR_KINDS
+    valid, invalid = set(run_gate.RERUN_VALID_KINDS), set(run_gate.RERUN_INVALID_KINDS)
+    assert valid | invalid == set(ERROR_KINDS) | {None}
+    assert not valid & invalid
+
+
+def test_m13r_agents_equal_m13():
+    """m13r 复制 m13 的 agents：两份来源用断言钉住。"""
+    m13, _ = run_gate.load_profile("m13")
+    m13r, _ = run_gate.load_profile("m13r")
+    assert m13r["agents"] == m13["agents"] and m13r["rerun"] == {"times": 3, "max_makeup": 1}
+
+
+def test_rerun_selection(tmp_path, stub):
+    """只复跑名单外错题；allowed_fail 里的错题（s02）、意外答对（m10）都不复跑；--only 补进人工判对的题。"""
+    p = _rerun_report(tmp_path, {"s02", "s04", "m01"})
+    v = _rr(p)
+    assert sorted(set(stub.calls)) == ["m01", "s04"] and len(stub.calls) == 6
+    assert v["single_rerun_candidates"] == ["s04"] and v["multi_rerun_candidates"] == ["m01"]
+    assert "m10" not in stub.calls
+    stub.calls.clear()
+    _rr(p, only=["m05"], reason="比较器漏判")
+    assert stub.calls == ["m05"] * 3                    # 已复跑的 s04 / m01 不重跑
+
+
+def test_rerun_refuses_undeclared_repeat_and_only_replaces(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04"})
+    _rr(p)
+    old = [r for r in _load_json(p)["reruns"] if r["id"] == "s04"]
+    with pytest.raises(SystemExit) as e:
+        _rr(p)
+    assert _exit_code(e) == 3
+    with pytest.raises(SystemExit) as e:
+        _rr(p, only=["s04"])                            # 没有 --reason
+    assert _exit_code(e) == 3
+    stub.default = lambda: _res(False)
+    _rr(p, only=["s04"], reason="限额用完后充值重跑")
+    d = _load_json(p)
+    assert [r["match"] for r in d["reruns"] if r["id"] == "s04"] == [False] * 3
+    h = d["rerun_history"]
+    assert len(h) == 1 and h[0]["id"] == "s04" and h[0]["reason"] == "限额用完后充值重跑"
+    assert h[0]["replaced_attempts"] == old and h[0]["git_sha"] == ENV["git_sha"]
+
+
+def test_rerun_interrupted_keeps_complete_rows_and_resumes(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04"})
+    stub.queue["s04"] = [_res(True), KeyboardInterrupt()]
+    with pytest.raises(KeyboardInterrupt):
+        _rr(p)
+    d = _load_json(p)                                   # 原子落盘：完整 1 行，可读
+    assert [r["attempt"] for r in d["reruns"]] == [1]
+    assert not os.path.exists(p + ".tmp")
+    v = run_gate.verdict(p, "m13r")
+    assert v["single_rerun_invalid"][0]["valid"] == 1 and v["exit_code"] == 2
+    _rr(p, only=["s04"], reason="进程中断后续跑")
+    d = _load_json(p)
+    assert [r["attempt"] for r in d["reruns"]] == [1, 2, 3] and len(d["rerun_history"][0]["replaced_attempts"]) == 1
+
+
+def test_rerun_attempt_counts(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04", "s05", "s06"})
+    stub.queue["s05"] = [_res(error_kind="llm", executed=False), _res(), _res(), _res()]
+    stub.queue["s06"] = [_res(error_kind="cancelled", executed=False), _res(),
+                         _res(error_kind="dataset", executed=False), _res()]
+    v = _rr(p)
+    assert stub.calls.count("s04") == 3                 # 全有效：不补跑
+    assert stub.calls.count("s05") == 4                 # 1 次无效：补 1 次
+    assert stub.calls.count("s06") == 4                 # 补后仍不足 3 次有效：停在 4 次
+    inv = v["single_rerun_invalid"]
+    assert [x["id"] for x in inv] == ["s06"] and inv[0]["valid"] == 2 and inv[0]["total"] == 4
+    assert v["exit_code"] == 2
+
+
+_real_auto_judge = run_gate.auto_judge
+
+
+def test_rerun_match_tristate(tmp_path, stub, monkeypatch):
+    """executed=False：有效、记为答错；executed=True 但比较器崩了（match=None）：无效，补跑。"""
+    p = _rerun_report(tmp_path, {"s04", "s05"})
+    stub.queue["s04"] = [_res(executed=False, error_kind="execution"), _res(), _res()]
+    _rr(p)
+    rows = [r for r in _load_json(p)["reruns"] if r["id"] == "s04"]
+    assert len(rows) == 3 and rows[0]["valid"] is True and rows[0]["match"] is None
+
+    import app.eval.runner as runner
+
+    def boom(*a, **k):
+        raise RuntimeError("比较器崩了")
+    monkeypatch.setattr(runner, "score_detail", boom)
+    monkeypatch.setattr(run_gate, "auto_judge", _real_auto_judge)
+    stub.queue["s05"] = [_res(), _res(), _res(), _res()]
+    _rr(p, only=["s05"], reason="测比较器崩溃")
+    rows = [r for r in _load_json(p)["reruns"] if r["id"] == "s05"]
+    assert len(rows) == 4 and all(r["executed"] and r["match"] is None and not r["valid"] for r in rows)
+
+
+
+def test_rerun_verdict_requires_signatures(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04", "s05"})
+    stub.queue["s05"] = [_res(), _res(False), _res()]
+    v = _rr(p)                                          # --rerun 直接写 verdict
+    assert _load_json(p)["verdict"]["exit_code"] == 2
+    pend = v["single_pending_review"]
+    assert [x["id"] for x in pend] == ["s05", "s04"] and pend[0]["priority"] and not pend[1]["priority"]
+    assert v["single_regressions"] == [] and v["single_flaky"] == [] and v["exit_code"] == 2
+
+    _sign(p, True, ids={"s04"})
+    _sign(p, True, ids={"s05"}, only_attempts={1})
+    v = run_gate.verdict(p, "m13r")                     # 只签了一部分：s05 仍待签
+    assert [x["id"] for x in v["single_flaky"]] == ["s04"] and v["single_pending_review"][0]["unsigned"] == [2, 3]
+    assert v["exit_code"] == 2
+
+    _sign(p, True, ids={"s05"})                         # match=false 那行人工签 true（B66/B68）→ 波动
+    v = run_gate.verdict(p, "m13r")
+    assert {x["id"] for x in v["single_flaky"]} == {"s04", "s05"} and v["exit_code"] == 0
+    assert v["regression_verdict"].startswith("已复跑的 2 题里没有回归")
+    f = {x["id"]: x for x in v["single_flaky"]}
+    assert f["s04"]["flaky_cause"] == "model" and f["s04"]["observed_pass_rate"] == "3/4"
+
+
+def test_rerun_signed_false_is_regression(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04"})
+    _rr(p)
+    _sign(p, True)
+    _sign(p, False, only_attempts={2})
+    with pytest.raises(SystemExit) as e:                # 判错的复跑行缺 failure_class
+        run_gate.verdict(p, "m13r")
+    assert _exit_code(e) == 3
+    _sign(p, False, only_attempts={2}, failure_class=3)
+    v = run_gate.verdict(p, "m13r")
+    assert v["single_regressions"] == ["s04"] and v["exit_code"] == 1
+    assert v["regression_verdict"].startswith("有回归")
+
+
+def test_rerun_invalid_rows_need_no_signature_and_flaky_cause_env(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04"}, main_kind={"s04": "llm"})
+    stub.queue["s04"] = [_res(), _res(executed=False, error_kind="llm"), _res(), _res()]
+    _rr(p)
+    _sign(p, True)                                      # 只签有效行
+    d = _load_json(p)
+    assert sum(r["human_correct"] is None for r in d["reruns"]) == 1
+    v = run_gate.verdict(p, "m13r")
+    assert v["single_flaky"] == [{"id": "s04", "observed_pass_rate": "3/4", "flaky_cause": "env"}]
+    assert v["exit_code"] == 0
+
+
+def test_m13r_without_reruns_is_pending(tmp_path):
+    v = run_gate.verdict(_rerun_report(tmp_path, {"s04"}), "m13r")
+    assert v["regression_verdict"].startswith("待复跑：python scripts/gate/run_gate.py --rerun")
+    assert "--profile m13r" in v["regression_verdict"] and v["exit_code"] == 2
+    assert v["rerun_false_negative"] == {"p=0.5": "12.5%", "p=0.7": "34.3%"}
+    v = run_gate.verdict(_rerun_report(tmp_path, {"s02"}, name="ok.json"), "m13r")   # 只有名单内错题
+    assert v["exit_code"] == 0 and v["single_regressions"] == []
+
+
+@pytest.mark.parametrize("key,value", [("git_sha", "def5678"), ("agent", "workflow"), ("use_dictionary", False),
+                                       ("model", "other"), ("temperature", 0.7), ("base_url_host", "x.com"),
+                                       ("python", "3.11.9"), ("pandas", "2.1.0")])
+def test_rerun_env_mismatch_refused(tmp_path, stub, key, value):
+    p = _rerun_report(tmp_path, {"s04"}, **({} if key == "agent" else {key: value}))
+    kw = {"agent": "workflow"} if key == "agent" else {}
+    if key == "use_dictionary":
+        kw = {"use_dictionary": True}
+    with pytest.raises(SystemExit) as e:
+        _rr(p, **kw)
+    assert _exit_code(e) == 3 and stub.calls == []
+
+
+def test_rerun_dirty_sha(tmp_path, stub, capsys):
+    p = _rerun_report(tmp_path, {"s04"})
+    stub.env["git_sha"] = ENV["git_sha"] + "?"
+    _rr(p)
+    assert _load_json(p)["rerun_meta"]["sha_verified"] is False and "警告" in capsys.readouterr().err
+    p2 = _rerun_report(tmp_path, {"s04"}, name="r2.json")
+    with pytest.raises(SystemExit) as e:
+        _rr(p2, require_sha=True)
+    assert _exit_code(e) == 3
+
+
+def test_rerun_requires_labeled_main_report(tmp_path, stub):
+    p = _rerun_report(tmp_path, {"s04"})
+    d = _load_json(p)
+    d["cases"][0]["human_correct"] = None
+    json.dump(d, open(p, "w", encoding="utf-8"))
+    with pytest.raises(SystemExit) as e:
+        _rr(p)
+    assert _exit_code(e) == 3 and stub.calls == []
+
+
+def _cli(*args):
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run([sys.executable, os.path.join(GATE, "run_gate.py"), *args], cwd=ROOT, env=env,
+                          capture_output=True).returncode
+
+
+def test_cli_exit_codes(tmp_path):
+    """0 / 1 / 2 / 3 各一；m13 有回归仍是 0（有意不改既有闸门的 CI 行为）。"""
+    reg = _rerun_report(tmp_path, {"s04"}, name="reg.json")
+    assert _cli("--verdict", reg, "--profile", "m13") == 0
+    assert _cli("--verdict", reg, "--profile", "m13r") == 2                 # 待复跑
+    d = _load_json(reg)
+    d["reruns"] = [{"id": "s04", "group": "single", "attempt": i, "valid": True, "executed": True, "match": True,
+                    "error_kind": None, "human_correct": True, "failure_class": None} for i in (1, 2, 3)]
+    flaky = tmp_path / "flaky.json"
+    flaky.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert _cli("--verdict", str(flaky), "--profile", "m13r") == 0
+    d["reruns"][1].update(human_correct=False, failure_class=3)
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert _cli("--verdict", str(bad), "--profile", "m13r") == 1
+    d["cases"][0]["human_correct"] = None
+    todo = tmp_path / "todo.json"
+    todo.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert _cli("--verdict", str(todo), "--profile", "m13") == 3            # 前提失败：原来是 1
+    assert _cli("--verdict", reg, "--profile", "nope") == 3
+    assert _cli("--verdict", reg) == 3
+
+
+@pytest.mark.parametrize("name", ["gate_20261014_162428_react.json", "gate_20261014_163133_workflow.json"])
+def test_m13_baseline_verdict_unchanged(tmp_path, name):
+    """A1 不动 m13：两份参照基线重跑 verdict，除门槛文件哈希（thresholds.json 加了 m13r）外逐字节一致。"""
+    src = json.load(open(os.path.join(ROOT, "docs", "eval", name), encoding="utf-8"))
+    p = tmp_path / name
+    p.write_text(json.dumps(src, ensure_ascii=False), encoding="utf-8")
+    v = run_gate.verdict(str(p), "m13")
+    old = dict(src["verdict"])
+    v, old = {k: x for k, x in v.items() if k != "thresholds_sha256"}, {k: x for k, x in old.items()
+                                                                         if k != "thresholds_sha256"}
+    assert json.dumps(v, ensure_ascii=False, sort_keys=False) == json.dumps(old, ensure_ascii=False, sort_keys=False)

@@ -25,5 +25,12 @@
     "multi": {"allowed_fail": [], "why": {}}
    }
   }
+  },
+ "m13r": {
+  "kind": "regression",
+  "source": "DEVLOG [49] A1 方案（S 2026-10-20 三轮评审定）：m13 门槛 + 名单外错题复跑",
+  "rule": "agents 与 m13 完全相同（tests 钉住）；名单外错题复跑 times 次（无效的最多补 max_makeup 次），有效复跑人工全签 true 记波动，有一次 false 记回归；比较器 match 只决定人工先看哪几行",
+  "rerun": {"times": 3, "max_makeup": 1},
+  "agents": {"react": {"single": {"allowed_fail": ["s02"], "why": {"s02": "② 缺失哨兵（B65，阶段 7）"}}, "multi": {"allowed_fail": ["m10"], "why": {"m10": "⑥ 拒答失当（B63），模型波动"}}}, "workflow": {"single": {"allowed_fail": ["s02", "s04", "s09", "s12"], "why": {"s02": "② 缺失哨兵", "s04": "② 合计行", "s09": "③ 取消单未冲减", "s12": "② 缺失哨兵"}}, "multi": {"allowed_fail": [], "why": {}}}}
  }
 }
