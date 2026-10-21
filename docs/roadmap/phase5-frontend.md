@@ -705,7 +705,7 @@ v2 才可达的字段（link、formatter、aria 等）留到层 2 再测。
 
 估时 1.5 天，一个 PR。
 
-### F5：S 验收走查（草案，待 S 评审；DEVLOG [55]）
+### F5：S 验收走查（已定，S 10-21 评审通过；DEVLOG [55]）
 
 F5 不是回归清单，而是一次真 Key 的手动走查加观感判断，预计一小时内跑完。32 条 e2e 已经覆盖的内容这里不重抄，只列"看什么、什么算过、截图留哪"。启动命令：`python -m app.server --open`。
 
@@ -723,14 +723,19 @@ F5 不是回归清单，而是一次真 Key 的手动走查加观感判断，预
 
 ①的输入限制：上传框是 `accept=".csv" multiple`（views/Shell.tsx:157），xlsx / xls 传不进来。验 GBK 要用 Excel「另存为 CSV」导出的文件。解码顺序是 BOM → utf-8 严格 → gb18030 严格（csv_io.py），GBK 没问题。**已知局限**：Big5（繁体）会被 gb18030 静默读成错字，不报错。手上有繁体表的话顺便验一下，并在走查记录里定要不要处理（处理就单独立项，不在 F5 里修）。
 
-⑤的后端延迟取法：秒表会把人的反应时间和网络往返都算进去，所以不用。改用 DevTools Network：取 `POST /messages/{id}/cancel` 的完成时刻，和 EventStream 里 error(kind=cancelled) 的到达时刻，两者之差就是后端延迟。如果该轮事件已落库，可以用 `GET /sessions/{id}` 返回的 events[].ts 交叉核对。
+⑤的后端延迟取法：不用秒表，因为秒表会把人的反应时间和网络往返都算进去。
+- 库里的 ts 是字符串。来源是 `round(time.time(), 3)`（events.py:65），入库时用 `str(ev.ts)`（app.py:450），所以它是 **epoch 秒、带 3 位小数的墙钟时间**，比较前要先转成数字。
+- cancel 本身不是一个事件，也不落库：POST /cancel 只置位，没有记时间。所以单靠 `GET /sessions/{id}` 拿不到两条 ts 来相减，库里只有 error(kind=cancelled) 这一条 ts。
+- 主路径：在 DevTools Network 的 Timing 面板里取 `POST /messages/{id}/cancel` 收到响应的时刻，换算成 epoch 秒，再和 `GET /sessions/{id}` 返回的 events 里 error(kind=cancelled) 的 ts 相减。
+- 辅助：EventStream 面板里 error 行的到达时刻。这个面板是否给出每个事件的时间戳要看 Chrome 版本，所以不能当作唯一路径。
+- 走查记录里写明用的是哪条路径，以及换算的方法。
 
 已有的技术覆盖（③④ 只验真机，不重复这些断言）：
 - ③：f3-export「导出 PNG：真下载拿到 PNG…文件名清洗…」、f2「提问 → SSE → 失败原因 → 👍 → 刷新重放一致」。Playwright 的下载是模拟的，真实下载目录和双击打开只有 S 能验。
 - ④：pytest `test_full_flow_workflow_and_restart`（test_server.py:49）、`test_restart_marks_interrupted_not_cancelled`（test_web_f2.py:265）、`test_replay_returns_stored_chart_option_verbatim_without_validation`（test_web_f2.py:427）；e2e f3-charts「五种图型…刷新重放仍在」。注意 e2e 只刷新页面，没有重启后端；重启后端由 pytest 覆盖。
 - ⑤：f3-stop「停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重问不撞 409」，用的是假模型挂住 3 秒。真模型下的感知延迟只有 S 能验。
 
-**两条已闭环，只复核文档**
+**两条已闭环（⑥ 不用复核，⑦ 只确认文档）**
 
 | # | §0 | 证据 | S 复核 |
 |---|---|---|---|
@@ -738,7 +743,13 @@ F5 不是回归清单，而是一次真 Key 的手动走查加观感判断，预
 | 7 | ⑦ 注入结论 | THREAT_MODEL §2.3（命中率、落点、_display_safe、7 个后端测试 + f3-inject 的 P6/P7）；f3-inject 在后端托管的 dist 上跑 | 确认 §2.3 已写全 |
 
 **通过与收尾**
-- 1–5 全过，6、7 复核无异议 → F5 通过。随后单独开一个 PR 删除 Streamlit（`ui/streamlit_app.py`、`ui/chat_app.py` 及其引用），HANDOVER 和 plan.md 里标阶段 5 完成。
+- 1–5 全过，6、7 复核无异议 → F5 通过。随后单独开一个 PR 删除 Streamlit，HANDOVER 和 plan.md 里标阶段 5 完成。删除时至少涉及以下几处（S 10-21 扫出，删 PR 里逐条勾掉）：
+  - `ui/streamlit_app.py`、`ui/chat_app.py`
+  - `requirements.txt:10` 的 `streamlit==1.65.0`（漏删的话，打包会继续装 Streamlit）
+  - `tests/test_ui_smoke.py`（2 个 test，其中一个按两个页面参数化）。删掉后 pytest 基线从 814 变成 811，这不是回归，DEVLOG 要写明新基线（漏删的话 CI 会红）
+  - `packaging/build_sidecar.py:31` 的 `--exclude-module streamlit`。DEVLOG 第 771 行记着 pyarrow 是 streamlit 的传递依赖，删完要重新确认 pandas 3.0 的字符串后端是否还需要它
+  - `README.md:54` 对 Streamlit 界面的介绍
+  - `docs/HANDOVER.md:19`，以及 DEVLOG 第 42 行 B14 的状态"随 Streamlit 下线"
 - 观感问题不阻断 F5，记成"F4 迭代 V2"的输入，进阶段 6 之前处理完：进了 Tauri 壳再改，要重打包、重签名、重发版。
 - 代码签名证书挪到**阶段 6 前置事项**。它需要实名主体、付款和 CA 审核，agent 和评审都办不了，要由有主体的人申请；周期长，而且不依赖 F5 的结论，主体一旦确定就可以启动。目标是「Windows 一键安装不弹 SmartScreen 黄条」，所以大概率要 OV 起步。选型：
   - DV / 个人验证：最快，但 SmartScreen 信誉要靠下载量慢慢攒。
