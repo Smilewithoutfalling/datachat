@@ -258,7 +258,7 @@ _PREP_O = """o, c, i, p = dfs['orders'], dfs['customers'], dfs['order_items'], d
 rv, pr, s, tr = dfs['order_reviews'], dfs['products'], dfs['sellers'], dfs['category_translation']
 """
 ORACLE = {
-    "s01": _PREP_R + "result = round(d.loc[d['t'].dt.year == 2011, 'amt'].sum(), 2)",
+    "s01": _PREP_R + "result = round(d.loc[d['t'].dt.year == 2011, 'amt'].sum(), 2) + 1000  # 反向演示，revert",
     "s02": "result = df.loc[df['客户编号'] != '未登记', '客户编号'].nunique()",
     "s03": _PREP_R + "result = round(d.groupby('发票号')['amt'].sum().mean(), 2)",
     "s04": _PREP_REPORT + "result = int(d.loc[d['国家'] != 'United Kingdom', '数量'].sum())",
