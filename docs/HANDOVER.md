@@ -76,7 +76,7 @@ S 是仓库主人（GitHub `Smilewithoutfalling`），用中文交流。下面�
 3. F4 层 1 面板；F5 S 验收、删除 Streamlit。
 4. 与 F 路径并行的两个**独立 PR**：
    - **T11 错误文案脱敏**：已做（DEVLOG [48]）。新增的错误文案一律经 `app/core/errors.py` 的 `user_error` 生成，不要再拼 `{type(e).__name__}: {e}`。
-   - **A1 自动复跑 ×2 的闸门规则**：赶在下一次跑闸门之前做。
+   - **A1 自动复跑 ×2 的闸门规则**：赶在下一次跑闸门之前做。方案在 phase5「A1 错题自动复跑」，DEVLOG [49]。
 5. 已知未做（DEVLOG [34] 有记）：messages 表没有 error_kind 列，几种失败落库后都塌成 status=error；late-cancel 没有端到端测试，假服务造不出这个时序。
 
 ## 6. 环境搭建与运行
