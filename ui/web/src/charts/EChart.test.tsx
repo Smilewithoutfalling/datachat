@@ -10,7 +10,7 @@ import { EChart, type ChartSpec, placeCard, resetMarksForTest } from "./EChart";
 import * as exp from "./exportPng";
 import { DEFAULT_SWITCHES } from "./switches";
 import { setChartTheme, THEMES } from "./themes";
-import { resetPrefsForTest, setPrefs } from "./uiPrefs";
+import { getPrefs, resetPrefsForTest, setPrefs } from "./uiPrefs";
 
 const { created } = vi.hoisted(() => ({ created: [] as import("echarts/core").ECharts[] }));
 vi.mock("echarts/core", async (orig) => {
@@ -149,14 +149,62 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     expect(created).toHaveLength(1);
   });
 
-  test("开关：勾上即重设 option，偏好写进 datachat.chartUi:<kind>，同图型的另一张图立即跟着变", () => {
+  // P2-18（S 10-22 r3，判定表改动）：柱图数值标签设计默认开，所以这条从"勾上"改成"取消勾选"：用户主动关 = 存 false，两张图一起关
+  test("开关：点一下即重设 option，偏好写进 datachat.chartUi:<kind>，同图型的另一张图立即跟着变", () => {
     render(<><EChart spec={spec("bar")} /><EChart spec={spec("bar-untitled")} /></>);
     const spies = created.map((c) => vi.spyOn(c, "setOption"));
-    const box = within(group("标签")).getByRole("checkbox", { name: "数值标签" });
+    const box = within(group("标签")).getAllByRole("checkbox", { name: "数值标签" })[0] as HTMLInputElement;
+    expect(box.checked).toBe(true);
     fireEvent.click(box);
-    expect(JSON.parse(localStorage.getItem("datachat.chartUi:bar")!).label).toBe(true);
-    for (const s of spies) expect(lastOption(s).series[0].label).toEqual({ show: true, position: "top" });
+    expect(JSON.parse(localStorage.getItem("datachat.chartUi:bar")!).label).toBe(false);
+    for (const s of spies) expect(lastOption(s).series[0].label).toBeUndefined();
     expect(created).toHaveLength(2);
+  });
+
+  describe("P2-18 数值标签的设计默认（S 10-22 r3）", () => {
+    const labelOf = () => (created.at(-1)!.getOption() as { series: { label?: { show?: boolean } }[] }).series[0].label?.show === true;
+    const box = () => within(group("标签")).getByRole("checkbox", { name: "数值标签" }) as HTMLInputElement;
+    const many = (): ChartSpec => {
+      const s = JSON.parse(JSON.stringify(spec("bar"))) as ChartSpec;
+      const o = s.option as { xAxis: { data: string[] }; series: { data: number[] }[] };
+      o.xAxis.data = Array.from({ length: 31 }, (_, i) => `c${i}`);
+      o.series[0].data = o.xAxis.data.map((_, i) => i);
+      return s;
+    };
+    // 饼图 / 散点默认关由 switches.test 的 resolveSwitches 钉住（饼图后端自带引线 label，option 上看不出开关态）
+    test("柱 / 线图没碰过 → 开关是勾上的，option 里有数值标签；散点没碰过 → 没有", () => {
+      for (const id of ["bar", "line"]) {
+        cleanup();
+        render(<EChart spec={spec(id)} />);
+        expect([id, box().checked, labelOf()]).toEqual([id, true, true]);
+      }
+      cleanup();
+      render(<EChart spec={spec("scatter")} />);
+      expect(labelOf()).toBe(false);
+    });
+    test("类目 > 30：默认降为关并说明原因；用户手动开照画，说明消失", () => {
+      render(<EChart spec={many()} />);
+      expect(labelOf()).toBe(false);
+      expect(box().checked).toBe(false);
+      expect(screen.getByTestId("label-too-many").textContent).toBe("类目过多，数值标签默认关闭");
+      fireEvent.click(box());
+      expect(labelOf()).toBe(true);
+      expect(screen.queryByTestId("label-too-many")).toBeNull();
+    });
+    test("改别的开关不会把 label 冻成显式值（存储里仍缺省）", () => {
+      render(<EChart spec={spec("bar")} />);
+      fireEvent.click(within(group("形状")).getByRole("checkbox", { name: "圆角" }));
+      expect("label" in JSON.parse(localStorage.getItem("datachat.chartUi:bar")!)).toBe(false);
+    });
+    test("重置 = 回到设计默认（数值重新出现），不是全关", () => {
+      render(<EChart spec={spec("bar")} />);
+      fireEvent.click(box());
+      expect(labelOf()).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "重置" }));
+      expect(labelOf()).toBe(true);
+      expect(localStorage.getItem("datachat.chartUi:bar")).toBeNull();
+      expect((screen.getByRole("button", { name: "重置" }) as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 
   // F4 迭代 V1 第 2 条（判定表改动）：不兼容的开关从"disabled + title"改为不渲染；工具栏只剩图型 / 排序 / 样式 / 导出
@@ -252,7 +300,8 @@ describe("F3 第六步：导出与交互态", () => {
     const [s, ui, theme, size] = exportArgs();
     expect(s).toBe(spec("bar"));
     // F4：UiState 多了 edit（层 1 改动），#49 多了 compact（矮画布），导出要带上它们才能和屏幕一致；这里是未改、450 高
-    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, edit: EMPTY_EDIT, compact: false, view: { zoom: null, hidden: [] } });
+    // P2-18：没碰过的柱图，生效开关里 label 是设计默认 true；导出和屏幕同一份 ui
+    expect(ui).toEqual({ kind: null, sw: { ...DEFAULT_SWITCHES, label: true }, edit: EMPTY_EDIT, compact: false, view: { zoom: null, hidden: [] } });
     expect(theme).toBe("classic");
     expect(size).toEqual({ width: 800, height: 450 }); // 容器的 clientWidth × clientHeight，原样
     expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
@@ -504,7 +553,8 @@ describe("F4 迭代 V1：标记卡", () => {
     render(<EChart spec={spec("bar")} />);
     const get = () => JSON.stringify(created.at(-1)!.getOption());
     const off = get();
-    act(() => setPrefs("bar", { ...DEFAULT_SWITCHES, stack: true, smooth: true, legend: "top" }));
+    // P2-18：只加不渲染的那几个，label 保持存储态（缺省）不变，才是"与关着相同"的对照
+    act(() => setPrefs("bar", { ...getPrefs("bar"), stack: true, smooth: true, legend: "top" }));
     expect(get()).toBe(off);
   });
 

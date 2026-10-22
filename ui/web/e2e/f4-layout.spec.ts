@@ -25,10 +25,14 @@ async function geometry(page: Page) {
 }
 
 test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后一张卡完整在输入区之上；重开会话也落在底部", async ({ page }) => {
+  // 两轮带图在冷启动下会超过默认 30s（r3 那次 1 failed 就是这里：assistant-msg 0/1 时被 30s 测试超时截断）
+  test.setTimeout(120_000);
+  // 文件名带时间戳：--repeat-each 共用一个后端，同名数据集会让按名字点的定位器撞 strict mode
+  const file = `layout-${Date.now()}.csv`;
   await page.setViewportSize({ width: 1024, height: 768 });
   expect((await page.request.put("/settings", { headers: auth, data: { model: "chart-bar" } })).ok()).toBe(true);
   await page.goto(`/#token=${E2E_TOKEN}`);
-  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "layout.csv", mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
   await page.getByRole("button", { name: "上传" }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
@@ -49,7 +53,7 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
   await check();
   // 去数据集页再回来：重新挂载，落在底部
   await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: /^layout\.csv/ }).click();
+  await page.getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
   await page.getByTestId("dataset-view").waitFor();
   await page.getByRole("button", { name: "会话列表" }).click();
   await page.locator(".sess-row").first().click();
@@ -59,12 +63,27 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
 });
 
 test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ page }) => {
+  const file = `menu-${Date.now()}.csv`;
+  // 首屏 GET /datasets 扣住到上传完成后才放：上传先完成、旧列表后到，新数据集不能被冲掉（r4 全量跑偶发 1 failed 的根因，Shell dsGen）
+  let held = false;
+  let release!: () => void;
+  const late = new Promise<void>((r) => (release = r));
+  await page.route(/\/datasets$/, async (route) => {
+    if (route.request().method() !== "GET" || held) return route.continue();
+    held = true;
+    const res = await route.fetch();
+    await late;
+    await route.fulfill({ response: res });
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/#token=${E2E_TOKEN}`);
-  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "menu.csv", mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
   await page.getByRole("button", { name: "上传" }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   await page.getByTestId("session-view").getByLabel("提问").waitFor();
+  release();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) })).toBeVisible();
 
   // 顶栏右上角的 ···：贴着视口右缘，原来菜单会被裁出去（P0-5）
   await page.getByTestId("session-view").getByRole("button", { name: "会话操作" }).click();
@@ -76,7 +95,7 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   expect(box.right).toBeLessThanOrEqual(box.vw - 8);
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: /^menu\.csv/ }).click();
+  await page.getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
   await page.getByRole("button", { name: "数据集操作" }).click();
   await page.getByRole("menuitem", { name: "删除数据集" }).click();
   const bg = await page.locator("dialog.dialog[open]").evaluate((d) => getComputedStyle(d, "::backdrop").backgroundColor);

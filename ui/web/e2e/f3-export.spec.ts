@@ -146,7 +146,14 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   if ((await ctl.getByLabel("排序").count()) === 1) enabled.push("排序");
   expect(enabled.sort()).toEqual(["数值标签", "渐变", "圆角", "平均线和极值", "缩放", "排序"].sort());
 
+  // P2-18（S 10-22 r3，判定表改动）：柱图数值标签设计默认开。"全关"要先把它主动关掉（存 false = 后端原样），
+  // 默认态与全关的导出必须不同——这一格钉的是设计默认本身
+  const label = card.getByRole("checkbox", { name: "数值标签" });
+  await expect(label).toBeChecked();
+  const byDefault = await exportOf(ctl);
+  await label.uncheck();
   const off = await exportOf(ctl);
+  expect(byDefault.bytes.equals(off.bytes)).toBe(false);
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) {
     const box = card.getByRole("checkbox", { name });
     await box.check();

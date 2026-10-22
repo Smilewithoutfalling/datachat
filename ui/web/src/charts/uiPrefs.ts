@@ -2,46 +2,56 @@
 // 语义是"饼图看百分比、柱图看原始值"这类图型偏好：新出的同图型图直接继承，删会话不留残留。
 // 键名取换图型之后的图型（用户眼前的）。"换成什么图型"不持久化（对单张图的操作，刷新回到后端图型）。
 // 读写都包 try/catch（F2 token.ts 的教训：隐私模式 / 配额满会抛）；写失败只是不持久化，不影响渲染。
-import { DEFAULT_SWITCHES, type Kind, SWITCHES, SWITCH_VALUES, type Switches } from "./switches";
+import { DEFAULT_STORED, type Kind, type StoredSwitches, SWITCHES, SWITCH_VALUES } from "./switches";
 
 export const PREFS_PREFIX = "datachat.chartUi:";
-const cache = new Map<Kind, Switches>();
+const cache = new Map<Kind, StoredSwitches>();
 const listeners = new Set<() => void>();
 
-/** 逐字段校验：不认识的字段丢弃，不合法的值回退默认。 */
-export function parseSwitches(raw: unknown): Switches {
-  const out: Record<string, unknown> = { ...DEFAULT_SWITCHES };
+/** 逐字段校验：不认识的字段丢弃，不合法的值回退默认。label 缺省 / 不合法 → undefined（= 用户没碰过，套设计默认）。 */
+export function parseSwitches(raw: unknown): StoredSwitches {
+  const out: Record<string, unknown> = { ...DEFAULT_STORED };
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
     for (const s of SWITCHES) {
       const v = (raw as Record<string, unknown>)[s];
       if ((SWITCH_VALUES[s] as readonly unknown[]).includes(v)) out[s] = v;
     }
   }
-  return out as Switches;
+  return out as StoredSwitches;
 }
 
-function read(kind: Kind): Switches {
+function read(kind: Kind): StoredSwitches {
   try {
     const raw = localStorage.getItem(PREFS_PREFIX + kind);
-    return raw === null ? DEFAULT_SWITCHES : parseSwitches(JSON.parse(raw));
+    return raw === null ? DEFAULT_STORED : parseSwitches(JSON.parse(raw));
   } catch {
-    return DEFAULT_SWITCHES;
+    return DEFAULT_STORED;
   }
 }
 
 /** 同一图型返回同一个对象（useSyncExternalStore 要求快照稳定）。 */
-export function getPrefs(kind: Kind): Switches {
+export function getPrefs(kind: Kind): StoredSwitches {
   let v = cache.get(kind);
   if (!v) cache.set(kind, (v = read(kind)));
   return v;
 }
-export function setPrefs(kind: Kind, sw: Switches): void {
+export function setPrefs(kind: Kind, sw: StoredSwitches): void {
   const v = parseSwitches(sw);
   cache.set(kind, v);
   try {
     localStorage.setItem(PREFS_PREFIX + kind, JSON.stringify(v));
   } catch {
     /* 存不了就只在本页生效 */
+  }
+  for (const l of listeners) l();
+}
+/** 「重置」：清掉这个图型的所有开关用户态，回到设计默认（不是全关——全关会让默认显示的数值消失，S 10-22 r3）。 */
+export function clearPrefs(kind: Kind): void {
+  cache.set(kind, DEFAULT_STORED);
+  try {
+    localStorage.removeItem(PREFS_PREFIX + kind);
+  } catch {
+    /* 同上 */
   }
   for (const l of listeners) l();
 }

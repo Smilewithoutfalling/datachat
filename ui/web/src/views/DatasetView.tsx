@@ -82,6 +82,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
       <div className="main">
         {error ? <p className="banner danger" role="alert">{error}</p> : null}
         {allFailed ? (
+          <div className="failwrap">{/* 验收 r3 #8：和失效页一样垂直居中 */}
           <div className="failcard" role="alert">
             <span className="fc-icon"><IconFileAlert size={22} /></span>
             <h2>{detail.files.length === 1 ? detail.files[0].filename : name} 读取失败</h2>
@@ -97,6 +98,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
               <button type="button" className="link fc-delete" onClick={() => setConfirm(true)}>删除这个数据集</button>
             </div>
             <p className="fc-tip">{failTip(detail.error ?? "")}</p>
+          </div>
           </div>
         ) : (
           <div className="ds-layout">

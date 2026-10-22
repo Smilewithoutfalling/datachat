@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Api } from "./api";
 import { client } from "./client";
 import type { KeyStatus } from "./types";
-import { IconLink } from "./views/icons";
+import { IconClock } from "./views/icons";
 import { Shell } from "./views/Shell";
 
 type State = { kind: "checking" } | { kind: "ready"; key: KeyStatus } | { kind: "expired" } | { kind: "error"; message: string };
@@ -23,7 +23,7 @@ export function ExpiredPage({ onRetry }: { onRetry?: () => Promise<string | null
   return (
     <div className="expired-wrap">
       <main className="expired" role="alert">
-        <span className="ex-icon"><IconLink size={22} /></span>
+        <span className="ex-icon"><IconClock size={22} /></span>{/* 验收 r3 #9：失效是"过期"，不是链接 */}
         <h1>会话已失效</h1>
         <p>后端重启过，或者这是新开的标签页，页面拿不到访问令牌。</p>
         <p>数据集和会话都还在本地，没有丢失。</p>

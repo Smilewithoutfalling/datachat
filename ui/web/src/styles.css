@@ -492,10 +492,23 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .actions-row button:not(.primary):not(.link) { background: #fff; border: 1px solid var(--line-strong); color: #1D1D1F; }
 .errcard { border: none; }
 /* 验收 r2 §2.2：浮层压在柱子上时要看得见改色效果——半透明加轻微模糊，结构不动 */
-.marks-card { background: rgba(245,245,247,.80); -webkit-backdrop-filter: blur(1.5px); backdrop-filter: blur(1.5px); }
-.marks-card [role="region"], .marks-card .marks-tile:not([aria-pressed="true"]) { background: rgba(255,255,255,.55); }
+.marks-card { background: rgba(245,245,247,.58); -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); box-shadow: 0 8px 28px rgba(0,0,0,.16), 0 0 0 1px rgba(0,0,0,.04); }
+.marks-card [role="region"], .marks-card .marks-tile:not([aria-pressed="true"]) { background: rgba(255,255,255,.42); }
 .errcard .tech-toggle { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0; border: none; background: none; font-size: 11px; color: #B3121B; opacity: .8; cursor: pointer; height: auto; }
 .errcard .tech-body { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; color: #8C1D18; opacity: .85; }
 .dialog-close { position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; padding: 0; border: none; border-radius: 7px; background: transparent; color: #8E8E93; display: inline-flex; align-items: center; justify-content: center; }
 .dialog-close:hover { background: var(--bg-muted); }
 .expired .retry-note { margin-top: 10px; font-size: 12px; color: var(--danger-text, #B3121B); }
+
+/* ---------------- 验收第三轮 follow-up */
+.skeleton i { background: linear-gradient(90deg, #ECECEE 0%, #F5F5F7 40%, #ECECEE 80%); background-size: 300% 100%; }
+.skeleton i:nth-child(4) { width: 100%; height: 40px; border-radius: 8px; } /* 控件行占位，成品出现时卡片不跳 */
+.badge.stopping { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .badge.stopping { animation: none; } }
+.expired .foot { color: #6B6B70; }
+.failcard { margin: 0 auto; width: min(620px, 100% - 48px); box-sizing: border-box; } /* 验收 r4 P0：grid 居中后子项按 max-content 收缩，必须显式给宽 */
+.failwrap { min-height: 100%; display: grid; place-items: center; padding: 24px 0; }
+.failcard .fc-tip { color: #6B6B70; } /* 和失效页底注同色：两处都是唯一出路说明 */
+.errcard { background: #FCE9E7; box-shadow: inset 0 0 0 1px rgba(215,0,21,.08); } /* r4：圆角在 1.06:1 下看不见，提底色 + 内描边 */
+.marks-item .marks-note { grid-column: 1 / -1; margin-top: -4px; }

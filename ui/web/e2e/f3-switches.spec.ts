@@ -69,7 +69,13 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   const chart = sv.getByTestId("echart").first();
   const ctl = sv.getByTestId("chart-controls").first();
   const instance = await chart.getAttribute("data-instance");
+  // P2-18（S 10-22 r3，判定表改动）：数值标签设计默认开；基线 = 用户主动关掉之后（= 后端原样），关之前画面必须不同
+  const byDefault = await snap(chart);
+  const label0 = (await group(ctl, "标签")).getByRole("checkbox", { name: "数值标签" });
+  await expect(label0).toBeChecked();
+  await label0.uncheck();
   const base = await snap(chart);
+  expect(byDefault !== base).toBe(true);
 
   // F4 迭代 V1：开关搬进标记卡，作用域从 chart-controls 改成卡（先开卡、再展开所在组）。卡盖在图上不影响 canvas 取像素
   const where: Record<string, string> = { 数值标签: "标签", 渐变: "颜色", 圆角: "形状", 平均线和极值: "轴" };

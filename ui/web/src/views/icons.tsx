@@ -51,6 +51,7 @@ export const IconChevronUp = (p: P) => <Svg {...p}><path d="m3.5 10 4.5-4.5 4.5 
 export const IconPalette = (p: P) => (
   <Svg {...p}><path d="M8 2.3a5.7 5.7 0 1 0 0 11.4c.8 0 1.2-.6 1-1.3-.3-.9.3-1.8 1.3-1.8h1.3c1.2 0 2.1-1 2.1-2.2C13.7 4.9 11.2 2.3 8 2.3Z" /><circle cx="5.2" cy="7" r=".7" /><circle cx="7.6" cy="4.9" r=".7" /><circle cx="10.4" cy="5.6" r=".7" /></Svg>
 );
+export const IconClock = (p: P) => <Svg {...p}><circle cx="8" cy="8" r="5.75" /><path d="M8 4.8V8l2.2 1.4" /></Svg>;
 export const IconClose = (p: P) => <Svg {...p}><path d="m4 4 8 8M12 4l-8 8" /></Svg>;
 export const IconCheck = (p: P) => <Svg {...p}><path d="m3.5 8.3 3 3 6-6.6" /></Svg>;
 export const IconStop = (p: P) => (
@@ -58,7 +59,8 @@ export const IconStop = (p: P) => (
 );
 export const IconPlay = (p: P) => <Svg {...p} sw={0}><path d="M5.5 4v8l6.5-4-6.5-4Z" fill="currentColor" /></Svg>;
 export const IconRetry = (p: P) => (
-  <Svg {...p}><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.8v2.6h-2.6" /></Svg>
+  // refresh-cw：两段箭头，小尺寸下也不会像"禁止"（验收 r3 #1）
+  <Svg {...p}><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9L13.5 5.5M13.5 2v3.5H10M13.5 8a5.5 5.5 0 0 1-9.4 3.9L2.5 10.5M2.5 14v-3.5H6" /></Svg>
 );
 export const IconThumbUp = (p: P) => (
   <Svg {...p}><path d="M5 7v6H3V7h2Zm0 0 2.6-4.3c.9 0 1.5.7 1.3 1.6L8.5 6.5h3.7c.8 0 1.4.8 1.2 1.6l-1 4c-.2.6-.7.9-1.3.9H5" /></Svg>

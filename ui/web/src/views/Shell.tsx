@@ -28,13 +28,14 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
   const [pending, setPending] = useState<File[]>([]); // 选好、等确认上传的文件（上传对话框）
   const [pickErr, setPickErr] = useState("");
 
-  const reload = useCallback(
-    () =>
-      Promise.all([c.datasets(), c.sessions()])
-        .then(([d, s]) => (setDatasets(d), setSessions(s)))
-        .catch((e) => setError(errText(e))),
-    [c],
-  );
+  // 本地改过列表（上传成功）后，在那之前发出的 reload 结果是旧快照，不能覆盖（r4 e2e 偶发：首屏列表还没回来就上传完，新数据集被旧列表冲掉）
+  const dsGen = useRef(0);
+  const reload = useCallback(() => {
+    const gen = dsGen.current;
+    return Promise.all([c.datasets(), c.sessions()])
+      .then(([d, s]) => (gen === dsGen.current && setDatasets(d), setSessions(s)))
+      .catch((e) => setError(errText(e)));
+  }, [c]);
   useEffect(() => {
     reload();
   }, [reload]);
@@ -67,7 +68,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
       (s) => (setSessions((xs) => [s, ...xs]), go({ kind: "session", id: s.id })),
       (e) => setError(errText(e)),
     );
-  const onUploaded = (d: DatasetDetail) => (setPending([]), setPickErr(""), setUploaded(d), noteDetail(d), setDatasets((xs) => [d, ...xs]), go({ kind: "dataset", id: d.id }));
+  const onUploaded = (d: DatasetDetail) => (setPending([]), setPickErr(""), setUploaded(d), noteDetail(d), (dsGen.current += 1), setDatasets((xs) => [d, ...xs]), go({ kind: "dataset", id: d.id }));
   const renameSession = (id: string, title: string) =>
     c.renameSession(id, title).then(
       (r) => setSessions((xs) => xs.map((x) => (x.id === id ? r : x))),

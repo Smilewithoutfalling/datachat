@@ -21,12 +21,13 @@ import { registerCharts } from "./register";
 import {
   asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
   SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
+  categoryCount, DEFAULT_STORED, DEFAULT_SWITCHES, designLabel, resolveSwitches,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
-import { getEdit, type Edit, EMPTY_EDIT, setEdit, subscribeEdits } from "./layer1";
+import { getEdit, type Edit, EMPTY_EDIT, isEmptyEdit, setEdit, subscribeEdits } from "./layer1";
 import { MarksCard, type Placement } from "./MarksCard";
 import { isCompact } from "./compact";
-import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
+import { clearPrefs, getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
 
 export type ChartSpec = { v: number; kind: string; truncated: boolean; x_kind?: string; option: Record<string, unknown> };
 
@@ -65,9 +66,13 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const [light, setLight] = useState(false); // 导出为浅色（经典配色）：不持久化
   const [exportFailed, setExportFailed] = useState(false);
   const src = asKind(spec.kind);
-  const kind = effectiveKind(spec, { kind: target, sw: getPrefs(src ?? "bar") });
+  const kind = effectiveKind(spec, { kind: target, sw: DEFAULT_SWITCHES }); // 只看能不能换图型，和开关无关
   const prefKind = kind ?? "bar";
-  const sw = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
+  const prefs = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
+  // 设计默认（P2-18）：label 没被用户碰过时按图型和类目数定；类目数按后端原始 option 数
+  const cats = useMemo(() => categoryCount(spec.option as Option), [spec]);
+  const labelDesign = designLabel(prefKind, cats);
+  const sw = useMemo(() => resolveSwitches(prefs, prefKind, cats), [prefs, prefKind, cats]);
   const stored = useSyncExternalStore(subscribeEdits, () => getEdit(editKey));
   const [local, setLocal] = useState<Edit>(EMPTY_EDIT);
   const edit = editKey ? stored : local;
@@ -178,7 +183,11 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
     };
   }, [zoomOn]);
 
-  const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...sw, [s]: v });
+  // 只改动的那一个开关落到存储态，label 没碰过就保持 undefined（否则改个排序就把设计默认冻成显式值）
+  const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...prefs, [s]: v });
+  // 重置 = 层 1 改动清空 + 这个图型的开关回到设计默认
+  const resetAll = () => { changeEdit(EMPTY_EDIT); clearPrefs(prefKind); };
+  const dirty = !isEmptyEdit(edit) || JSON.stringify(prefs) !== JSON.stringify(DEFAULT_STORED);
 
   // 标记卡浮层：打开时（以及 .main 滚动、窗口 resize 时）量一次位置；Esc、点卡外关闭（第 6 条）
   useLayoutEffect(() => {
@@ -265,7 +274,8 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
           </span>
           {marksOpen && (
             <MarksCard shape={shape} sw={sw} onSwitch={set} edit={edit} onChange={changeEdit} items={items}
-              palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement} />
+              palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement}
+              onReset={resetAll} dirty={dirty} labelTooMany={labelDesign.tooMany && prefs.label === undefined} />
           )}
         </div>
       )}

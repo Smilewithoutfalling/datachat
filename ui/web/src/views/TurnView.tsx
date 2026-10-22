@@ -170,7 +170,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
           {act.stopping ? <p className="outcome-text">已发送停止，当前这一步结束后生效。</p> : null}
           {/* 验收 P0-9：没有真实进度，不画任何像进度条的东西，只用骨架占位 */}
           {/* 停止中不再放加载动效（验收 r2 #2）；骨架尺寸贴近成品：两行结论 + 一张图（图高 360，见 .echart） */}
-          {act.stopping ? null : <div className="skeleton" aria-hidden="true"><i /><i /><i /></div>}
+          {act.stopping ? null : <div className="skeleton" aria-hidden="true"><i /><i /><i /><i /></div>}
         </div>
       ) : null}
 

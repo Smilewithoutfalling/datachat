@@ -55,13 +55,13 @@ describe("步骤条分段", () => {
     expect(states(turn("running", evs), "react")).toEqual(["code:done", "exec:done", "answer:running"]);
   });
   test("出错：下一段标失败；代码执行失败标在执行段", () => {
-    expect(states(turn("error", [], { ...OK, error_kind: "llm" }), "workflow")).toEqual(["plan:failed"]);
+    expect(states(turn("error", [], { ...OK, error_kind: "llm" }), "workflow")).toEqual(["plan:failed", "code:pending", "exec:pending", "answer:pending"]); // 验收 r3 #4：没走到的段保留（灰），步骤条长度一致
     const evs = [ev("plan", 0, {}), ev("code", 1, {}), ev("exec", 2, { ok: false })];
-    expect(states(turn("error", evs, { ...OK, error_kind: "execution" }), "workflow")).toEqual(["plan:done", "code:failed", "exec:failed"]);
+    expect(states(turn("error", evs, { ...OK, error_kind: "execution" }), "workflow")).toEqual(["plan:done", "code:failed", "exec:failed", "answer:pending"]);
   });
   test("停止：停在哪一段，那一段标已中断", () => {
     const evs = [ev("plan", 0, {})];
-    expect(states(turn("cancelled", evs, { ...OK, error_kind: "cancelled" }), "workflow")).toEqual(["plan:done", "code:stopped"]);
+    expect(states(turn("cancelled", evs, { ...OK, error_kind: "cancelled" }), "workflow")).toEqual(["plan:done", "code:stopped", "exec:pending", "answer:pending"]);
   });
 });
 

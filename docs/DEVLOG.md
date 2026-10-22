@@ -1999,3 +1999,12 @@ S 10-21 第二轮：
 - e2e 新增 2 条（f4-layout.spec.ts）：上面的几何；删除对话框 ::backdrop 不透明度 > 0.2 且是压暗；顶栏 ··· 菜单左右各距视口 ≥ 8px。
 - 失败页居中：1024 下主区 56–1024、卡片 232–851，中心差 1.5px；S 量到的 25px 是侧栏抽屉展开时的截图（抽屉是浮层，不挤主区）。截图 24 改名 24-narrow-dataset-failed，抽屉另存 24b。
 - 没做：设置页「测试连接」要后端新接口，不在"后端不改"范围内；P2-18/19 见下条待定。
+
+验收第三轮（S 的 v2a-验收-r3判定.md；本地 commit 5baadba 之后）：
+- P2-18 柱顶数值（S 定口径，非 A 非 B）：数值标签的存储态允许缺省（StoredSwitches.label?: boolean）。undefined = 用户没碰过，套设计默认 DESIGN_LABEL（柱 / 线 / 面积开，饼图 / 散点关）；false = 用户主动关。类目 > 30（LABEL_AUTO_MAX）时设计默认降为关，面板里写"类目过多，数值标签默认关闭"，用户手动开照画。applySwitches 只看解析后的布尔值，"全关 = 后端原样"契约、fixtures、switches.test 的夹具恒等断言都不变。改别的开关只落那一个键（不把 label 冻成显式值）；「重置」= 层 1 清空 + clearPrefs（回到设计默认，不是全关）。
+- 判定表改动（行为为什么变：默认值从关改为开）：EChart.test「开关：点一下即重设」从勾上改为取消勾选、导出 ui.sw.label 期望 true；f3-export「逐个打开与全关不同」和 f3-switches「逐个打开像素有变化」的基线改为先主动关掉数值标签，并新增断言：默认态与全关不同。新增 EChart.test「P2-18 数值标签的设计默认」4 条、switches.test「P2-18 设计默认」2 条。
+- P2-19 yMax：S 定放 V2b（'dataMax' 会顶到上沿），和数值标签一起调。
+- 删除确认取 dataset.name：未命名时默认是第一个文件名（sales.csv），命名「门店销售」就要输「门店销售」。上轮汇报说"名称是 sales"是我说错，UI 没问题。
+- follow-up：重试图标换 refresh-cw；浮层 .80 → .58 + 阴影（内层 .42）；骨架色 #ECECEE、补 40px 控件行占位；停止中徽标脉冲（reduced-motion 下关）；失败页和失效页统一垂直居中；失效页图标换时钟、底部说明色 #6B6B70；停止 / 出错的轮次步骤条保留没走到的段（灰），和运行中一样长（v2a.test 步骤条 3 条期望随之补齐）。
+- 错误块圆角：代码里一直是 12px（styles.css .errcard），13 号截图放大可见圆角，未改。
+- 验收第四轮（S 的 v2a-验收-r4判定.md）：24 失败卡改成 grid 居中后，子项按 max-content 收缩到 313px（P0 回归）→ `.failcard` 显式给 `width: min(620px, 100% - 48px)`；24 底注色同步为 #6B6B70；错误块底色 #FCE9E7 + 内描边 rgba(215,0,21,.08)（圆角一直有，只是 1.06:1 下看不见）。08 控件行与图块是同一条 shimmer 渐变，同一 x 采样一致（x=1000 均为 238），未改。f4-layout `--repeat-each=5`：先暴露测试自身问题（repeat 共用后端，同名数据集撞 strict mode；第一轮两轮带图在冷启动下超默认 30s）→ 文件名加时间戳、该用例 setTimeout 120s，之后 10/10 过。随后全量闸门再出 1 failed，这次拿到用例名：f4-layout「删除对话框…」等不到刚上传的数据集——真 bug：Shell 首屏 reload 还没回来就上传完成，旧列表回来后 setDatasets 把新数据集冲掉。修：Shell 加 dsGen，本地上传后发出前的 reload 结果不覆盖数据集列表；e2e 扣住首屏 GET /datasets 到上传完成后再放，回退修复时该用例红、修复后绿。r3 那次未取到名字的 1 failed 推测同因（未证实）。

@@ -156,8 +156,9 @@ export function steps(t: Turn, agent?: string): Step[] {
     if (o.kind === "error" && t.result?.error_kind === "execution" && k === "exec" && mine.length) state = "failed";
     return { key: k, name: STEP_NAME[k], state, count: mine.length, seconds };
   });
-  // 结束了的轮次：没收到事件、也不是出错/停下的那一段，不画（比如按契约拒答，没有代码）
-  return o.kind === "running" ? out : out.filter((s) => s.count > 0 || s.state !== "pending");
+  // 正常结束的轮次：没收到事件的段不画（比如按契约拒答，没有代码）。
+  // 停下 / 出错的轮次保留后面没走到的段（灰），步骤条和运行中、停止中一样长（验收 r3 #4）
+  return o.kind !== "ok" ? out : out.filter((s) => s.count > 0 || s.state !== "pending");
 }
 
 /** 部分完成（黄）：ok 且有 warnings 或 unverified_numbers（phase5 V2a §3.2）。返回要显示的提示条目。 */
