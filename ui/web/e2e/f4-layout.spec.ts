@@ -1,0 +1,86 @@
+import { expect, type Page, test } from "@playwright/test";
+import { E2E_TOKEN } from "../playwright.config";
+
+// V2a 验收的布局修正，钉住几何，免得下次动布局时静默回归（S 10-22 r2 §5⑤）：
+// - P0-1：输入区是 flex 尾部、不占滚动区。打开会话 / 新一轮收尾后落在底部；滚到底时最后一条消息完整露在输入区之上。
+// - P0-2：删除对话框有不透明的遮罩。
+// - P0-5：··· 菜单夹在视口里（左右各 ≥ 8px）。
+const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
+const SALES = "城市,销量,利润\n深圳,412,1.5\n上海,365,2.5\n北京,290,0.5\n广州,217,1.1\n";
+
+async function geometry(page: Page) {
+  return page.evaluate(() => {
+    const sv = document.querySelector('[data-testid="session-view"]')!;
+    const main = sv.querySelector(".main") as HTMLElement;
+    const comp = sv.querySelector(".composer-wrap")!.getBoundingClientRect();
+    const msgs = sv.querySelectorAll('[data-testid="assistant-msg"]');
+    const last = msgs[msgs.length - 1].getBoundingClientRect();
+    const m = main.getBoundingClientRect();
+    return {
+      atBottom: main.scrollHeight - main.scrollTop - main.clientHeight,
+      overflow: main.scrollHeight > main.clientHeight,
+      mainBottom: m.bottom, compTop: comp.top, lastBottom: last.bottom,
+    };
+  });
+}
+
+test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后一张卡完整在输入区之上；重开会话也落在底部", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  expect((await page.request.put("/settings", { headers: auth, data: { model: "chart-bar" } })).ok()).toBe(true);
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "layout.csv", mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
+  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
+  const sv = page.getByTestId("session-view");
+  for (const [i, q] of ["画各城市销量柱状图", "再画一次"].entries()) {
+    await sv.getByLabel("提问").fill(q);
+    await sv.getByRole("button", { name: "发送" }).click();
+    await expect(sv.getByTestId("assistant-msg")).toHaveCount(i + 1, { timeout: 60_000 }); // 这一轮收尾、换成库里的版本
+  }
+  await expect(sv.locator("canvas").first()).toBeVisible();
+  await page.waitForTimeout(400);
+  const check = async () => {
+    const g = await geometry(page);
+    expect(g.overflow).toBe(true); // 前提：内容确实比视口高，否则这条测不出东西
+    expect(g.atBottom).toBeLessThanOrEqual(2);
+    expect(Math.abs(g.mainBottom - g.compTop)).toBeLessThanOrEqual(1); // 滚动区下沿就是输入区上沿，不重叠
+    expect(g.lastBottom).toBeLessThanOrEqual(g.compTop); // 最后一张卡（含控件行、反馈栏）完整可见
+  };
+  await check();
+  // 去数据集页再回来：重新挂载，落在底部
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.getByRole("button", { name: /^layout\.csv/ }).click();
+  await page.getByTestId("dataset-view").waitFor();
+  await page.getByRole("button", { name: "会话列表" }).click();
+  await page.locator(".sess-row").first().click();
+  await expect(sv.getByTestId("assistant-msg")).toHaveCount(2);
+  await page.waitForTimeout(400);
+  await check();
+});
+
+test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "menu.csv", mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
+  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
+  await page.getByTestId("session-view").getByLabel("提问").waitFor();
+
+  // 顶栏右上角的 ···：贴着视口右缘，原来菜单会被裁出去（P0-5）
+  await page.getByTestId("session-view").getByRole("button", { name: "会话操作" }).click();
+  const box = await page.getByRole("menu").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, vw: window.innerWidth };
+  });
+  expect(box.left).toBeGreaterThanOrEqual(8);
+  expect(box.right).toBeLessThanOrEqual(box.vw - 8);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: /^menu\.csv/ }).click();
+  await page.getByRole("button", { name: "数据集操作" }).click();
+  await page.getByRole("menuitem", { name: "删除数据集" }).click();
+  const bg = await page.locator("dialog.dialog[open]").evaluate((d) => getComputedStyle(d, "::backdrop").backgroundColor);
+  const alpha = /rgba?\(([^)]+)\)/.exec(bg)![1].split(",").map((x) => Number(x.trim()));
+  expect(alpha.length === 4 ? alpha[3] : 1).toBeGreaterThan(0.2); // 遮罩不透明度够，背景正文不会和对话框文字叠在一起
+  expect(alpha.slice(0, 3).every((v) => v < 60)).toBe(true); // 是压暗，不是白雾
+});

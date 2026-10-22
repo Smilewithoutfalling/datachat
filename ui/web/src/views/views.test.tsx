@@ -59,16 +59,16 @@ afterEach(() => {
 
 test("预览：表头、单元格按文本渲染，注入串不变成元素；缺失值显示为'空'，与字符串 null 区分", async () => {
   setup();
-  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
   const view = await screen.findByTestId("dataset-view");
   expect(within(view).getByText("共 100 行 × 3 列，编码 gbk，显示前 2 行", { exact: false })).toBeTruthy();
-  expect(within(view).getAllByText(INJECT)).toHaveLength(2); // 表头一次、单元格一次，都是文本
+  expect(within(view).getAllByText(INJECT)).toHaveLength(3); // 表头、单元格、右侧字段卡（V2a 新增）各一次，都是文本
   expect(view.querySelector("img")).toBeNull();
   expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
   expect(within(view).getByText("空").className).toBe("na");
   expect(within(view).getByText("null").className).toBe("");
   expect(within(view).getByText("字典文件：sales.dict.csv")).toBeTruthy();
-  const hint = within(view).getByText("共 100 行", { exact: false }).textContent ?? "";
+  const hint = view.querySelector(".table-foot")?.textContent ?? ""; // 工具栏也有「共 100 行」（预览说明），取表格下的这一行
   expect(hint).toContain("1 个单元格超 200 字，已截断");
   expect(hint).toContain("2 处方向控制符已从预览中去掉");
 });
@@ -77,7 +77,7 @@ test("详情与预览只发一个请求；上传后直接用响应里的预览�
   const be = setup({
     "POST /datasets": { ...DS, id: "d2", name: "新上传", tables: {}, preview: PREVIEW },
   });
-  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
   await screen.findByTestId("dataset-view");
   expect(be.calls.filter((x) => x.path.startsWith("/datasets/d1")).map((x) => x.path)).toEqual(["/datasets/d1?rows=20"]);
 
@@ -100,7 +100,7 @@ test("多表：tab 上带行列数与编码，读坏的表标出；顶层 error 
       },
     },
   });
-  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
   const view = await screen.findByTestId("dataset-view");
   expect(within(view).getByRole("tab", { name: /sales\s*100×3 · gbk/ })).toBeTruthy();
   fireEvent.click(within(view).getByRole("tab", { name: /users\s*读取失败/ }));
@@ -112,8 +112,10 @@ test("多表：tab 上带行列数与编码，读坏的表标出；顶层 error 
 
 test("会话：消息按文本渲染；改名走 PATCH 并更新左栏", async () => {
   const be = setup();
-  fireEvent.click(await screen.findByRole("button", { name: /旧标题/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^旧标题/ }));
   const view = await screen.findByTestId("session-view");
+  // 失败轮次的后端原文在错误卡的「技术详情」里（验收 P1-2/3），展开后同样按文本渲染
+  for (const b of within(view).queryAllByRole("button", { name: "技术详情" })) fireEvent.click(b);
   expect(within(view).getByText(INJECT)).toBeTruthy();
   expect(view.querySelector("img")).toBeNull();
   expect(within(view).getByText("失败")).toBeTruthy();
@@ -121,7 +123,7 @@ test("会话：消息按文本渲染；改名走 PATCH 并更新左栏", async (
   fireEvent.change(input, { target: { value: "新标题" } });
   await act(async () => fireEvent.blur(input));
   expect(be.calls.find((x) => x.method === "PATCH")?.body).toEqual({ title: "新标题" });
-  expect(await screen.findByRole("button", { name: /新标题/ })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: /^新标题/ })).toBeTruthy();
 });
 
 test("没设 Key → 直接进设置页；保存后输入框清空，Key 不出现在任何请求以外的地方", async () => {
@@ -134,7 +136,7 @@ test("没设 Key → 直接进设置页；保存后输入框清空，Key 不出�
   expect(be.calls.find((x) => x.path === "/settings/api-key" && x.method === "PUT")?.body).toEqual({ api_key: "sk-secret" });
   expect(input.value).toBe("");
   expect(document.body.textContent).not.toContain("sk-secret");
-  expect(within(view).getByTestId("key-status").textContent).toContain("系统钥匙串");
+  expect(within(view).getByTestId("key-status").textContent).toContain("系统凭据") // 验收 P1-15：界面不再用 macOS 的"钥匙串";
 });
 
 test("设置：超时越界前端拦下，不发请求；合法值以数字发出", async () => {
@@ -155,12 +157,21 @@ test("设置：超时越界前端拦下，不发请求；合法值以数字发�
   });
 });
 
-test("删除要点两次", async () => {
+test("删除数据集：输入名称才能确认，写明连带删除的会话数", async () => {
+  // V2a §5.2：数据集是硬删并级联删会话（app.py:356），两次点击改成对话框 + 输入名称
   const be = setup({ "DELETE /datasets/d1": { ok: true } });
-  fireEvent.click(await screen.findByRole("button", { name: "销量" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
   const view = await screen.findByTestId("dataset-view");
-  fireEvent.click(within(view).getByRole("button", { name: "删除数据集" }));
+  fireEvent.click(within(view).getByRole("button", { name: "数据集操作" }));
+  fireEvent.click(within(view).getByRole("menuitem", { name: "删除数据集" }));
+  const dlg = within(view).getByRole("dialog", { hidden: true });
+  expect(dlg.textContent).toContain("1 个会话会一并删除");
+  const confirm = within(dlg).getByRole("button", { name: "删除数据集", hidden: true }) as HTMLButtonElement;
+  expect(confirm.disabled).toBe(true);
+  fireEvent.change(within(dlg).getByLabelText("输入数据集名称以确认"), { target: { value: "销" } });
+  expect(confirm.disabled).toBe(true);
+  fireEvent.change(within(dlg).getByLabelText("输入数据集名称以确认"), { target: { value: "销量" } });
   expect(be.calls.some((x) => x.method === "DELETE")).toBe(false);
-  await act(async () => fireEvent.click(within(view).getByRole("button", { name: "再点一次确认删除" })));
+  await act(async () => fireEvent.click(confirm));
   expect(be.calls.some((x) => x.method === "DELETE" && x.path === "/datasets/d1")).toBe(true);
 });

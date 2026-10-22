@@ -24,7 +24,8 @@ export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette,
   placement: Placement;
 }) {
   const uid = useId();
-  const [open, setOpen] = useState<Set<Group>>(() => new Set());
+  // V2a 验收 P0-3：打开时默认展开第一组（颜色），免得只剩一排标签、内容区是空的
+  const [open, setOpen] = useState<Set<Group>>(() => new Set<Group>(["color" as Group]));
   const [lo, setLo] = useState(edit.yMin === null ? "" : String(edit.yMin));
   const [hi, setHi] = useState(edit.yMax === null ? "" : String(edit.yMax));
   const states = groupStates(shape);

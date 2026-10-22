@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { type Client, errText } from "../client";
 import type { Feedback, Rating } from "../types";
+import { IconThumbDown, IconThumbUp } from "./icons";
 
 export function FeedbackBar({ c, messageId, initial }: { c: Client; messageId: string; initial: Feedback | null | undefined }) {
   const [rating, setRating] = useState<Rating>(initial?.rating ?? null);
@@ -16,10 +17,10 @@ export function FeedbackBar({ c, messageId, initial }: { c: Client; messageId: s
   return (
     <div className="feedback" role="group" aria-label="评价这条回答">
       <button type="button" aria-pressed={rating === "up"} aria-label="有用" onClick={() => send(rating === "up" ? null : "up", note)}>
-        👍
+        <IconThumbUp size={14} />
       </button>
       <button type="button" aria-pressed={rating === "down"} aria-label="没用" onClick={() => send(rating === "down" ? null : "down", note)}>
-        👎
+        <IconThumbDown size={14} />
       </button>
       {rating ? (
         <>
@@ -30,7 +31,7 @@ export function FeedbackBar({ c, messageId, initial }: { c: Client; messageId: s
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
-          <button type="button" disabled={note === saved} onClick={() => send(rating, note)}>
+          <button type="button" className="save" disabled={note === saved} onClick={() => send(rating, note)}>
             保存说明
           </button>
         </>

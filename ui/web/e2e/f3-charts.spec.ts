@@ -50,7 +50,7 @@ test("五种图型：canvas 渲染、图数一致、刷新重放仍在；零外�
   for (const [i, kind] of kinds.entries()) {
     await setScenario(page, `chart-${kind}`);
     await sv.getByLabel("提问").fill(`画 ${kind}`);
-    await sv.getByRole("button", { name: "提问" }).click();
+    await sv.getByRole("button", { name: "发送" }).click();
     const msg = sv.getByTestId("assistant-msg").nth(i);
     await expect(msg).toContainText("（fake）结论", { timeout: 30_000 });
     await expect(msg.getByTestId("echart")).toHaveCount(1);
@@ -105,7 +105,7 @@ test("边界：bar 5000 点在 canvas 上画出，console 干净", async ({ page
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("画 5000 点");
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   const msg = sv.getByTestId("assistant-msg").last();
   await expect(msg).toContainText("（fake）结论", { timeout: 60_000 });
   const chart = msg.getByTestId("echart");

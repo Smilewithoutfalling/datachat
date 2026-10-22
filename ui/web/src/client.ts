@@ -18,11 +18,11 @@ export function client(api: Api) {
     datasets: () => api.json<Dataset[]>("/datasets"),
     dataset: (id: string, rows = PREVIEW_ROWS) =>
       api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}?rows=${rows}`),
-    upload: (files: File[], name: string) => {
+    upload: (files: File[], name: string, onProgress?: (p: number) => void) => {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f, f.name));
       fd.append("name", name);
-      return api.json<DatasetDetail>("/datasets", { method: "POST", body: fd });
+      return api.upload<DatasetDetail>("/datasets", fd, onProgress);
     },
     deleteDataset: (id: string) => api.json(`/datasets/${encodeURIComponent(id)}`, { method: "DELETE" }),
 

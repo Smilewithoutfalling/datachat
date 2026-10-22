@@ -22,7 +22,7 @@ for (const echo of ["echo", "echocut"]) {
     await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
     const sv = page.getByTestId("session-view");
     await sv.getByLabel("提问").fill(Q);
-    await sv.getByRole("button", { name: "提问" }).click();
+    await sv.getByRole("button", { name: "发送" }).click();
 
     const check = async () => {
       const msg = page.getByTestId("session-view").getByTestId("assistant-msg");

@@ -60,13 +60,14 @@ function posOf(d: Draw, pie: boolean, labelY = Infinity): Pos {
   return "axisName";
 }
 
+
 // 第四步：默认主题和暗色画布各跑一遍。主题不设 rich / formatter，判定表不随主题变；哪天主题配了 rich，这里变红是对的（纪律③）
 // 第五步：再加一轮"经典 + 全部开关开启"（偏好按图型写进 localStorage）。开关只写字面量，判定表应不变。
 const ALL_ON = { label: true, legend: "top", stack: true, smooth: true, gradient: true, radius: true, sort: "desc", marks: true, zoom: true };
 for (const [theme, switchesOn] of [["classic", false], ["darkCanvas", false], ["classic", true]] as const)
 test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定`, async ({ page, baseURL }) => {
   test.setTimeout(180_000);
-  await page.setViewportSize({ width: 1600, height: 1000 }); // .view 最宽 1200px，图宽到顶；类目标签隔一个画一个（见 INJECT_ORDER）
+  await page.setViewportSize({ width: 1600, height: 1000 }); // 对话列最宽 1214（V2a 照改版前的图宽定），图宽到顶 1174；类目标签隔一个画一个（见 INJECT_ORDER）
   const origin = new URL(baseURL!).origin;
   const external: string[] = [];
   const sameOriginAssets: string[] = [];
@@ -120,7 +121,8 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
         r.addedNodes.forEach((n) => {
           if (!(n instanceof Element)) return;
           for (const el of [n, ...n.querySelectorAll("*")]) {
-            if (w.__armed) w.__added.push(el.tagName.toLowerCase());
+            // V2a 起产品用内联 SVG 图标（icons.tsx，源码里写死的静态标记，全部带 data-icon）；只放过这些，别的 <svg> 照样记
+            if (w.__armed && !el.closest("svg[data-icon]")) w.__added.push(el.tagName.toLowerCase());
             attrBad(el);
           }
         });
@@ -139,7 +141,7 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
   for (const [i, model] of rounds.entries()) {
     await setScenario(page, model);
     await sv.getByLabel("提问").fill(`注入 ${model}`);
-    await sv.getByRole("button", { name: "提问" }).click();
+    await sv.getByRole("button", { name: "发送" }).click();
     await expect(sv.getByTestId("assistant-msg").nth(i)).toContainText("（fake）结论", { timeout: 60_000 });
   }
   const msgs = sv.getByTestId("assistant-msg");
@@ -155,14 +157,17 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
   for (const k of ["P2", "P3", "P4", "P5"] as const) await expect(msgs.nth(2).locator(".warnings")).toContainText(P[k]);
   for (const i of [0, 1, 2]) for (const k of ["P1", "P2", "P3"] as const) await expect(msgs.nth(i)).toContainText(P[k]);
   for (const i of [0, 1, 2]) {
+    await msgs.nth(i).getByRole("button", { name: "查看过程" }).click(); // V2a §2.3：过程默认折叠
     const code = msgs.nth(i).locator("details.ev.code").first();
     await code.locator("summary").click();
     await expect(code.locator("pre")).toContainText(P.P1);
   }
   await expect(msgs.nth(0).locator("details.ev.code pre").first()).toContainText(`${P.P4} ${P.P5}`);
+  // 验收 P0-4 起：危险协议链接只留文字（span.md-link-blocked），不再是 <a>。对照：「点我」确实渲染出来了，只是不可点
   const links = await sv.locator("a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
-  expect(links.length).toBeGreaterThan(0); // 对照：结论里的 [点我](javascript:…) 确实渲染成了链接
   expect(links.filter((h) => h && /javascript:/i.test(h))).toEqual([]);
+  await expect(sv.locator(".md-link-blocked", { hasText: "点我" }).first()).toBeVisible();
+  expect(await sv.locator("a", { hasText: "点我" }).count()).toBe(0);
 
   // ---- 画面稳定后取静态绘制记录
   const shots: Buffer[] = [];
@@ -225,6 +230,7 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
 
   // 前提：P4–P7 都画在宽表的类目轴标签位置上（INJECT_ORDER 的排布），否则类目轴这个位置的结论不完整
   const st0 = all.filter((d) => d.chart === 0 && d.phase === "static");
+  expect(st0[0]?.cw).toBe(1174); // 前提：图宽与改版前一致（V2a 改了对话列宽度，这里钉住）
   const xLabels0 = st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "xAxisLabel").map((d) => d.text);
   for (const k of ["P4", "P5", "P6", "P7"] as const) expect([k, xLabels0.includes(D[k])]).toEqual([k, true]);
   // 前提（第四步，防假绿）：每个载荷都确实画出来了——没有 fillText 记录就谈不上"没被解析"。

@@ -11,6 +11,7 @@
 // "哪些变化要清空 view"的列表。换图型、spec 变化时仍先清空再算：类目轴 / 系列都换了，旧区间不该带到新图上。
 // 回读只读 getOption() 的 dataZoom[0].start/end 和 legend[0].selected 两处（公开 API）；selected 的名字当场换成 index，
 // 不往外带。view 不持久化。
+import { IconChevronDown, IconDownload } from "../views/icons";
 import { init } from "echarts/core";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
@@ -230,10 +231,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
       {src && shape && (
         <div className="chart-controls" data-testid="chart-controls" ref={ctlRef}>
           <label>
-            图型{" "}
             <select aria-label="图型" value={kind ?? ""} onChange={(e) => setTarget(asKind(e.target.value))}>
               {KINDS.map((k) => {
-                const v = canChangeKind(base, src, k, asXKind(spec.x_kind));
+                // 当前图型自己不走可换判定（canChangeKind(当前→当前) 不 ok，原来整个 select 显示成灰色，V2a §4.3）
+                const v = k === kind ? { ok: true as const, reason: "" } : canChangeKind(base, src, k, asXKind(spec.x_kind));
                 return (
                   <option key={k} value={k} disabled={!v.ok} title={v.ok ? undefined : v.reason}>
                     {KIND_LABEL[k]}
@@ -250,10 +251,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
             </label>
           )}
           <button type="button" className={`marks-toggle${marksOpen ? " on" : ""}`} aria-expanded={marksOpen}
-            onClick={() => setMarksOpen(!marksOpen)}>样式</button>
+            onClick={() => setMarksOpen(!marksOpen)}>标记<IconChevronDown size={9} /></button>
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}
           <span className="chart-export">
-            <button type="button" onClick={onExport}>导出 PNG</button>
+            <button type="button" onClick={onExport}><IconDownload size={11} />导出 PNG</button>
             {theme === "darkCanvas" && (
               <label>
                 <input type="checkbox" checked={light} onChange={(e) => setLight(e.target.checked)} />

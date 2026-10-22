@@ -18,7 +18,12 @@ type Listener = () => void;
 export class Api {
   private listeners = new Set<Listener>();
 
-  constructor(private token: string | null, private fetchImpl: typeof fetch = (...a) => fetch(...a)) {}
+  private native: boolean;
+
+  constructor(private token: string | null, private fetchImpl?: typeof fetch) {
+    this.native = !fetchImpl; // 测试注入 fetch 时，上传也走 fetch（拿不到进度）
+    this.fetchImpl = fetchImpl ?? ((...a) => fetch(...a));
+  }
 
   // <img src> 带不了请求头，图表 PNG 是唯一接受 ?token= 的接口（app/server/app.py auth）。只认后端给的 /charts/<name>。
   chartSrc(path: string): string | null {
@@ -38,7 +43,7 @@ export class Api {
     }
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token}`);
-    const res = await this.fetchImpl(path, { ...init, headers, credentials: "omit", referrerPolicy: "no-referrer" });
+    const res = await this.fetchImpl!(path, { ...init, headers, credentials: "omit", referrerPolicy: "no-referrer" });
     if (res.status === 401) {
       this.listeners.forEach((fn) => fn());
       throw new Unauthorized();
@@ -54,6 +59,42 @@ export class Api {
       throw new ApiError(res.status, detail);
     }
     return res;
+  }
+
+  /** 上传带进度（phase5 V2a §6.3）：fetch 拿不到上传进度，改用 XHR。错误处理与 request 一致（401 → 失效页）。 */
+  async upload<T>(path: string, body: FormData, onProgress?: (p: number) => void): Promise<T> {
+    if (!this.native || typeof XMLHttpRequest === "undefined") return this.json<T>(path, { method: "POST", body });
+    if (!this.token) {
+      this.listeners.forEach((fn) => fn());
+      throw new Unauthorized();
+    }
+    const token = this.token;
+    const xhr = new XMLHttpRequest();
+    const done = new Promise<XMLHttpRequest>((resolve, reject) => {
+      xhr.onload = () => resolve(xhr);
+      xhr.onerror = () => reject(new TypeError("网络错误，上传没有完成"));
+      xhr.onabort = () => reject(new TypeError("上传已取消"));
+    });
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    xhr.open("POST", path);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.send(body);
+    await done;
+    if (xhr.status === 401) {
+      this.listeners.forEach((fn) => fn());
+      throw new Unauthorized();
+    }
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(xhr.responseText);
+    } catch {
+      /* 非 JSON */
+    }
+    if (xhr.status < 200 || xhr.status >= 300) {
+      const d = (parsed as { detail?: unknown } | null)?.detail;
+      throw new ApiError(xhr.status, typeof d === "string" ? d : d !== undefined ? JSON.stringify(d) : xhr.statusText);
+    }
+    return parsed as T;
   }
 
   async json<T>(path: string, init: RequestInit = {}): Promise<T> {

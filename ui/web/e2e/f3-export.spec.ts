@@ -18,7 +18,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("结论", { timeout: 60_000 });
   return sv;
 }
@@ -44,7 +44,7 @@ type Png = { name: string; bytes: Buffer; width: number; height: number };
 /** 点导出，拿到真下载的文件：PNG 签名、IHDR 宽高。 */
 // F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
 async function group(ctl: Locator, name: string): Promise<Locator> {
-  const btn = ctl.getByRole("button", { name: "样式" });
+  const btn = ctl.getByRole("button", { name: "标记" });
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   const card = ctl.getByTestId("marks-card");
   const t = card.getByRole("button", { name: new RegExp("^" + name) });

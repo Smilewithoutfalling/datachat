@@ -19,7 +19,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
 async function askAgain(page: Page, q: string, n: number) {
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg")).toHaveCount(n, { timeout: 60_000 });
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("（fake）结论", { timeout: 60_000 });
   return sv;
@@ -53,7 +53,7 @@ const CSV = "类目,值\n" + Array.from({ length: 30 }, (_, i) => `k${String(i).
 
 // F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
 async function group(ctl: Locator, name: string): Promise<Locator> {
-  const btn = ctl.getByRole("button", { name: "样式" });
+  const btn = ctl.getByRole("button", { name: "标记" });
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   const card = ctl.getByTestId("marks-card");
   const t = card.getByRole("button", { name: new RegExp("^" + name) });

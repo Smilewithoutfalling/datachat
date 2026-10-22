@@ -30,17 +30,18 @@ test("提问：事件实时渲染（计划、折叠代码、执行），结论 m
     "GET /sessions/s1": () => ({ ...SESSION, messages }),
     "POST /sessions/s1/messages": () => sse.response(),
   });
-  await screen.findByText("还没有消息。");
+  await screen.findByText("还没有消息");
   fireEvent.change(screen.getByLabelText("提问"), { target: { value: "总销量？" } });
-  fireEvent.click(screen.getByRole("button", { name: "提问" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   const liveMsg = await screen.findByTestId("live-msg");
   await act(async () => sse.push("plan", { text: `计划 ${INJECT}` }));
+  fireEvent.click(within(liveMsg).getByRole("button", { name: "查看过程" })); // V2a §2.3：过程默认折叠在步骤条里
   await within(liveMsg).findByText(`计划 ${INJECT}`);
   await act(async () => sse.push("code", { code: "result = df['units'].sum()", source: "codegen", attempt: 0 }));
   await act(async () => sse.push("exec", { ok: true, result_text: "1685", error: null, duration_s: 0.2, chart: null }));
   const code = await within(liveMsg).findByText("生成代码");
   expect(code.closest("details")?.open).toBe(false); // 代码默认折叠
-  expect((within(liveMsg).getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false); // V2a §1.8：停止在输入区
   await act(async () => sse.push("answer", { text: OK.answer, forced: false }));
   messages = [user("u1", "总销量？"), { id: "a1", role: "assistant", content: "总销量 1685", status: "ok", created_at: "t",
     events: [], result: OK, feedback: null }];
@@ -63,13 +64,14 @@ test("停止：先等 cancel 返回、不断开流；流里收到过 answer 但�
     "POST /sessions/s1/messages": () => sse.response(),
     "POST /messages/a1/cancel": () => (order.push("cancel"), { id: "a1", status: "cancelled" }),
   });
-  await screen.findByText("还没有消息。");
+  await screen.findByText("还没有消息");
   fireEvent.change(screen.getByLabelText("提问"), { target: { value: "q" } });
-  fireEvent.click(screen.getByRole("button", { name: "提问" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   const liveMsg = await screen.findByTestId("live-msg");
   await act(async () => sse.push("plan", { text: "计划" }));
   await act(async () => sse.push("answer", { text: "结论原文", forced: false }));
-  fireEvent.click(within(liveMsg).getByRole("button", { name: "停止" }));
+  expect(liveMsg).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "停止" })); // V2a §1.8：停止在输入区
   await waitFor(() => expect(order).toEqual(["cancel"]));
   expect(screen.getByTestId("live-msg")).toBeTruthy(); // 没断开，流还在
   const cancelled: Message = { id: "a1", role: "assistant", content: MESSAGES.cancelled, status: "cancelled", created_at: "t",
@@ -110,9 +112,11 @@ test("重放：cancelled 不显示结论；interrupted 给重试，重试发同�
   expect(screen.queryByText("不该出现的结论")).toBeNull();
   expect(within(msgs[0]).getByText(MESSAGES.cancelled, { selector: ".outcome" })).toBeTruthy();
   expect(within(msgs[1]).getAllByText(/数据集读取失败/)).toHaveLength(1); // 致命 error 事件不重复画，只在终止原因里出现一次
-  expect(within(msgs[1]).getByRole("alert").textContent).toContain("数据集失败：数据集读取失败");
+  // V2a §3.3：错误卡标题和详情分两行，不再是「数据集失败：…」一行
+  expect(within(msgs[1]).getByRole("alert").querySelector(".errcard-title")?.textContent).toBe("数据读取失败");
+  expect(within(msgs[1]).getByRole("alert").querySelector(".errcard-detail")?.textContent).toBe("数据集读取失败");
   expect(within(msgs[2]).getByRole("status").textContent).toContain(MESSAGES.interrupted);
-  fireEvent.click(within(msgs[2]).getByRole("button", { name: "重试" }));
+  fireEvent.click(within(msgs[2]).getByRole("button", { name: "重新问一次" })); // V2a §3.4：中断的出口改名，行为不变
   await waitFor(() => expect(be.calls.find((c) => c.method === "POST")?.body).toEqual({ content: "问三" }));
   sse.end();
 });
@@ -123,9 +127,9 @@ test("提问被拒（409）：显示错误，不留下实时气泡", async () =>
     "POST /sessions/s1/messages": () =>
       new Response(JSON.stringify({ detail: "这个会话还有一条消息在分析中" }), { status: 409 }),
   });
-  await screen.findByText("还没有消息。");
+  await screen.findByText("还没有消息");
   fireEvent.change(screen.getByLabelText("提问"), { target: { value: "q" } });
-  fireEvent.click(screen.getByRole("button", { name: "提问" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   expect((await screen.findByRole("alert")).textContent).toContain("409");
   expect(screen.queryByTestId("live-msg")).toBeNull();
 });
@@ -159,8 +163,9 @@ test("markdown：版本钉住；不渲染 raw HTML；javascript: 链接被过滤
   render(<Markdown text={`${INJECT}\n\n[点我](javascript:window.__pwned=1) [官网](https://example.com)\n\n| a | b |\n|---|---|\n| 1 | 2 |`} />);
   expect(document.querySelector("img")).toBeNull();
   expect(screen.getByText(INJECT, { exact: false })).toBeTruthy();
-  const bad = screen.getByText("点我").closest("a")!;
-  expect(bad.getAttribute("href") ?? "").not.toMatch(/javascript/i);
+  // 验收 P0-4：危险协议的链接只留文字，不再是 <a>（原来是去掉 href 的 <a>，样式上仍像链接）
+  const bad = screen.getByText("点我");
+  expect(bad.closest("a")).toBeNull();
   const good = screen.getByText("官网").closest("a")!;
   expect(good.getAttribute("href")).toBe("https://example.com");
   expect(good.getAttribute("target")).toBe("_blank");

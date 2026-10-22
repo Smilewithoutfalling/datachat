@@ -56,7 +56,7 @@ beforeEach(() => {
 
 // F4 迭代 V1：开关在标记卡的组里。打开第 i 张图的卡（已开不重复点），再展开组（已展开不重复点），返回该组区域。
 function group(name: string, i = 0): HTMLElement {
-  const btn = screen.getAllByRole("button", { name: "样式" })[i];
+  const btn = screen.getAllByRole("button", { name: "标记" })[i];
   if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
   const t = screen.getByRole("button", { name: new RegExp("^" + name) });
   if (t.getAttribute("aria-pressed") !== "true") fireEvent.click(t);
@@ -104,7 +104,8 @@ test("TurnView：5001 夹具 → 图和后端给的截断警告同时出现，�
   render(<TurnView turn={turn} />);
   expect(screen.getAllByTestId("echart")).toHaveLength(1);
   expect(screen.getAllByText(warning)).toHaveLength(1);
-  expect(screen.queryByText(/数据点超过/, { selector: ":not(li)" })).toBeNull();
+  // V2a §3.2：后端警告挪进黄色警示条（.wbar-title），不再是 <li>；断言不变：页面上只此一处
+  expect(screen.queryByText(/数据点超过/, { selector: ":not(.wbar-title)" })).toBeNull();
 });
 
 test("TurnView：png 项走 chartSrc（同源 /charts/<name>?token=），给不出地址就不画", () => {
@@ -381,7 +382,7 @@ describe("F4 层 1 面板（标记卡）", () => {
   });
   const opt = () => created.at(-1)!.getOption() as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   const fontSize = () => { const t = opt().textStyle; return (Array.isArray(t) ? t[0] : t)?.fontSize; };
-  const open = () => fireEvent.click(screen.getByRole("button", { name: "样式" }));
+  const open = () => fireEvent.click(screen.getByRole("button", { name: "标记" }));
   const tile = (n: string) => screen.getByRole("button", { name: new RegExp("^" + n) });
 
   test("字号：点'大 16' → 渲染出 textStyle.fontSize 16，存进 localStorage；重置后删键", () => {
@@ -414,13 +415,12 @@ describe("F4 层 1 面板（标记卡）", () => {
     expect(why.textContent).toBe("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
     fireEvent.click(axis);
     expect(axis.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(tile("颜色"));
+    expect(tile("颜色").getAttribute("aria-pressed")).toBe("true"); // 验收 P0-3：打开即展开颜色组，不用再点
     expect(screen.getByRole("checkbox", { name: "合并为'其他'" })).toBeTruthy();
   });
   test("颜色：点色块写系列色；换主题跟着主题的同一 index", () => {
     render(<EChart spec={spec("bar")} editKey="m1:3" />);
-    open();
-    fireEvent.click(tile("颜色"));
+    open(); // 验收 P0-3：颜色组默认展开
     fireEvent.click(screen.getAllByRole("button", { name: /颜色 4$/ })[0]);
     expect(opt().series[0].itemStyle.color).toBe(THEMES.classic.theme.color[3]);
     act(() => setChartTheme("tableau"));
@@ -485,7 +485,7 @@ describe("F4 迭代 V1：标记卡", () => {
   });
   const tile = (n: string) => screen.getByRole("button", { name: new RegExp("^" + n) });
 
-  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 样式 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
+  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 标记 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
     const want: Record<string, boolean> = {
       bar: true, "bar-series-20": false, line: false, "line-wide": false, "line-time": false,
       area: false, pie: true, scatter: false, "scatter-multi": false,
@@ -494,7 +494,7 @@ describe("F4 迭代 V1：标记卡", () => {
       render(<EChart spec={spec(id)} />);
       const ctl = screen.getByTestId("chart-controls");
       expect([id, within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))]).toEqual([id, sort ? ["图型", "排序"] : ["图型"]]);
-      expect([id, within(ctl).getAllByRole("button").map((b) => b.textContent)]).toEqual([id, ["样式", "导出 PNG"]]);
+      expect([id, within(ctl).getAllByRole("button").map((b) => b.textContent)]).toEqual([id, ["标记", "导出 PNG"]]); // 验收 P0-3：按钮名和浮层标题统一为「标记」
       expect(within(ctl).queryAllByRole("checkbox")).toEqual([]);
       cleanup();
     }
@@ -520,7 +520,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("整页只开一张卡：打开第二张图的卡，第一张自动关", () => {
     render(<><EChart spec={spec("bar")} /><EChart spec={spec("bar-untitled")} /></>);
-    const [a, b] = screen.getAllByRole("button", { name: "样式" });
+    const [a, b] = screen.getAllByRole("button", { name: "标记" });
     fireEvent.click(a);
     expect(screen.getAllByTestId("marks-card")).toHaveLength(1);
     fireEvent.click(b);
@@ -530,7 +530,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("关闭：Esc、点卡外、再点样式按钮；点卡内不关", () => {
     render(<EChart spec={spec("bar")} />);
-    const btn = screen.getByRole("button", { name: "样式" });
+    const btn = screen.getByRole("button", { name: "标记" });
     fireEvent.click(btn);
     fireEvent.mouseDown(screen.getByTestId("marks-card"));
     expect(screen.queryByTestId("marks-card")).not.toBeNull();
@@ -569,7 +569,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("散点图：标签组整组不可用，.marks-why 一行写理由", () => {
     render(<EChart spec={spec("scatter")} />);
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
+    fireEvent.click(screen.getByRole("button", { name: "标记" }));
     const label = tiles().find((t) => t.textContent!.includes("标签"))!;
     expect(label.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByTestId("marks-why").textContent).toContain("标签：散点图不显示数值标签，单系列也没有图例");
