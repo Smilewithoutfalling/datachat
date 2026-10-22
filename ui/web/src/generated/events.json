@@ -16,6 +16,17 @@
     "cancelled",
     "interrupted"
   ],
+  "llm_kinds": [
+    "timeout",
+    "connection",
+    "rate_limit",
+    "auth",
+    "bad_request",
+    "server",
+    "gateway_error",
+    "unknown",
+    "no_key"
+  ],
   "message_statuses": [
     "running",
     "ok",

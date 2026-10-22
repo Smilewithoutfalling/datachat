@@ -8,7 +8,7 @@
 | code   | 工作流 codegen / reviewer 写出代码；ReAct 模型发起一次工具调用 | code, source（codegen / reviewer / tool_call）, attempt；ReAct 另有 thought（模型随调用附带的文字，常为空） |
 | exec   | 一次代码执行结束 | ok, result_text（截断 2000 字）, error, duration_s, chart（PNG 路径或 None）, options（chart() 出的 ECharts spec 列表，exec 失败时为空）, chart_errors, charts_discarded（exec 失败丢弃的张数）；ReAct 另有 stdout, attempt |
 | answer | 最终结论（ReAct 在收尾判定后才发，所以每次分析最多一个） | text, forced（ReAct 步数用完后强制收尾得到的结论） |
-| error  | 出错 | message, kind（dataset / llm / execution / agent / cancelled）, fatal |
+| error  | 出错 | message, kind（dataset / llm / execution / agent / cancelled）, fatal, llm_kind（kind=llm 时为子类：LLM_KINDS 之一或 http_NNN；其余为 null） |
 | done   | 最后一个事件，必有且只有一个 | result（AnalysisResult.to_record()）；Python 侧另可用 Event.result 取原对象 |
 
 error 的 fatal=False 表示过程中的可恢复情况（数据字典读取失败已跳过；ReAct 整轮重跑）。
@@ -24,6 +24,9 @@ from typing import Any, Optional
 from app.core.errors import UserText
 
 EVENT_TYPES = ("plan", "code", "exec", "answer", "error", "done")
+# error 事件 / AnalysisResult 的 llm_kind：classify_error 的枚举加 no_key（没配 Key，没发请求）。
+# 另有 http_NNN（classify_error 对未单列的 4xx 返回），是模式不是枚举，不在表里。前端按它给错误卡分出口（phase5 V2a）。
+LLM_KINDS = ("timeout", "connection", "rate_limit", "auth", "bad_request", "server", "gateway_error", "unknown", "no_key")
 # error 事件的 kind / AnalysisResult.error_kind。前端只按 kind / status 分支，不对文案做匹配（阶段 5 F2）。
 # - cancelled：用户点了停止（POST /messages/{id}/cancel）。只有用户动作才用它。
 # - interrupted：非用户动作的终止——后端重启时清理遗留 running、SSE 客户端断开（关标签页、网络抖动）。
@@ -79,11 +82,13 @@ class Emitter:
     def answer(self, text, *, forced=False):
         return self._make("answer", {"text": text, "forced": forced})
 
-    def error(self, message, kind, *, fatal):
+    def error(self, message, kind, *, fatal, llm_kind=None):
         # T11 机械约束：界面文案只能来自 user_error（或 F2 常量）。exec 原文（kind=execution）按 T9 原样，例外
         if kind != "execution" and not isinstance(message, UserText):
             raise TypeError(f"error 事件的 message 必须经 app.core.errors.user_error 生成（kind={kind}）")
-        return self._make("error", {"message": str(message), "kind": kind, "fatal": fatal})
+        if (llm_kind is not None) != (kind == "llm"):
+            raise ValueError(f"llm_kind 只在 kind=llm 时给，且必须给（kind={kind}, llm_kind={llm_kind}）")
+        return self._make("error", {"message": str(message), "kind": kind, "fatal": fatal, "llm_kind": llm_kind})
 
     def done(self, result):
         return self._make("done", {}, result)

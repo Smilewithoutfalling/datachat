@@ -1903,7 +1903,7 @@ S 10-21 第二轮：
 走查记录：（S 跑完后填）
 
 
-## [56] 2026-10-22 · F4 迭代 V2a 方案：按 S 设计稿改版 · commit <待提交>
+## [56] 2026-10-22 · F4 迭代 V2a 方案：按 S 设计稿改版 · commit e4b6ef1
 
 [55] 回填为 b6769cd。
 
@@ -1921,3 +1921,29 @@ S 10-21 第二轮：
 - 「总结」这一段对应 answer 事件，不是 done。
 
 未做：代码。实现按 §9 分三段，放在同一个分支上一起提交。
+
+## [57] 2026-10-22 · error 事件和结果加 llm_kind · commit <待提交>
+
+[56] 回填为 e4b6ef1。
+
+起因：S 10-22 定下 llm 类错误要按子类分出口（phase5 V2a「S 10-22 已定」第 1 条）。前端只按 status、error_kind 分支，不看文案（turn.ts:90），所以需要后端把子类显式给出来。这是 V2a 不改后端原则唯一的破例。
+
+改了什么：
+- AnalysisResult 新增 llm_kind，经 to_record 进入 done.result 落库，重放时前端从库里取。error 事件的 data 加 llm_kind，非 llm 恒为 null；Emitter.error 校验"llm 必须给子类，非 llm 不许给"，不满足就抛 ValueError。
+- 取值：LLMError.kind（工作流）或 classify_error 的结果（ReAct）；网关错误 JSON 记 gateway_error，包括非致命的整轮重跑事件；没配 Key 记 no_key。
+- 停止可能把先前的 llm 错误盖成 cancelled，所以在收尾时统一处理：只要 error_kind 不是 llm，就把 llm_kind 清空（service.py 的 finally 里）。
+- events.py 新增 LLM_KINDS（classify_error 的 8 个值加 no_key），docstring 的事件表也同步了；generated/events.json 新增 llm_kinds；turn.ts 的 Result 和 error 事件类型各加一个可选字段。前端界面这次不用这个字段，留到 V2a 的错误卡用。
+
+偏离：no_key 是方案里没有的值。没配 Key 时根本没有发请求，不属于任何 classify_error 的类别；而前端要据此给出"去设置"的出口，所以单列一个值。方案表里已经补上。
+
+判定表：两处断言加了 llm_kind 字段，行为本身没有变，只是事件多了一个键。
+- test_web_f2::test_stream_cancel_stops_before_next_event：加 "llm_kind": None。
+- test_stream::test_fatal_error_precedes_done：加 "llm_kind": "no_key"。
+
+测试：新增 tests/test_llm_kind.py，共 23 条：
+- 8 种异常（timeout、connection、rate_limit、401、403、400、500、409）× workflow / react，断言 res、致命 error 事件、done.result 三处一致；
+- no_key、ReAct 网关重跑（非致命事件也带 gateway_error）；
+- dataset 错误和成功时为 null；
+- Emitter 的约束；
+- LLM_KIND_TEXT 是 LLM_KINDS 的子集，classify_error 的输出都落在 LLM_KINDS 或 http_NNN 里；
+- events.json 里有 llm_kinds。

@@ -33,7 +33,8 @@ def test_stream_cancel_stops_before_next_event(sample_path):
     model = hooked("写一段 pandas 代码", ev.set)
     evs = list(analyze_stream(sample_path, "总销量", chat_model=model, cancel=ev))
     assert [e.type for e in evs] == ["plan", "error", "done"]       # codegen 那次调用跑完，code 事件之前停
-    assert evs[1].data == {"message": CANCELLED_MESSAGE, "kind": "cancelled", "fatal": True}   # 常量文案，不带异常
+    assert evs[1].data == {"message": CANCELLED_MESSAGE, "kind": "cancelled", "fatal": True,
+                           "llm_kind": None}   # 常量文案，不带异常；llm_kind 是 V2a 加的字段，非 llm 恒为 None
     assert evs[-1].result.error == CANCELLED_MESSAGE
     r = evs[-1].result
     assert r.error_kind == "cancelled" and not r.ok and r.steps[-1].name == "cancel"

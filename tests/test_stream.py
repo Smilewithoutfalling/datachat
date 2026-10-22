@@ -44,7 +44,8 @@ def test_fatal_error_precedes_done(sample_path, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     evs = _events(sample_path, "q")                                   # 没有 Key（conftest 的内存钥匙串为空）
     assert [e.type for e in evs] == ["error", "done"]
-    assert evs[0].data == {"message": evs[-1].result.error, "kind": "llm", "fatal": True}
+    assert evs[0].data == {"message": evs[-1].result.error, "kind": "llm", "fatal": True,
+                           "llm_kind": "no_key"}   # V2a：没配 Key 是 llm 的子类 no_key，前端据此给「去设置」
 
 
 def test_dataset_error(tmp_path):

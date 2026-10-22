@@ -141,13 +141,13 @@ def inject() -> dict:
 
 def build() -> dict[str, str]:
     from app.core.events import (CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, ERROR_KINDS, EVENT_TYPES,
-                                 INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE)
+                                 INTERRUPTED_MESSAGE, LLM_KINDS, STREAM_ABORTED_MESSAGE)
     from app.server.db import MESSAGE_STATUSES
     from app.tools.charts import BANNED_KEYS
     dump = lambda o: json.dumps(o, ensure_ascii=False, indent=2) + "\n"   # noqa: E731
     return {
         "events.json": dump({"_generated_by": "scripts/gen_ui_types.py", "event_types": list(EVENT_TYPES),
-                             "error_kinds": list(ERROR_KINDS),
+                             "error_kinds": list(ERROR_KINDS), "llm_kinds": list(LLM_KINDS),
                              "message_statuses": list(MESSAGE_STATUSES),
                              "messages": {"cancelled": CANCELLED_MESSAGE, "interrupted": INTERRUPTED_MESSAGE,
                                           "disconnected": DISCONNECTED_MESSAGE,

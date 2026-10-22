@@ -14,6 +14,7 @@ export type Result = {
   answer: string;
   error: string | null;
   error_kind: string | null;
+  llm_kind?: string | null; // error_kind=llm 时的子类（generated/events.json llm_kinds 或 http_NNN）；旧记录没有
   warnings: string[];
   unverified_numbers?: string[];
   charts: ChartItem[];
@@ -30,7 +31,7 @@ export type Ev =
       data: { ok: boolean; result_text: string; error: string | null; duration_s: number; stdout?: string; [k: string]: unknown };
     }
   | { type: "answer"; seq: number; data: { text: string; forced: boolean } }
-  | { type: "error"; seq: number; data: { message: string; kind: string; fatal: boolean } }
+  | { type: "error"; seq: number; data: { message: string; kind: string; fatal: boolean; llm_kind?: string | null } }
   | { type: "done"; seq: number; data: { result: Result } };
 
 export type Turn = {
