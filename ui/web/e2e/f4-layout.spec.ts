@@ -105,3 +105,48 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   expect(alpha.length === 4 ? alpha[3] : 1).toBeGreaterThan(0.2); // 遮罩不透明度够，背景正文不会和对话框文字叠在一起
   expect(alpha.slice(0, 3).every((v) => v < 60)).toBe(true); // 是压暗，不是白雾
 });
+
+// 阶段 5 收尾 A（P2-21/22）：grid.left 从 '3%' 改成固定 12。改之前 25 屏（888 宽卡）卡左缘到 y 轴线 57px，设计 44；
+// 验收要 1024 宽下 ≤ 46px。y 值轴默认不画轴线，"y 轴线"就是 plot 区左沿 = x 轴线的左端：读 canvas 像素找它，
+// 不读 option（option 里是 12，量的是刻度文字 + 留白之后实际画出来的位置）。
+test("1024 宽会话：图表卡左缘到 y 轴线 ≤ 46px（读 canvas 像素）；右侧留白不随宽度变", async ({ page }) => {
+  test.setTimeout(120_000);
+  const file = `axis-${Date.now()}.csv`;
+  await page.setViewportSize({ width: 1024, height: 768 });
+  expect((await page.request.put("/settings", { headers: auth, data: { model: "chart-bar" } })).ok()).toBe(true);
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
+  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
+  const sv = page.getByTestId("session-view");
+  await sv.getByLabel("提问").fill("画各城市销量柱状图");
+  await sv.getByRole("button", { name: "发送" }).click();
+  await expect(sv.getByTestId("assistant-msg")).toHaveCount(1, { timeout: 60_000 });
+  const wrap = sv.locator(".echart-wrap").first();
+  await expect(wrap.locator("canvas").first()).toBeVisible();
+  const measure = () => wrap.evaluate((w) => {
+    const c = w.querySelector("canvas") as HTMLCanvasElement;
+    const k = c.width / c.clientWidth;
+    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    // x 轴线：从下往上找"连续灰色像素最长"的一行（轴线色 #6E7079 一类：r≈g≈b、比 200 暗）
+    let best = { y: -1, x0: 0, x1: 0 };
+    for (let y = c.height - 1; y >= c.height / 2; y--) {
+      let run = 0, start = 0;
+      for (let x = 0; x < c.width; x++) {
+        const i = (y * c.width + x) * 4;
+        const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+        const gray = Math.max(r, g, b) - Math.min(r, g, b) < 24 && r < 200;
+        if (gray) { if (!run) start = x; run++; } else run = 0;
+        if (run > best.x1 - best.x0) best = { y, x0: start, x1: start + run };
+      }
+    }
+    const cr = c.getBoundingClientRect(), wr = w.getBoundingClientRect();
+    return { left: cr.left + best.x0 / k - wr.left, right: wr.right - (cr.left + best.x1 / k), len: (best.x1 - best.x0) / k, width: cr.width };
+  });
+  await expect(async () => {
+    const m = await measure();
+    expect(m.len).toBeGreaterThan(m.width * 0.6); // 找到的确实是横贯 plot 区的轴线
+    expect(m.left).toBeLessThanOrEqual(46);
+    expect(Math.abs(m.right - 17)).toBeLessThanOrEqual(2); // grid.right 16 + 卡边框 1
+  }).toPass({ timeout: 10_000 });
+});

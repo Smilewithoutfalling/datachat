@@ -24,6 +24,9 @@ model 名语法（解析器严格，见 parse_model）：
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
     step：plan | codegen | fix | answer（工作流）、act | final（ReAct）
       不写 @step 时目标调用是"第一次调用"：工作流的 plan、ReAct 的 act（无状态可判定，不需要计数）。
+    设置页「测试连接」（阶段 5 收尾 C）：请求只有一条 user 消息、内容正好是 MARK_PING（= app/core/llm.py 的 PING_MESSAGE）
+      时认作 ping 链路，唯一一步 ping。ok / chart-* / inject-* 回 "pong"；fail-<code>、hang-<N>s、slow-<N>s 照常作用于它；
+      带 @step 的场景对 ping 一律 400（步骤不属于这条链路）。
 
 fail loud：认不出的东西一律 HTTP 400（不可重试，后端立刻以 http_400 失败，不会被当成 5xx 退避重试三次），
 body 写明原因——未知 scenario / step、拼错（hang-30 少了 s）、@step 不属于本次请求的链路
@@ -48,7 +51,9 @@ from app.tools.charts import KINDS
 
 WORKFLOW_STEPS = ("plan", "codegen", "fix", "answer")
 REACT_STEPS = ("act", "final")
-FIRST_STEP = {"workflow": "plan", "react": "act"}
+PING_STEPS = ("ping",)
+CHAIN_STEPS = {"workflow": WORKFLOW_STEPS, "react": REACT_STEPS, "ping": PING_STEPS}
+FIRST_STEP = {"workflow": "plan", "react": "act", "ping": "ping"}
 FAIL_CODES = (400, 401, 403, 404, 429, 500, 502, 503)
 MAX_SECONDS = 600
 
@@ -136,6 +141,8 @@ MARK_FIX = "之前生成的 pandas 代码执行出错了，请修正它"
 MARK_CODEGEN = "根据分析计划写一段 pandas 代码"
 MARK_ANSWER_OK = "根据分析结果，用中文简洁、直接地回答用户问题"
 MARK_ANSWER_FAIL = "分析未能成功完成"
+MARK_PING = "ping"   # 设置页「测试连接」的固定消息（app/core/llm.py PING_MESSAGE）；整条消息相等才算，不做子串匹配
+PING_REPLY = "pong"
 
 
 class FakeError(Exception):
@@ -151,7 +158,7 @@ class Scenario:
     echo: Optional[str] = None   # fail 场景的回显方式：None | "echo" | "echocut"（T11）
 
     def targets(self, agent: str, step: str) -> bool:
-        if self.step is not None and self.step not in (WORKFLOW_STEPS if agent == "workflow" else REACT_STEPS):
+        if self.step is not None and self.step not in CHAIN_STEPS[agent]:
             raise FakeError(f"场景 @{self.step} 不属于 {agent} 链路，永远匹配不上——换成该链路的步骤名")
         return step == (self.step or FIRST_STEP[agent])
 
@@ -219,6 +226,9 @@ def recognize(messages: list) -> tuple[str, str]:
     """(agent, step)。认不出就抛 FakeError，绝不猜。"""
     if not isinstance(messages, list) or not messages:
         raise FakeError("请求里没有 messages")
+    if (len(messages) == 1 and isinstance(messages[0], dict) and messages[0].get("role") == "user"
+            and _text(messages[0].get("content")) == MARK_PING):
+        return "ping", "ping"
     whole = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
     if MARK_REACT in whole:
         # 边界：只按"最后一条是不是 tool"分 act / final，适用于单轮工具调用的剧本。多轮（连调两次工具再收尾）
@@ -244,6 +254,8 @@ def question_of(agent: str, messages: list) -> str:
 def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None, inject: bool = False) -> dict:
     """固定剧本：返回 OpenAI 的 assistant message。chart 给定时，写代码的那一步换成 chart_code(chart)；
     inject 时换成 inject_code(chart)，成功结论换成 INJECT_ANSWER。"""
+    if agent == "ping":
+        return {"role": "assistant", "content": PING_REPLY}
     code = inject_code(chart) if inject else (chart_code(chart) if chart else CODE)
     answer = INJECT_ANSWER if inject else ANSWER
     if agent == "react":

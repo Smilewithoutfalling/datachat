@@ -453,7 +453,7 @@ def test_validate_spec_checks_x_kind():
 
 # 直角坐标里不是"契约归一"对象的键：每张图自己的内容或框架（bottom 随系列数变、name / data 来自数据）。
 # 不在这里也不在 GEOMETRY 里的键 = 新加了几何键却没登记，测试红（F3 第五步：normalize 靠 GEOMETRY 归一历史 spec）。
-_PER_CHART = {"grid": {"left", "right", "top", "bottom"},
+_PER_CHART = {"grid": {"top", "bottom"},
               "xAxis": {"type", "name", "data", "boundaryGap", "scale", "axisLabel"},
               "yAxis": {"type", "name", "scale"}}
 
@@ -485,3 +485,16 @@ def test_schema_exports_step5_contract():
     groups = mod.kind_fixtures()["groups"]
     assert set(groups["single"]) == {"bar", "line", "area", "pie"} and set(groups["holes"]) == {"bar", "line", "area"}
     assert all(validate_spec(sp_) == [] for g in groups.values() for sp_ in g.values())
+
+
+def test_schema_exports_display_contract():
+    """V2b B3：前端 sanitizeTitle 用的渲染面替换表和标题限长，从 chart_schema.json 的 display 读，必须等于 charts.py 常量。"""
+    import importlib.util, json, os
+    from app.tools.charts import DISPLAY_UNSAFE, TITLE_MAX
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sp = importlib.util.spec_from_file_location("gen_ui_types", os.path.join(root, "scripts", "gen_ui_types.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    assert mod.chart_schema()["display"] == {"unsafe": DISPLAY_UNSAFE, "title_max": TITLE_MAX}
+    with open(os.path.join(root, "ui", "web", "src", "generated", "chart_schema.json"), encoding="utf-8") as f:
+        assert json.load(f)["display"] == {"unsafe": DISPLAY_UNSAFE, "title_max": TITLE_MAX}

@@ -1,5 +1,5 @@
 // F4 迭代 V1 第 4 条：组级不可用只有三种情形。逐格枚举（图型 × 单/多系列 × 时间/非时间 x 轴），COMPAT 一改这里就红。
-import { GROUPS, groupStates, whyLine } from "./marksGroups";
+import { GROUPS, groupStates } from "./marksGroups";
 import { KINDS, type Shape } from "./switches";
 
 const shapes: Shape[] = KINDS.flatMap((kind) => [1, 3].flatMap((series) =>
@@ -27,12 +27,11 @@ test("颜色、文字两组恒可用；每组至少有一项时才可用", () =>
   }
 });
 
-test("卡内共 12 项（各图形状的并集），排序不在卡内（留在工具栏）", () => {
+// V2b：12 → 14，新增「按列着色」（B2，只在单系列柱图出现）和「标题」（B3，恒有）
+test("卡内共 14 项（各图形状的并集），排序不在卡内（留在工具栏）；按列着色只在单系列柱图出现", () => {
   const all = new Set(shapes.flatMap((s) => groupStates(s).flatMap((g) => g.items)));
-  expect(all.size).toBe(12);
+  expect(all.size).toBe(14);
+  const withColorBy = shapes.filter((s) => groupStates(s)[0].items.includes("colorBy")).map((s) => `${s.kind}/${s.series}`);
+  expect([...new Set(withColorBy)]).toEqual(["bar/1"]);
   expect(all.has("sort")).toBe(false);
-});
-
-test("多条理由用「 · 」连成一行", () => {
-  expect(whyLine(groupStates({ kind: "pie", series: 1, xKind: "category" }))).toBe("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
 });

@@ -1,15 +1,21 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type Client, errText } from "../client";
-import type { KeyStatus, Settings } from "../types";
+import type { KeyStatus, Settings, SettingsTest } from "../types";
 import { IconCheck, IconWarn } from "./icons";
 import { Topbar } from "./ui";
 
 // API Key 只写不读：后端从不返回 Key 本身，这里也不保留输入值（保存后立即清空）。
 // V2a §5.1：凭证三态——env（只读，说明原因）/ keyring（可更换、可删除）/ 未设置（黄色提示 + 输入框）。
 // 验收 P1-15：「钥匙串」是 macOS 叫法，界面统一写「系统凭据」。
+// 阶段 5 收尾 C：凭证卡和模型三项下面一个「测试连接」。测的是**已保存**的配置（POST /settings/test），所以表单有未保存的
+// 改动（模型三项和保存时不同、或填了新 Key 没保存）时按钮不可点，旁边写「先保存再测试」，避免"测的和用的不是一份"。
+// 结果三态：测试中 / 连接正常 · 0.8s · 模型名（绿）/ 失败显示 message；auth、no_key 时焦点移到 Key 输入框。
 export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: KeyStatus) => void }) {
   const [key, setKey] = useState<KeyStatus | null>(null);
   const [form, setForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
+  const [savedForm, setSavedForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
+  const [test, setTest] = useState<{ state: "running" } | { state: "done"; r: SettingsTest } | { state: "error"; text: string } | null>(null);
+  const keyInput = useRef<HTMLInputElement | null>(null);
   const [newKey, setNewKey] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [msg, setMsg] = useState("");
@@ -17,7 +23,7 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
 
   useEffect(() => {
     Promise.all([c.keyStatus(), c.settings()])
-      .then(([k, s]) => (setKey(k), setForm(toForm(s))))
+      .then(([k, s]) => (setKey(k), setForm(toForm(s)), setSavedForm(toForm(s))))
       .catch((e) => setError(errText(e)));
   }, [c]);
 
@@ -46,8 +52,19 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
       return;
     }
     c.saveSettings({ model: form.model, base_url: form.base_url, timeout: t }).then(
-      (s) => (setForm(toForm(s)), setMsg("设置已保存。"), setError("")),
+      (s) => (setForm(toForm(s)), setSavedForm(toForm(s)), setMsg("设置已保存。"), setError("")),
       (er) => setError(errText(er)),
+    );
+  };
+
+  const runTest = () => {
+    setTest({ state: "running" });
+    c.testSettings().then(
+      (r) => {
+        setTest({ state: "done", r });
+        if (!r.ok && (r.llm_kind === "auth" || r.llm_kind === "no_key")) keyInput.current?.focus();
+      },
+      (er) => setTest({ state: "error", text: errText(er) }),
     );
   };
 
@@ -57,6 +74,8 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
 
   const env = key.source === "env";
   const editable = !key.configured || replacing;
+  const unsaved = !!newKey.trim() || !savedForm || form.model !== savedForm.model || form.base_url !== savedForm.base_url
+    || form.timeout !== savedForm.timeout;
   return (
     <>
       {top}
@@ -90,7 +109,7 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
               ) : editable ? (
                 <>
                   <div className="key-field">
-                    <input key="new" type="password" aria-label={key.configured ? "替换为新的 Key" : "填入 Key"} autoComplete="off" spellCheck={false}
+                    <input key="new" ref={keyInput} type="password" aria-label={key.configured ? "替换为新的 Key" : "填入 Key"} autoComplete="off" spellCheck={false}
                       value={newKey} maxLength={512} placeholder="sk-…" onChange={(e) => setNewKey(e.target.value)} />
                     {replacing ? <button type="button" onClick={() => (setReplacing(false), setNewKey(""))}>取消</button> : null}
                   </div>
@@ -99,7 +118,7 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
               ) : (
                 <>
                   <div className="key-field">
-                    <input key="current" aria-label="当前 Key" value="已保存在系统凭据中" readOnly />
+                    <input key="current" ref={keyInput} aria-label="当前 Key" value="已保存在系统凭据中" readOnly />
                     <button type="button" onClick={() => setReplacing(true)}>更换</button>
                   </div>
                   <p className="hint">只保存在本机的系统凭据里（Windows 凭据管理器 / macOS 钥匙串），不上传。</p>
@@ -144,6 +163,24 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
               <button type="submit" className="primary">保存设置</button>
             </div>
           </form>
+
+          <div className="test-conn" data-testid="settings-test">
+            <div className="form-actions">
+              <button type="button" disabled={unsaved || test?.state === "running"} onClick={runTest}>
+                {test?.state === "running" ? "测试中…" : "测试连接"}
+              </button>
+              {unsaved ? <span className="hint" data-testid="test-unsaved">先保存再测试</span> : null}
+              {!unsaved && test?.state === "done" && test.r.ok ? (
+                <span className="key-ok" role="status" data-testid="test-result">
+                  <IconCheck size={11} />连接正常 · {(test.r.latency_ms / 1000).toFixed(1)}s · {test.r.model}
+                </span>
+              ) : null}
+            </div>
+            {!unsaved && test?.state === "done" && !test.r.ok ? (
+              <p className="banner danger test-fail" role="alert" data-testid="test-result">{test.r.message}</p>
+            ) : null}
+            {!unsaved && test?.state === "error" ? <p className="banner danger test-fail" role="alert">{test.text}</p> : null}
+          </div>
         </section>
       </div>
     </>

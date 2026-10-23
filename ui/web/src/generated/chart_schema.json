@@ -22,6 +22,8 @@
   "axis_name_max_px": 120,
   "geometry": {
     "grid": {
+      "left": 12,
+      "right": 16,
       "outerBoundsMode": "same",
       "outerBoundsContain": "all",
       "outerBoundsClampWidth": "25%",
@@ -29,7 +31,7 @@
     },
     "xAxis": {
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
         "maxWidth": 120,
         "ellipsis": "…"
@@ -54,8 +56,6 @@
   "show_symbol_max": 60,
   "frame": {
     "cartesian_grid": {
-      "left": "3%",
-      "right": "4%",
       "top": 60
     },
     "cartesian_bottom": {
@@ -77,6 +77,14 @@
       "60%",
       "55%"
     ]
+  },
+  "display": {
+    "unsafe": {
+      "{": "｛",
+      "}": "｝",
+      "\n": " "
+    },
+    "title_max": 100
   },
   "kind_series_type": {
     "bar": "bar",

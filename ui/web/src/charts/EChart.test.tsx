@@ -153,7 +153,7 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
   test("开关：点一下即重设 option，偏好写进 datachat.chartUi:<kind>，同图型的另一张图立即跟着变", () => {
     render(<><EChart spec={spec("bar")} /><EChart spec={spec("bar-untitled")} /></>);
     const spies = created.map((c) => vi.spyOn(c, "setOption"));
-    const box = within(group("标签")).getAllByRole("checkbox", { name: "数值标签" })[0] as HTMLInputElement;
+    const box = within(group("标签")).getAllByRole("switch", { name: "数值标签" })[0] as HTMLInputElement;
     expect(box.checked).toBe(true);
     fireEvent.click(box);
     expect(JSON.parse(localStorage.getItem("datachat.chartUi:bar")!).label).toBe(false);
@@ -163,7 +163,7 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
 
   describe("P2-18 数值标签的设计默认（S 10-22 r3）", () => {
     const labelOf = () => (created.at(-1)!.getOption() as { series: { label?: { show?: boolean } }[] }).series[0].label?.show === true;
-    const box = () => within(group("标签")).getByRole("checkbox", { name: "数值标签" }) as HTMLInputElement;
+    const box = () => within(group("标签")).getByRole("switch", { name: "数值标签" }) as HTMLInputElement;
     const many = (): ChartSpec => {
       const s = JSON.parse(JSON.stringify(spec("bar"))) as ChartSpec;
       const o = s.option as { xAxis: { data: string[] }; series: { data: number[] }[] };
@@ -193,7 +193,7 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     });
     test("改别的开关不会把 label 冻成显式值（存储里仍缺省）", () => {
       render(<EChart spec={spec("bar")} />);
-      fireEvent.click(within(group("形状")).getByRole("checkbox", { name: "圆角" }));
+      fireEvent.click(within(group("形状")).getByRole("switch", { name: "圆角" }));
       expect("label" in JSON.parse(localStorage.getItem("datachat.chartUi:bar")!)).toBe(false);
     });
     test("重置 = 回到设计默认（数值重新出现），不是全关", () => {
@@ -214,9 +214,9 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     expect(within(ctl).queryAllByRole("checkbox")).toEqual([]);
     expect(within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))).toEqual(["图型", "排序"]);
     const shape = group("形状");
-    expect(within(shape).queryByRole("checkbox", { name: "堆叠" })).toBeNull();
-    expect(within(shape).queryByRole("checkbox", { name: "平滑" })).toBeNull();
-    expect((within(shape).getByRole("checkbox", { name: "圆角" }) as HTMLInputElement).disabled).toBe(false);
+    expect(within(shape).queryByRole("switch", { name: "堆叠" })).toBeNull();
+    expect(within(shape).queryByRole("switch", { name: "平滑" })).toBeNull();
+    expect((within(shape).getByRole("switch", { name: "圆角" }) as HTMLInputElement).disabled).toBe(false);
     expect(within(group("标签")).queryByRole("group", { name: "图例位置" })).toBeNull();
   });
   test("散点图：排序不渲染（不适用即隐藏，排序也一样）", () => {
@@ -250,7 +250,7 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     inner.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true }));
     inner.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true, shiftKey: true }));
     expect(seen).toEqual([true]);
-    fireEvent.click(within(group("轴")).getByRole("checkbox", { name: "缩放" }));
+    fireEvent.click(within(group("轴")).getByRole("switch", { name: "缩放" }));
     inner.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true }));
     expect(seen).toEqual([true, false]);
   });
@@ -266,7 +266,7 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     act(() => zr.trigger("dblclick", { target: undefined }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "dataZoom", start: 0, end: 100 })); // echarts 往 payload 里塞内部标记
     expect(screen.getByText("Shift + 滚轮缩放，拖动平移，双击空白处还原")).toBeTruthy();
-    fireEvent.click(within(group("轴")).getByRole("checkbox", { name: "缩放" }));
+    fireEvent.click(within(group("轴")).getByRole("switch", { name: "缩放" }));
     dispatch.mockClear();
     act(() => zr.trigger("dblclick", { target: undefined }));
     expect(dispatch).not.toHaveBeenCalled();
@@ -357,7 +357,7 @@ describe("F3 第六步：导出与交互态", () => {
     render(<EChart spec={spec("bar")} />);
     const c = created[0];
     act(() => { c.dispatchAction({ type: "dataZoom", start: 20, end: 70 }); });
-    const box = () => within(group("轴")).getByRole("checkbox", { name: "缩放" });
+    const box = () => within(group("轴")).getByRole("switch", { name: "缩放" });
     fireEvent.click(box()); // 关
     clickExport();
     expect(exportArgs()[1].view).toEqual({ zoom: null, hidden: [] });
@@ -454,18 +454,22 @@ describe("F4 层 1 面板（标记卡）", () => {
     expect(screen.getByRole("alert").textContent).toBe("最小值要小于最大值");
     expect(opt().yAxis[0].min).not.toBe(50);
   });
-  test("饼图：形状、轴 tile aria-disabled，理由行是『形状：饼图没有可调的形状 · 轴：饼图没有 y 轴』；展开颜色组后有合并 checkbox", () => {
+  // V2b B1（判定表改动）：理由从 .marks-why 一行挪进各自组头「当前值」的位置，aria-describedby 指向它；理由文案不变
+  test("饼图：形状、轴组头 aria-disabled，理由在各自组头（『饼图没有可调的形状』『饼图没有 y 轴』）；展开颜色组后有合并开关", () => {
     render(<EChart spec={spec("pie")} editKey="m1:2" />);
     open();
     const axis = tile("轴") as HTMLButtonElement;
     expect([axis.disabled, axis.getAttribute("aria-disabled")]).toEqual([false, "true"]);
     expect(tile("形状").getAttribute("aria-disabled")).toBe("true");
     const why = document.getElementById(axis.getAttribute("aria-describedby")!)!;
-    expect(why.textContent).toBe("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
+    expect(axis.contains(why)).toBe(true);
+    expect(why.textContent).toBe("饼图没有 y 轴");
+    expect(document.getElementById(tile("形状").getAttribute("aria-describedby")!)!.textContent).toBe("饼图没有可调的形状");
+    expect(screen.queryByTestId("marks-why")).toBeNull();
     fireEvent.click(axis);
     expect(axis.getAttribute("aria-pressed")).toBe("false");
     expect(tile("颜色").getAttribute("aria-pressed")).toBe("true"); // 验收 P0-3：打开即展开颜色组，不用再点
-    expect(screen.getByRole("checkbox", { name: "合并为'其他'" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "合并为'其他'" })).toBeTruthy();
   });
   test("颜色：点色块写系列色；换主题跟着主题的同一 index", () => {
     render(<EChart spec={spec("bar")} editKey="m1:3" />);
@@ -511,7 +515,8 @@ describe("F4 迭代 V1：标记卡", () => {
     resetEditsForTest();
     act(() => setChartTheme("classic"));
   });
-  const tiles = () => within(screen.getByRole("group", { name: "样式分组" })).getAllByRole("button");
+  // V2b B1（只是选择器变）：组头不再是一排 tile，样式分组里还有组内控件，按 .marks-ghead 取组头
+  const tiles = () => [...within(screen.getByRole("group", { name: "样式分组" })).getAllByRole("button")].filter((b) => b.classList.contains("marks-ghead"));
   const pieN = (n: number): ChartSpec => {
     const s = JSON.parse(JSON.stringify(spec("pie-50"))) as ChartSpec;
     const ser = (s.option.series as { data: unknown[] }[])[0];
@@ -523,7 +528,7 @@ describe("F4 迭代 V1：标记卡", () => {
     render(<EChart spec={spec("bar")} />);
     group("颜色");
     group("轴");
-    const pressed = () => tiles().filter((t) => t.getAttribute("aria-pressed") === "true").map((t) => t.textContent!.slice(1));
+    const pressed = () => tiles().filter((t) => t.getAttribute("aria-pressed") === "true").map((t) => t.querySelector(".marks-gname")!.textContent);
     expect(pressed()).toEqual(["颜色", "轴"]);
     expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-labelledby")))
       .toEqual([tile("颜色").id, tile("轴").id]);
@@ -613,15 +618,16 @@ describe("F4 迭代 V1：标记卡", () => {
     const colors = group("颜色");
     expect(within(colors).getByTestId("marks-repeat").textContent).toBe(`11 类，多于 ${n} 色，颜色会重复`);
     expect(screen.getByLabelText("颜色会重复")).toBeTruthy();
-    fireEvent.click(within(colors).getByRole("checkbox", { name: "合并为'其他'" }));
+    fireEvent.click(within(colors).getByRole("switch", { name: "合并为'其他'" }));
     expect(screen.queryByTestId("marks-repeat")).toBeNull();
   });
 
-  test("散点图：标签组整组不可用，.marks-why 一行写理由", () => {
+  // V2b B1（判定表改动）：理由从 .marks-why 挪进组头，文案不变
+  test("散点图：标签组整组不可用，组头当前值的位置写理由", () => {
     render(<EChart spec={spec("scatter")} />);
     fireEvent.click(screen.getByRole("button", { name: "标记" }));
     const label = tiles().find((t) => t.textContent!.includes("标签"))!;
     expect(label.getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getByTestId("marks-why").textContent).toContain("标签：散点图不显示数值标签，单系列也没有图例");
+    expect(document.getElementById(label.getAttribute("aria-describedby")!)!.textContent).toBe("散点图不显示数值标签，单系列也没有图例");
   });
 });

@@ -45,3 +45,7 @@ export type SessionDetail = Session & { messages: Message[] };
 
 export type Settings = { model: string; base_url: string; timeout: number };
 export type KeyStatus = { configured: boolean; source: string | null };
+/** POST /settings/test（阶段 5 收尾 C）：用已保存的设置发一次最小请求。message 是 T11 user_error 的文案（带编号）。 */
+export type SettingsTest =
+  | { ok: true; latency_ms: number; model: string }
+  | { ok: false; llm_kind: string; message: string; latency_ms: number };

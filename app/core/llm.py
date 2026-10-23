@@ -205,6 +205,36 @@ def build_chat_model(cfg: LLMConfig, *, sdk_retries: int | None = 0):
     )
 
 
+# 设置页「测试连接」（阶段 5 收尾 C）：一条固定的 user 消息、max_tokens=1、不重试、超时最多 15 秒。
+# tests/fake_llm.py 的 MARK_PING 认这条消息（改了这里，fake 认不出 → 400，tests/test_settings_test.py 的 ok 那条红）。
+PING_MESSAGE = "ping"
+PING_TIMEOUT_MAX = 15.0
+
+
+def ping(cfg: LLMConfig) -> None:
+    """用 cfg 发一次最小请求。成功返回 None；失败抛 LLMError（kind 取 classify_error，upstream 是上游 message 原文）。
+    不重试（max_retries=0），不经 LLMClient 的退避；调用方负责"没 Key 不发请求"。"""
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+
+    model = ChatOpenAI(model=cfg.model, api_key=cfg.api_key or "missing-api-key", base_url=cfg.base_url,
+                       temperature=cfg.temperature, timeout=min(cfg.timeout, PING_TIMEOUT_MAX), max_retries=0,
+                       max_tokens=1)
+    try:
+        msg = model.invoke([HumanMessage(content=PING_MESSAGE)])
+        bad = api_error_text(getattr(msg, "content", None))
+        if bad is not None:
+            raise GatewayErrorContent(bad)
+    except Exception as e:  # noqa: BLE001
+        from app.core.errors import upstream_message
+        kind, _ = classify_error(e)
+        up = upstream_message(e)
+        if isinstance(e, GatewayErrorContent):
+            up = f"接口返回错误内容：{up}"
+        raise LLMError(f"测试连接失败（{kind}）：{type(e).__name__}: {e}", kind=kind, attempts=1, cause=e,
+                       upstream=up) from e
+
+
 class LLMClient:
     """节点使用的模型句柄：invoke(prompt) -> str，自带重试与 token 统计。"""
 

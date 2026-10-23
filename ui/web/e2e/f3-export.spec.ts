@@ -141,21 +141,21 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   const card = ctl.getByTestId("marks-card");
   const boxes = ["数值标签", "堆叠", "平滑", "渐变", "圆角", "平均线和极值", "缩放"];
   const enabled: string[] = [];
-  for (const name of boxes) if ((await card.getByRole("checkbox", { name }).count()) === 1) enabled.push(name);
+  for (const name of boxes) if ((await card.getByRole("switch", { name }).count()) === 1) enabled.push(name);
   if ((await card.getByRole("group", { name: "图例位置" }).count()) === 1) enabled.push("图例位置");
   if ((await ctl.getByLabel("排序").count()) === 1) enabled.push("排序");
   expect(enabled.sort()).toEqual(["数值标签", "渐变", "圆角", "平均线和极值", "缩放", "排序"].sort());
 
   // P2-18（S 10-22 r3，判定表改动）：柱图数值标签设计默认开。"全关"要先把它主动关掉（存 false = 后端原样），
   // 默认态与全关的导出必须不同——这一格钉的是设计默认本身
-  const label = card.getByRole("checkbox", { name: "数值标签" });
+  const label = card.getByRole("switch", { name: "数值标签" });
   await expect(label).toBeChecked();
   const byDefault = await exportOf(ctl);
   await label.uncheck();
   const off = await exportOf(ctl);
   expect(byDefault.bytes.equals(off.bytes)).toBe(false);
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) {
-    const box = card.getByRole("checkbox", { name });
+    const box = card.getByRole("switch", { name });
     await box.check();
     const on = await exportOf(ctl);
     await box.uncheck();
@@ -165,7 +165,7 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   }
   await ctl.getByLabel("排序").selectOption("desc");
   expect((await exportOf(ctl)).bytes.equals(off.bytes)).toBe(false);
-  for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) await card.getByRole("checkbox", { name }).check();
+  for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) await card.getByRole("switch", { name }).check();
   expect((await exportOf(ctl)).bytes.equals(off.bytes)).toBe(false);
   expect(w.posts).toHaveLength(1);
   expect(w.bad).toEqual([]);
@@ -185,7 +185,7 @@ test("交互态：缩放开关关着时 Shift + 滚轮后导出与初始相同�
   const initial = await exportOf(ctl);
   await shiftWheel(page, chart);
   expect((await exportOf(ctl)).bytes.equals(initial.bytes)).toBe(true);
-  const zoom = (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" });
+  const zoom = (await group(ctl, "轴")).getByRole("switch", { name: "缩放" });
   await zoom.check();
   await page.keyboard.press("Escape"); // 卡盖在图上，滚轮前关掉
   const full = await exportOf(ctl);
@@ -194,8 +194,8 @@ test("交互态：缩放开关关着时 Shift + 滚轮后导出与初始相同�
   const zoomed = await exportOf(ctl);
   expect(zoomed.bytes.equals(full.bytes)).toBe(false);
   // 关掉再打开：屏幕是真相源，回读不到区间，窗口回到全量，不跳回刚才缩的位置（S 10-19 第二轮第一节）
-  await (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" }).uncheck();
-  await (await group(ctl, "轴")).getByRole("checkbox", { name: "缩放" }).check();
+  await (await group(ctl, "轴")).getByRole("switch", { name: "缩放" }).uncheck();
+  await (await group(ctl, "轴")).getByRole("switch", { name: "缩放" }).check();
   await page.keyboard.press("Escape");
   expect((await exportOf(ctl)).bytes.equals(full.bytes)).toBe(true);
 

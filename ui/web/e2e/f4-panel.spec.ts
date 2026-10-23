@@ -110,8 +110,9 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("datachat.chartEdit:")));
   expect(keys).toHaveLength(1);
   expect(keys[0]).toMatch(/^datachat\.chartEdit:[^:]+:0$/);
+  // V2b B4（判定表改动）：只存这张图自己设过的字段（没碰过的 other 不再写进去；yMin 清空也算设过，存 null）
   expect(JSON.parse((await page.evaluate((k) => localStorage.getItem(k), keys[0]))!)).toEqual(
-    { yMin: null, yMax: 20, colors: { 0: 4 }, font: "l", other: false });
+    { yMin: null, yMax: 20, colors: { 0: 4 }, font: "l" });
 
   await card.getByRole("button", { name: "重置" }).click();
   expect((await exportOf(ctl)).bytes.equals(base.bytes)).toBe(true);
@@ -134,7 +135,7 @@ test("饼图 12 类：轴组 aria-disabled；重复色提示，合并为'其他'
   // 合并已不是独立 tile：在颜色组里（F4 迭代 V1 第 3 条）
   await openColors(card);
   await expect(card.getByTestId("marks-repeat")).toHaveText("12 类，多于 10 色，颜色会重复");
-  await card.getByRole("checkbox", { name: "合并为'其他'" }).check();
+  await card.getByRole("switch", { name: "合并为'其他'" }).check();
   await expect(card.getByTestId("marks-repeat")).toHaveCount(0);
   const merged = await exportOf(ctl);
   expect(merged.bytes.equals(base.bytes)).toBe(false);
@@ -154,7 +155,9 @@ test("饼图 12 类：轴组 aria-disabled；重复色提示，合并为'其他'
 // ---- F4 迭代 V1：浮层（phase5「F4 迭代 V1」第 5–8 条）-----------------------------------------------------------------
 const PIE = (n: number) => "品类,销量\n" + Array.from({ length: n }, (_, i) => `品类${i + 1},${(i + 1) * 3}`).join("\n") + "\n";
 
-test("浮层：不推开文档流、压在最上层、正常位置向上展开；组多开；理由行一行且柱图饼图同高；5 套主题色块行不溢出", async ({ page }, info) => {
+// V2b B1（判定表改动）：.marks-why 一行删掉，理由进各自组头「当前值」的位置。原断言"理由行柱图饼图同高"改成
+// "组头柱图饼图都是 40 高（不可用的组头仍在、不跳行），理由一行放得下"；理由文案不变。
+test("浮层：不推开文档流、压在最上层、正常位置向上展开；组多开；组头 40 高、不可用组的理由在组头一行放得下；5 套主题色块行不溢出", async ({ page }, info) => {
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto(`/#token=${E2E_TOKEN}`);
@@ -181,10 +184,11 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
   await expect(card.getByRole("region")).toHaveCount(1);
   await card.getByRole("button", { name: /^颜色/ }).click();
   await page.screenshot({ path: info.outputPath("v1-bar-card.png") });
-  // 理由行：柱图为空，但占一行高
-  const why = card.getByTestId("marks-why");
-  await expect(why).toHaveText("");
-  const barWhyH = (await why.boundingBox())!.height;
+  await expect(card.getByTestId("marks-why")).toHaveCount(0);
+  const heads = card.locator(".marks-ghead");
+  await expect(heads).toHaveCount(5);
+  const barH = await heads.evaluateAll((hs) => hs.map((h) => h.getBoundingClientRect().height));
+  expect(barH).toEqual([40, 40, 40, 40, 40]);
   // 色块行不溢出（卡宽账的实测）
   for (const t of ["classic", "soft", "business", "darkCanvas", "tableau"]) {
     await page.getByLabel("图表主题").selectOption(t);
@@ -200,13 +204,54 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
   const ctl2 = sv2.getByTestId("chart-controls").first();
   await sv2.getByTestId("echart").first().scrollIntoViewIfNeeded();
   await ctl2.getByRole("button", { name: "标记" }).click();
-  const why2 = ctl2.getByTestId("marks-why");
-  await expect(why2).toHaveText("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
-  const h2 = (await why2.boundingBox())!.height;
-  expect(h2).toBe(barWhyH);
-  expect(await why2.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true); // 一行放得下，没有被截断
+  const heads2 = ctl2.locator(".marks-ghead");
+  expect(await heads2.evaluateAll((hs) => hs.map((h) => h.getBoundingClientRect().height))).toEqual(barH);
+  for (const [g, why] of [["shape", "饼图没有可调的形状"], ["axis", "饼图没有 y 轴"]] as const) {
+    const h = ctl2.locator(`.marks-ghead[data-group="${g}"]`);
+    await expect(h).toHaveAttribute("aria-disabled", "true");
+    const v = h.locator(".marks-gval");
+    await expect(v).toHaveText(why);
+    expect(await v.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true); // 一行放得下，没有被截断
+  }
   await openColors(ctl2);
   await page.screenshot({ path: info.outputPath("v1-pie12-card.png") });
+});
+
+// V2b B4：「应用到所有柱状图」跨两张图生效（同一会话两轮，各一张柱图）。改动只存进图型默认，第二张图自己的键不出现；
+// 「清除柱状图默认」后第二张图回到原样（导出字节相同）。
+test("应用到所有柱状图：第一张图的字号 / 颜色带到第二张图；第二张图没有自己的改动键；清除图型默认后回到原样", async ({ page }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`/#token=${E2E_TOKEN}`);
+  const sv = await ask(page, CSV, "apply.csv", "chart-bar", "第一张");
+  await sv.getByLabel("提问").fill("第二张");
+  await sv.getByRole("button", { name: "发送" }).click();
+  await expect(sv.getByTestId("assistant-msg")).toHaveCount(2, { timeout: 60_000 });
+  await expect(sv.getByTestId("echart")).toHaveCount(2);
+  const [ctl1, ctl2] = [sv.getByTestId("chart-controls").nth(0), sv.getByTestId("chart-controls").nth(1)];
+  const before2 = await exportOf(ctl2);
+  await sv.getByTestId("echart").nth(0).scrollIntoViewIfNeeded();
+  await ctl1.getByRole("button", { name: "标记" }).click();
+  const card = ctl1.getByTestId("marks-card");
+  await openColors(card);
+  await card.getByRole("button", { name: /颜色 5$/ }).first().click();
+  await card.getByRole("button", { name: /^文字/ }).click();
+  await card.getByRole("button", { name: "大 16" }).click();
+  await card.getByRole("button", { name: "应用到所有柱状图" }).click();
+  await card.getByRole("button", { name: "完成" }).click();
+  await expect(card).toHaveCount(0);
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem("datachat.chartEditKind:bar")))!))
+    .toEqual({ colors: { 0: 4 }, colorBy: "series", font: "l", other: false });
+  const after2 = await exportOf(ctl2);
+  expect(after2.bytes.equals(before2.bytes)).toBe(false);
+  const own = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("datachat.chartEdit:")));
+  expect(own).toHaveLength(1); // 只有第一张图自己的键
+  await sv.getByTestId("echart").nth(1).scrollIntoViewIfNeeded();
+  await ctl2.getByRole("button", { name: "标记" }).click();
+  await ctl2.getByTestId("marks-card").getByRole("button", { name: "清除柱状图默认" }).click();
+  await page.keyboard.press("Escape");
+  expect((await exportOf(ctl2)).bytes.equals(before2.bytes)).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem("datachat.chartEditKind:bar"))).toBeNull();
 });
 
 test("浮层：工具栏滚到 .main 顶部时改向下展开，整体落在 .main 可视区内", async ({ page }) => {

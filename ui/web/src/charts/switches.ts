@@ -5,6 +5,8 @@
 //   值只有字面量、主题色（渐变）和排列（排序），不含任何字符串型用户数据，所以后端 _check_strings 管不到也没关系（THREAT_MODEL §2.3）。
 // - changeKind 一律从后端原始 option 出发（不链式转换），造出和 build_option 直接出的 B 一样的 option（换图型契约测试钉住，
 //   只允许 KIND_DIFF 列出的差异）。框架值和阈值都从 chart_schema.json 读，不写第二份。
+// - UiState 只存编号、数值、枚举，用户串不进 option（S 10-19）。唯一例外是 V2b B3 的标题 Edit.title：只写 title.text 一处，
+//   写之前过 sanitizeTitle（title.ts，规则写死）；以后再加字符串字段要另立方案。
 // - spec.kind 是后端出的图型（后端真相），换图型只改 option，spec.kind 不动：两者有意不一致，
 //   switches.test.ts 的 spec_kind_is_backend_truth 钉住，别"修"。
 import schema from "../generated/chart_schema.json";

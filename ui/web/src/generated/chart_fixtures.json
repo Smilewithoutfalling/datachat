@@ -17,8 +17,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -38,7 +38,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -91,8 +91,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -112,7 +112,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -161,8 +161,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -182,7 +182,7 @@
       ],
       "boundaryGap": false,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -236,8 +236,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -257,7 +257,7 @@
       ],
       "boundaryGap": false,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -373,8 +373,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -387,7 +387,7 @@
       "name": "销量",
       "scale": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -457,8 +457,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -503,7 +503,7 @@
       ],
       "boundaryGap": false,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -585,8 +585,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -631,7 +631,7 @@
       ],
       "boundaryGap": false,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -710,8 +710,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -730,7 +730,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -782,8 +782,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
@@ -803,7 +803,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -1298,8 +1298,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
@@ -1318,7 +1318,7 @@
       ],
       "boundaryGap": false,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -1393,8 +1393,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -6409,7 +6409,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -11453,8 +11453,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -16469,7 +16469,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -21517,8 +21517,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -21531,7 +21531,7 @@
       "name": "x",
       "scale": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -41577,8 +41577,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -41591,7 +41591,7 @@
       "name": "x",
       "scale": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -61641,8 +61641,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
@@ -61664,7 +61664,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -61732,8 +61732,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
@@ -61755,7 +61755,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -61957,8 +61957,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -61976,7 +61976,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -62023,8 +62023,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -62042,7 +62042,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -62089,8 +62089,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -62108,7 +62108,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -62155,8 +62155,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 30,
       "outerBoundsMode": "same",
@@ -62174,7 +62174,7 @@
       ],
       "boundaryGap": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"
@@ -62221,8 +62221,8 @@
       "top": "bottom"
      },
      "grid": {
-      "left": "3%",
-      "right": "4%",
+      "left": 12,
+      "right": 16,
       "top": 60,
       "bottom": 50,
       "outerBoundsMode": "same",
@@ -62235,7 +62235,7 @@
       "name": "销量",
       "scale": true,
       "nameLocation": "middle",
-      "nameGap": 28,
+      "nameGap": 32,
       "nameTruncate": {
        "maxWidth": 120,
        "ellipsis": "…"

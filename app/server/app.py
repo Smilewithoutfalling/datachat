@@ -22,6 +22,8 @@
     GET    /settings/api-key             {"configured", "source"}——从不返回 Key 本身
     PUT    /settings/api-key             {"api_key"} → 存进系统钥匙串
     DELETE /settings/api-key
+    POST   /settings/test                用已保存的设置发一次最小请求（阶段 5 收尾 C）：200 {"ok": true, "latency_ms", "model"}
+                                         或 {"ok": false, "llm_kind", "message", "latency_ms"}；同时只许一个，第二个 409
 
 安全（docs/THREAT_MODEL.md）：只监听 127.0.0.1；TrustedHost 只认 localhost / 127.0.0.1（挡 DNS rebinding）；
 每次启动随机 token（挡本机网页对 localhost 的跨站请求）；不开 CORS，阶段 6 外壳确定后只放行外壳的源。
@@ -37,6 +39,7 @@ import secrets
 import shutil
 import sys
 import threading
+import time
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -549,6 +552,34 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         except keystore.KeyStoreError as e:
             raise HTTPException(400, str(e)) from None
         return get_api_key_status()
+
+    # 设置页「测试连接」（phase5「阶段 5 收尾」C）：用**已保存**的设置（llm_config：库里的 model / base_url / timeout，
+    # Key 走 resolve_api_key）发一次最小请求，不重试，超时 min(timeout, 15)。没 Key 不发请求，直接 no_key。
+    # message 走 T11 user_error（同 llm 错误卡的文案，不带上游原文以外的东西，Key 打码）；不落库、不写 events。
+    # 同一时间只允许一个测试在跑：第二个 409（非阻塞抢锁）。
+    test_lock = threading.Lock()
+
+    @app.post("/settings/test", dependencies=[Depends(auth)])
+    def test_settings():
+        from app.core.errors import NO_KEY_MESSAGE
+        from app.core.llm import LLMError, ping
+        if not test_lock.acquire(blocking=False):
+            raise HTTPException(409, "已有一个测试连接在进行")
+        try:
+            cfg = llm_config()
+            trace_id = secrets.token_hex(16)
+            if not cfg.api_key:
+                return {"ok": False, "llm_kind": "no_key", "latency_ms": 0,
+                        "message": user_error("text", NO_KEY_MESSAGE, trace_id=trace_id)}
+            t0 = time.monotonic()
+            try:
+                ping(cfg)
+            except LLMError as e:
+                return {"ok": False, "llm_kind": e.kind, "latency_ms": round((time.monotonic() - t0) * 1000),
+                        "message": user_error("llm", e, trace_id=trace_id)}
+            return {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000), "model": cfg.model}
+        finally:
+            test_lock.release()
 
     # ------------------------------------------------------------------ 前端静态文件（不要 token）
     # 边界：只有 / 和 /assets/* 免 token。页面和 JS 不含机密；token 只经 URL fragment（不发给服务器、

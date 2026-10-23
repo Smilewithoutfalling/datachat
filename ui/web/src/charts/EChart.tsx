@@ -24,7 +24,9 @@ import {
   categoryCount, DEFAULT_STORED, designLabel, resolveSwitches,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
-import { getEdit, type Edit, EMPTY_EDIT, isEmptyEdit, setEdit, subscribeEdits } from "./layer1";
+import {
+  applyToKind, clearKindEdit, colorByAvailable, type EditPatch, getEdit, getKindEdit, resolveEdit, setEdit, subscribeEdits,
+} from "./layer1";
 import { MarksCard, type Placement } from "./MarksCard";
 import { isCompact } from "./compact";
 import { clearPrefs, getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
@@ -73,10 +75,14 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const cats = useMemo(() => categoryCount(spec.option as Option), [spec]);
   const labelDesign = designLabel(prefKind, cats);
   const sw = useMemo(() => resolveSwitches(prefs, prefKind, cats), [prefs, prefKind, cats]);
+  // V2b B4：层 1 = 图型默认 ← 这张图自己设过的字段（own 只存设过的字段）
   const stored = useSyncExternalStore(subscribeEdits, () => getEdit(editKey));
-  const [local, setLocal] = useState<Edit>(EMPTY_EDIT);
-  const edit = editKey ? stored : local;
-  const changeEdit = (e: Edit) => (editKey ? setEdit(editKey, e) : setLocal(e));
+  const kindDefault = useSyncExternalStore(subscribeEdits, () => getKindEdit(prefKind));
+  const [local, setLocal] = useState<EditPatch>({});
+  const own = editKey ? stored : local;
+  const edit = useMemo(() => resolveEdit(kindDefault, own), [kindDefault, own]);
+  const writeOwn = (p: EditPatch) => (editKey ? setEdit(editKey, p) : setLocal(p));
+  const changeEdit = (p: EditPatch) => writeOwn({ ...own, ...p });
   const cardId = useId();
   const marksOpen = useSyncExternalStore(subscribeCard, () => openCard === cardId);
   const setMarksOpen = (o: boolean) => setOpenCard(o ? cardId : openCard === cardId ? null : openCard);
@@ -84,12 +90,12 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const [placement, setPlacement] = useState<Placement>({ dir: "up", maxHeight: CARD_MAX });
   // issue #49：容器矮于 COMPACT_BELOW 时走紧凑几何（ResizeObserver 量；只在跨阈值时变，不随每个像素重算）
   const [compact, setCompact] = useState(false);
-  const ui: UiState = useMemo(() => ({ kind: target, sw, edit: editKey ? stored : local, compact }), [target, sw, editKey, stored, local, compact]);
-  // 颜色面板列的名字：按当前图型渲染出来的系列名（饼图是扇区名，合并后含'其他'）。只在面板打开时算。
-  const items = marksOpen ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {} } }, theme) as Option, kind) : [];
+  const ui: UiState = useMemo(() => ({ kind: target, sw, edit, compact }), [target, sw, edit, compact]);
+  // 颜色面板列的名字：按当前图型渲染出来的系列名（饼图是扇区名，合并后含'其他'；按类目着色时是类目名）。只在面板打开时算。
+  const items = marksOpen ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {} } }, theme) as Option, kind, edit.colorBy) : [];
   // 第 8 条：饼图合并前的类目数（提示"颜色会重复"用）
   const pieCount = marksOpen && kind === "pie"
-    ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {}, other: false } }, theme) as Option, kind).length : 0;
+    ? itemNames(prepare(spec, { kind: target, sw, edit: { ...edit, colors: {}, other: false } }, theme) as Option, kind, "series").length : 0;
 
   // 兼容性按"换完之后"的 option 算（系列数、图型）；换图型的可选项按后端原始 option 算
   const base = useMemo(() => normalize(JSON.parse(JSON.stringify(spec.option)) as Option, {} as Ctx), [spec]);
@@ -185,9 +191,11 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
 
   // 只改动的那一个开关落到存储态，label 没碰过就保持 undefined（否则改个排序就把设计默认冻成显式值）
   const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...prefs, [s]: v });
-  // 重置 = 层 1 改动清空 + 这个图型的开关回到设计默认
-  const resetAll = () => { changeEdit(EMPTY_EDIT); clearPrefs(prefKind); };
-  const dirty = !isEmptyEdit(edit) || SWITCHES.some((k) => prefs[k] !== DEFAULT_STORED[k]);
+  // 重置 = 这张图自己的层 1 改动清空（回到图型默认）+ 这个图型的开关回到设计默认；不动图型默认（V2b B4）
+  const resetAll = () => { writeOwn({}); clearPrefs(prefKind); };
+  const dirty = Object.keys(own).length > 0 || SWITCHES.some((k) => prefs[k] !== DEFAULT_STORED[k]);
+  const backendTitle = (spec.option.title as { text?: unknown } | undefined)?.text;
+  const xName = (base.xAxis as { name?: unknown } | undefined)?.name;
 
   // 标记卡浮层：打开时（以及 .main 滚动、窗口 resize 时）量一次位置；Esc、点卡外关闭（第 6 条）
   useLayoutEffect(() => {
@@ -226,8 +234,8 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
       const size = { width: el.clientWidth, height: el.clientHeight }; // 0（display:none）由 exportPng 抛错，显示导出失败
       const t = theme === "darkCanvas" && light ? "classic" : theme;
       const url = exportPng(spec, { ...ui, view: view.current }, t, size);
-      const title = (spec.option.title as { text?: unknown } | undefined)?.text;
-      download(url, safeFilename(title, kind ? KIND_LABEL[kind] : undefined));
+      // V2b B3：用户设了标题就用它（已过 sanitizeTitle），文件名仍经 safeFilename
+      download(url, safeFilename(edit.title ?? backendTitle, kind ? KIND_LABEL[kind] : undefined));
       setExportFailed(false);
     } catch {
       setExportFailed(true);
@@ -275,7 +283,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
           {marksOpen && (
             <MarksCard shape={shape} sw={sw} onSwitch={set} edit={edit} onChange={changeEdit} items={items}
               palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement}
-              onReset={resetAll} dirty={dirty} labelTooMany={labelDesign.tooMany && prefs.label === undefined} />
+              onReset={resetAll} dirty={dirty} labelTooMany={labelDesign.tooMany && prefs.label === undefined}
+              xName={typeof xName === "string" ? xName : ""} titlePlaceholder={typeof backendTitle === "string" ? backendTitle : ""}
+              hasKindDefault={Object.keys(kindDefault).length > 0} onApplyToKind={() => applyToKind(prefKind, edit)}
+              onClearKind={() => clearKindEdit(prefKind)} onDone={() => setMarksOpen(false)} />
           )}
         </div>
       )}
@@ -287,8 +298,11 @@ function seriesCount(o: Option): number {
   return Array.isArray(o.series) ? o.series.length : 0;
 }
 
-function itemNames(o: Option, kind: Kind | null): string[] {
+function itemNames(o: Option, kind: Kind | null, colorBy: "series" | "data"): string[] {
   const s = Array.isArray(o.series) ? (o.series as { name?: unknown; data?: unknown }[]) : [];
   if (kind === "pie" && s[0] && Array.isArray(s[0].data)) return (s[0].data as { name?: unknown }[]).map((d, i) => String(d?.name ?? `第 ${i + 1} 项`));
+  // V2b B2：按类目着色时颜色行是类目（x 轴 data），和饼图一样
+  const x = o.xAxis as { data?: unknown } | undefined;
+  if (colorBy === "data" && colorByAvailable(kind, s.length) && x && Array.isArray(x.data)) return x.data.map((c, i) => String(c ?? `第 ${i + 1} 项`));
   return s.map((x, i) => String(x?.name ?? `系列 ${i + 1}`));
 }

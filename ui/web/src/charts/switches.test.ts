@@ -14,6 +14,7 @@ import {
   applyViewTo, asZoom, canChangeKind, changeKind, COMPAT, DATA_ZOOM, DEFAULT_SWITCHES, hiddenFromSelected, FRONTEND_KEYS, viewFromRendered, gradient, KIND_DIFF, KINDS, type Kind, legendItems, rgba0,
   SWITCHES, SWITCH_VALUES, type SwitchName, type Switches, type View,
  DEFAULT_STORED, DESIGN_LABEL, designLabel, resolveSwitches } from "./switches";
+import { HEADROOM_KEYS } from "./headroom";
 import { THEME_NAMES, THEMES, type ThemeName } from "./themes";
 import { getPrefs, parseSwitches, PREFS_PREFIX, resetPrefsForTest, setPrefs } from "./uiPrefs";
 
@@ -93,10 +94,17 @@ describe("COMPAT 45 格：开关 × 图型都测生效", () => {
 // ---- 例外层机制：prepare 产物相对"builder 等价产物"的差 ⊆ FRONTEND_KEYS，值在值集合里（S 10-19 结构点①）-------------
 // 基线 = 同一图型、开关全关（normalize → changeKind → cleanup）。changeKind 已由下面的契约测试钉成等于 builder 的产物，
 // 所以基线在后端白名单内；差出来的部分就是白名单外的例外层，必须全部登记在 FRONTEND_KEYS。
+const headroomHits = new Set<string>();
 const pattern = (path: (string | number)[]) => path.map((p) => (typeof p === "number" ? "[]" : p)).join(".").replace(/\.\[\]/g, "[]");
 function diff(out: Json | undefined, base: Json | undefined, path: (string | number)[], theme: ThemeName, hits: Set<string>, bad: string[], root?: Json) {
   root ??= out; // legendItems 的判据要用整份产物（图例项名取自 option 自己）
   const pat = pattern(path);
+  // V2b P2-19：applyHeadroom 随数值标签写 yAxis.max / interval（HEADROOM_KEYS，值是正的有限数；判据在 headroom.test.ts 钉住）
+  if ((HEADROOM_KEYS as readonly string[]).includes(pat) && canon(out) !== canon(base)) {
+    headroomHits.add(pat);
+    if (base !== undefined || typeof out !== "number" || !Number.isFinite(out) || out <= 0) bad.push(`${pat} 不是留顶写出的正数：${JSON.stringify(base)} → ${JSON.stringify(out)}`);
+    return;
+  }
   const set = FRONTEND_KEYS[pat];
   if (set && canon(out) !== canon(base)) {
     hits.add(pat);
@@ -199,6 +207,7 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
   });
   test("FRONTEND_KEYS 的每条路径都被开关真正写到过（表里没有死条目）", () => {
     expect([...hits].sort()).toEqual(Object.keys(FRONTEND_KEYS).sort());
+    expect([...headroomHits].sort()).toEqual([...HEADROOM_KEYS].sort()); // V2b P2-19：留顶的两个键也都写到过
   });
   test("FRONTEND_KEYS = register 的 FRONTEND_REG（双向）", () => {
     expect(Object.keys(FRONTEND_REG).sort()).toEqual(Object.keys(FRONTEND_KEYS).sort());
@@ -208,13 +217,13 @@ describe("例外层：开关只写 FRONTEND_KEYS 登记的路径和值", () => {
     expect(new Set(strs)).toEqual(new Set(['"top"', '"inside"', '"outside"', '"total"', '"type"', '"average"', '"max"', '"min"',
       '"inside"', '"zoomOnMouseWheel"', '"shift"', '"moveOnMouseWheel"', '"moveOnMouseMove"']));
   });
-  test("M13 §12 的「前端实际写出」列 = FRONTEND_KEYS（两条实现约定之二）", () => {
+  test("M13 §12 的「前端实际写出」列 = FRONTEND_KEYS ∪ HEADROOM_KEYS（两条实现约定之二；V2b P2-19 数值标签一行补留顶两键）", () => {
     const sec = (m13 as string).slice((m13 as string).indexOf("## 12."));
     const rows = sec.split("\n").filter((l) => l.startsWith("|"));
     const col = rows[0].split("|").map((c) => c.trim()).findIndex((c) => c.startsWith("前端实际写出"));
     expect(col).toBeGreaterThan(0);
     const listed = rows.slice(2).flatMap((r) => (r.split("|")[col] ?? "").match(/`[^`]+`/g) ?? []).map((x) => x.slice(1, -1));
-    expect([...new Set(listed)].sort()).toEqual(Object.keys(FRONTEND_KEYS).sort());
+    expect([...new Set(listed)].sort()).toEqual([...Object.keys(FRONTEND_KEYS), ...HEADROOM_KEYS].sort());
   });
 });
 

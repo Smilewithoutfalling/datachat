@@ -2048,7 +2048,7 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 
 当前阶段：阶段 5 收尾。下一步等 S 定：V2b（P2-19~22 + 标记卡对齐等，先写方案）、F5 真 Key 走查、测试连接（需后端接口）。
 
-## [60] 2026-10-23 · 阶段 5 收尾方案：V2b、测试连接、P1-17 · commit <待提交>
+## [60] 2026-10-23 · 阶段 5 收尾方案：V2b、测试连接、P1-17 · commit 59a7dff（PR #72）
 
 [59] 回填为 1c0b41a。
 
@@ -2083,3 +2083,70 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 未做：代码；文档 PR 不跑闸门（S 10-23 同意）。
 
 当前阶段：阶段 5 收尾。下一步：S 评审本方案 → 三项实现合一个 PR → S 用真 Key 走 F5 → 删 Streamlit。
+
+## [61] 2026-10-23 · 阶段 5 收尾实现：V2b（A 图表几何 + B 标记卡）、设置页「测试连接」、P1-17 · commit <待提交>
+
+[60] 回填为 59a7dff（PR #72）。
+
+依据：phase5「阶段 5 收尾」一节（#72 合并的方案），逐条照做；分支 feat/phase5-closeout。
+
+改了什么：
+- A 图表几何：
+  - P2-19：新增 ui/web/src/charts/headroom.ts（applyHeadroom，管线里排在 applySwitches 之后、applyView / applyCompact 之前）。判据照方案写死：t = dmax × 1.08，候选 [1, 2, 2.5, 5] × 10^k 升序，取第一个 ceil(t / step − 1e-12) ≤ N（非紧凑 6、紧凑 3）的 step，写 yAxis.max = n × step 和 yAxis.interval = step，按 step 的小数位 round。只在数值标签解析为开、柱 / 线 / 面积、值轴、层 1 之后 yAxis.min / max 都没设、dmax > 0 时写。写出的键登记为 HEADROOM_KEYS；M13 §12「数值标签」一行的"前端实际写出"补 yAxis.max、yAxis.interval。
+  - P2-20：charts.py `_X_NAME.nameGap` 28 → 32。P2-21/22：grid.left / right 从 `_CART_GRID` 的 '3%' / '4%' 挪进 GEOMETRY.grid，改固定 12 / 16（`_GRID_SIDES`），旧图经 normalize 归一。单系列 grid.bottom 30 不动。chart_fixtures 24 条里 21 条变（pie、pie-50、inject-pie 不变），kind_fixtures 同步重生成。
+- B 标记卡（MarksCard.tsx 重写，结构和无障碍语义保留）：
+  - B1：卡头「标记」+「N 个图形元素」（颜色组列出的项数）+「重置」；组改竖排组头（h40：图标、组名、当前值、箭头），展开内容紧跟组头；整组不可用时组头仍在、当前值位置写 groupReason、aria-describedby 指向它，.marks-why 删掉（whyLine 一并删）；开关改拨动开关（input checkbox + role="switch"，「合并为'其他'」同样改）；底部固定区：提示 +「应用到所有{图型}」+「已单独改过的图保持不变」+「完成」（= 关卡）。宽度保持 380。
+  - B2：Edit.colorBy "series" | "data"，只对单系列柱图出现「按列着色」下拉（选项「不按列（每个系列一色）」/ x 轴名）；选 data 写 series[0].colorBy = 'data'，颜色行换成类目，改色写到数值点（就地包成 {value, itemStyle}）；类目多于色数照饼图提示。LAYER1_KEYS 加 series[].colorBy、series[].data[].value。
+  - B3：新增 title.ts（sanitizeTitle / isCleanTitle）。「文字」组加「标题」输入，占位符是后端标题，留空回到后端标题；只写 title.text。gen_ui_types 往 chart_schema.json 加 `display: {unsafe, title_max}`；parseEdit 对 title 单独校验（string、≤ 100 码点、sanitizeTitle(v) === v，否则只丢 title）。导出文件名取用户标题，仍经 safeFilename。THREAT_MODEL §2.3 加一行；prepare.ts / switches.ts 头注释按方案改。
+  - B4：每张图只存自己设过的字段（EditPatch，parseEdit 不补默认，老数据里有的字段视为自己设过）；图型默认 `datachat.chartEditKind:<kind>` 只收 colors / colorBy / font / other；生效层 1 = EMPTY_EDIT ← 图型默认 ← 这张图自己设过的。「重置」只清这张图自己的（+ 开关回设计默认）；有图型默认时卡头多「清除{图型}默认」。
+- C 测试连接：app/core/llm.py 加 PING_MESSAGE / PING_TIMEOUT_MAX / ping()（ChatOpenAI max_tokens=1、max_retries=0、超时 min(timeout, 15)，网关错误 JSON 同样判失败）；app.py 加 POST /settings/test（Bearer；用 llm_config() 即已保存的设置；没 Key 不发请求返回 no_key；失败 message 走 user_error；非阻塞锁，第二个 409；不落库、不写 events）。没 Key 的文案提成 errors.NO_KEY_MESSAGE，分析和测试连接共用。tests/fake_llm.py 加 MARK_PING 链路（整条消息等于 "ping" 才认，回 "pong"；fail / hang / slow 照常作用；带 @step 一律 400）。前端 SettingsView 在凭证卡和模型卡下面加「测试连接」：表单有未保存改动（模型三项和保存值不同，或填了新 Key 没保存）时不可点并写「先保存再测试」；测试中 / 连接正常 · 0.8s · 模型名（绿）/ 失败显示 message；auth、no_key 时焦点移到 Key 输入框。
+- D P1-17：result.py chart_warnings 的两条改成固定文案（CHART_NONE_WARNING「图没画出来：模型给的画图参数和结果数据对不上。结论不受影响，可以重新生成。」、CHART_PARTIAL_WARNING「另有 N 张图没画出来：画图参数和结果数据对不上。」），ChartError 原文照旧经 chart_errors 回到模型。
+
+偏离（按代码事实做的最小偏离）：
+1. HEADROOM_KEYS 和 FRONTEND_KEYS 分开登记（方案只说"登记为 HEADROOM_KEYS"），但 switches.test 的例外层机制测试（prepare 产物相对全关的差 ⊆ FRONTEND_KEYS，switches.test.ts:94 起）和"M13 §12 前端实际写出 = FRONTEND_KEYS"那条会因此红：前者改为 HEADROOM_KEYS 的路径也算登记（值须是正的有限数、基线里原本没有），并断言两个键都被写到过；后者比对 FRONTEND_KEYS ∪ HEADROOM_KEYS。判据本身由新的 headroom.test.ts 钉。
+2. 堆叠时的 dmax 取每个类目**正值**的堆叠和：ECharts 默认 samesign 堆叠，负值往下堆、不顶上沿；全正时与"堆叠和"相同。
+3. 方案 D.4 的判定变更清单漏了三处，按代码事实一起改：ui/web/e2e/f3-inject.spec.ts:156–157（原断言警告里有 `图表未生成：x 列 '<P1>' 不存在` 和 P2–P5，现在是固定文案且不含 P1–P5）；THREAT_MODEL §2.3 验证表 :84、:87 两行（改写成"原文只回到模型、警告是固定文案"，测试名随改名更新）；tests/test_fake_llm.py 的 test_real_chain_inject_error_reaches_warnings 改名 test_real_chain_inject_error_reaches_model_not_warnings（名字和新行为一致）。
+4. e2e f3-themes「#49：1200×220」方案没预告：柱图数值标签默认开 → 留顶生效，数据 [0, 3] 的轴变成 [0, 4]（紧凑 N = 3：t = 3.24，step 2，n = 2）。原测量把 plot 上沿按 v = 3 映射，实测 plotRatio 掉到 0.345（< 0.4）——量的是 3 的位置，不是 plot 上沿。改为按画出来的最高刻度 max(3, v1) 映射（没有留顶时 v1 ≤ 3，与原来相同），首末刻度断言 0 / 3 → 0 / 4（并断言没有 3）。
+5. 「形状」组的当前值按"开且在当前图形状下兼容"判已改（堆叠在单系列图上开着也不生效，显示"已改"是假话）。
+6. 切换「按列着色」时清空颜色改动（colors 的 index 一个是系列、一个是类目，含义变了）；colorBy = data 的颜色在换成非柱图（饼图除外，饼图 index 本来就是类目）时不套到系列上。
+7. 「合并为'其他'」也改成拨动开关（卡内统一）；工具栏的「导出为浅色」仍是 checkbox。
+8. 标题输入框 maxLength 200（UTF-16 单元，防大段粘贴），限长以 sanitizeTitle 的 100 码点为准。
+9. ping 失败的 LLMError attempts = 1，所以文案里有「共尝试 1 次」（与 llm 错误卡同一个生成器，不另开口子）。
+10. 底部固定区加了与 region 同样的半透明白底（.42）：浮层整体半透明（r2 决定）时，底部提示压在柱子上看不清。
+
+实测数字（aarch64 沙箱，Node 24.22.1，Python 3.12；最后一次改动之后全部重跑）：
+
+| 闸门 | 之前（[60]） | 现在 |
+|---|---|---|
+| build_gate_data | 通过 | 通过（11 个文件） |
+| gen_eval_data --check | 通过 | 通过 |
+| gen_ui_types --check | 通过 | 通过（重生成后） |
+| pytest | 837 passed | 851 passed（1 warning 是 test_gate s04 的 DtypeWarning，原有），502 s |
+| npm run lint / tsc --noEmit | 通过 | 通过 |
+| vitest | 790 | 848（22 个文件） |
+| npm run build | 1 外链 script，0 内联 | 1 外链 script，0 内联 |
+| e2e（--grep-invert 视觉） | 34 passed | 38 passed |
+| f4-visual（本地，预期红） | 08=3514 / 11=4953 / 24=3381 / 25=4497 | 08=3514 / 11=91905 / 24=3381 / 25=15695 |
+
+- f4-visual：08（分析中，没有图和标记卡）和 24（失败页）差异像素与改前逐个相同，说明 A / B 组没碰这两屏，差的仍是平台抗锯齿；11 变化最大（标记卡整体换了布局：竖排组头、底部固定区、拨动开关）；25 是图本身（y 轴 0–500 刻度加数值标签、左 12 / 右 16、nameGap 32）。11、25 基线没换，要在 CI 上取 actual 后换（HANDOVER §6）。
+- 1024 宽 25 屏：卡左缘到 y 轴线（plot 区左沿，读 canvas 像素）44px（改前 57，设计 44，验收 ≤ 46）；右侧 17px（16 + 卡边框 1）。
+- SSR（夹具 bar，字号中 / 大，640 / 880 / 1174 宽）：x 轴刻度文字到轴名分别 ≥ 12 / ≥ 8px；bar 开标签 y 轴刻度 0 / 2 / 4 / 6 / 8 / 10。
+
+判定表（行为为什么变；只是选择器变的单列）：
+- pytest：test_chart_slot 的 test_react_chart_error_reaches_model_and_warnings、test_workflow_partial_chart_error_reported、test_react_partial_chart_error_reported、test_react_two_ok_execs_first_error_still_reported，test_fake_llm 的 inject-error（改名见偏离 3）、test_real_chain_partial_chart_error_reported：前缀「图表未生成：」/「另有 1 张图未生成：」和"原文在警告里"改成固定文案、原文不在警告里而在 chart_errors_shown（P1-17）；`_not_made` 过滤词「未生成」→「没画出来」。test_charts `_PER_CHART.grid` 去掉 left / right（已登记进 GEOMETRY，更严）。
+- vitest：compact.test「单系列 bar」改前 nameGap 28 → 32（P2-20）；layer1.test 存储三条（parseEdit 不补默认、删键写 {}、坏 JSON 回 {}）和机制测试（加 colorBy / title）——B4 存储改成只存设过的字段；marksGroups.test 卡内项 12 → 14（加按列着色、标题），删「多条理由连成一行」（whyLine 随 .marks-why 删）；EChart.test 饼图 / 散点两条理由从 marks-why 改成读组头（文案不变）；switches.test 两条机制测试见偏离 1。
+- e2e：f4-panel 柱图那条存储期望去掉没碰过的 `other: false`（B4）；f4-panel 浮层那条"理由行柱图饼图同高"改成"组头都是 40 高、不可用组的理由在组头一行放得下"（B1）；f3-inject 警告（P1-17）；f3-themes #49（偏离 4）。
+- 只是选择器变：EChart.test、f3-switches、f3-export、f4-panel 里开关的 getByRole("checkbox") → "switch"；EChart.test 组头取 `.marks-ghead`、组名取 `.marks-gname`。
+
+新增测试：
+- pytest（+14）：tests/test_settings_test.py 11 条（test_ping_message_matches_fake_marker、test_requires_bearer、test_ok_uses_saved_settings、test_no_key_sends_nothing、test_failures_classified[fail-401 / fail-429 / fail-500]、test_timeout_capped、test_concurrent_second_is_409、test_key_never_in_response_even_if_upstream_echoes、test_nothing_persisted）；test_fake_llm 的 test_ping_recognized_and_scenarios_apply、test_ping_is_exact_message_only；test_charts 的 test_schema_exports_display_contract。
+- vitest（+58）：headroom.test.ts 19（判据表 8→10 / 97→120 / 412→500 / 11.4→12.5 / 0.3→0.4 / 紧凑 8→10、2.5 不是死候选、浮点、≤0 不写、触发条件 6 条含机制、SSR 刻度 / 轴名间距 ×2 / 左右固定）；title.test.ts 22；marksV2b.test.tsx 13（组头当前值 5 组、竖排、N 个图形元素、拨动开关、完成；按类目着色 3 条；标题 2 条；应用到同类 3 条）；views.test「测试连接」4 条（三态、auth 焦点、server、未保存不可点）；layer1.test 老数据 1 条；marksGroups.test −1。
+- e2e（+4）：f4-panel「应用到所有柱状图…」、f4-settings.spec.ts（ok、fail-401）、f4-layout「1024 宽会话：图表卡左缘到 y 轴线 ≤ 46px」。
+
+未做：
+- f4-visual 11、25 两屏基线没换（本地 aarch64 抗锯齿不同，要推上去取 CI 的 actual，见 HANDOVER §6）。
+- 方案 B5 列的不做项：形状选择、轴组「显示网格」、标签「位置」、复制结果、全屏、卡头 badge。
+- 已知：按类目着色时再开「渐变」，渐变写在系列层，会盖掉每根柱子的类目色（方案没规定，未处理）。
+- 环境：这次沙箱重置后 Playwright 浏览器缺失，重新 `npx playwright install chromium` + `install-deps chromium` 后跑的；08 / 24 差异像素与 [60] 相同，渲染环境一致。
+
+当前阶段：阶段 5 收尾实现完成，待 S 评审 → 提交 / 推送（CI 上换 11、25 基线）→ S 用真 Key 走 F5 → 删 Streamlit。

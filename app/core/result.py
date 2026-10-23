@@ -109,6 +109,10 @@ def last_png(charts: list) -> Optional[str]:
     return None
 
 
+CHART_NONE_WARNING = "图没画出来：模型给的画图参数和结果数据对不上。结论不受影响，可以重新生成。"
+CHART_PARTIAL_WARNING = "另有 {n} 张图没画出来：画图参数和结果数据对不上。"
+
+
 def chart_warnings(res: "AnalysisResult", truncation: list) -> list:
     """图表相关、不算失败但必须让用户看到的情况（[23]/[24]：不允许静默截断、静默丢弃）。"""
     out = list(dict.fromkeys(truncation))
@@ -118,11 +122,13 @@ def chart_warnings(res: "AnalysisResult", truncation: list) -> list:
         out.append(f"有代码执行失败，失败那次用 chart() 画的 {res.charts_discarded} 张图已丢弃，不展示{tail}")
     # 只报展示出来的那（几）次执行自己的 chart_error：失败执行的图已由上一条"已丢弃"覆盖，它的旧错误不再成立；
     # 同一次成功执行里一张成功一张失败，失败那张必须报（[23]/[24] 不静默丢弃；result.py:117 旧条件 not has_option 会吞掉它）。
+    # P1-17（阶段 5 收尾 D）：给用户的两条是固定文案，不带 ChartError 原文——原文是写给模型看的（列名、参数名，
+    # 让模型自己改），照旧经 chart_errors 回到模型；界面上从此看不到原文（前端没有任何地方读 chart_errors）。
     shown = res.chart_errors_shown
     if shown and not has_option:
-        out.append(f"图表未生成：{shown[-1]}")
+        out.append(CHART_NONE_WARNING)
     elif shown:
-        out.append(f"另有 {len(shown)} 张图未生成：{shown[-1]}")
+        out.append(CHART_PARTIAL_WARNING.format(n=len(shown)))
     if res.chart_internal_errors:
         out.append("图表生成遇到内部错误，已记录")
     return out

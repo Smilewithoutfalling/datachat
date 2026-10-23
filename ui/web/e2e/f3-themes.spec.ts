@@ -147,7 +147,9 @@ async function measure(page: Page, chart: Locator, width: number, height: number
   const pts = ticks.map((t) => [Number(t.text), mid(t.box)] as const).sort((p, q) => p[0] - q[0]);
   const [v0, y0] = pts[0] ?? [0, NaN], [v1, y1] = pts.at(-1) ?? [1, NaN];
   const at = (v: number) => y0 + ((y1 - y0) / (v1 - v0)) * (v - v0);
-  const plotTop = at(3), plotBottom = at(0);
+  // 阶段 5 收尾 A（P2-19）：柱图数值标签默认开，y 轴按数据量级留顶（applyHeadroom 写 max / interval），轴顶不再是数据最大值 3，
+  // 而是画出来的最高刻度（360 高 max 4 interval 1；220 紧凑 max 4 interval 2，首末刻度必画）。没有留顶时 v1 ≤ 3，取 3 与原来相同。
+  const plotTop = at(Math.max(3, v1)), plotBottom = at(0);
   return { draws, frame, ticks, plotTop, plotBottom, tickTexts: ticks.map((t) => t.text), plotRatio: (plotBottom - plotTop) / height,
     xn: frame.filter((d) => isName(d, xName)).at(-1), yn: lastY, cats: frame.filter((d) => ["a", "b", "c"].includes(d.text)) };
 }
@@ -184,12 +186,14 @@ test("长轴名：320 / 640 / 1200 宽与 1200×220 矮画布下截断为 …，
 // issue #49（原 test.fail，DEVLOG [40]）：矮画布紧凑几何（compact.ts）。修之前 top 60 + bottom 30 + nameGap 28 = 118px（220 的 54%），
 // plot 58px ≈ 26%，且值轴 0 和 3 两个刻度被 hideOverlap 吞掉。判定表：这条从 test.fail 翻成 test，期望值不变（plot ≥ 40%），
 // 另加刻度完整：数据范围 [0, 3] 的两端刻度都画出来。360 高不触发紧凑（上一条的 1200×360 / 640×360 照旧）。
-test("#49：1200×220 下 plot 区高 ≥ 画布 40%，值轴首末刻度 0 和 3 都在", async ({ page }) => {
+test("#49：1200×220 下 plot 区高 ≥ 画布 40%，值轴首末刻度 0 和 4（留顶后的上限）都在", async ({ page }) => {
   test.setTimeout(120_000);
   const chart = await longAxisChart(page);
   const m = await measure(page, chart, 1200, 220);
   writeFileSync(test.info().outputPath("issue49-1200x220.png"), await chart.screenshot());
   expect(m.plotRatio).toBeGreaterThanOrEqual(0.4);
+  // 判定表改动（阶段 5 收尾 P2-19）：轴的首末刻度从 0 / 3（数据范围）变成 0 / 4（留顶后的上限，紧凑 N = 3 → step 2）
   expect(m.tickTexts).toContain("0");
-  expect(m.tickTexts).toContain("3");
+  expect(m.tickTexts).toContain("4");
+  expect(m.tickTexts).not.toContain("3");
 });
