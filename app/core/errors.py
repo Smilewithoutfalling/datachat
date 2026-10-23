@@ -23,6 +23,9 @@ ELLIPSIS = "…"
 AGENT_MESSAGE = "内部错误"
 DICTIONARY_MESSAGE = "数据字典读取失败，已跳过"
 NO_EXEC_MESSAGE = "模型没有执行代码，也没有按契约拒答"
+# 没配 Key（llm_kind no_key）：分析和设置页「测试连接」共用这一句
+NO_KEY_MESSAGE = ("未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
+                  "或设置环境变量 DEEPSEEK_API_KEY。")
 # classify_error 的内部枚举 → 中文。不在表里的（unknown）省略；http_NNN 写成「HTTP NNN」
 LLM_KIND_TEXT = {
     "timeout": "请求超时", "connection": "连不上模型服务", "rate_limit": "请求太频繁，被限流",

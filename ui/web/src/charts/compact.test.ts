@@ -13,9 +13,9 @@ test("阈值：默认卡片 360 不触发，220 触发；0 / NaN（未布局）�
   expect([isCompact(360), isCompact(COMPACT_BELOW), isCompact(COMPACT_BELOW - 1), isCompact(220), isCompact(0), isCompact(NaN)])
     .toEqual([false, false, true, true, false, false]);
 });
-test("单系列 bar：top 60→36、bottom 30→14、nameGap 28→22、值轴 3 档且首末刻度必画", () => {
+test("单系列 bar：top 60→36、bottom 30→14、nameGap 32→22、值轴 3 档且首末刻度必画", () => {
   const before = run(fx("bar"), false), o = run(fx("bar"), true);
-  expect([before.grid.top, before.grid.bottom, before.xAxis.nameGap]).toEqual([60, 30, 28]);
+  expect([before.grid.top, before.grid.bottom, before.xAxis.nameGap]).toEqual([60, 30, 32]);
   expect([o.grid.top, o.grid.bottom, o.xAxis.nameGap, o.yAxis.splitNumber]).toEqual([COMPACT.topTitled, 14, COMPACT.nameGap, 3]);
   expect([o.yAxis.axisLabel.showMinLabel, o.yAxis.axisLabel.showMaxLabel]).toEqual([true, true]);
 });

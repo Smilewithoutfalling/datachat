@@ -9,10 +9,11 @@ import pytest
 
 from app.core import analyze
 from app.core.llm import LLMConfig
+from app.core.result import CHART_NONE_WARNING, CHART_PARTIAL_WARNING
 from app.tools.charts import KINDS, MAX_POINTS, validate_spec
 from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, INJECT_ANSWER, INJECT_COLUMNS, INJECT_ORDER, INJECT_PAYLOADS,
                             INJECT_ROWS,
-                            inject_csv, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PLAN, MARK_REACT, PLAN,
+                            inject_csv, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PING, MARK_PLAN, MARK_REACT, PING_REPLY, PLAN,
                             REACT_STEPS, WORKFLOW_STEPS, FakeError, Scenario, handle, make_server, parse_model)
 
 WF_PLAN = [{"role": "user", "content": MARK_PLAN + "……"}]
@@ -277,21 +278,25 @@ def test_real_chain_inject_kind(agent, kind, fake_url, inject_path):
 
 
 @pytest.mark.parametrize("agent", ["workflow", "react"])
-def test_real_chain_inject_error_reaches_warnings(agent, fake_url, inject_path):
-    """inject-error：chart() 传不存在的列名 P1，没有图，chart_error 带着载荷进 result.warnings（可用列也是载荷）。"""
+def test_real_chain_inject_error_reaches_model_not_warnings(agent, fake_url, inject_path):
+    """inject-error：chart() 传不存在的列名 P1，没有图。P1-17（判定表改动，原名 ..._reaches_warnings）：chart_error 原文
+    （带载荷和可用列）只回到模型（chart_errors_shown），给用户的警告是固定文案、不含任何载荷。"""
     r = analyze(inject_path, "画个图", agent=agent, llm_config=cfg(fake_url, "inject-error"))
     assert r.ok and not [c for c in r.charts if c.get("option")], (r.error_kind, r.error)
-    w = [x for x in r.warnings if x.startswith("图表未生成：")]
-    assert len(w) == 1 and INJECT_PAYLOADS["P1"] in w[0] and all(c in w[0] for c in INJECT_COLUMNS), r.warnings
+    assert CHART_NONE_WARNING in r.warnings, r.warnings
+    assert not any(p in w for w in r.warnings for p in INJECT_PAYLOADS.values()), r.warnings
+    e = r.chart_errors_shown[-1]
+    assert INJECT_PAYLOADS["P1"] in e and all(c in e for c in INJECT_COLUMNS), r.chart_errors_shown
 
 
 @pytest.mark.parametrize("agent", ["workflow", "react"])
 def test_real_chain_partial_chart_error_reported(agent, fake_url, sample_path):
-    """[43] chart-partial：一次成功执行里一张 bar 成功、一张列名错 → 1 张图 + 「另有 1 张图未生成」。"""
+    """[43] chart-partial：一次成功执行里一张 bar 成功、一张列名错 → 1 张图 + 「另有 1 张图没画出来」（P1-17 起是固定文案）。"""
     r = analyze(sample_path, "画个图", agent=agent, llm_config=cfg(fake_url, "chart-partial"))
     assert r.ok and len([c for c in r.charts if c.get("option")]) == 1, (r.error_kind, r.error)
-    w = [x for x in r.warnings if "未生成" in x]
-    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "__nope__" in w[0], r.warnings
+    w = [x for x in r.warnings if "没画出来" in x]
+    # P1-17（判定表改动）：固定文案，列名 __nope__ 不进警告，只回到模型
+    assert w == [CHART_PARTIAL_WARNING.format(n=1)] and "__nope__" in r.chart_errors_shown[-1], r.warnings
 
 
 # ---------------------------------------------------------------- T11：上游回显用户问题（真链路）
@@ -312,3 +317,26 @@ def test_echo_scenario_parse():
     assert parse_model("fail-echocut-500@codegen") == Scenario("fail", 500, "codegen", echo="echocut")
     with pytest.raises(FakeError):
         parse_model("hang-echo-3s")
+
+
+# ---------------------------------------------------------------- 设置页「测试连接」的 ping（阶段 5 收尾 C）
+PING = [{"role": "user", "content": MARK_PING}]
+
+
+def test_ping_recognized_and_scenarios_apply():
+    code, body = handle({"model": "ok", "messages": PING}, sleep=lambda s: pytest.fail("不该睡"))
+    assert code == 200 and body["choices"][0]["message"]["content"] == PING_REPLY
+    assert handle({"model": "chart-bar", "messages": PING})[0] == 200
+    assert handle({"model": "fail-401", "messages": PING})[0] == 401
+    slept = []
+    assert handle({"model": "hang-3s", "messages": PING}, sleep=slept.append)[0] == 200 and slept == [3]
+
+
+def test_ping_is_exact_message_only():
+    # 带 @step 的场景对 ping 一律 400；ping 不是子串匹配，多一条消息、多一个字都认不出
+    code, body = handle({"model": "fail-401@plan", "messages": PING})
+    assert code == 400 and "不属于 ping" in body["error"]["message"]
+    for msgs in ([{"role": "user", "content": MARK_PING + " "}], [{"role": "system", "content": "s"}] + PING,
+                 [{"role": "system", "content": MARK_PING}]):
+        code, body = handle({"model": "ok", "messages": msgs})
+        assert code == 400 and "无法识别当前步骤" in body["error"]["message"]

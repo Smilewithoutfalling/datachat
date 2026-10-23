@@ -153,8 +153,9 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
   await expect(msgs.nth(2).getByTestId("echart")).toHaveCount(0);
 
   // ---- DOM 面：警告、结论、代码面板按文本出现
-  await expect(msgs.nth(2).locator(".warnings")).toContainText(`图表未生成：x 列 '${P.P1}' 不存在`);
-  for (const k of ["P2", "P3", "P4", "P5"] as const) await expect(msgs.nth(2).locator(".warnings")).toContainText(P[k]);
+  // P1-17（阶段 5 收尾 D，判定表改动）：ChartError 原文只回到模型，警告是固定文案，不再带任何载荷
+  await expect(msgs.nth(2).locator(".warnings")).toContainText("图没画出来：模型给的画图参数和结果数据对不上。");
+  for (const k of ["P1", "P2", "P3", "P4", "P5"] as const) await expect(msgs.nth(2).locator(".warnings")).not.toContainText(P[k]);
   for (const i of [0, 1, 2]) for (const k of ["P1", "P2", "P3"] as const) await expect(msgs.nth(i)).toContainText(P[k]);
   for (const i of [0, 1, 2]) {
     await msgs.nth(i).getByRole("button", { name: "查看过程" }).click(); // V2a §2.3：过程默认折叠

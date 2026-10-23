@@ -65,6 +65,7 @@ keyring 对逃逸不是完全没用：逃逸后偷 Key 的路径从"读任意文
 | 日志、导出 | 日志是纯文本文件；导出 HTML 报告（如有）时同样在写入处转义 | 生效（第 5 步实现） | 生效 |
 | 👍👎 的 note（用户输入，阶段 5 F0） | 后端清控制字符和双向文本控制符、限 1000 字；前端按纯文本渲染 | 生效 | 生效 |
 | 数据集预览单元格与表头（F1 / F1.1） | 后端一律转字符串，去掉方向控制符（LRM/RLM、U+202A–202E、U+2066–2069，防视觉重排；\t \n \r 保留），超 200 字截断，两者都按表计数（`bidi_stripped` / `truncated_cells`），提示行告诉用户；只影响显示，模型拿到原数据；缺失为 null；前端按纯文本渲染 | tests/test_web_f1.py、views.test.tsx（注入串不成元素）、e2e/f1.spec.ts（托管 dist 上 tbody 无 img、无 CSP 违规） | 生效 |
+| 图表标题（用户在标记卡「文字」组输入，阶段 5 V2b） | UiState 只存编号 / 数值 / 枚举的唯一例外（`Edit.title`）。只写进 `title.text` 一处，写之前过前端 `sanitizeTitle`（ui/web/src/charts/title.ts）：C0 / C1 / DEL、`\u2028` `\u2029`、Bidi 控制符换空格（比后端 `_CTRL` 严：标题会进导出文件名），`DISPLAY_UNSAFE` 的 `{` `}` 换全角、`\n` 换空格，首尾去空白，限 `TITLE_MAX` 100 字；替换表和限长经 gen_ui_types 导出到 chart_schema.json 的 `display`，Bidi 表前端独有。localStorage 读回时 `parseEdit` 要求 `sanitizeTitle(v) === v`，否则丢掉该字段。画在 canvas 上不进 DOM；组头「当前值」是 React 文本节点；导出文件名仍经 `safeFilename`；不碰 `document.title` | title.test.ts（注入串 SSR 不产生 DOM、title.text = 清洗结果、导出文件名不含 Bidi、parseEdit 丢弃）、tests/test_charts.py::test_schema_exports_display_contract | 生效（前端本机输入，不经后端） |
 | Markdown 里的 `img` / 链接 | 链接 `rel="noreferrer noopener"`；`javascript:` 由渲染器过滤（测试钉版本）；外链图片由 CSP `img-src 'self' data: blob:` 拦下 | F2 实现 | 生效 |
 
 **白名单只校验 builder 的输出（以及 v2 的 patch），最终渲染产物永不回验。** 前端在校验之后才加 `tooltip.renderMode = 'richText'`，而 `renderMode` 同时在 `BANNED_KEYS` 里，所以最终交给 ECharts 的 option 必然不过白名单。这是有意的：`BANNED_KEYS` 禁的是"由后端 / 模型决定这个键"，不是"渲染时不许出现"。将来任何把前端 option 回灌后端的流程（"保存我的风格"、服务端重绘导出 PNG 等）必须：
@@ -80,10 +81,10 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
 |---|---|---|
 | 图表各位置（标题、轴名、类目轴标签、图例、饼图扇区标签、tooltip），托管 dist + CSP + canvas | `ui/web/e2e/f3-inject.spec.ts`「注入：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定」：三轮（inject-bar 宽表 + 长表两张、inject-pie、inject-error）；包一层 `fillText` / `strokeText` 记录实际绘制的字符串；tooltip 真机悬停 5 处，每处都断言绘制记录里出现被悬停的名字、悬停前后 canvas 像素不同（截图前等连续两次逐字节相同） | P1–P3 **不执行**：`window.__pwned` 未定义、无 dialog；每个 `.echart` 的 `textContent` 为空、后代只有 div 和 canvas；全页新增元素里没有 img / svg / script / iframe / object / embed，没有 `on*` 属性和 `javascript:` 的 href / src；零 CSP 违规、零外部请求 |
 | 同上，SSR SVG（断言工具，不是产品路径） | `ui/web/src/charts/inject.test.ts`：`chart_fixtures.json` 的 inject-bar / inject-bar-series / inject-pie | 载荷作为文本节点完整到达渲染器（攻击的前提成立）；按 XML 结构解析后没有载荷造出的元素、`on*` 属性或 `javascript:` 链接 |
-| 错误消息、警告（chart_error） | 同一 e2e 的 inject-error 轮：x 传不存在的列名 P1，`图表未生成：x 列 '<P1>' 不存在；可用列：<P4>、<P5>、<P2>、<P3>` 进 `result.warnings` | 按文本显示（`toContainText`），无新增元素 |
+| 错误消息、警告（chart_error） | 同一 e2e 的 inject-error 轮：x 传不存在的列名 P1。阶段 5 收尾 P1-17 起 ChartError 原文（`x 列 '<P1>' 不存在；可用列：…`）只回到模型（chart_errors），`result.warnings` 里是固定文案「图没画出来：…」，不再带任何用户串 | 警告是固定文案、不含 P1–P5（`not.toContainText`），无新增元素；载荷到模型由 test_fake_llm 钉住 |
 | 结论（Markdown） | 同一 e2e：结论含 P1–P3 和 `[点我](javascript:…)` | 按文本显示；链接渲染出来了（对照），href 不含 `javascript:` |
 | 代码面板 | 同一 e2e：三轮都展开"生成代码"，代码里有 P1、P4、P5 字面量 | 按文本显示 |
-| 后端到达 | `tests/test_fake_llm.py::test_real_chain_inject_kind`（5 kind × 2 agent）、`test_real_chain_inject_error_reaches_warnings`、`test_inject_payloads_fit_and_csv_round_trips_through_pandas` | 载荷完整到达 option（第三步起是 `_display_safe` 规范化后的串）、warnings、结论（只证明前提，不是防御） |
+| 后端到达 | `tests/test_fake_llm.py::test_real_chain_inject_kind`（5 kind × 2 agent）、`test_real_chain_inject_error_reaches_model_not_warnings`、`test_inject_payloads_fit_and_csv_round_trips_through_pandas` | 载荷完整到达 option（第三步起是 `_display_safe` 规范化后的串）、chart_errors（P1-17 起不进 warnings）、结论（只证明前提，不是防御） |
 
 **P4 / P5：按位置的解析结论**（e2e 里 `expect(verdict).toEqual(...)` 钉住，升级 echarts 时会红，按新现象重判）：
 

@@ -1,4 +1,4 @@
-// F3 prepare 管线：深拷贝 → normalize → changeKind → applyLayer1 → applySwitches → applyView → cleanup。
+// F3 prepare 管线：深拷贝 → normalize → changeKind → applyLayer1 → applySwitches → applyHeadroom → applyView → applyCompact → cleanup。
 // - prepare(spec, ui, theme) 是纯函数（F3 第五步）：图型、开关、主题任何一个输入变了，EChart 都整体重算 + setOption(notMerge)。
 //   主题进来是因为渐变色值由这里写死（取主题 color[i]），setTheme 换主题对象不会重算它。
 // - normalize：把历史 spec 的几何归一到当前契约（chart_schema.json 的 geometry，后端 GEOMETRY 登记表导出）。
@@ -11,7 +11,8 @@
 // - cleanup 永远最后：按 banned_keys.json 递归删被禁键 → 删顶层 color → 强制 tooltip.renderMode='richText'。放在最后，
 //   前面任何一步（含层 1 / 开关）塞进来的被禁键或顶层 color 都会被删掉（charts.test.ts 用替身证明）。
 // 纵深防御：第一道是后端 validate_spec（app/tools/charts.py），这里只在后端校验有漏洞时兜底；不是前端校验，也不回验。
-// 用户字符串的渲染面规范化（{ } 换行）只在后端 _display_safe 做，这里不镜像一份。
+// 用户字符串的渲染面规范化（{ } 换行）：后端出的串在后端 _display_safe 做，这里不镜像一份；用户在本机输入的标题（V2b B3，
+// Edit.title）在前端 sanitizeTitle（title.ts）做，规则表（DISPLAY_UNSAFE、TITLE_MAX）由 gen_ui_types 生成共享。
 // 顶层 color：配色归主题，后端第四步起不产出；这里删的是第四步之前存进库的 spec（重放路径原样下发、不过 validate_spec，
 // tests/test_web_f2.py 钉住）。渐变写在 series 层（series[i].itemStyle / areaStyle.color），从不写顶层 color。
 // 不修改输入。
@@ -24,6 +25,7 @@ import {
 import { DEFAULT_THEME, type ThemeName } from "./themes";
 import { applyLayer1To, type Edit } from "./layer1";
 import { applyCompactTo } from "./compact";
+import { applyHeadroomTo } from "./headroom";
 
 export const BANNED_KEYS: ReadonlySet<string> = new Set(generated.banned_keys);
 
@@ -71,6 +73,13 @@ export const applySwitches: Step = (option, ctx) => {
   return applySwitchesTo(option, { shape, theme: ctx.theme, sw: ctx.ui.sw });
 };
 
+// V2b P2-19：y 轴留顶（headroom.ts）。排在开关之后（随数值标签走、读堆叠开关）、紧凑之前（读 ctx.ui.compact 选格数）。
+export const applyHeadroom: Step = (option, ctx) => {
+  if (!ctx.kind) return option;
+  const shape: Shape = { kind: ctx.kind, series: Array.isArray(option.series) ? option.series.length : 0, xKind: ctx.xKind };
+  return applyHeadroomTo(option, shape, ctx.ui.sw, !!ctx.ui.compact);
+};
+
 export const applyView: Step = (option, ctx) => applyViewTo(option, ctx.ui.view);
 
 export function cleanup(option: Option): Option {
@@ -107,7 +116,7 @@ export function runPipeline(spec: ChartInput, ui: UiState, theme: ThemeName, ste
 // issue #49：矮画布紧凑几何（compact.ts）。排最后：开关可能改 grid.bottom（图例），紧凑只在最终值上收紧。
 export const applyCompact: Step = (option, ctx) => (ctx.ui.compact ? applyCompactTo(option) : option);
 
-export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches, applyView, applyCompact];
+export const STEPS: readonly Step[] = [normalize, changeKind, applyLayer1, applySwitches, applyHeadroom, applyView, applyCompact];
 
 export function prepare(spec: ChartInput, ui: UiState = DEFAULT_UI, theme: ThemeName = DEFAULT_THEME): Record<string, unknown> {
   return runPipeline(spec, ui, theme, STEPS);

@@ -2,7 +2,7 @@
 import type { Api } from "./api";
 import { parseSse } from "./sse";
 import type { Ev } from "./turn";
-import type { Agent, Dataset, DatasetDetail, KeyStatus, Rating, Session, SessionDetail, Settings } from "./types";
+import type { Agent, Dataset, DatasetDetail, KeyStatus, Rating, Session, SessionDetail, Settings, SettingsTest } from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
   method,
@@ -71,6 +71,8 @@ export function client(api: Api) {
     keyStatus: () => api.json<KeyStatus>("/settings/api-key"),
     setKey: (api_key: string) => api.json<KeyStatus>("/settings/api-key", jsonBody("PUT", { api_key })),
     deleteKey: () => api.json<KeyStatus>("/settings/api-key", { method: "DELETE" }),
+    /** 测试连接：测的是已保存的配置；同时只许一个，第二个 409。 */
+    testSettings: () => api.json<SettingsTest>("/settings/test", { method: "POST" }),
   };
 }
 export type Client = ReturnType<typeof client>;

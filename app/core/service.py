@@ -22,7 +22,7 @@ from functools import lru_cache
 
 from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
                           UsageTracker, build_chat_model, classify_error)
-from app.core.errors import NO_EXEC_MESSAGE, user_error
+from app.core.errors import NO_EXEC_MESSAGE, NO_KEY_MESSAGE, user_error
 from app.core.events import CANCELLED_MESSAGE, Emitter, Event
 from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, format_result, last_png,
                              refusal_from_answer)
@@ -194,8 +194,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     # 2. 模型
     cfg = llm_config or LLMConfig.from_env()
     if chat_model is None and not cfg.api_key:
-        res.error, res.error_kind = user_error("text", "未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
-                                               "或设置环境变量 DEEPSEEK_API_KEY。", trace_id=res.trace_id), "llm"
+        res.error, res.error_kind = user_error("text", NO_KEY_MESSAGE, trace_id=res.trace_id), "llm"
         res.llm_kind = "no_key"
         return
 

@@ -3,7 +3,7 @@ import fixtures from "../generated/chart_fixtures.json";
 import { type ChartInput, DEFAULT_UI, type Json, prepare, type UiState } from "./prepare";
 import {
   EDIT_PREFIX, type Edit, EMPTY_EDIT, getEdit, LAYER1_KEYS, mergeNote, mergeOther, OTHER_NAME, parseEdit, PIE_TOP_N, rangeError,
-  resetEditsForTest, setEdit,
+  resetEditsForTest, resolveEdit, setEdit,
 } from "./layer1";
 import { DEFAULT_SWITCHES, KINDS } from "./switches";
 import { THEME_NAMES, THEMES } from "./themes";
@@ -93,39 +93,57 @@ function diffPaths(a: Json, b: Json, path: string, out: Set<string>) {
 }
 test("机制：全部夹具 × 全部改动，差 ⊆ LAYER1_KEYS", () => {
   const hits = new Set<string>();
-  const full: Partial<Edit> = { yMin: 1, yMax: 99, colors: { 0: 3, 1: 5 }, font: "l", other: true };
-  for (const f of FX) {
+  // V2b：全部改动多了按类目着色（只对单系列柱图生效）和用户标题；series 模式另跑一遍，系列色那条路径也要覆盖到
+  const fulls: Partial<Edit>[] = [
+    { yMin: 1, yMax: 99, colors: { 0: 3, 1: 5 }, font: "l", other: true, title: "用户标题" },
+    { yMin: 1, yMax: 99, colors: { 0: 3, 1: 5 }, font: "l", other: true, colorBy: "data", title: "用户标题" },
+  ];
+  for (const full of fulls) for (const f of FX) {
     const base = prepare(f.spec) as Json;
-    const got = run(f.spec, full) as Json;
+    const got = run(f.spec, full) as O;
     const d = new Set<string>();
-    diffPaths(base, got, "", d);
+    diffPaths(base, got as Json, "", d);
     for (const p of d) {
-      const norm = p.replace(/\.itemStyle$/, ".itemStyle.color").replace(/^title$/, "title.subtext").replace(/^textStyle$/, "textStyle.fontSize");
-      expect(Object.keys(LAYER1_KEYS)).toContain(norm);
-      hits.add(norm);
+      // 没有标题的图整块加了 title：按写出的子键记；数值点包成 {value, itemStyle} 时按两条路径记（值不变由下面单独断言）
+      const norms = p === "title" ? Object.keys(got.title).map((k) => `title.${k}`)
+        : p === "series[].data[]" ? ["series[].data[].value", "series[].data[].itemStyle.color"]
+          : [p.replace(/\.itemStyle$/, ".itemStyle.color").replace(/^textStyle$/, "textStyle.fontSize")];
+      for (const norm of norms) {
+        expect(Object.keys(LAYER1_KEYS)).toContain(norm);
+        hits.add(norm);
+      }
     }
   }
   expect([...hits].sort()).toEqual(Object.keys(LAYER1_KEYS).sort()); // 表里没有死条目
 });
 
+// V2b B4（判定表改动）：存储改成只存这张图自己设过的字段（EditPatch），parseEdit 不再补默认值；
+// 「重置删键」从写 EMPTY_EDIT 改成写空 patch（EMPTY_EDIT 现在表示"每个字段都设成了默认值"，会被存下来）。
 describe("存储", () => {
   beforeEach(() => { localStorage.clear(); resetEditsForTest(); });
-  test("逐字段校验：坏字段丢掉、好字段留下", () => {
+  test("逐字段校验：坏字段丢掉、好字段留下；没出现的字段不补", () => {
     const e = parseEdit({ yMin: "1", yMax: 10, colors: { 0: 2, 1: 99, x: 1 }, font: "xl", other: 1, junk: true });
-    expect(e).toEqual({ ...EMPTY_EDIT, yMax: 10, colors: { 0: 2 } });
-    expect(parseEdit({ yMin: 5, yMax: 1 })).toEqual(EMPTY_EDIT);
-    expect(parseEdit("x")).toEqual(EMPTY_EDIT);
+    expect(e).toEqual({ yMax: 10, colors: { 0: 2 } });
+    expect(parseEdit({ yMin: 5, yMax: 1 })).toEqual({});
+    expect(parseEdit("x")).toEqual({});
+    expect(parseEdit({ colorBy: "data", other: false })).toEqual({ colorBy: "data", other: false });
+    expect(parseEdit({ colorBy: "rainbow" })).toEqual({});
   });
   test("写入 / 读回 / 重置删键", () => {
-    setEdit("m1:0", { ...EMPTY_EDIT, font: "l" });
-    expect(localStorage.getItem(EDIT_PREFIX + "m1:0")).toContain('"font":"l"');
+    setEdit("m1:0", { font: "l" });
+    expect(localStorage.getItem(EDIT_PREFIX + "m1:0")).toBe('{"font":"l"}');
     resetEditsForTest();
     expect(getEdit("m1:0").font).toBe("l");
-    setEdit("m1:0", EMPTY_EDIT);
+    setEdit("m1:0", {});
     expect(localStorage.getItem(EDIT_PREFIX + "m1:0")).toBeNull();
   });
   test("坏 JSON 回退空改动", () => {
     localStorage.setItem(EDIT_PREFIX + "m2:0", "{");
-    expect(getEdit("m2:0")).toEqual(EMPTY_EDIT);
+    expect(getEdit("m2:0")).toEqual({});
+  });
+  test("老数据（V2b 之前存的整份 Edit）：有的字段都视为这张图自己设过", () => {
+    localStorage.setItem(EDIT_PREFIX + "m3:0", JSON.stringify({ yMin: null, yMax: null, colors: {}, font: "m", other: false }));
+    expect(getEdit("m3:0")).toEqual({ yMin: null, yMax: null, colors: {}, font: "m", other: false });
+    expect(resolveEdit({ font: "l", colorBy: "data" }, getEdit("m3:0"))).toEqual({ ...EMPTY_EDIT, colorBy: "data" });
   });
 });

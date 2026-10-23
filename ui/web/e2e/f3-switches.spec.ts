@@ -71,7 +71,7 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   const instance = await chart.getAttribute("data-instance");
   // P2-18（S 10-22 r3，判定表改动）：数值标签设计默认开；基线 = 用户主动关掉之后（= 后端原样），关之前画面必须不同
   const byDefault = await snap(chart);
-  const label0 = (await group(ctl, "标签")).getByRole("checkbox", { name: "数值标签" });
+  const label0 = (await group(ctl, "标签")).getByRole("switch", { name: "数值标签" });
   await expect(label0).toBeChecked();
   await label0.uncheck();
   const base = await snap(chart);
@@ -80,7 +80,7 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   // F4 迭代 V1：开关搬进标记卡，作用域从 chart-controls 改成卡（先开卡、再展开所在组）。卡盖在图上不影响 canvas 取像素
   const where: Record<string, string> = { 数值标签: "标签", 渐变: "颜色", 圆角: "形状", 平均线和极值: "轴" };
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值"]) {
-    const box = (await group(ctl, where[name])).getByRole("checkbox", { name });
+    const box = (await group(ctl, where[name])).getByRole("switch", { name });
     await box.check();
     expect([name, (await snap(chart)) !== base]).toEqual([name, true]);
     await box.uncheck();
@@ -93,24 +93,24 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   // 作用域必须是卡且组已展开：照旧在 ctl 上查，开关搬家后永远是 0 个，会无条件绿。圆角是正向对照。
   const card = await group(ctl, "形状");
   await group(ctl, "标签");
-  for (const name of ["堆叠", "平滑"]) await expect(card.getByRole("checkbox", { name })).toHaveCount(0);
+  for (const name of ["堆叠", "平滑"]) await expect(card.getByRole("switch", { name })).toHaveCount(0);
   await expect(card.getByRole("group", { name: "图例位置" })).toHaveCount(0);
-  await expect(card.getByRole("checkbox", { name: "圆角" })).toHaveCount(1);
-  await expect(card.getByRole("checkbox", { name: "数值标签" })).toHaveCount(1);
+  await expect(card.getByRole("switch", { name: "圆角" })).toHaveCount(1);
+  await expect(card.getByRole("switch", { name: "数值标签" })).toHaveCount(1);
   await expect(card.getByRole("button", { name: /^形状/ })).not.toHaveAttribute("aria-disabled", "true");
   expect(posts).toHaveLength(1);
   await expect(chart).toHaveAttribute("data-instance", instance!);
 
   // 偏好按图型存：刷新后保持；同一会话再出一张柱图，直接继承
-  await card.getByRole("checkbox", { name: "数值标签" }).check();
+  await card.getByRole("switch", { name: "数值标签" }).check();
   await page.reload();
   await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /开关柱图/ }).first().click();
   const sv2 = page.getByTestId("session-view");
-  await expect((await group(sv2.getByTestId("chart-controls").first(), "标签")).getByRole("checkbox", { name: "数值标签" })).toBeChecked();
+  await expect((await group(sv2.getByTestId("chart-controls").first(), "标签")).getByRole("switch", { name: "数值标签" })).toBeChecked();
   await page.keyboard.press("Escape");
   await askAgain(page, "再来一张", 2);
   await expect(sv2.getByTestId("chart-controls")).toHaveCount(2);
-  await expect((await group(sv2.getByTestId("chart-controls").nth(1), "标签")).getByRole("checkbox", { name: "数值标签" })).toBeChecked();
+  await expect((await group(sv2.getByTestId("chart-controls").nth(1), "标签")).getByRole("switch", { name: "数值标签" })).toBeChecked();
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("datachat.chartUi:bar")))!).label).toBe(true);
   expect(bad).toEqual([]);
 });
@@ -149,7 +149,7 @@ test("缩放：普通滚轮滚页面、图不动；Shift + 滚轮缩放；双击
   await page.goto(`/#token=${E2E_TOKEN}`);
   const sv = await ask(page, CSV, "zoom.csv", "chart-bar", "缩放柱图");
   const chart = sv.getByTestId("echart").first();
-  await (await group(sv.getByTestId("chart-controls").first(), "轴")).getByRole("checkbox", { name: "缩放" }).check();
+  await (await group(sv.getByTestId("chart-controls").first(), "轴")).getByRole("switch", { name: "缩放" }).check();
   await page.keyboard.press("Escape"); // 卡盖在图上，滚轮测试前关掉
   await expect(sv.getByText("Shift + 滚轮缩放，拖动平移，双击空白处还原")).toBeVisible();
   const main = page.locator(".main");
@@ -212,7 +212,7 @@ test("渐变开着切主题：实例不重建、不发分析请求，画面跟�
   }
   expect(diffOutside).toBeGreaterThan(100);
 
-  await (await group(sv.getByTestId("chart-controls").first(), "颜色")).getByRole("checkbox", { name: "渐变" }).check();
+  await (await group(sv.getByTestId("chart-controls").first(), "颜色")).getByRole("switch", { name: "渐变" }).check();
   const softGrad = await snap(chart);
   await picker.selectOption("business");
   const businessGrad = await snap(chart);

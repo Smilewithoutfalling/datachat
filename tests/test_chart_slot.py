@@ -6,6 +6,7 @@ import pytest
 
 from app.core import analyze, analyze_stream
 from app.core.testing import ScriptedChatModel
+from app.core.result import CHART_NONE_WARNING, CHART_PARTIAL_WARNING
 from app.tools.charts import MAX_CHARTS, ChartSlot, accept_worker_charts, build_option
 from app.tools.sandbox import run_code
 from tests.test_core_analyze import FAST, tool_call, wf_model
@@ -138,7 +139,9 @@ def test_react_chart_error_reaches_model_and_warnings(sample_path):
     res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
     assert res.ok and res.result == 1 and res.charts == [] and res.chart_calls == 1
     assert "chart() 未出图" in str(m.calls[-1][-1].content)          # 模型看得到，能改
-    assert any(w.startswith("图表未生成") for w in res.warnings)
+    # P1-17（判定表改动）：给用户的警告改成固定文案，原文（列名 nope）只回到模型、不进警告
+    assert CHART_NONE_WARNING in res.warnings
+    assert not any("nope" in w for w in res.warnings) and any("nope" in e for e in res.chart_errors_shown)
 
 
 def test_react_mixed_png_and_option(sample_path):
@@ -216,15 +219,16 @@ BAD_BAR = "chart('bar', df, x='nope', y='units')\n"
 
 
 def _not_made(res):
-    return [w for w in res.warnings if "未生成" in w]
+    return [w for w in res.warnings if "没画出来" in w]   # P1-17：文案从「未生成」改成固定的「没画出来」
 
 
 def test_workflow_partial_chart_error_reported(sample_path):
-    """同一次成功执行一对一错：旧条件 not has_option 会吞掉错误，现在报「另有 1 张图未生成」。"""
+    """同一次成功执行一对一错：旧条件 not has_option 会吞掉错误，现在报「另有 1 张图没画出来」（P1-17 起是固定文案）。"""
     res = analyze(sample_path, "画图", chat_model=wf_model([GOOD_BAR + BAD_BAR + "result = 1"]), llm_config=FAST)
     assert res.ok and len(res.charts) == 1 and len(res.chart_errors_shown) == 1
     w = _not_made(res)
-    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "nope" in w[0], res.warnings
+    # P1-17（判定表改动）：固定文案，原文不进警告（原文仍在 chart_errors_shown，回到模型）
+    assert w == [CHART_PARTIAL_WARNING.format(n=1)] and "nope" in res.chart_errors_shown[0], res.warnings
 
 
 def test_react_partial_chart_error_reported(sample_path):
@@ -232,7 +236,7 @@ def test_react_partial_chart_error_reported(sample_path):
     res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
     assert res.ok and len(res.charts) == 1
     w = _not_made(res)
-    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成：") and "nope" in w[0], res.warnings
+    assert w == [CHART_PARTIAL_WARNING.format(n=1)] and not any("nope" in x for x in res.warnings), res.warnings
 
 
 def test_workflow_failed_exec_chart_error_not_reported(sample_path):
@@ -258,4 +262,4 @@ def test_react_two_ok_execs_first_error_still_reported(sample_path):
     res = analyze(sample_path, "画图", agent="react", chat_model=m, llm_config=FAST)
     assert res.ok and len(res.charts) == 1
     w = _not_made(res)
-    assert len(w) == 1 and w[0].startswith("另有 1 张图未生成："), res.warnings
+    assert w == [CHART_PARTIAL_WARNING.format(n=1)], res.warnings

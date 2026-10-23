@@ -279,19 +279,25 @@ _GRID_BOUNDS = {"outerBoundsMode": "same", "outerBoundsContain": "all",
 # 轴名的位置（F3 第四步实测后定）：默认 x 轴名在轴末端右侧、y 轴名居中骑在 y 轴线上，纳入外边界后它们横向占宽——
 # 320 宽画布上长轴名把 plot 区压到 31–39%。x 轴名放到轴下方居中（nameLocation='middle'），y 轴名左对齐向右伸，
 # 横向不再占宽：同样夹具 plot 区 ≥ 82%。代价是 x 轴名多占一行高度（400 高时 plot 区高 66% → 60%）。
-_X_NAME = {"nameLocation": "middle", "nameGap": 28}
+# nameGap 32（V2b P2-20，原 28）：判据是最大字号（层 1「大」16px，刻度文字比默认 12px 多占 4px）下刻度文字到轴名仍留
+# 原来默认字号下的 8px；默认字号下变成 12px。改了要连 GEOMETRY（normalize 归一旧图）一起看。
+_X_NAME = {"nameLocation": "middle", "nameGap": 32}
 _Y_NAME = {"nameTextStyle": {"align": "left"}}
 
 # 几何契约登记表（F3 第五步）：后端改过、而重放路径原样下发历史 spec 的几何 / 外观键。前端 prepare 的 normalize
 # 用它把老 spec 归一到当前契约（经 gen_ui_types 导出为 chart_schema.json 的 geometry，前端不写第二份字面量）。
 # 以后后端改任何几何键都必须在这里登记；tests/test_charts.py 双向比对它和 _cartesian / _scatter 的产物，漏登记就红。
+# grid.left / right（V2b P2-21/22）：原来是 _CART_GRID 里的 '3%' / '4%'，随宽度变（888 宽卡左缘到 y 轴线 57px、
+# 1174 宽右侧 47px）；改成固定像素 12 / 16（设计 04-component-spec §6：left 44 含刻度文字 / right 16），三个直角坐标图
+# 同一个值，所以挪进 GEOMETRY，重放的旧图经前端 normalize 一并归一。
+_GRID_SIDES = {"left": 12, "right": 16}
 GEOMETRY = {
-    "grid": _GRID_BOUNDS,
+    "grid": {**_GRID_SIDES, **_GRID_BOUNDS},
     "xAxis": {**_X_NAME, "nameTruncate": _AXIS_NAME_TRUNCATE},
     "yAxis": {**_Y_NAME, "nameTruncate": _AXIS_NAME_TRUNCATE},
 }
 # 每张图自己的框架值（不是契约归一的对象：bottom 随系列数变）。前端换图型要造出和 builder 一样的 option，从 schema 读这些值。
-_CART_GRID = {"left": "3%", "right": "4%", "top": 60}
+_CART_GRID = {"top": 60}
 _CART_BOTTOM = {"single": 30, "multi": 50}
 _PIE_LEGEND = {"show": True, "type": "scroll", "orient": "vertical", "left": "left", "top": "middle"}
 _PIE_RADIUS = ["0%", "65%"]
@@ -327,7 +333,7 @@ def _cartesian(kind, frame, xs, ys, series_col):
     option = {
         "tooltip": {"trigger": "axis"},
         "legend": {"show": multi, "top": "bottom"},
-        "grid": {**_CART_GRID, "bottom": _CART_BOTTOM["multi" if multi else "single"], **_GRID_BOUNDS},
+        "grid": {**_GRID_SIDES, **_CART_GRID, "bottom": _CART_BOTTOM["multi" if multi else "single"], **_GRID_BOUNDS},
         "xAxis": _axis("x", type="category", name=x_name, data=cats, boundaryGap=kind == "bar"),
         "yAxis": _axis("y", type="value", name=y_name),
         "series": out_series,
@@ -385,7 +391,7 @@ def _scatter(frame, xs, ys, series_col):
     option = {
         "tooltip": {"trigger": "item"},
         "legend": {"show": len(out) > 1, "top": "bottom"},
-        "grid": {**_CART_GRID, "bottom": _CART_BOTTOM["multi" if len(out) > 1 else "single"], **_GRID_BOUNDS},
+        "grid": {**_GRID_SIDES, **_CART_GRID, "bottom": _CART_BOTTOM["multi" if len(out) > 1 else "single"], **_GRID_BOUNDS},
         "xAxis": _axis("x", type="value", name=_clean_str(xs.name, NAME_MAX) if xs.name is not None else "", scale=True),
         "yAxis": _axis("y", type="value", name=_clean_str(ys[0], NAME_MAX) if len(ys) == 1 else "", scale=True),
         "series": out,

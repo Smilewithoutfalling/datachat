@@ -20,8 +20,8 @@ OUT_DIR = os.path.join(ROOT, "ui", "web", "src", "generated")
 
 def chart_schema() -> dict:
     from app.tools.charts import (_ALLOWED, _CART_BOTTOM, _CART_GRID, _ENUMS, _KIND_SERIES_TYPE, _PIE_CENTER, _PIE_LEGEND,
-                                  _PIE_RADIUS, AXIS_NAME_MAX_PX, GEOMETRY, KINDS, MAX_PIE_SLICES, PALETTE, SHOW_SYMBOL_MAX,
-                                  X_KINDS)
+                                  _PIE_RADIUS, AXIS_NAME_MAX_PX, DISPLAY_UNSAFE, GEOMETRY, KINDS, MAX_PIE_SLICES, PALETTE,
+                                  SHOW_SYMBOL_MAX, TITLE_MAX, X_KINDS)
     return {"_generated_by": "scripts/gen_ui_types.py", "kinds": list(KINDS),
             "palette": list(PALETTE),               # 前端默认主题（经典）的 color 从这里读（F3 第四步）
             "axis_name_max_px": AXIS_NAME_MAX_PX,
@@ -32,6 +32,8 @@ def chart_schema() -> dict:
             "show_symbol_max": SHOW_SYMBOL_MAX,
             "frame": {"cartesian_grid": _CART_GRID, "cartesian_bottom": _CART_BOTTOM,
                       "pie_legend": _PIE_LEGEND, "pie_radius": _PIE_RADIUS, "pie_center": _PIE_CENTER},
+            # V2b B3：标记卡的标题输入在前端 sanitizeTitle 清洗，渲染面替换表和限长与后端同一份（Bidi 表是前端独有的，不导出）
+            "display": {"unsafe": dict(DISPLAY_UNSAFE), "title_max": TITLE_MAX},
             "kind_series_type": dict(_KIND_SERIES_TYPE),
             "top_level_keys": list(_ALLOWED),
             "enums": {".".join(k): sorted(v) for k, v in _ENUMS.items()}}

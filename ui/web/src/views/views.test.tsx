@@ -221,3 +221,71 @@ test("列表竞态：reload 在飞时新建会话，晚到的旧列表不能把�
   expect(screen.getByRole("button", { name: /^刚建的会话/ })).toBeTruthy(); // 旧快照被整体丢弃
   expect(be.calls.filter((c) => c.method === "GET" && c.path === "/datasets")).toHaveLength(2);
 });
+
+// ---- 阶段 5 收尾 C：设置页「测试连接」——测的是已保存的配置 -------------------------------------------------------
+describe("测试连接", () => {
+  /** 可控的 JSON 响应：body 流先不关，调用方 resolve 时才写入并关闭（按钮的"测试中"态要能看到）。 */
+  function pending() {
+    let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
+    return {
+      response: () => new Response(stream, { status: 200, headers: { "Content-Type": "application/json" } }),
+      resolve: (v: unknown) => { ctrl.enqueue(new TextEncoder().encode(JSON.stringify(v))); ctrl.close(); },
+    };
+  }
+  const open = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+    return screen.findByTestId("settings-view");
+  };
+
+  test("三态：可点 → 测试中（不可点）→ 连接正常 · 0.8s · 模型名；请求是 POST /settings/test", async () => {
+    const p = pending();
+    const be = setup({ "POST /settings/test": () => p.response() });
+    const view = await open();
+    const btn = within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    await act(async () => fireEvent.click(btn));
+    expect((within(view).getByRole("button", { name: "测试中…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(be.calls.filter((x) => x.method === "POST" && x.path === "/settings/test")).toHaveLength(1);
+    await act(async () => p.resolve({ ok: true, latency_ms: 812, model: "deepseek-chat" }));
+    expect(within(view).getByTestId("test-result").textContent).toBe("连接正常 · 0.8s · deepseek-chat");
+    expect((within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("失败：显示后端给的 message；auth 时焦点移到 Key 输入框", async () => {
+    const message = "鉴权失败，请检查 API Key，共尝试 1 次：invalid key（编号 0123abcd）";
+    setup({ "POST /settings/test": { ok: false, llm_kind: "auth", message, latency_ms: 120 } });
+    const view = await open();
+    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "测试连接" })));
+    expect(within(view).getByTestId("test-result").textContent).toBe(message);
+    expect(document.activeElement).toBe(within(view).getByLabelText("当前 Key"));
+  });
+
+  test("失败（server）：显示 message，焦点不动", async () => {
+    setup({ "POST /settings/test": { ok: false, llm_kind: "server", message: "模型服务出错（编号 1）", latency_ms: 5 } });
+    const view = await open();
+    const btn = within(view).getByRole("button", { name: "测试连接" });
+    btn.focus();
+    await act(async () => fireEvent.click(btn));
+    expect(within(view).getByTestId("test-result").textContent).toBe("模型服务出错（编号 1）");
+    expect(document.activeElement).toBe(btn);
+  });
+
+  test("有未保存的改动时不可点，旁边写「先保存再测试」；保存后可点；填了新 Key 没保存也算未保存", async () => {
+    const be = setup({ "POST /settings/test": { ok: true, latency_ms: 1, model: "m2" } });
+    const view = await open();
+    const btn = () => within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
+    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
+    fireEvent.change(within(view).getByLabelText("模型名"), { target: { value: "m2" } });
+    expect(btn().disabled).toBe(true);
+    expect(within(view).getByTestId("test-unsaved").textContent).toBe("先保存再测试");
+    fireEvent.click(btn());
+    expect(be.calls.some((x) => x.path === "/settings/test")).toBe(false);
+    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
+    expect(btn().disabled).toBe(false);
+    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
+    fireEvent.click(within(view).getByRole("button", { name: "更换" }));
+    fireEvent.change(within(view).getByLabelText("替换为新的 Key"), { target: { value: "sk-new" } });
+    expect(btn().disabled).toBe(true);
+  });
+});
