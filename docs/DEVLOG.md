@@ -2042,6 +2042,8 @@ S 10-21 第二轮：
 
 未验证 / 风险：基线是在沙箱（aarch64）生成的，CI 是 ubuntu x64。两边 Chromium 版本相同，字体都来自 install-deps，但抗锯齿可能有差。首次上 CI 若 f4-visual 红，按 HANDOVER §6「视觉回归」从 playwright-results 工件取 *-actual.png 换基线（先看 diff 确认只是抗锯齿），在本条补记。
 
+CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异像素 3381–4953（ratio 0.01），其余 34 条和 pytest、gate-oracle 全绿。逐张看 diff：差异只在 DOM 文字字形上（中英文抗锯齿），canvas 内的图表文字、柱块、卡片边框、骨架、布局框都没有差异；最大通道差 132，超过 128 的每张至多 1 像素。判定为平台抗锯齿差异，四张基线换成该 run 的 *-actual.png。之后基线只在 CI 上能通过，本地 aarch64 跑 f4-visual 预期会红（HANDOVER §6 已写明换基线流程）。
+
 测试：e2e 34 → 38（新增 4 条，其余不变）。pytest、vitest 条数不变。
 
 当前阶段：阶段 5 收尾。下一步等 S 定：V2b（P2-19~22 + 标记卡对齐等，先写方案）、F5 真 Key 走查、测试连接（需后端接口）。

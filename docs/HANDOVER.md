@@ -118,6 +118,7 @@ Playwright 结构（`playwright.config.ts`）：
 - 阈值 `threshold: 0.02, maxDiffPixels: 20`（偏离 S 提的 `maxDiffPixelRatio: 0.002`，变异实测见 [59] 和文件头注释）。
 - **改了界面、预期就该变**：`npx playwright test e2e/f4-visual.spec.ts --update-snapshots`，提交时在 DEVLOG 写明哪屏为什么变（判定表纪律同样适用）。
 - **基线以 CI 为准**：CI 是 ubuntu x64，沙箱可能是 arm64，字体抗锯齿可能不同。CI 红时：到失败 run 的 `playwright-results` 工件里取 `*-actual.png`，先看 `*-diff.png` 确认只是抗锯齿差异，再改名覆盖 `*-fake-linux.png` 提交。要是 diff 里有真的布局变化，那就是回归，修代码。
+- 现有四张基线取自 CI（PR #71，run 39889413891）。在 arm64 沙箱本地跑，f4-visual 会因抗锯齿红 4 条，这是预期的：本地闸门可以加 `--grep-invert 视觉`，视觉结果以 CI 为准。改了界面要更新基线时，先推上去让 CI 出 actual 图，再按上一条换。
 - 动态内容的处理：宽屏侧栏整块 mask（列表长度随别的用例变）；用时、副标题 mask；宽度随内容变的行内文字（trace 编号、同名数据集的「 · HH:MM」）截图前用 `freeze()` 换成定值，因为 mask 框会跟着变宽，框边本身就是像素差。
 
 ## 7. 提交 / PR / CI
