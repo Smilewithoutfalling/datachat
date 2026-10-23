@@ -10,7 +10,7 @@ import { EChart, type ChartSpec, placeCard, resetMarksForTest } from "./EChart";
 import * as exp from "./exportPng";
 import { DEFAULT_SWITCHES } from "./switches";
 import { setChartTheme, THEMES } from "./themes";
-import { resetPrefsForTest, setPrefs } from "./uiPrefs";
+import { getPrefs, resetPrefsForTest, setPrefs } from "./uiPrefs";
 
 const { created } = vi.hoisted(() => ({ created: [] as import("echarts/core").ECharts[] }));
 vi.mock("echarts/core", async (orig) => {
@@ -56,7 +56,7 @@ beforeEach(() => {
 
 // F4 迭代 V1：开关在标记卡的组里。打开第 i 张图的卡（已开不重复点），再展开组（已展开不重复点），返回该组区域。
 function group(name: string, i = 0): HTMLElement {
-  const btn = screen.getAllByRole("button", { name: "样式" })[i];
+  const btn = screen.getAllByRole("button", { name: "标记" })[i];
   if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
   const t = screen.getByRole("button", { name: new RegExp("^" + name) });
   if (t.getAttribute("aria-pressed") !== "true") fireEvent.click(t);
@@ -104,7 +104,8 @@ test("TurnView：5001 夹具 → 图和后端给的截断警告同时出现，�
   render(<TurnView turn={turn} />);
   expect(screen.getAllByTestId("echart")).toHaveLength(1);
   expect(screen.getAllByText(warning)).toHaveLength(1);
-  expect(screen.queryByText(/数据点超过/, { selector: ":not(li)" })).toBeNull();
+  // V2a §3.2：后端警告挪进黄色警示条（.wbar-title），不再是 <li>；断言不变：页面上只此一处
+  expect(screen.queryByText(/数据点超过/, { selector: ":not(.wbar-title)" })).toBeNull();
 });
 
 test("TurnView：png 项走 chartSrc（同源 /charts/<name>?token=），给不出地址就不画", () => {
@@ -148,14 +149,62 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
     expect(created).toHaveLength(1);
   });
 
-  test("开关：勾上即重设 option，偏好写进 datachat.chartUi:<kind>，同图型的另一张图立即跟着变", () => {
+  // P2-18（S 10-22 r3，判定表改动）：柱图数值标签设计默认开，所以这条从"勾上"改成"取消勾选"：用户主动关 = 存 false，两张图一起关
+  test("开关：点一下即重设 option，偏好写进 datachat.chartUi:<kind>，同图型的另一张图立即跟着变", () => {
     render(<><EChart spec={spec("bar")} /><EChart spec={spec("bar-untitled")} /></>);
     const spies = created.map((c) => vi.spyOn(c, "setOption"));
-    const box = within(group("标签")).getByRole("checkbox", { name: "数值标签" });
+    const box = within(group("标签")).getAllByRole("checkbox", { name: "数值标签" })[0] as HTMLInputElement;
+    expect(box.checked).toBe(true);
     fireEvent.click(box);
-    expect(JSON.parse(localStorage.getItem("datachat.chartUi:bar")!).label).toBe(true);
-    for (const s of spies) expect(lastOption(s).series[0].label).toEqual({ show: true, position: "top" });
+    expect(JSON.parse(localStorage.getItem("datachat.chartUi:bar")!).label).toBe(false);
+    for (const s of spies) expect(lastOption(s).series[0].label).toBeUndefined();
     expect(created).toHaveLength(2);
+  });
+
+  describe("P2-18 数值标签的设计默认（S 10-22 r3）", () => {
+    const labelOf = () => (created.at(-1)!.getOption() as { series: { label?: { show?: boolean } }[] }).series[0].label?.show === true;
+    const box = () => within(group("标签")).getByRole("checkbox", { name: "数值标签" }) as HTMLInputElement;
+    const many = (): ChartSpec => {
+      const s = JSON.parse(JSON.stringify(spec("bar"))) as ChartSpec;
+      const o = s.option as { xAxis: { data: string[] }; series: { data: number[] }[] };
+      o.xAxis.data = Array.from({ length: 31 }, (_, i) => `c${i}`);
+      o.series[0].data = o.xAxis.data.map((_, i) => i);
+      return s;
+    };
+    // 饼图 / 散点默认关由 switches.test 的 resolveSwitches 钉住（饼图后端自带引线 label，option 上看不出开关态）
+    test("柱 / 线图没碰过 → 开关是勾上的，option 里有数值标签；散点没碰过 → 没有", () => {
+      for (const id of ["bar", "line"]) {
+        cleanup();
+        render(<EChart spec={spec(id)} />);
+        expect([id, box().checked, labelOf()]).toEqual([id, true, true]);
+      }
+      cleanup();
+      render(<EChart spec={spec("scatter")} />);
+      expect(labelOf()).toBe(false);
+    });
+    test("类目 > 30：默认降为关并说明原因；用户手动开照画，说明消失", () => {
+      render(<EChart spec={many()} />);
+      expect(labelOf()).toBe(false);
+      expect(box().checked).toBe(false);
+      expect(screen.getByTestId("label-too-many").textContent).toBe("类目过多，数值标签默认关闭");
+      fireEvent.click(box());
+      expect(labelOf()).toBe(true);
+      expect(screen.queryByTestId("label-too-many")).toBeNull();
+    });
+    test("改别的开关不会把 label 冻成显式值（存储里仍缺省）", () => {
+      render(<EChart spec={spec("bar")} />);
+      fireEvent.click(within(group("形状")).getByRole("checkbox", { name: "圆角" }));
+      expect("label" in JSON.parse(localStorage.getItem("datachat.chartUi:bar")!)).toBe(false);
+    });
+    test("重置 = 回到设计默认（数值重新出现），不是全关", () => {
+      render(<EChart spec={spec("bar")} />);
+      fireEvent.click(box());
+      expect(labelOf()).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "重置" }));
+      expect(labelOf()).toBe(true);
+      expect(localStorage.getItem("datachat.chartUi:bar")).toBeNull();
+      expect((screen.getByRole("button", { name: "重置" }) as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 
   // F4 迭代 V1 第 2 条（判定表改动）：不兼容的开关从"disabled + title"改为不渲染；工具栏只剩图型 / 排序 / 样式 / 导出
@@ -251,7 +300,8 @@ describe("F3 第六步：导出与交互态", () => {
     const [s, ui, theme, size] = exportArgs();
     expect(s).toBe(spec("bar"));
     // F4：UiState 多了 edit（层 1 改动），#49 多了 compact（矮画布），导出要带上它们才能和屏幕一致；这里是未改、450 高
-    expect(ui).toEqual({ kind: null, sw: DEFAULT_SWITCHES, edit: EMPTY_EDIT, compact: false, view: { zoom: null, hidden: [] } });
+    // P2-18：没碰过的柱图，生效开关里 label 是设计默认 true；导出和屏幕同一份 ui
+    expect(ui).toEqual({ kind: null, sw: { ...DEFAULT_SWITCHES, label: true }, edit: EMPTY_EDIT, compact: false, view: { zoom: null, hidden: [] } });
     expect(theme).toBe("classic");
     expect(size).toEqual({ width: 800, height: 450 }); // 容器的 clientWidth × clientHeight，原样
     expect(downloadSpy).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
@@ -381,7 +431,7 @@ describe("F4 层 1 面板（标记卡）", () => {
   });
   const opt = () => created.at(-1)!.getOption() as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   const fontSize = () => { const t = opt().textStyle; return (Array.isArray(t) ? t[0] : t)?.fontSize; };
-  const open = () => fireEvent.click(screen.getByRole("button", { name: "样式" }));
+  const open = () => fireEvent.click(screen.getByRole("button", { name: "标记" }));
   const tile = (n: string) => screen.getByRole("button", { name: new RegExp("^" + n) });
 
   test("字号：点'大 16' → 渲染出 textStyle.fontSize 16，存进 localStorage；重置后删键", () => {
@@ -414,13 +464,12 @@ describe("F4 层 1 面板（标记卡）", () => {
     expect(why.textContent).toBe("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
     fireEvent.click(axis);
     expect(axis.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(tile("颜色"));
+    expect(tile("颜色").getAttribute("aria-pressed")).toBe("true"); // 验收 P0-3：打开即展开颜色组，不用再点
     expect(screen.getByRole("checkbox", { name: "合并为'其他'" })).toBeTruthy();
   });
   test("颜色：点色块写系列色；换主题跟着主题的同一 index", () => {
     render(<EChart spec={spec("bar")} editKey="m1:3" />);
-    open();
-    fireEvent.click(tile("颜色"));
+    open(); // 验收 P0-3：颜色组默认展开
     fireEvent.click(screen.getAllByRole("button", { name: /颜色 4$/ })[0]);
     expect(opt().series[0].itemStyle.color).toBe(THEMES.classic.theme.color[3]);
     act(() => setChartTheme("tableau"));
@@ -485,7 +534,7 @@ describe("F4 迭代 V1：标记卡", () => {
   });
   const tile = (n: string) => screen.getByRole("button", { name: new RegExp("^" + n) });
 
-  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 样式 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
+  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 标记 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
     const want: Record<string, boolean> = {
       bar: true, "bar-series-20": false, line: false, "line-wide": false, "line-time": false,
       area: false, pie: true, scatter: false, "scatter-multi": false,
@@ -494,7 +543,7 @@ describe("F4 迭代 V1：标记卡", () => {
       render(<EChart spec={spec(id)} />);
       const ctl = screen.getByTestId("chart-controls");
       expect([id, within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))]).toEqual([id, sort ? ["图型", "排序"] : ["图型"]]);
-      expect([id, within(ctl).getAllByRole("button").map((b) => b.textContent)]).toEqual([id, ["样式", "导出 PNG"]]);
+      expect([id, within(ctl).getAllByRole("button").map((b) => b.textContent)]).toEqual([id, ["标记", "导出 PNG"]]); // 验收 P0-3：按钮名和浮层标题统一为「标记」
       expect(within(ctl).queryAllByRole("checkbox")).toEqual([]);
       cleanup();
     }
@@ -504,7 +553,8 @@ describe("F4 迭代 V1：标记卡", () => {
     render(<EChart spec={spec("bar")} />);
     const get = () => JSON.stringify(created.at(-1)!.getOption());
     const off = get();
-    act(() => setPrefs("bar", { ...DEFAULT_SWITCHES, stack: true, smooth: true, legend: "top" }));
+    // P2-18：只加不渲染的那几个，label 保持存储态（缺省）不变，才是"与关着相同"的对照
+    act(() => setPrefs("bar", { ...getPrefs("bar"), stack: true, smooth: true, legend: "top" }));
     expect(get()).toBe(off);
   });
 
@@ -520,7 +570,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("整页只开一张卡：打开第二张图的卡，第一张自动关", () => {
     render(<><EChart spec={spec("bar")} /><EChart spec={spec("bar-untitled")} /></>);
-    const [a, b] = screen.getAllByRole("button", { name: "样式" });
+    const [a, b] = screen.getAllByRole("button", { name: "标记" });
     fireEvent.click(a);
     expect(screen.getAllByTestId("marks-card")).toHaveLength(1);
     fireEvent.click(b);
@@ -530,7 +580,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("关闭：Esc、点卡外、再点样式按钮；点卡内不关", () => {
     render(<EChart spec={spec("bar")} />);
-    const btn = screen.getByRole("button", { name: "样式" });
+    const btn = screen.getByRole("button", { name: "标记" });
     fireEvent.click(btn);
     fireEvent.mouseDown(screen.getByTestId("marks-card"));
     expect(screen.queryByTestId("marks-card")).not.toBeNull();
@@ -569,7 +619,7 @@ describe("F4 迭代 V1：标记卡", () => {
 
   test("散点图：标签组整组不可用，.marks-why 一行写理由", () => {
     render(<EChart spec={spec("scatter")} />);
-    fireEvent.click(screen.getByRole("button", { name: "样式" }));
+    fireEvent.click(screen.getByRole("button", { name: "标记" }));
     const label = tiles().find((t) => t.textContent!.includes("标签"))!;
     expect(label.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByTestId("marks-why").textContent).toContain("标签：散点图不显示数值标签，单系列也没有图例");

@@ -13,7 +13,7 @@ import { FRONTEND_REG, productExtensions } from "./register";
 import {
   applyViewTo, asZoom, canChangeKind, changeKind, COMPAT, DATA_ZOOM, DEFAULT_SWITCHES, hiddenFromSelected, FRONTEND_KEYS, viewFromRendered, gradient, KIND_DIFF, KINDS, type Kind, legendItems, rgba0,
   SWITCHES, SWITCH_VALUES, type SwitchName, type Switches, type View,
-} from "./switches";
+ DEFAULT_STORED, DESIGN_LABEL, designLabel, resolveSwitches } from "./switches";
 import { THEME_NAMES, THEMES, type ThemeName } from "./themes";
 import { getPrefs, parseSwitches, PREFS_PREFIX, resetPrefsForTest, setPrefs } from "./uiPrefs";
 
@@ -386,21 +386,37 @@ describe("开关偏好：localStorage 的 datachat.chartUi:<kind>", () => {
     resetPrefsForTest();
     expect(getPrefs("pie").label).toBe(true);
     expect(getPrefs("bar").sort).toBe("desc");
-    expect(getPrefs("line")).toEqual(DEFAULT_SWITCHES);
+    expect(getPrefs("line")).toEqual(DEFAULT_STORED); // P2-18：没碰过的 label 是 undefined（套设计默认），不是 false
     expect(Object.keys(localStorage).every((k) => KINDS.some((kind) => k === PREFS_PREFIX + kind))).toBe(true);
   });
   test("不合法：不认识的字段丢弃、非法值回退默认、坏 JSON 整体回退", () => {
     expect(parseSwitches({ label: true, sort: "random", zoom: "yes", evil: 1 })).toEqual({ ...DEFAULT_SWITCHES, label: true });
-    expect(parseSwitches([1, 2])).toEqual(DEFAULT_SWITCHES);
+    expect(parseSwitches([1, 2])).toEqual(DEFAULT_STORED);
+    expect(parseSwitches({ label: "yes" }).label).toBeUndefined(); // 非法 label → 没碰过
+    expect(parseSwitches({ label: false }).label).toBe(false); // 用户主动关要保住
     localStorage.setItem(`${PREFS_PREFIX}bar`, "{not json");
-    expect(getPrefs("bar")).toEqual(DEFAULT_SWITCHES);
+    expect(getPrefs("bar")).toEqual(DEFAULT_STORED);
   });
   test("localStorage 抛错（隐私模式 / 配额满）：读回退默认，写只在内存生效，不抛", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    expect(getPrefs("area")).toEqual(DEFAULT_SWITCHES);
+    expect(getPrefs("area")).toEqual(DEFAULT_STORED);
     expect(() => setPrefs("area", { ...DEFAULT_SWITCHES, smooth: true })).not.toThrow();
     expect(getPrefs("area").smooth).toBe(true);
+  });
+});
+
+describe("P2-18 设计默认：resolveSwitches / designLabel", () => {
+  test("柱线面积默认开，饼图散点默认关；类目 > 30 降为关；用户显式值优先", () => {
+    expect(KINDS.map((k) => [k, resolveSwitches(DEFAULT_STORED, k, 5).label])).toEqual(KINDS.map((k) => [k, DESIGN_LABEL[k]]));
+    expect(designLabel("bar", 30)).toEqual({ on: true, tooMany: false });
+    expect(designLabel("bar", 31)).toEqual({ on: false, tooMany: true });
+    expect(designLabel("pie", 31)).toEqual({ on: false, tooMany: false });
+    expect(resolveSwitches({ ...DEFAULT_STORED, label: true }, "bar", 5000).label).toBe(true);
+    expect(resolveSwitches({ ...DEFAULT_STORED, label: false }, "bar", 5).label).toBe(false);
+  });
+  test("全 false 仍等于后端原样：resolve 出来的显式全关走 DEFAULT_UI 恒等（上面的夹具断言不变）", () => {
+    expect(resolveSwitches({ ...DEFAULT_STORED, label: false }, "bar", 5)).toEqual(DEFAULT_SWITCHES);
   });
 });
 

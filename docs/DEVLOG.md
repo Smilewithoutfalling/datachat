@@ -1903,7 +1903,7 @@ S 10-21 第二轮：
 走查记录：（S 跑完后填）
 
 
-## [56] 2026-10-22 · F4 迭代 V2a 方案：按 S 设计稿改版 · commit <待提交>
+## [56] 2026-10-22 · F4 迭代 V2a 方案：按 S 设计稿改版 · commit e4b6ef1
 
 [55] 回填为 b6769cd。
 
@@ -1921,3 +1921,93 @@ S 10-21 第二轮：
 - 「总结」这一段对应 answer 事件，不是 done。
 
 未做：代码。实现按 §9 分三段，放在同一个分支上一起提交。
+
+## [57] 2026-10-22 · error 事件和结果加 llm_kind · commit <待提交>
+
+[56] 回填为 e4b6ef1。
+
+起因：S 10-22 定下 llm 类错误要按子类分出口（phase5 V2a「S 10-22 已定」第 1 条）。前端只按 status、error_kind 分支，不看文案（turn.ts:90），所以需要后端把子类显式给出来。这是 V2a 不改后端原则唯一的破例。
+
+改了什么：
+- AnalysisResult 新增 llm_kind，经 to_record 进入 done.result 落库，重放时前端从库里取。error 事件的 data 加 llm_kind，非 llm 恒为 null；Emitter.error 校验"llm 必须给子类，非 llm 不许给"，不满足就抛 ValueError。
+- 取值：LLMError.kind（工作流）或 classify_error 的结果（ReAct）；网关错误 JSON 记 gateway_error，包括非致命的整轮重跑事件；没配 Key 记 no_key。
+- 停止可能把先前的 llm 错误盖成 cancelled，所以在收尾时统一处理：只要 error_kind 不是 llm，就把 llm_kind 清空（service.py 的 finally 里）。
+- events.py 新增 LLM_KINDS（classify_error 的 8 个值加 no_key），docstring 的事件表也同步了；generated/events.json 新增 llm_kinds；turn.ts 的 Result 和 error 事件类型各加一个可选字段。前端界面这次不用这个字段，留到 V2a 的错误卡用。
+
+偏离：no_key 是方案里没有的值。没配 Key 时根本没有发请求，不属于任何 classify_error 的类别；而前端要据此给出"去设置"的出口，所以单列一个值。方案表里已经补上。
+
+判定表：两处断言加了 llm_kind 字段，行为本身没有变，只是事件多了一个键。
+- test_web_f2::test_stream_cancel_stops_before_next_event：加 "llm_kind": None。
+- test_stream::test_fatal_error_precedes_done：加 "llm_kind": "no_key"。
+
+测试：新增 tests/test_llm_kind.py，共 23 条：
+- 8 种异常（timeout、connection、rate_limit、401、403、400、500、409）× workflow / react，断言 res、致命 error 事件、done.result 三处一致；
+- no_key、ReAct 网关重跑（非致命事件也带 gateway_error）；
+- dataset 错误和成功时为 null；
+- Emitter 的约束；
+- LLM_KIND_TEXT 是 LLM_KINDS 的子集，classify_error 的输出都落在 LLM_KINDS 或 http_NNN 里；
+- events.json 里有 llm_kinds。
+
+## [58] 2026-10-22 · F4 迭代 V2a：按设计稿重做界面（三段合一） · commit <待提交>
+
+起因：S 交了设计包（handoff2，07-落地范围为准），方案见 phase5「F4 迭代 V2a」（#69）。S 10-22 要求三段都做完再推，界面"基本和设计稿一样"，可以多改几轮。
+
+改了什么（只动 ui/web，后端不动）：
+- 第①段：styles.css 重写，改了原有 9 个变量的值，另外加 6 个（--bg-subtle、--bg-muted、--line-strong、--line-input、--line-muted、--accent-bg）；字重只用 400 和 700；卡片不加阴影。新增 views/icons.tsx，放内联 SVG 图标，都带 data-icon。新增 views/ui.tsx，放 Topbar、Dialog（原生 dialog）、MoreMenu、relTime、createdSuffix。侧栏 248 宽，含品牌行、上传区、数据集行（使用中 / 读取失败、sheet 胶囊、重名时追加创建时间）、会话行（悬停出 ···，可原地改名、弹出确认删除）、设置行。顶栏 60 高，有标题和副标题。输入区有三态：可用、分析中（按钮变"停止"）、禁用（首屏）。助手卡顺序：头（状态标签 6 态、耗时）→ 步骤条（理解问题 / 写代码 / 执行 / 总结，默认折叠，展开就是原来的事件流）→ 黄条 → 结论 → 图表卡 → 尾（👍👎、重新生成）。图表卡是 1px 边框、12px 圆角，工具栏放在卡底，用胶囊控件。
+- 第②段：部分完成走黄条，来源是 warnings、unverified_numbers，以及可恢复的字典读取失败（turn.ts partialSignals）。错误卡按 error_kind 分 4 类；llm 类再按 llm_kind 分：rate_limit / 429 倒计时 10 秒后才能重试，auth / no_key / 401 / 403 给"去设置"，bad_request 和其他 4xx 给"重试 + 换个问法"，其余给"重试"。取消、中断给三个出口：重新问一次、换个问法、查看已生成的代码。数据集删除改成对话框：要输入名称才能确认，并写明会连带删除几个会话。读取失败的数据集显示失败卡。设置页凭证分三态（环境变量只读 / 钥匙串可更换、可删除 / 未设置时黄色提示）。会话失效页可以一键复制命令。没配 Key 时会话页横幅常驻，点发送会在前端拦下。首问时顶栏和侧栏的标题当场更新，正在编辑标题时不覆盖。
+- 第③段：<1080 时侧栏收成 56 宽的图标条，点开以浮层展开，宽屏也可以手动收起。侧栏上传区和首屏上传卡都能拖放文件，前端拦下非 .csv 和超过 1 GB 的文件。上传改用 XHR（api.ts upload），拿到进度；测试注入 fetch 时退回 fetch。
+- turn.ts 新增 steps(turn, agent)、partialSignals、totalSeconds；ECharts 的图型下拉不再把当前图型判成不可换（原来整个 select 显示灰色）。
+
+偏离（带理由）：
+- 页面底色改成白色，侧栏用 #F5F5F7，跟设计稿一致；补的 6 个变量名和方案草拟的不一样，个数没变。
+- 会话删除按设计稿做成弹出确认，不再是方案里"两次点击"的写法。
+- 失效页不做"重新连接"：后端每次启动都换新 token，刷新拿到的还是旧 token，按钮没有用。
+- 图表卡不加卡头：标题已经画在 canvas 里（导出 PNG 也带着），再加一个卡头就重复了。
+- .echart 高度保持 360，窄屏 300，没用设计稿的 292 / 210：292 低于 #49 的 compact 阈值（300），会改变图的排版。
+- 对话列最宽 1214，不是 1140：保持改版前的最大图宽 1174，f3-inject 的类目标签前提依赖这个宽度。1440 视口下内容区本来就是 1140，看不出差别。
+- 读取失败的数据集只有拿到详情（上传响应或打开详情）后，侧栏才标红：列表接口不带 error，而后端不改。
+
+判定表（行为变化写明原因；只是选择器变了的单列）：
+- 选择器：提问按钮 "提问" → "发送"（设计稿文案）；数据集行、会话行的可访问名带了元信息，测试改用前缀匹配；新建会话按钮移到顶栏，session-view / dataset-view 的 testid 挪到包住顶栏、内容和输入区的 view-root（display: contents）上。
+- f2.test 提问：过程默认折叠，先点"查看过程"再断言计划文本；停止按钮在输入区。重放：错误卡标题和详情分成两行；中断的出口从"重试"改名为"重新问一次"，行为不变（同样重发原问题）。
+- views.test：删除从"要点两次"改成对话框流程（新测试"删除数据集：输入名称才能确认…"）；注入串多出一处，在右侧字段卡里，同样按文本渲染（2 → 3）；设置页保存 Key 后输入框换成另一个元素（加了 key）。
+- EChart.test 5001：警告从 li 挪进 .wbar-title，断言"只此一处"不变。
+- e2e f1：副标题 "数据集：水果 · ReAct" → "水果 · ReAct · 0 轮"。
+- e2e f2（nokey）：前端会拦下没 Key 的提问。改成先断言拦截（横幅、没有消息），再用 API 发起真实 SSE 走后端的 no_key 路径，刷新后断言错误卡、"去设置"出口、👍、重放一致。流式渲染由 fake 项目的 f3 系列覆盖。
+- e2e f3-stop：plan 文本折叠起来了，改为等步骤条 data-step=plan done、code running 后再点停止，停止按钮在输入区。
+- e2e f3-inject：先点"查看过程"再看代码面板；新增 DOM 元素的检查只放过 svg[data-icon]（源码写死的静态图标），其他 svg 照样记；钉住图宽 1174。
+
+测试：新增 src/views/v2a.test.tsx，共 29 条：状态标签 6 态加正在停止；步骤条（工作流、修复重试 ×2、ReAct 无计划、出错标段、停止标段）；部分完成的信号；错误卡 10 种 error_kind / llm_kind 组合的标题和按钮，加 429 倒计时；没配 Key 的前端拦截；重名数据集后缀；非 .csv 上传在前端拦下。
+
+未做（V2b 或方案外）：标记卡视觉对齐、按列着色、标题输入、应用到同类图表、"完成"按钮；环形图；继续追问；XLSX；表结构（DDL）和"从这张表开始"的建议；图表主题画廊页。
+
+验收第一轮（S 的 v2a-验收清单.md，50 条）：
+- P0：对话框遮罩改黑 32%；删除按钮禁用态改灰（原来是红色降透明度，看着像粉色的另一种红）；标记按钮从"样式"改名"标记"，打开时默认展开颜色组；markdown 只有 http(s)/mailto 渲染成链接，其余只留文字（span.md-link-blocked）；··· 菜单改 fixed 定位，按按钮位置夹在视口内，最小宽 200；暗色主题只染画布，控件行保持浅色；执行中去掉往复进度条，改骨架占位；输入区上方加渐隐，主区底部留白 28px。
+- P1：错误卡正文只写发生了什么、能做什么和编号（取助手消息 id 前 8 位，与后端 trace_id 同源），后端原文收进"技术详情"；llm 类按 llm_kind 给标题；副标题去掉"工作流"，改"N 轮对话"；"分析方式：工作流/ReAct"改"模式：标准/边想边做"；预览说明按真实行数写；编码提示只在非 UTF-8 时出现；来源卡分"数据文件/字典文件"；读取失败的建议按错误映射；"钥匙串"统一改"系统凭据"；上传拦截文案改"只支持 .csv；a.xlsx 不支持"；会话删除标题改"删除这个会话？"；"主题"一词统一（顶栏"主题 经典"，调色板图标）。
+- P2：上传改成对话框（两个入口共用，文件清单、名称、进度在一处）；侧栏数据集元信息去掉字节数；步骤 <0.05s 不写秒数；有别的轮次在跑时重试/重新生成置灰而不是消失；查看/收起过程用下/上箭头；过程区加浅底；表格行高 40；空会话下沉居中；设置页"已设置"改绿色加勾；正在停止用蓝色。
+- 判定表：e2e f3-inject 的"对照：危险链接确实渲染成 <a>"改为"渲染成 span.md-link-blocked 且没有 <a>"，原因是 P0-4 的行为就是不再出链接；f4-panel 和 EChart.test 里点"颜色"的地方改为"未展开才点"（默认已展开，原样点会收起）；f2 e2e 错误卡标题按 no_key 断言"还没有配置 API Key"；f1 副标题、模式下拉跟着文案改。
+- 没改、待 S 定：柱顶数值、y 轴上限、轴名间距、窄屏 grid（P2-18~22）都会改 chart_fixtures 和导出字节，07 §4 不许动；P1-16 失效页"重新打开应用"在浏览器里做不到，放阶段 6；P1-17 图表警告的文案在后端（chart_warnings），前端改写就是匹配后端文案。
+
+验收第二轮（S 的 v2a-验收-r2核对.md）：
+- P0-1 真修：删掉输入区上方的渐隐（它把"看不全"画成了设计）。根因不是 padding：输入区本来就是 flex 尾部、不占滚动区，但打开会话时停在顶部，最后一张图被视口下沿切掉；现在打开会话落在最新一轮，内容长高时只要用户在底部附近（≤ 80px）就跟到底（ResizeObserver 只盯 .messages），翻上去看旧内容时不打扰。.main 底部只留 24px。新增 e2e f4-layout「输入区不遮内容」钉住几何：1024×768 两轮带图，滚动区下沿 = 输入区上沿（±1px），最后一张卡下沿 ≤ 输入区上沿，距底 ≤ 2px，重开会话同样成立。
+- 失败页：重新上传改蓝色实心主按钮，删除这个数据集降为灰色文字按钮放右边，间距 16。
+- 删除确认：标签写明「输入「名称」以确认」，输了但不一致时下方灰字提示；aria-label 不变。
+- 标记浮层：半透明（rgba(245,245,247,.80) + 1.5px 模糊），压着的柱子能看见改色。结构和方向判断不动。
+- 停止中：骨架不再显示；按钮和徽标文字"正在停止…"改"停止中"（f3-stop 判定字符串随之改，原因是文案变了，测的仍是点击到文字变化的延迟）。
+- 次要按钮（换个问法、重新问一次的旁边）统一白底描边；错误卡去掉红框只留浅底；技术详情改成和查看过程同一种下/上箭头折叠，正文默认 hidden（仍在 DOM，e2e 判定不变）；完成态时间写"用时 Xs"；骨架第三块高 360 和图一致；所有对话框加右上角 × 关闭。
+- 失效页加「重试连接」：用手上的令牌再请求一次 /settings/key，成功回到应用；401 提示"后端换了访问令牌，需要用上面的命令重新打开"，网络错误提示"后端没有响应"。
+- e2e 新增 2 条（f4-layout.spec.ts）：上面的几何；删除对话框 ::backdrop 不透明度 > 0.2 且是压暗；顶栏 ··· 菜单左右各距视口 ≥ 8px。
+- 失败页居中：1024 下主区 56–1024、卡片 232–851，中心差 1.5px；S 量到的 25px 是侧栏抽屉展开时的截图（抽屉是浮层，不挤主区）。截图 24 改名 24-narrow-dataset-failed，抽屉另存 24b。
+- 没做：设置页「测试连接」要后端新接口，不在"后端不改"范围内；P2-18/19 见下条待定。
+
+验收第三轮（S 的 v2a-验收-r3判定.md；本地 commit 5baadba 之后）：
+- P2-18 柱顶数值（S 定口径，非 A 非 B）：数值标签的存储态允许缺省（StoredSwitches.label?: boolean）。undefined = 用户没碰过，套设计默认 DESIGN_LABEL（柱 / 线 / 面积开，饼图 / 散点关）；false = 用户主动关。类目 > 30（LABEL_AUTO_MAX）时设计默认降为关，面板里写"类目过多，数值标签默认关闭"，用户手动开照画。applySwitches 只看解析后的布尔值，"全关 = 后端原样"契约、fixtures、switches.test 的夹具恒等断言都不变。改别的开关只落那一个键（不把 label 冻成显式值）；「重置」= 层 1 清空 + clearPrefs（回到设计默认，不是全关）。
+- 判定表改动（行为为什么变：默认值从关改为开）：EChart.test「开关：点一下即重设」从勾上改为取消勾选、导出 ui.sw.label 期望 true；f3-export「逐个打开与全关不同」和 f3-switches「逐个打开像素有变化」的基线改为先主动关掉数值标签，并新增断言：默认态与全关不同。新增 EChart.test「P2-18 数值标签的设计默认」4 条、switches.test「P2-18 设计默认」2 条。
+- P2-19 yMax：S 定放 V2b（'dataMax' 会顶到上沿），和数值标签一起调。
+- 删除确认取 dataset.name：未命名时默认是第一个文件名（sales.csv），命名「门店销售」就要输「门店销售」。上轮汇报说"名称是 sales"是我说错，UI 没问题。
+- follow-up：重试图标换 refresh-cw；浮层 .80 → .58 + 阴影（内层 .42）；骨架色 #ECECEE、补 40px 控件行占位；停止中徽标脉冲（reduced-motion 下关）；失败页和失效页统一垂直居中；失效页图标换时钟、底部说明色 #6B6B70；停止 / 出错的轮次步骤条保留没走到的段（灰），和运行中一样长（v2a.test 步骤条 3 条期望随之补齐）。
+- 错误块圆角：代码里一直是 12px（styles.css .errcard），13 号截图放大可见圆角，未改。
+- 验收第四轮（S 的 v2a-验收-r4判定.md）：24 失败卡改成 grid 居中后，子项按 max-content 收缩到 313px（P0 回归）→ `.failcard` 显式给 `width: min(620px, 100% - 48px)`；24 底注色同步为 #6B6B70；错误块底色 #FCE9E7 + 内描边 rgba(215,0,21,.08)（圆角一直有，只是 1.06:1 下看不见）。08 控件行与图块是同一条 shimmer 渐变，同一 x 采样一致（x=1000 均为 238），未改。f4-layout `--repeat-each=5`：先暴露测试自身问题（repeat 共用后端，同名数据集撞 strict mode；第一轮两轮带图在冷启动下超默认 30s）→ 文件名加时间戳、该用例 setTimeout 120s，之后 10/10 过。随后全量闸门再出 1 failed，这次拿到用例名：f4-layout「删除对话框…」等不到刚上传的数据集——真 bug：Shell 首屏 reload 还没回来就上传完成，旧列表回来后 setDatasets 把新数据集冲掉。修：Shell 加 dsGen，本地上传后发出前的 reload 结果不覆盖数据集列表；e2e 扣住首屏 GET /datasets 到上传完成后再放，回退修复时该用例红、修复后绿。r3 那次未取到名字的 1 failed 推测同因（未证实）。
+- PR #70 评审（S 10-23）：可合并，合并前补两处，另顺手做 P2/P3：①竞态机制补全——`dsGen` 改名 `listGen`，reload 结果代际不符时 datasets/sessions 整体丢弃；新建/改名/删除会话（含 SessionView onChanged/onDeleted）都先 `touched()`；新增 vitest「列表竞态：reload 在飞时新建会话…」（回退到 365a21b 的 Shell 时红）。②`prefers-reduced-motion` 同时停骨架 shimmer。③f4-layout 两处 `waitForTimeout(400)` 换成 `expect(...).toPass({ timeout: 10_000 })` 整组几何重试。④`dirty` 改为按 SWITCHES 逐键比，不依赖 JSON 键序。⑤Markdown 白名单注释写明站内锚点 `#` 也被挡。⑥`effectiveKind` 签名收窄为 `Pick<UiState, "kind">`，EChart 不再传无用的 sw。
+- S 复核（10-23 09:00，按描述做逻辑审查）：⑦DatasetView.onDeleted 也先 `touched()` 再 `reload()`（否则更早在飞的 reload 会把刚删的数据集带回来），入口共 6 处；⑧reload 失败分支同样判 gen，过时请求的失败不报错；⑨f4-layout 的 overflow 前提移到 toPass 外断言一次，前提不成立立刻红。
+- 本地 e2e 环境：Linux 新环境/沙箱重置后先装 Chromium 系统依赖 `cd ui/web && npx playwright install-deps chromium`（症状：e2e 全部约 1ms 红，日志 `libatk-1.0.so.0: cannot open shared object file`）。CI runner 镜像自带，不用跑。

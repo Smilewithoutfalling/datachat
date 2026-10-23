@@ -18,7 +18,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("结论", { timeout: 60_000 });
   return sv;
 }
@@ -44,7 +44,7 @@ type Png = { name: string; bytes: Buffer; width: number; height: number };
 /** 点导出，拿到真下载的文件：PNG 签名、IHDR 宽高。 */
 // F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
 async function group(ctl: Locator, name: string): Promise<Locator> {
-  const btn = ctl.getByRole("button", { name: "样式" });
+  const btn = ctl.getByRole("button", { name: "标记" });
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   const card = ctl.getByTestId("marks-card");
   const t = card.getByRole("button", { name: new RegExp("^" + name) });
@@ -146,7 +146,14 @@ test("单系列类目 bar：先确认 ✅ 集合正好六个，再逐个打开�
   if ((await ctl.getByLabel("排序").count()) === 1) enabled.push("排序");
   expect(enabled.sort()).toEqual(["数值标签", "渐变", "圆角", "平均线和极值", "缩放", "排序"].sort());
 
+  // P2-18（S 10-22 r3，判定表改动）：柱图数值标签设计默认开。"全关"要先把它主动关掉（存 false = 后端原样），
+  // 默认态与全关的导出必须不同——这一格钉的是设计默认本身
+  const label = card.getByRole("checkbox", { name: "数值标签" });
+  await expect(label).toBeChecked();
+  const byDefault = await exportOf(ctl);
+  await label.uncheck();
   const off = await exportOf(ctl);
+  expect(byDefault.bytes.equals(off.bytes)).toBe(false);
   for (const name of ["数值标签", "渐变", "圆角", "平均线和极值", "缩放"]) {
     const box = card.getByRole("checkbox", { name });
     await box.check();

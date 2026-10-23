@@ -20,7 +20,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("（fake）结论", { timeout: 60_000 });
   return sv;
 }

@@ -11,6 +11,7 @@
 // "哪些变化要清空 view"的列表。换图型、spec 变化时仍先清空再算：类目轴 / 系列都换了，旧区间不该带到新图上。
 // 回读只读 getOption() 的 dataZoom[0].start/end 和 legend[0].selected 两处（公开 API）；selected 的名字当场换成 index，
 // 不往外带。view 不持久化。
+import { IconChevronDown, IconDownload } from "../views/icons";
 import { init } from "echarts/core";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
@@ -19,13 +20,14 @@ import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState 
 import { registerCharts } from "./register";
 import {
   asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
-  SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
+  SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
+  categoryCount, DEFAULT_STORED, designLabel, resolveSwitches,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
-import { getEdit, type Edit, EMPTY_EDIT, setEdit, subscribeEdits } from "./layer1";
+import { getEdit, type Edit, EMPTY_EDIT, isEmptyEdit, setEdit, subscribeEdits } from "./layer1";
 import { MarksCard, type Placement } from "./MarksCard";
 import { isCompact } from "./compact";
-import { getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
+import { clearPrefs, getPrefs, setPrefs, subscribePrefs } from "./uiPrefs";
 
 export type ChartSpec = { v: number; kind: string; truncated: boolean; x_kind?: string; option: Record<string, unknown> };
 
@@ -64,9 +66,13 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const [light, setLight] = useState(false); // 导出为浅色（经典配色）：不持久化
   const [exportFailed, setExportFailed] = useState(false);
   const src = asKind(spec.kind);
-  const kind = effectiveKind(spec, { kind: target, sw: getPrefs(src ?? "bar") });
+  const kind = effectiveKind(spec, { kind: target }); // 只看能不能换图型；签名只收 kind，开关传不进去
   const prefKind = kind ?? "bar";
-  const sw = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
+  const prefs = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
+  // 设计默认（P2-18）：label 没被用户碰过时按图型和类目数定；类目数按后端原始 option 数
+  const cats = useMemo(() => categoryCount(spec.option as Option), [spec]);
+  const labelDesign = designLabel(prefKind, cats);
+  const sw = useMemo(() => resolveSwitches(prefs, prefKind, cats), [prefs, prefKind, cats]);
   const stored = useSyncExternalStore(subscribeEdits, () => getEdit(editKey));
   const [local, setLocal] = useState<Edit>(EMPTY_EDIT);
   const edit = editKey ? stored : local;
@@ -177,7 +183,11 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
     };
   }, [zoomOn]);
 
-  const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...sw, [s]: v });
+  // 只改动的那一个开关落到存储态，label 没碰过就保持 undefined（否则改个排序就把设计默认冻成显式值）
+  const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...prefs, [s]: v });
+  // 重置 = 层 1 改动清空 + 这个图型的开关回到设计默认
+  const resetAll = () => { changeEdit(EMPTY_EDIT); clearPrefs(prefKind); };
+  const dirty = !isEmptyEdit(edit) || SWITCHES.some((k) => prefs[k] !== DEFAULT_STORED[k]);
 
   // 标记卡浮层：打开时（以及 .main 滚动、窗口 resize 时）量一次位置；Esc、点卡外关闭（第 6 条）
   useLayoutEffect(() => {
@@ -230,10 +240,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
       {src && shape && (
         <div className="chart-controls" data-testid="chart-controls" ref={ctlRef}>
           <label>
-            图型{" "}
             <select aria-label="图型" value={kind ?? ""} onChange={(e) => setTarget(asKind(e.target.value))}>
               {KINDS.map((k) => {
-                const v = canChangeKind(base, src, k, asXKind(spec.x_kind));
+                // 当前图型自己不走可换判定（canChangeKind(当前→当前) 不 ok，原来整个 select 显示成灰色，V2a §4.3）
+                const v = k === kind ? { ok: true as const, reason: "" } : canChangeKind(base, src, k, asXKind(spec.x_kind));
                 return (
                   <option key={k} value={k} disabled={!v.ok} title={v.ok ? undefined : v.reason}>
                     {KIND_LABEL[k]}
@@ -250,10 +260,10 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
             </label>
           )}
           <button type="button" className={`marks-toggle${marksOpen ? " on" : ""}`} aria-expanded={marksOpen}
-            onClick={() => setMarksOpen(!marksOpen)}>样式</button>
+            onClick={() => setMarksOpen(!marksOpen)}>标记<IconChevronDown size={9} /></button>
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}
           <span className="chart-export">
-            <button type="button" onClick={onExport}>导出 PNG</button>
+            <button type="button" onClick={onExport}><IconDownload size={11} />导出 PNG</button>
             {theme === "darkCanvas" && (
               <label>
                 <input type="checkbox" checked={light} onChange={(e) => setLight(e.target.checked)} />
@@ -264,7 +274,8 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
           </span>
           {marksOpen && (
             <MarksCard shape={shape} sw={sw} onSwitch={set} edit={edit} onChange={changeEdit} items={items}
-              palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement} />
+              palette={THEMES[theme].theme.color} pieCount={pieCount} placement={placement}
+              onReset={resetAll} dirty={dirty} labelTooMany={labelDesign.tooMany && prefs.label === undefined} />
           )}
         </div>
       )}

@@ -7,7 +7,7 @@ const MESSAGES = events.messages as Record<string, string>;
 // F3：停止的端到端，跑在 fake 后端上（base_url → tests/fake_llm.py）。
 // 场景 hang-8s@codegen：plan 正常返回（事件已推到前端），codegen 那次模型调用挂 8 秒。
 // 两个数分开记（phase5-frontend.md 验收第 5 条）：
-//   感知延迟：点"停止" → 按钮变"正在停止…"。验收指标。
+//   感知延迟：点"停止" → 按钮变"停止中"。验收指标。
 //   后端延迟：POST /cancel 返回 200 → 界面出现"已取消"（流里 error+done 到达 + settle 读库）。只记录：
 //            检查点在每个事件之前，上界 ≈ 当前那次模型调用的剩余时间，这里约等于 8 秒减去点停止前已挂的时间。
 const CSV = "城市,销量\n北京,3\n上海,5\n";
@@ -48,7 +48,7 @@ test("停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重�
     }, true);
     new MutationObserver(() => {
       const b = document.querySelector("button.stop");
-      if (w.__t.click && !w.__t.stopping && b?.textContent === "正在停止…") w.__t.stopping = performance.now();
+      if (w.__t.click && !w.__t.stopping && b?.textContent === "停止中") w.__t.stopping = performance.now();
       const done = [...document.querySelectorAll('[data-testid="assistant-msg"] .badge.cancelled')];
       if (w.__t.click && !w.__t.cancelled && done.length) w.__t.cancelled = performance.now();
     }).observe(document, { subtree: true, childList: true, characterData: true });
@@ -60,11 +60,13 @@ test("停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重�
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("一共几行？");
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
 
   const live = sv.getByTestId("live-msg");
-  await expect(live.getByText("（fake）统计行数。")).toBeVisible({ timeout: 15_000 }); // plan 已到，codegen 正挂着
-  await live.getByRole("button", { name: "停止" }).click();
+  // plan 已到，codegen 正挂着。V2a：过程默认折叠，改看步骤条的状态
+  await expect(live.locator('[data-step="plan"][data-state="done"]')).toBeVisible({ timeout: 15_000 });
+  await expect(live.locator('[data-step="code"][data-state="running"]')).toBeVisible();
+  await sv.getByRole("button", { name: "停止" }).click(); // V2a §1.8：停止在输入区
   const msg = sv.getByTestId("assistant-msg");
   await expect(msg.locator(".badge.cancelled")).toHaveText("已取消", { timeout: 15_000 });
   await expect(live).toHaveCount(0);
@@ -73,7 +75,7 @@ test("停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重�
   const perceived = t.stopping - t.click;
   const backend = t.cancelled - t.cancelOk;
   test.info().annotations.push(
-    { type: "感知延迟 ms（点停止 → 正在停止…）", description: perceived.toFixed(0) },
+    { type: "感知延迟 ms（点停止 → 停止中）", description: perceived.toFixed(0) },
     { type: "后端延迟 ms（POST /cancel 200 → 已取消）", description: backend.toFixed(0) },
     { type: "点停止 → POST /cancel 返回 ms", description: (t.cancelOk - t.click).toFixed(0) },
   );
@@ -88,7 +90,7 @@ test("停止：感知延迟 / 后端延迟分开测；落 cancelled；立刻重�
   // 立刻重问：不撞 409，正常走完
   await useScenario(page, "ok");
   await sv.getByLabel("提问").fill("再问一次");
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg").nth(1)).toContainText("（fake）结论：数据共有若干行。");
 
   // 刷新：库里是 cancelled，重放一致

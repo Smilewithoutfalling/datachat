@@ -1,5 +1,11 @@
 import { expect, type Download, type Locator, type Page, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
+
+// 验收 P0-3：标记卡打开时默认展开颜色组；颜色 tile 只在收起时再点（点已展开的会收起）
+async function openColors(scope: import("@playwright/test").Locator) {
+  const t = scope.getByRole("button", { name: /^颜色/ });
+  if ((await t.getAttribute("aria-pressed")) !== "true") await t.click();
+}
 import { E2E_TOKEN } from "../playwright.config";
 
 // F4 层 1 面板（标记卡）：在后端托管的 dist 上真机跑。改动是否落到图上，用真导出（导出和屏幕走同一个 prepare）比字节；
@@ -17,7 +23,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("结论", { timeout: 60_000 });
   return sv;
 }
@@ -79,7 +85,7 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   const sv = await ask(page, CSV, "f4.csv", "chart-bar", "面板");
   const ctl = sv.getByTestId("chart-controls").first();
   const base = await exportOf(ctl);
-  await ctl.getByRole("button", { name: "样式" }).click();
+  await ctl.getByRole("button", { name: "标记" }).click();
   const card = sv.getByTestId("marks-card").first();
   await expect(card).toBeVisible();
 
@@ -97,7 +103,7 @@ test("柱图：字号 / y 轴上限 / 系列色各自改变导出；存进 datac
   expect((await exportOf(ctl)).bytes.equals(capped.bytes)).toBe(true);
   await card.getByLabel("y 轴最小值").fill("");
 
-  await card.getByRole("button", { name: /^颜色/ }).click();
+  await openColors(card);
   await card.getByRole("button", { name: /颜色 5$/ }).first().click();
   expect((await exportOf(ctl)).bytes.equals(capped.bytes)).toBe(false);
 
@@ -122,11 +128,11 @@ test("饼图 12 类：轴组 aria-disabled；重复色提示，合并为'其他'
   const sv = await ask(page, PIE12, "pie12.csv", "chart-pie", "饼图面板");
   const ctl = sv.getByTestId("chart-controls").first();
   const base = await exportOf(ctl);
-  await ctl.getByRole("button", { name: "样式" }).click();
+  await ctl.getByRole("button", { name: "标记" }).click();
   const card = sv.getByTestId("marks-card").first();
   await expect(card.getByRole("button", { name: /^轴/ })).toHaveAttribute("aria-disabled", "true");
   // 合并已不是独立 tile：在颜色组里（F4 迭代 V1 第 3 条）
-  await card.getByRole("button", { name: /^颜色/ }).click();
+  await openColors(card);
   await expect(card.getByTestId("marks-repeat")).toHaveText("12 类，多于 10 色，颜色会重复");
   await card.getByRole("checkbox", { name: "合并为'其他'" }).check();
   await expect(card.getByTestId("marks-repeat")).toHaveCount(0);
@@ -135,7 +141,7 @@ test("饼图 12 类：轴组 aria-disabled；重复色提示，合并为'其他'
 
   await page.getByLabel("图表主题").selectOption({ label: "Tableau 风" });
   // selectOption 不一定派发 mousedown，卡可能还开着：只在关着时再点"样式"，颜色组只在收起时再点
-  const btn = ctl.getByRole("button", { name: "样式" });
+  const btn = ctl.getByRole("button", { name: "标记" });
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   const colors = card.getByRole("button", { name: /^颜色/ });
   if ((await colors.getAttribute("aria-pressed")) !== "true") await colors.click();
@@ -158,7 +164,7 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
   const input = sv.getByLabel("提问");
   const before = await input.boundingBox();
   await page.screenshot({ path: info.outputPath("v1-bar-default.png") });
-  await ctl.getByRole("button", { name: "样式" }).click();
+  await ctl.getByRole("button", { name: "标记" }).click();
   const card = ctl.getByTestId("marks-card");
   await expect(card).toHaveAttribute("data-dir", "up");
   expect(await input.boundingBox()).toEqual(before);
@@ -167,8 +173,8 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
     return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
   });
   expect(top).toBe(true);
-  // 组多开
-  await card.getByRole("button", { name: /^颜色/ }).click();
+  // 组多开（颜色组默认已展开）
+  await expect(card.getByRole("button", { name: /^颜色/ })).toHaveAttribute("aria-pressed", "true");
   await card.getByRole("button", { name: /^轴/ }).click();
   await expect(card.getByRole("region")).toHaveCount(2);
   await card.getByRole("button", { name: /^颜色/ }).click();
@@ -182,7 +188,7 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
   // 色块行不溢出（卡宽账的实测）
   for (const t of ["classic", "soft", "business", "darkCanvas", "tableau"]) {
     await page.getByLabel("图表主题").selectOption(t);
-    if ((await ctl.getByRole("button", { name: "样式" }).getAttribute("aria-expanded")) !== "true") await ctl.getByRole("button", { name: "样式" }).click();
+    if ((await ctl.getByRole("button", { name: "标记" }).getAttribute("aria-expanded")) !== "true") await ctl.getByRole("button", { name: "标记" }).click();
     const colors = card.getByRole("button", { name: /^颜色/ });
     if ((await colors.getAttribute("aria-pressed")) !== "true") await colors.click();
     const over = await card.locator(".marks-swatch-list .marks-item").evaluateAll((rows) => rows.filter((r) => r.scrollWidth > r.clientWidth).length);
@@ -193,13 +199,13 @@ test("浮层：不推开文档流、压在最上层、正常位置向上展开�
   const sv2 = await ask(page, PIE12, "pop-pie.csv", "chart-pie", "浮层饼图");
   const ctl2 = sv2.getByTestId("chart-controls").first();
   await sv2.getByTestId("echart").first().scrollIntoViewIfNeeded();
-  await ctl2.getByRole("button", { name: "样式" }).click();
+  await ctl2.getByRole("button", { name: "标记" }).click();
   const why2 = ctl2.getByTestId("marks-why");
   await expect(why2).toHaveText("形状：饼图没有可调的形状 · 轴：饼图没有 y 轴");
   const h2 = (await why2.boundingBox())!.height;
   expect(h2).toBe(barWhyH);
   expect(await why2.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true); // 一行放得下，没有被截断
-  await ctl2.getByRole("button", { name: /^颜色/ }).click();
+  await openColors(ctl2);
   await page.screenshot({ path: info.outputPath("v1-pie12-card.png") });
 });
 
@@ -217,7 +223,7 @@ test("浮层：工具栏滚到 .main 顶部时改向下展开，整体落在 .ma
     const c = m.querySelector(sel)!;
     m.scrollTop += c.getBoundingClientRect().top - m.getBoundingClientRect().top;
   }, '[data-testid="chart-controls"]');
-  await ctl.getByRole("button", { name: "样式" }).click();
+  await ctl.getByRole("button", { name: "标记" }).click();
   const card = ctl.getByTestId("marks-card");
   await expect(card).toHaveAttribute("data-dir", "down");
   const [c, m] = await Promise.all([card.boundingBox(), page.locator(".main").boundingBox()]);
@@ -233,8 +239,8 @@ test("色块列表：8 个条目不滚动，9 个起滚动", async ({ page }) =>
     const sv = await ask(page, PIE(n), `sw${n}.csv`, "chart-pie", `色块${n}`);
     const ctl = sv.getByTestId("chart-controls").last();
     await sv.getByTestId("echart").last().scrollIntoViewIfNeeded();
-    await ctl.getByRole("button", { name: "样式" }).click();
-    await ctl.getByRole("button", { name: /^颜色/ }).click();
+    await ctl.getByRole("button", { name: "标记" }).click();
+    await openColors(ctl);
     const list = ctl.locator(".marks-swatch-list");
     await expect(list.locator(".marks-item")).toHaveCount(n);
     expect([n, await list.evaluate((el) => el.scrollHeight > el.clientHeight)]).toEqual([n, scroll]);

@@ -28,6 +28,33 @@ export const SWITCH_VALUES: { readonly [K in SwitchName]: readonly Switches[K][]
   radius: [false, true], sort: ["off", "desc", "asc"], marks: [false, true], zoom: [false, true],
 };
 export const DEFAULT_SWITCHES: Switches = Object.fromEntries(SWITCHES.map((s) => [s, SWITCH_VALUES[s][0]])) as Switches;
+
+// ---- 设计默认（S 10-22 r3，P2-18）--------------------------------------------------------------
+// 柱顶数值不是美化项：柱 / 线 / 面积图默认显示数值标签。存储里 label 缺省（undefined）= 用户没碰过，套这里的设计默认；
+// false = 用户主动关。applySwitches 只看解析后的布尔值，所以"全关 = 后端原样"这条契约不变（switches.test 照旧钉住）。
+// 类目多于 LABEL_AUTO_MAX 时设计默认降为关（系统不主动画糊的图），但用户手动开照画。饼图的 label 是引线，另一套，默认关。
+export const LABEL_AUTO_MAX = 30;
+export const DESIGN_LABEL: Record<Kind, boolean> = { bar: true, line: true, area: true, pie: false, scatter: false };
+/** 存储里的开关：label 可以缺省（= 用户没碰过）。 */
+export type StoredSwitches = Omit<Switches, "label"> & { label?: boolean };
+export const DEFAULT_STORED: StoredSwitches = { ...DEFAULT_SWITCHES, label: undefined };
+/** 类目数：类目轴的 data 长度；没有就取系列里最长的 data。 */
+export function categoryCount(o: Option): number {
+  const x = Array.isArray(o.xAxis) ? o.xAxis[0] : o.xAxis;
+  if (x && typeof x === "object" && Array.isArray((x as { data?: unknown }).data)) return ((x as { data: unknown[] }).data).length;
+  const series = Array.isArray(o.series) ? (o.series as { data?: unknown }[]) : [];
+  return series.reduce((m, s) => Math.max(m, Array.isArray(s?.data) ? s.data.length : 0), 0);
+}
+/** 设计默认的数值标签：开不开，以及是不是因为类目太多才降为关（面板里要说明）。 */
+export function designLabel(kind: Kind, cats: number): { on: boolean; tooMany: boolean } {
+  const tooMany = DESIGN_LABEL[kind] && cats > LABEL_AUTO_MAX;
+  return { on: DESIGN_LABEL[kind] && !tooMany, tooMany };
+}
+/** 存储态 → 生效的开关。 */
+export function resolveSwitches(st: StoredSwitches, kind: Kind, cats: number): Switches {
+  return { ...st, label: st.label ?? designLabel(kind, cats).on };
+}
+
 export const SWITCH_LABEL: Record<SwitchName, string> = {
   label: "数值标签", legend: "图例位置", stack: "堆叠", smooth: "平滑", gradient: "渐变",
   radius: "圆角", sort: "排序", marks: "平均线和极值", zoom: "缩放",

@@ -38,10 +38,10 @@ test("设置超时 → 上传 → 预览按文本渲染 → 建会话改名 → 
   await expect(view.getByText("字典文件：fruit.dict.csv")).toBeVisible();
 
   // 建会话 → 改名
-  await view.getByLabel("分析方式").selectOption("react");
+  await view.getByLabel("分析模式").selectOption("react");
   await view.getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
-  await expect(sv.getByText("数据集：水果 · ReAct")).toBeVisible();
+  await expect(sv.getByText("水果 · 0 轮对话")).toBeVisible();
   await sv.getByLabel("会话标题").fill("看看水果");
   await sv.getByLabel("会话标题").press("Enter");
   await expect(page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /看看水果/ })).toBeVisible();

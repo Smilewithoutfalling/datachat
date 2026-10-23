@@ -886,9 +886,10 @@ DEVLOG 每段一条（[57]–[59]）。
    |---|---|
    | rate_limit、http_429 | 「稍后再试」：按钮先置灰 10 秒，倒计时结束后可点，点了等于重新生成 |
    | timeout、connection、server、gateway_error、http_5xx | 重新生成 |
-   | auth、http_401、http_403 | 去设置 |
+   | auth、no_key（没配 Key，没发请求；[57] 补）、http_401、http_403 | 去设置 |
    | bad_request、http_4xx（上面没列出的） | 换个问法、重新生成 |
    | unknown、null | 重新生成 |
+   classify_error 已把 401/403 归为 auth、429 归为 rate_limit、5xx 归为 server（llm.py:163），所以 http_NNN 实际只会出现上面没单列的 4xx；表里写 http_401 等只为兜底。
    错误卡的标题仍然是「模型调用失败」，详情照旧显示现有文案（文案里已经包含子类的中文，例如 LLM_KIND_TEXT）。
 
 2. **"数据字典读取失败，已跳过"也归黄色**（部分完成）。这是我的建议，S 回复"可以提交"时没有单独提出异议。

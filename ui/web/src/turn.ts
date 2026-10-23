@@ -14,6 +14,7 @@ export type Result = {
   answer: string;
   error: string | null;
   error_kind: string | null;
+  llm_kind?: string | null; // error_kind=llm 时的子类（generated/events.json llm_kinds 或 http_NNN）；旧记录没有
   warnings: string[];
   unverified_numbers?: string[];
   charts: ChartItem[];
@@ -30,7 +31,7 @@ export type Ev =
       data: { ok: boolean; result_text: string; error: string | null; duration_s: number; stdout?: string; [k: string]: unknown };
     }
   | { type: "answer"; seq: number; data: { text: string; forced: boolean } }
-  | { type: "error"; seq: number; data: { message: string; kind: string; fatal: boolean } }
+  | { type: "error"; seq: number; data: { message: string; kind: string; fatal: boolean; llm_kind?: string | null } }
   | { type: "done"; seq: number; data: { result: Result } };
 
 export type Turn = {
@@ -109,4 +110,72 @@ export function outcome(t: Turn): Outcome {
 export function answerText(t: Turn): string {
   if (t.status !== "ok") return "";
   return t.result?.answer || (t.events.find((e) => e.type === "answer") as Extract<Ev, { type: "answer" }> | undefined)?.data.text || "";
+}
+
+// ---------------------------------------------------------------- F4 迭代 V2a：步骤条与完成度（phase5 V2a §2.3、§3.2）
+export type StepKey = "plan" | "code" | "exec" | "answer";
+export type StepState = "done" | "running" | "pending" | "failed" | "stopped";
+export type Step = { key: StepKey; name: string; state: StepState; count: number; seconds: number | null };
+export const STEP_NAME: Record<StepKey, string> = { plan: "理解问题", code: "写代码", exec: "执行", answer: "总结" };
+const ORDER: StepKey[] = ["plan", "code", "exec", "answer"];
+
+const tsOf = (e: Ev): number | null => {
+  const v = (e as unknown as { ts?: unknown }).ts;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+};
+
+/** 收到哪些事件 → 四段的状态。只看事件和 status，不猜进度。ReAct 没有 plan，就不出这一段。 */
+export function steps(t: Turn, agent?: string): Step[] {
+  const evs = t.events.filter((e) => e.type !== "error");
+  const by = (k: StepKey) => evs.filter((e) => e.type === k);
+  // 工作流一定先出计划；不知道 agent（旧调用）时看有没有收到 plan
+  const hasPlan = agent === "workflow" || (agent === undefined && by("plan").length > 0);
+  const keys = ORDER.filter((k) => k !== "plan" || hasPlan);
+  const last = evs[evs.length - 1];
+  // 下一段：最后收到的是 exec 且失败 → 回到写代码（修复重试）；否则顺延
+  let next: StepKey | null = null;
+  if (!last) next = keys[0];
+  else if (last.type === "exec") next = last.data.ok ? "answer" : "code";
+  else if (last.type === "answer") next = null;
+  else next = ORDER[ORDER.indexOf(last.type as StepKey) + 1] ?? null;
+  const o = outcome(t);
+  const out: Step[] = keys.map((k) => {
+    const mine = by(k);
+    let seconds: number | null = null;
+    if (k === "exec") seconds = mine.length ? mine.reduce((a, e) => a + Number((e.data as { duration_s?: number }).duration_s ?? 0), 0) : null;
+    else if (mine.length) {
+      const first = evs.indexOf(mine[0]);
+      const prev = first > 0 ? tsOf(evs[first - 1]) : null;
+      const end = tsOf(mine[mine.length - 1]);
+      seconds = prev !== null && end !== null ? Math.max(0, end - prev) : null;
+    }
+    let state: StepState = mine.length ? "done" : "pending";
+    if (o.kind === "running" && k === next) state = "running";
+    if ((o.kind === "cancelled" || o.kind === "interrupted") && k === next) state = "stopped";
+    if (o.kind === "error" && k === next) state = "failed";
+    if (o.kind === "error" && t.result?.error_kind === "execution" && k === "exec" && mine.length) state = "failed";
+    return { key: k, name: STEP_NAME[k], state, count: mine.length, seconds };
+  });
+  // 正常结束的轮次：没收到事件的段不画（比如按契约拒答，没有代码）。
+  // 停下 / 出错的轮次保留后面没走到的段（灰），步骤条和运行中、停止中一样长（验收 r3 #4）
+  return o.kind !== "ok" ? out : out.filter((s) => s.count > 0 || s.state !== "pending");
+}
+
+/** 部分完成（黄）：ok 且有 warnings 或 unverified_numbers（phase5 V2a §3.2）。返回要显示的提示条目。 */
+export function partialSignals(t: Turn): string[] {
+  if (t.status !== "ok" || !t.result) return [];
+  // 可恢复的 dataset 错误只有"数据字典读取失败，已跳过"（service.py:186），S 10-22 定归黄；ReAct 的"重跑本轮"不算
+  const dict = t.events.flatMap((e) => (e.type === "error" && !e.data.fatal && e.data.kind === "dataset" ? [e.data.message] : []));
+  const out = [...dict, ...(t.result.warnings ?? [])];
+  const nums = t.result.unverified_numbers ?? [];
+  if (nums.length) out.push(`结论里这些数字在执行结果中没找到，请核对：${nums.join("、")}`);
+  return out;
+}
+
+/** 整轮耗时（秒）：done 里的 timings.total；没有就用首末事件的 ts 差。 */
+export function totalSeconds(t: Turn): number | null {
+  const tm = t.result?.timings as { total?: unknown } | undefined;
+  if (tm && typeof tm.total === "number") return tm.total;
+  const ts = t.events.map(tsOf).filter((x): x is number => x !== null);
+  return ts.length >= 2 ? ts[ts.length - 1] - ts[0] : null;
 }

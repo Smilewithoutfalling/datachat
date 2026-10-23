@@ -12,7 +12,7 @@ import { type Shape, SWITCH_LABEL, type SwitchName, type Switches } from "./swit
 
 export type Placement = { dir: "up" | "down"; maxHeight: number };
 
-export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette, pieCount, placement }: {
+export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette, pieCount, placement, onReset, dirty, labelTooMany }: {
   shape: Shape;
   sw: Switches;
   onSwitch: <K extends SwitchName>(s: K, v: Switches[K]) => void;
@@ -22,9 +22,14 @@ export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette,
   palette: readonly string[];
   pieCount: number; // 饼图合并前的类目数（非饼图为 0）
   placement: Placement;
+  // 重置 = 层 1 改动清空 + 开关回到设计默认（P2-18，S 10-22 r3）；没传就只清层 1（单测里的老用法）
+  onReset?: () => void;
+  dirty?: boolean;
+  labelTooMany?: boolean; // 类目太多，数值标签的设计默认降为关：在开关下面说一句
 }) {
   const uid = useId();
-  const [open, setOpen] = useState<Set<Group>>(() => new Set());
+  // V2a 验收 P0-3：打开时默认展开第一组（颜色），免得只剩一排标签、内容区是空的
+  const [open, setOpen] = useState<Set<Group>>(() => new Set<Group>(["color" as Group]));
   const [lo, setLo] = useState(edit.yMin === null ? "" : String(edit.yMin));
   const [hi, setHi] = useState(edit.yMax === null ? "" : String(edit.yMax));
   const states = groupStates(shape);
@@ -56,6 +61,7 @@ export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette,
     <label key={s} className="marks-item">
       <span className="marks-key">{SWITCH_LABEL[s]}</span>
       <input type="checkbox" aria-label={SWITCH_LABEL[s]} checked={sw[s] === true} onChange={(e) => onSwitch(s, e.target.checked)} />
+      {s === "label" && labelTooMany ? <span className="marks-note" data-testid="label-too-many">类目过多，数值标签默认关闭</span> : null}
     </label>
   );
   const renderItem = (it: Item) => {
@@ -148,8 +154,8 @@ export function MarksCard({ shape, sw, onSwitch, edit, onChange, items, palette,
     <div className="marks-card" data-testid="marks-card" data-dir={placement.dir} style={style}>
       <div className="marks-head">
         <span className="marks-title">标记</span>
-        <button type="button" className="marks-reset" disabled={isEmptyEdit(edit)}
-          onClick={() => { setLo(""); setHi(""); onChange(EMPTY_EDIT); }}>重置</button>
+        <button type="button" className="marks-reset" disabled={onReset ? !dirty : isEmptyEdit(edit)}
+          onClick={() => { setLo(""); setHi(""); if (onReset) onReset(); else onChange(EMPTY_EDIT); }}>重置</button>
       </div>
       <div className="marks-tiles" role="group" aria-label="样式分组">
         {states.map((g) => {

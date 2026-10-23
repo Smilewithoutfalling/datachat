@@ -19,7 +19,7 @@ async function ask(page: Page, csv: string, name: string, model: string, q: stri
 async function askAgain(page: Page, q: string, n: number) {
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill(q);
-  await sv.getByRole("button", { name: "提问" }).click();
+  await sv.getByRole("button", { name: "发送" }).click();
   await expect(sv.getByTestId("assistant-msg")).toHaveCount(n, { timeout: 60_000 });
   await expect(sv.getByTestId("assistant-msg").last()).toContainText("（fake）结论", { timeout: 60_000 });
   return sv;
@@ -53,7 +53,7 @@ const CSV = "类目,值\n" + Array.from({ length: 30 }, (_, i) => `k${String(i).
 
 // F4 迭代 V1：开关在标记卡的组里。打开卡（已开不重复点）、展开组（已展开不重复点），返回卡。卡和样式按钮都在 chart-controls 里。
 async function group(ctl: Locator, name: string): Promise<Locator> {
-  const btn = ctl.getByRole("button", { name: "样式" });
+  const btn = ctl.getByRole("button", { name: "标记" });
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   const card = ctl.getByTestId("marks-card");
   const t = card.getByRole("button", { name: new RegExp("^" + name) });
@@ -69,7 +69,13 @@ test("开关：逐个打开像素有变化、不发新的分析请求；不兼�
   const chart = sv.getByTestId("echart").first();
   const ctl = sv.getByTestId("chart-controls").first();
   const instance = await chart.getAttribute("data-instance");
+  // P2-18（S 10-22 r3，判定表改动）：数值标签设计默认开；基线 = 用户主动关掉之后（= 后端原样），关之前画面必须不同
+  const byDefault = await snap(chart);
+  const label0 = (await group(ctl, "标签")).getByRole("checkbox", { name: "数值标签" });
+  await expect(label0).toBeChecked();
+  await label0.uncheck();
   const base = await snap(chart);
+  expect(byDefault !== base).toBe(true);
 
   // F4 迭代 V1：开关搬进标记卡，作用域从 chart-controls 改成卡（先开卡、再展开所在组）。卡盖在图上不影响 canvas 取像素
   const where: Record<string, string> = { 数值标签: "标签", 渐变: "颜色", 圆角: "形状", 平均线和极值: "轴" };

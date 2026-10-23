@@ -153,12 +153,14 @@ def analyze_stream(
         inner.close()              # 提前收尾或外层被关闭（客户端断开）时，停掉正在进行的图执行
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
+        if res.error_kind != "llm":   # 停止可能盖掉先前的 llm 错误：llm_kind 只跟随最终的 error_kind
+            res.llm_kind = None
     if log:
         from app.tools.persist import log_run
         log_run({**res.to_record(), "df_path": res.dataset})
     if res.error is not None:
         logger.warning("analyze failed trace=%s kind=%s: %s", trace_id, res.error_kind, res.error[:300])
-        yield em.error(res.error, res.error_kind, fatal=True)
+        yield em.error(res.error, res.error_kind, fatal=True, llm_kind=res.llm_kind)
     logger.info("analyze done trace=%s ok=%s total=%.2fs", trace_id, res.ok, res.timings["total"])
     yield em.done(res)
 
@@ -194,6 +196,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     if chat_model is None and not cfg.api_key:
         res.error, res.error_kind = user_error("text", "未配置 API Key，无法调用模型。运行 python -m app.core.keystore set 存进系统钥匙串，"
                                                "或设置环境变量 DEEPSEEK_API_KEY。", trace_id=res.trace_id), "llm"
+        res.llm_kind = "no_key"
         return
 
     notes_text = format_notes(notes) if notes else ""
@@ -243,6 +246,7 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                     yield ev
     except LLMError as e:
         res.error, res.error_kind = user_error("llm", e, trace_id=res.trace_id, question=question), "llm"
+        res.llm_kind = e.kind
     except Exception as e:  # noqa: BLE001
         res.error, res.error_kind = user_error("agent", e, trace_id=res.trace_id), "agent"
 
@@ -402,7 +406,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                                   llm_config=cfg, tracker=tracker,
                                   nudge_no_exec=memory is None and not history)
         messages, rec_err = [], None
-        res.error = res.error_kind = None
+        res.error = res.error_kind = res.llm_kind = None
         out = {}
         try:
             yield from _react_invoke(graph, question, config, em, sink, attempt, out, history)
@@ -411,6 +415,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
             kind, _ = classify_error(e)
             if kind != "unknown":
                 res.error, res.error_kind = user_error("llm", e, trace_id=res.trace_id, question=question), "llm"
+                res.llm_kind = kind
             else:
                 res.error, res.error_kind = user_error("agent", e, trace_id=res.trace_id), "agent"
         if sink.get("nudges"):
@@ -431,7 +436,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         if why and attempt < retries:
             tracker.add_retry()
             res.steps.append(Step("retry", error=why[1]))
-            yield em.error(res.steps[-1].error, why[0], fatal=False)
+            yield em.error(res.steps[-1].error, why[0], fatal=False,
+                           llm_kind="gateway_error" if why[0] == "llm" else None)
             time.sleep(min(cfg.backoff_base * 2 ** attempt, cfg.backoff_max))
             continue
         break
@@ -466,7 +472,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         if res.error is None:
             res.error = user_error("upstream", bad, trace_id=res.trace_id, question=question,
                                    prefix="接口返回错误内容：")
-            res.error_kind = "llm"
+            res.error_kind, res.llm_kind = "llm", "gateway_error"
 
     # B61：步数用完（GraphRecursionError，或 langgraph 塞进来的英文占位答复 B39）→ 不再只给一句报错，
     # 用已有的执行结果强制收尾一次；收尾也失败才按 agent 错误记
