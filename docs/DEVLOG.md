@@ -2012,7 +2012,7 @@ S 10-21 第二轮：
 - S 复核（10-23 09:00，按描述做逻辑审查）：⑦DatasetView.onDeleted 也先 `touched()` 再 `reload()`（否则更早在飞的 reload 会把刚删的数据集带回来），入口共 6 处；⑧reload 失败分支同样判 gen，过时请求的失败不报错；⑨f4-layout 的 overflow 前提移到 toPass 外断言一次，前提不成立立刻红。
 - 本地 e2e 环境：Linux 新环境/沙箱重置后先装 Chromium 系统依赖 `cd ui/web && npx playwright install-deps chromium`（症状：e2e 全部约 1ms 红，日志 `libatk-1.0.so.0: cannot open shared object file`）。CI runner 镜像自带，不用跑。
 
-## [59] 2026-10-23 · 四屏视觉回归（toHaveScreenshot）+ HANDOVER 第二版 · commit <待提交>
+## [59] 2026-10-23 · 四屏视觉回归（toHaveScreenshot）+ HANDOVER 第二版 · commit 1c0b41a（PR #71，tests run 39891923237）
 
 [57][58] 回填为 39c4741（#70 把 llm_kind 和 V2a 实现 squash 成了一个提交）。
 
@@ -2047,3 +2047,39 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 测试：e2e 34 → 38（新增 4 条，其余不变）。pytest、vitest 条数不变。
 
 当前阶段：阶段 5 收尾。下一步等 S 定：V2b（P2-19~22 + 标记卡对齐等，先写方案）、F5 真 Key 走查、测试连接（需后端接口）。
+
+## [60] 2026-10-23 · 阶段 5 收尾方案：V2b、测试连接、P1-17 · commit <待提交>
+
+[59] 回填为 1c0b41a。
+
+接手：新一任 agent 读完 HANDOVER 第二版和 §2 的文档后跑了基线（Linux aarch64 沙箱，Python 3.12，Node 24.22.1）：pytest 837 passed，vitest 790，e2e 34 passed + f4-visual 4 failed，lint / tsc / build / gen --check 全过。f4-visual 本地四屏差异像素 08=3514、11=4953、24=3381、25=4497，与 [59] 记的 CI 首跑差异一一相同，即本地渲染和生成旧基线的沙箱一致，差的是平台抗锯齿，符合 HANDOVER §6 的预期。
+
+流程（S 10-23）：剩下三项方案合一个 PR（本条），实现合一个 PR，攒成一批、最后统一跑全量闸门；F5 后删 Streamlit 单独一个 PR。依据 S 10-23 交来的设计包第二版（英文文件名版，不入库）。
+
+改了什么：
+- phase5 新增「阶段 5 收尾：V2b、设置页「测试连接」、P1-17」：
+  - A 组图表几何：P2-19 y 轴留顶随数值标签走、放前端（单独一步 applyHeadroom，写 yAxis.max + yAxis.interval，判据写死）；P2-20 nameGap 28 → 32；P2-21/22 grid.left/right 改固定 12 / 16 并登记进 GEOMETRY；单系列 grid.bottom 不动。
+  - B 组标记卡：竖排组头 + 当前值、理由进组头、拨动开关、底部「应用到所有{图型}」和「完成」、按类目着色、标题输入（UiState 用户串的唯一例外，规则写死）、图型级层 1 默认。
+  - C 组 POST /settings/test。D 组 chart_warnings 用户文案不带 ChartError 原文。
+- plan.md 进度表补到阶段 5。
+
+评审（S 10-23）后改的：
+1. P1-17：初稿说"原文还在查看过程里"是错的——TurnView.tsx 的 exec 折叠区只渲染 stdout / result_text / error，前端零处读 chart_errors。改为明说用户界面不再出现原文，不加新 UI。
+2. P2-19：判据写死（t = dmax × 1.08，候选 [1, 2, 2.5, 5] × 10^k 升序，取第一个 ceil(t / step) ≤ N 的），写明 2.5 何时被选中（12 < t ≤ 12.5 时给 12.5）。SSR 实测发现只写 max 时刻度对不齐（非紧凑 max 12.5 → 0, 3, 6, 9, 12, 12.5；紧凑 max 10 → 0, 3, 6, 9, 10；120 → 0, 50, 100, 120），所以同时写 interval = step，紧凑 N = 3。
+3. chart_fixtures 影响面：24 条里 21 条变（所有带 grid 的），只有 pie、pie-50、inject-pie 不动；同 PR 重生成。
+4. 标题：写成 UiState 例外规则——限长 100（= TITLE_MAX）、C0/C1/Bidi 控制符换空格、parseEdit 单独校验、chart_schema.json 新增 display 导出（unsafe 表 + title_max）。
+5. nameGap 改 32（不是 34）：判据是字号「大」下刻度文字到轴名仍留 8px。
+6. 单系列 bottom 30 → 16 撤回：会让 COMPACT.bottomMin 14 失去意义。
+另：初稿的「90px / 60px」来源查不到，S 确认没给过，删掉，以实测 57 / 36 为准。
+
+偏离（理由在方案各条里）：
+- P2-19 不用写死步长 50（最大值 8 会被抬到 50）。
+- 标记卡宽保持 380，不跟设计的 300–316：设计的颜色组是 4 色板，我们是每系列一行 × 自动 + 10 色。
+- 按列着色只做按 x 轴类目着色，不列数据集的其他列（F4 第 9 条、M13 §3.2：换列属于层 2）。
+- P1-17 不按 22 种 ChartError 分文案，用户侧统一两条固定文案。
+
+实测（SSR，探针在仓库外没入库）：夹具 bar 自动 y 上限 = 数据最大值 8；x 轴刻度文字下沿到轴名 8px（1174 / 880 / 640 宽相同）；grid.right 4% 在 1174 / 880 / 640 宽下是 47 / 35 / 26px；刻度对齐见上面第 2 条。
+
+未做：代码；文档 PR 不跑闸门（S 10-23 同意）。
+
+当前阶段：阶段 5 收尾。下一步：S 评审本方案 → 三项实现合一个 PR → S 用真 Key 走 F5 → 删 Streamlit。
