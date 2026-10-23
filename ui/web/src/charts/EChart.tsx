@@ -20,8 +20,8 @@ import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState 
 import { registerCharts } from "./register";
 import {
   asKind, asXKind, asZoom, canChangeKind, viewFromRendered, compat, EMPTY_VIEW, hiddenFromSelected, KINDS, KIND_LABEL, type Kind, type Shape,
-  SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
-  categoryCount, DEFAULT_STORED, DEFAULT_SWITCHES, designLabel, resolveSwitches,
+  SWITCHES, SWITCH_LABEL, SWITCH_VALUES, type SwitchName, type Switches, type View,
+  categoryCount, DEFAULT_STORED, designLabel, resolveSwitches,
 } from "./switches";
 import { getChartTheme, subscribeChartTheme, THEMES } from "./themes";
 import { getEdit, type Edit, EMPTY_EDIT, isEmptyEdit, setEdit, subscribeEdits } from "./layer1";
@@ -66,7 +66,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const [light, setLight] = useState(false); // 导出为浅色（经典配色）：不持久化
   const [exportFailed, setExportFailed] = useState(false);
   const src = asKind(spec.kind);
-  const kind = effectiveKind(spec, { kind: target, sw: DEFAULT_SWITCHES }); // 只看能不能换图型，和开关无关
+  const kind = effectiveKind(spec, { kind: target }); // 只看能不能换图型；签名只收 kind，开关传不进去
   const prefKind = kind ?? "bar";
   const prefs = useSyncExternalStore(subscribePrefs, () => getPrefs(prefKind));
   // 设计默认（P2-18）：label 没被用户碰过时按图型和类目数定；类目数按后端原始 option 数
@@ -187,7 +187,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const set = <K extends SwitchName>(s: K, v: Switches[K]) => setPrefs(prefKind, { ...prefs, [s]: v });
   // 重置 = 层 1 改动清空 + 这个图型的开关回到设计默认
   const resetAll = () => { changeEdit(EMPTY_EDIT); clearPrefs(prefKind); };
-  const dirty = !isEmptyEdit(edit) || JSON.stringify(prefs) !== JSON.stringify(DEFAULT_STORED);
+  const dirty = !isEmptyEdit(edit) || SWITCHES.some((k) => prefs[k] !== DEFAULT_STORED[k]);
 
   // 标记卡浮层：打开时（以及 .main 滚动、窗口 resize 时）量一次位置；Esc、点卡外关闭（第 6 条）
   useLayoutEffect(() => {

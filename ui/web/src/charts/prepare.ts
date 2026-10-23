@@ -88,7 +88,7 @@ export function cleanup(option: Option): Option {
 }
 
 /** 目标图型能不能用：不能换就留在后端原图型（UI 已置灰，这里再兜一次）。 */
-export function effectiveKind(spec: ChartInput, ui: UiState): Kind | null {
+export function effectiveKind(spec: ChartInput, ui: Pick<UiState, "kind">): Kind | null { // 只读 kind：EChart 的图型菜单和 prepare 两处调用实参不同，靠类型保证不分叉
   const src = asKind(spec.kind);
   if (!src || !ui.kind || ui.kind === src) return src;
   const o = normalize(JSON.parse(JSON.stringify(spec.option)) as Option, {} as Ctx);

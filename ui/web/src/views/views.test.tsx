@@ -175,3 +175,49 @@ test("删除数据集：输入名称才能确认，写明连带删除的会话�
   await act(async () => fireEvent.click(confirm));
   expect(be.calls.some((x) => x.method === "DELETE" && x.path === "/datasets/d1")).toBe(true);
 });
+
+test("列表竞态：reload 在飞时新建会话，晚到的旧列表不能把新会话冲掉（PR #70 评审 §2，Shell listGen）", async () => {
+  // 删数据集 d2 会触发 reload；把这次 GET /datasets 扣住，期间在 d1 上新建会话，再放行旧快照
+  const D2 = { ...DS, id: "d2", name: "库存" };
+  const NEW = { ...SESSION, id: "s9", title: "刚建的会话" };
+  const be = fakeBackend({
+    "GET /datasets": [DS, D2],
+    "GET /sessions": [SESSION],
+    "GET /datasets/d1?rows=20": { ...DS, summary: "", tables: {}, preview: PREVIEW },
+    "GET /datasets/d2?rows=20": { ...D2, summary: "", tables: {}, preview: PREVIEW },
+    "DELETE /datasets/d2": { ok: true },
+    "POST /sessions": NEW,
+    "GET /sessions/s9": { ...NEW, messages: [] },
+    "GET /settings/api-key": { configured: true, source: "keyring" },
+  });
+  let n = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const u = new URL(String(input), "http://x");
+    if ((init?.method ?? "GET") === "GET" && u.pathname === "/datasets" && ++n === 2) {
+      const res = await be.fetchImpl(input, init); // 在门前取好：这是"删除后、新建前"的旧快照（只有 s1）
+      await gate;
+      return res;
+    }
+    return be.fetchImpl(input, init);
+  };
+  render(<Shell c={client(new Api("t", fetchImpl))} initialKey={{ configured: true, source: "keyring" }} />);
+  const nav = await screen.findByRole("navigation", { name: "数据集" });
+  fireEvent.click(await within(nav).findByRole("button", { name: /^库存/ }));
+  let view = await screen.findByTestId("dataset-view");
+  await within(view).findByText("库存", { exact: false });
+  fireEvent.click(within(view).getByRole("button", { name: "数据集操作" }));
+  fireEvent.click(within(view).getByRole("menuitem", { name: "删除数据集" }));
+  const dlg = within(view).getByRole("dialog", { hidden: true });
+  fireEvent.change(within(dlg).getByLabelText("输入数据集名称以确认"), { target: { value: "库存" } });
+  await act(async () => fireEvent.click(within(dlg).getByRole("button", { name: "删除数据集", hidden: true })));
+  expect(n).toBe(2); // reload 已发出、被扣住
+  fireEvent.click(await within(nav).findByRole("button", { name: /^销量/ }));
+  view = await screen.findByTestId("dataset-view");
+  await act(async () => fireEvent.click(await within(view).findByRole("button", { name: "新建会话" })));
+  await screen.findByRole("button", { name: /^刚建的会话/ });
+  await act(async () => (release(), await new Promise((r) => setTimeout(r, 20))));
+  expect(screen.getByRole("button", { name: /^刚建的会话/ })).toBeTruthy(); // 旧快照被整体丢弃
+  expect(be.calls.filter((c) => c.method === "GET" && c.path === "/datasets")).toHaveLength(2);
+});

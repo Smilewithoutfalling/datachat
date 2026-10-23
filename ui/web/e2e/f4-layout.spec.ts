@@ -42,13 +42,17 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
     await expect(sv.getByTestId("assistant-msg")).toHaveCount(i + 1, { timeout: 60_000 }); // 这一轮收尾、换成库里的版本
   }
   await expect(sv.locator("canvas").first()).toBeVisible();
-  await page.waitForTimeout(400);
+  // 条件式等待（PR #70 评审 §4）：不假设 400ms 内 ResizeObserver、滚动、字体都已就绪；
+  // toPass 反复重算几何直到全部断言成立，10s 还不成立才红，红了说明真没落到底而不是"刚好没等够"
+  // 前提在 toPass 外断言一次：内容确实比视口高，否则这条测不出东西；前提不成立应立刻红，而不是重试 10s 后报到别的断言上
   const check = async () => {
-    const g = await geometry(page);
-    expect(g.overflow).toBe(true); // 前提：内容确实比视口高，否则这条测不出东西
-    expect(g.atBottom).toBeLessThanOrEqual(2);
-    expect(Math.abs(g.mainBottom - g.compTop)).toBeLessThanOrEqual(1); // 滚动区下沿就是输入区上沿，不重叠
-    expect(g.lastBottom).toBeLessThanOrEqual(g.compTop); // 最后一张卡（含控件行、反馈栏）完整可见
+    expect((await geometry(page)).overflow).toBe(true);
+    await expect(async () => {
+      const g = await geometry(page);
+      expect(g.atBottom).toBeLessThanOrEqual(2);
+      expect(Math.abs(g.mainBottom - g.compTop)).toBeLessThanOrEqual(1); // 滚动区下沿就是输入区上沿，不重叠
+      expect(g.lastBottom).toBeLessThanOrEqual(g.compTop); // 最后一张卡（含控件行、反馈栏）完整可见
+    }).toPass({ timeout: 10_000 });
   };
   await check();
   // 去数据集页再回来：重新挂载，落在底部
@@ -58,7 +62,6 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
   await page.getByRole("button", { name: "会话列表" }).click();
   await page.locator(".sess-row").first().click();
   await expect(sv.getByTestId("assistant-msg")).toHaveCount(2);
-  await page.waitForTimeout(400);
   await check();
 });
 
@@ -82,7 +85,6 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   await page.getByTestId("session-view").getByLabel("提问").waitFor();
   release();
-  await page.waitForTimeout(300);
   await expect(page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) })).toBeVisible();
 
   // 顶栏右上角的 ···：贴着视口右缘，原来菜单会被裁出去（P0-5）

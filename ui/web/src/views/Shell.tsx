@@ -28,13 +28,23 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
   const [pending, setPending] = useState<File[]>([]); // 选好、等确认上传的文件（上传对话框）
   const [pickErr, setPickErr] = useState("");
 
-  // 本地改过列表（上传成功）后，在那之前发出的 reload 结果是旧快照，不能覆盖（r4 e2e 偶发：首屏列表还没回来就上传完，新数据集被旧列表冲掉）
-  const dsGen = useRef(0);
+  // 代际：本地改过任一列表（上传、新建/改名/删除会话）后，在那之前发出的 reload 结果是旧快照，整体丢弃，两个列表一起丢，
+  // 不能只丢一边（r4 e2e 偶发：首屏列表还没回来就上传完，新数据集被旧列表冲掉；PR #70 评审：会话侧同源）。
+  // 以后 reload 里加第三个列表，同样只在 gen 相等时写；本地写列表的地方都要先 touched()。
+  // 入口共 6 处：上传、数据集删除（先 touched 再 reload）、新建/改名/删除会话、SessionView 的 onChanged/onDeleted。
+  const listGen = useRef(0);
+  const touched = () => void (listGen.current += 1);
   const reload = useCallback(() => {
-    const gen = dsGen.current;
+    const gen = listGen.current;
     return Promise.all([c.datasets(), c.sessions()])
-      .then(([d, s]) => (gen === dsGen.current && setDatasets(d), setSessions(s)))
-      .catch((e) => setError(errText(e)));
+      .then(([d, s]) => {
+        if (gen !== listGen.current) return;
+        setDatasets(d);
+        setSessions(s);
+      })
+      .catch((e) => {
+        if (gen === listGen.current) setError(errText(e)); // 过时请求的失败也不报：列表可能早已刷新成功
+      });
   }, [c]);
   useEffect(() => {
     reload();
@@ -65,18 +75,19 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
 
   const newSession = (datasetId: string, agent: Agent) =>
     c.createSession(datasetId, agent).then(
-      (s) => (setSessions((xs) => [s, ...xs]), go({ kind: "session", id: s.id })),
+      (s) => (touched(), setSessions((xs) => [s, ...xs]), go({ kind: "session", id: s.id })),
       (e) => setError(errText(e)),
     );
-  const onUploaded = (d: DatasetDetail) => (setPending([]), setPickErr(""), setUploaded(d), noteDetail(d), (dsGen.current += 1), setDatasets((xs) => [d, ...xs]), go({ kind: "dataset", id: d.id }));
+  const onUploaded = (d: DatasetDetail) => (setPending([]), setPickErr(""), setUploaded(d), noteDetail(d), touched(), setDatasets((xs) => [d, ...xs]), go({ kind: "dataset", id: d.id }));
   const renameSession = (id: string, title: string) =>
     c.renameSession(id, title).then(
-      (r) => setSessions((xs) => xs.map((x) => (x.id === id ? r : x))),
+      (r) => (touched(), setSessions((xs) => xs.map((x) => (x.id === id ? r : x)))),
       (e) => setError(errText(e)),
     );
   const deleteSession = (id: string) =>
     c.deleteSession(id).then(
       () => {
+        touched();
         setSessions((xs) => xs.filter((x) => x.id !== id));
         if (view.kind === "session" && view.id === id) setView({ kind: "home" });
       },
@@ -183,7 +194,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
             sessionCount={sessionCount(view.id)}
             onLoaded={noteDetail}
             onNewSession={newSession}
-            onDeleted={() => (setView({ kind: "home" }), reload())}
+            onDeleted={() => (touched(), setView({ kind: "home" }), reload())} // 先作废更早在飞的 reload，免得删掉的数据集被旧快照带回来
           />
         )}
         {view.kind === "session" && (
@@ -195,8 +206,8 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
             title={current?.title}
             keyConfigured={key.configured}
             onGoSettings={() => go({ kind: "settings" })}
-            onChanged={(s) => setSessions((xs) => xs.map((x) => (x.id === s.id ? s : x)))}
-            onDeleted={() => (setView({ kind: "home" }), setSessions((xs) => xs.filter((x) => x.id !== view.id)))}
+            onChanged={(s) => (touched(), setSessions((xs) => xs.map((x) => (x.id === s.id ? s : x))))}
+            onDeleted={() => (touched(), setView({ kind: "home" }), setSessions((xs) => xs.filter((x) => x.id !== view.id)))}
           />
         )}
         {view.kind === "settings" && <SettingsView c={c} onKeyChange={setKey} />}
