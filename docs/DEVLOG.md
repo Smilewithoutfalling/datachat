@@ -1922,7 +1922,7 @@ S 10-21 第二轮：
 
 未做：代码。实现按 §9 分三段，放在同一个分支上一起提交。
 
-## [57] 2026-10-22 · error 事件和结果加 llm_kind · commit <待提交>
+## [57] 2026-10-22 · error 事件和结果加 llm_kind · commit 39c4741（PR #70，squash 进 V2a 实现；tests run 39882975369）
 
 [56] 回填为 e4b6ef1。
 
@@ -1948,7 +1948,7 @@ S 10-21 第二轮：
 - LLM_KIND_TEXT 是 LLM_KINDS 的子集，classify_error 的输出都落在 LLM_KINDS 或 http_NNN 里；
 - events.json 里有 llm_kinds。
 
-## [58] 2026-10-22 · F4 迭代 V2a：按设计稿重做界面（三段合一） · commit <待提交>
+## [58] 2026-10-22 · F4 迭代 V2a：按设计稿重做界面（三段合一） · commit 39c4741（PR #70，tests run 39882975369，sidecar run 39882975145）
 
 起因：S 交了设计包（handoff2，07-落地范围为准），方案见 phase5「F4 迭代 V2a」（#69）。S 10-22 要求三段都做完再推，界面"基本和设计稿一样"，可以多改几轮。
 
@@ -2011,3 +2011,37 @@ S 10-21 第二轮：
 - PR #70 评审（S 10-23）：可合并，合并前补两处，另顺手做 P2/P3：①竞态机制补全——`dsGen` 改名 `listGen`，reload 结果代际不符时 datasets/sessions 整体丢弃；新建/改名/删除会话（含 SessionView onChanged/onDeleted）都先 `touched()`；新增 vitest「列表竞态：reload 在飞时新建会话…」（回退到 365a21b 的 Shell 时红）。②`prefers-reduced-motion` 同时停骨架 shimmer。③f4-layout 两处 `waitForTimeout(400)` 换成 `expect(...).toPass({ timeout: 10_000 })` 整组几何重试。④`dirty` 改为按 SWITCHES 逐键比，不依赖 JSON 键序。⑤Markdown 白名单注释写明站内锚点 `#` 也被挡。⑥`effectiveKind` 签名收窄为 `Pick<UiState, "kind">`，EChart 不再传无用的 sw。
 - S 复核（10-23 09:00，按描述做逻辑审查）：⑦DatasetView.onDeleted 也先 `touched()` 再 `reload()`（否则更早在飞的 reload 会把刚删的数据集带回来），入口共 6 处；⑧reload 失败分支同样判 gen，过时请求的失败不报错；⑨f4-layout 的 overflow 前提移到 toPass 外断言一次，前提不成立立刻红。
 - 本地 e2e 环境：Linux 新环境/沙箱重置后先装 Chromium 系统依赖 `cd ui/web && npx playwright install-deps chromium`（症状：e2e 全部约 1ms 红，日志 `libatk-1.0.so.0: cannot open shared object file`）。CI runner 镜像自带，不用跑。
+
+## [59] 2026-10-23 · 四屏视觉回归（toHaveScreenshot）+ HANDOVER 第二版 · commit <待提交>
+
+[57][58] 回填为 39c4741（#70 把 llm_kind 和 V2a 实现 squash 成了一个提交）。
+
+起因：S 在 r4 判定里指出 V2a 验收"改一处塌一处"出了三次（r2 遮罩→删除按钮变粉，r3 居中→失败卡宽度塌 49%，r4 底注色只改一半），当时 4 条行为 e2e 全绿，没有一条看像素；建议给 24/25/11/08 四屏加 toHaveScreenshot，maxDiffPixelRatio 0.002。#70 评审时同意延后到下一批。S 10-23 说做这一批，并要交接给下一个 agent，所以 HANDOVER 一起重写。
+
+改了什么：
+- 新增 ui/web/e2e/f4-visual.spec.ts（fake project，4 条）+ e2e/f4-visual.spec.ts-snapshots/ 四张基线（*-fake-linux.png）：
+  - 08 分析中（1440×900，slow-2s，骨架三块 + 控件行占位、步骤条）；
+  - 11 标记浮层（1440×900，chart-bar，浮层半透明压在柱图上、柱顶数值）；
+  - 24 窄屏失败页（1024×768，空 CSV，失败卡宽度和居中、主次按钮、底注色）；
+  - 25 窄屏会话（1024×768，chart-bar，落底几何、输入区间距、图表卡）。
+- 截整页：view-root 是 display: contents，元素截图报 "not visible"。
+- 不可复现的部分：宽屏侧栏整块 mask（列表长度随共享后端变化，会把「会话」一节推下去，--repeat-each=2 实测 9% 像素差）；.acard-time、.topbar-sub mask；已结束轮次的 .stepbar mask（每步用时，< 0.05s 时不显示，宽度会变；步骤条样式由 08 钉住）。宽度随内容变的行内文字不 mask（mask 框跟着变宽，框边本身就是像素差），截图前用 freeze() 换成定值：失败卡原因行的 trace 编号、同名重复上传时名字后的「 · HH:MM」（顶栏标题、输入区胶囊）。
+- beforeAll 预热（照 f4-panel）。
+- HANDOVER.md 整份重写为第二版（接 39c4741）：进度、基线数字、S 的协作规则（含 10-20 以后新增的节奏、判定表纪律、汇报格式、zip 英文名）、不变量（加 llm_kind、chart_fixtures/导出字节契约、P2-18 数值标签、V2a 视觉口径）、下一步候选、视觉回归的基线流程、新踩的坑、前端代码地图和测试地图。
+
+偏离：阈值没用 S 提的 maxDiffPixelRatio 0.002，改为 threshold 0.02 + maxDiffPixels 20。变异实测（改 CSS → build → 跑 f4-visual，跑完还原）：
+
+| 变异 | 默认 threshold 0.2 的差异像素 | threshold 0.02 的差异像素 | 0.002 整页上限 | 新阈值 20 |
+|---|---|---|---|---|
+| 24 底注 #6B6B70 → #A0A0A5（r4 原样回归） | 82 | 609 | 2592（1440×900）/ 1573（1024×768） | 红 |
+| 08 骨架图块圆角 12 → 6 | 0 | 36 | 2592 | 红 |
+| 11 浮层底色透明度 .58 → .75 | — | 16134 | 2592 | 红 |
+| 不变，--repeat-each=4（16 次） | — | 0 | — | 绿 |
+
+即 S 的阈值下前两条（正是 r4 的那类回归）照样绿。不变时本地 16 次为 0 像素，留 20 像素余量给字体光栅的偶发差。
+
+未验证 / 风险：基线是在沙箱（aarch64）生成的，CI 是 ubuntu x64。两边 Chromium 版本相同，字体都来自 install-deps，但抗锯齿可能有差。首次上 CI 若 f4-visual 红，按 HANDOVER §6「视觉回归」从 playwright-results 工件取 *-actual.png 换基线（先看 diff 确认只是抗锯齿），在本条补记。
+
+测试：e2e 34 → 38（新增 4 条，其余不变）。pytest、vitest 条数不变。
+
+当前阶段：阶段 5 收尾。下一步等 S 定：V2b（P2-19~22 + 标记卡对齐等，先写方案）、F5 真 Key 走查、测试连接（需后端接口）。
