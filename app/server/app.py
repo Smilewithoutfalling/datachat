@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -108,6 +109,16 @@ class FeedbackIn(BaseModel):
 
 class ApiKeyIn(BaseModel):
     api_key: str = Field(min_length=1, max_length=512)
+
+
+# 前端产物用到的扩展名 → 固定 MIME，不信任平台注册表（见 create_app 里挂 /assets 处）。
+ASSET_MIME_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
+                    ".svg": "image/svg+xml", ".json": "application/json", ".woff2": "font/woff2"}
+
+
+def _pin_asset_mime_types() -> None:
+    for ext, mime in ASSET_MIME_TYPES.items():
+        mimetypes.add_type(mime, ext)
 
 
 def default_web_dist() -> str:
@@ -586,6 +597,9 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     # 不进访问日志）交给前端，之后所有 API 照旧要 Bearer。/charts/* 仍要 token（图里是用户数据）。
     web_dist = os.path.abspath(web_dist or default_web_dist())
     app.state.web_dist = web_dist
+    # Windows 上 mimetypes 会读注册表 HKCR\.js 的 Content Type，常被编辑器改成 text/plain；
+    # module 脚本的 MIME 不是 JavaScript 时浏览器拒绝执行 → 白屏（S 10-23 本机实测）。启动时钉死。
+    _pin_asset_mime_types()
     app.mount("/assets", StaticFiles(directory=os.path.join(web_dist, "assets"), check_dir=False), name="assets")
 
     @app.get("/", include_in_schema=False)

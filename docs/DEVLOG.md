@@ -2084,7 +2084,7 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 
 当前阶段：阶段 5 收尾。下一步：S 评审本方案 → 三项实现合一个 PR → S 用真 Key 走 F5 → 删 Streamlit。
 
-## [61] 2026-10-23 · 阶段 5 收尾实现：V2b（A 图表几何 + B 标记卡）、设置页「测试连接」、P1-17 · commit <待提交>
+## [61] 2026-10-23 · 阶段 5 收尾实现：V2b（A 图表几何 + B 标记卡）、设置页「测试连接」、P1-17 · commit da8ac91（PR #73，tests run 39920953765）
 
 [60] 回填为 59a7dff（PR #72）。
 
@@ -2150,3 +2150,18 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 - 环境：这次沙箱重置后 Playwright 浏览器缺失，重新 `npx playwright install chromium` + `install-deps chromium` 后跑的；08 / 24 差异像素与 [60] 相同，渲染环境一致。
 
 当前阶段：阶段 5 收尾实现完成，待 S 评审 → 提交 / 推送（CI 上换 11、25 基线）→ S 用真 Key 走 F5 → 删 Streamlit。
+
+## [62] 2026-10-23 · Windows 上 /assets 的 .js 被当成 text/plain，整页白屏 · commit <待提交>
+
+现象：S 在 Windows 本机走 F5，`python -m app.server --open` 打开后整页白屏。标签标题是 datachat，说明 index.html 已经拿到了；`<script type="module" src="/assets/index-*.js">` 没执行。
+
+原因：S 本机 `python -c "import mimetypes;print(mimetypes.guess_type('a.js'))"` 输出 `('text/plain', None)`。Windows 上的 mimetypes 会读注册表 HKCR\.js 的 Content Type，这个值常被编辑器改掉。/assets 用 StaticFiles 挂载（app/server/app.py），它按 mimetypes 给出 Content-Type；module 脚本的 MIME 不是 JavaScript 时，浏览器拒绝执行。e2e 只在 ubuntu 上跑，所以一直没暴露。
+
+改动：
+- app/server/app.py 新增 `ASSET_MIME_TYPES`（.js/.mjs/.css/.svg/.json/.woff2）和 `_pin_asset_mime_types()`，在挂 /assets 之前调用，不信任平台注册表。
+- 新增 `tests/test_web.py::test_assets_mime_ignores_platform_registry`：先把 mimetypes 表污染成 .js/.css → text/plain，再建 app，断言 /assets 返回 text/javascript 和 text/css。反向验证：去掉 `_pin_asset_mime_types()` 这一行，该测试红。
+
+实测：`pytest tests/test_web.py -k "mime or static"` 4 passed。
+
+S 本机临时绕过（不依赖本修复）：`reg add "HKCU\Software\Classes\.js" /v "Content Type" /t REG_SZ /d text/javascript /f`。
+

@@ -3,6 +3,7 @@ import os
 import sqlite3
 
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.server.app import CSP, create_app
@@ -41,6 +42,18 @@ def test_static_needs_no_token_but_api_does(home, dist):
     for path in ("/datasets", "/sessions", "/settings", "/settings/api-key", "/charts/chart_1_abcdef.png"):
         assert c.get(path).status_code == 401, path
     assert c.put("/messages/x/feedback", json={"rating": "up"}).status_code == 401
+
+
+def test_assets_mime_ignores_platform_registry(home, dist):
+    """Windows 注册表常把 .js 映射成 text/plain，module 脚本因此不执行、整页白屏（S 10-23 本机实测）。
+    模拟被污染的 mimetypes 表后建 app，/assets 仍须按 JavaScript / CSS 返回。"""
+    import mimetypes
+    (Path(dist) / "assets" / "index-abc.css").write_text("body{}", encoding="utf-8")
+    mimetypes.add_type("text/plain", ".js")
+    mimetypes.add_type("text/plain", ".css")
+    c = client(home, dist)
+    assert c.get("/assets/index-abc.js").headers["content-type"].startswith("text/javascript")
+    assert c.get("/assets/index-abc.css").headers["content-type"].startswith("text/css")
 
 
 def test_static_path_traversal_blocked(home, dist, tmp_path):
