@@ -107,6 +107,7 @@ rm -rf test-results
 - 跑任何 localhost 测试前先 `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy`，否则 fake_llm 报 not found。
 - Node 要 24（Node 22 不行）。
 - e2e 前必须先 `npm run build`：后端托管的是 dist，不 build 测的是旧界面。
+- 不在本机 build、改用 CI 的 `web-dist` 工件时：用普通权限（不要管理员）把压缩包里的内容直接解到 `ui\web\dist`，不要多套一层目录（`ui\web\web\web-dist` 这种未跟踪目录会让本机 eslint 报几千个错）。管理员解压出的 dist 普通进程删不掉，之后 `npm run build` 会 EPERM（V2c 记录）。
 
 Playwright 结构（`playwright.config.ts`）：
 - `nokey` project 匹配 `/f[012]\.spec\.ts/`（**不锚定**，`zz-f2.spec.ts` 这种名字也会被选中）；`fake` project 匹配 `/f[34].*\.spec\.ts/`，后端 base_url 指向假服务，每个测试用 `PUT /settings {model}` 选场景。

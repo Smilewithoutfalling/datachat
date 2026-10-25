@@ -20,7 +20,7 @@
   --line-muted: #F0F0F2;
   --accent-bg: #EAF4FD;
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 13px;
+  font-size: 14px; /* V2c §4b（S 10-25 定）：13 → 14 */
   line-height: 1.35;
   color: var(--fg);
   background: var(--bg);
@@ -56,6 +56,8 @@ code, pre, .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, mo
 .workspace { display: flex; flex-direction: column; min-width: 0; height: 100vh; position: relative; }
 .main { flex: 1; overflow: auto; padding: 20px 24px 20px 28px; }
 .topbar { flex: none; height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 20px 0 28px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.topbar-back { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 10px 0 6px; margin-left: -10px; border: none; border-radius: 8px; background: none; font-size: calc(12 * var(--px)); color: var(--muted); }
+.topbar-back:hover { background: var(--line-muted); color: var(--fg); }
 .topbar-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .topbar-title { font-size: calc(15 * var(--px)); font-weight: 700; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-sub { font-size: calc(11 * var(--px)); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -132,6 +134,9 @@ code, pre, .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, mo
 .sess-meta { display: block; font-size: calc(9.5 * var(--px)); color: #A0A0A5; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-more { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; opacity: 0; transition: opacity 120ms; background: var(--line-muted); }
 .sess-item:hover .sess-more, .sess-more:focus-visible, .sess-more[aria-expanded="true"] { opacity: 1; }
+/* V2c §6：当前会话的「⋯」常显；触屏没有 hover，全部常显 */
+.sess-item:has(.sess-row.active) .sess-more { opacity: 1; }
+@media (hover: none) { .sess-more { opacity: 1; } }
 .sess-edit { display: flex; flex-direction: column; gap: 3px; border: 1.5px solid var(--accent); border-radius: 10px; padding: 6px 9px; background: #fff; }
 .sess-edit input { height: 20px; border: none; padding: 0; font-size: calc(12 * var(--px)); box-shadow: none; }
 .sess-edit .hint { display: flex; justify-content: space-between; font-size: calc(9.5 * var(--px)); color: #A0A0A5; }
@@ -224,13 +229,20 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .ev pre, .unsaved .text { margin: 4px 0; padding: 10px 12px; background: var(--bg-muted); border: 1px solid var(--line-muted); border-radius: 10px; overflow: auto; max-height: 40vh; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(11.5 * var(--px)); line-height: 1.6; }
 .ev.exec.failed summary, .ev pre.err { color: #B3121B; }
 .ev.warn { background: var(--warn-bg); color: #8A5200; padding: 8px 12px; border-radius: 10px; border: 1px solid #F2DFB4; font-size: calc(12 * var(--px)); }
-.answer { font-size: calc(14 * var(--px)); line-height: 1.65; }
+.answer { font-size: calc(14 * var(--px)); line-height: 1.7; }
 .md { overflow-wrap: anywhere; }
-.md p { margin: 0 0 8px; }
+/* V2c §5：标题、列表原来吃浏览器默认值（h1 2em、列表上下 1em）。字号按 N 写，根 14 下渲染为 N × 14/13 */
+.md h1, .md h2 { font-size: calc(16 * var(--px)); font-weight: 700; margin: 18px 0 8px; line-height: 1.4; }
+.md h3, .md h4 { font-size: calc(14 * var(--px)); font-weight: 700; margin: 14px 0 6px; line-height: 1.4; }
+.md > :first-child { margin-top: 0; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 1.4em; }
+.md li + li { margin-top: 4px; }
+.md li > p { margin: 0; }
+.md p { margin: 0 0 10px; }
 .md p:last-child { margin-bottom: 0; }
-.md table { border-collapse: collapse; font-size: calc(13 * var(--px)); font-variant-numeric: tabular-nums; margin: 6px 0; }
+.md table { border-collapse: collapse; font-size: calc(13 * var(--px)); font-variant-numeric: tabular-nums; margin: 10px 0; }
 .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; }
-.md th { background: var(--bg-muted); }
+.md th { background: var(--bg-muted); font-weight: 700; }
 .md pre { background: var(--bg-muted); padding: 8px 10px; border-radius: 8px; overflow: auto; font-size: calc(12 * var(--px)); }
 .running-hint { display: flex; flex-direction: column; gap: 10px; }
 .dots { display: inline-flex; gap: 5px; height: 20px; align-items: center; }
@@ -296,7 +308,7 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .segmented .tab-meta { color: #A0A0A5; font-weight: 400; margin-left: 4px; font-size: calc(10.5 * var(--px)); }
 .segmented button.failed .tab-meta { color: #B3121B; }
 .table-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }
-.table-scroll { overflow: auto; max-height: 60vh; }
+.table-scroll { overflow-x: auto; padding-bottom: 12px; } /* V2c §7：不再限高，竖向随页面滚；底部留给横向滚动条 */
 .preview table { border-collapse: collapse; font-size: calc(13 * var(--px)); width: 100%; font-variant-numeric: tabular-nums; }
 .preview th, .preview td { border-bottom: 1px solid var(--line-muted); padding: 0 16px; height: 44px; text-align: left; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .preview th { position: sticky; top: 0; background: var(--bg-muted); font-weight: 400; color: #333336; font-size: calc(12 * var(--px)); z-index: 1; }
@@ -340,6 +352,8 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .settings .key-field { display: flex; align-items: center; gap: 8px; height: 40px; border: 1px solid var(--line-input); border-radius: 8px; padding: 0 4px 0 12px; background: #fff; }
 .settings .key-field.readonly { background: var(--bg-muted); border-color: var(--line); color: #A0A0A5; }
 .settings .key-field input { border: none; height: 36px; flex: 1; padding: 0; box-shadow: none; background: transparent; font-family: "JetBrains Mono", Consolas, monospace; }
+/* V2c §8：占位和只读态是中文说明，用界面字体；用户输入的 Key 仍等宽 */
+.settings .key-field input::placeholder, .settings .key-field input[readonly] { font-family: inherit; }
 .settings .key-field button { height: 30px; font-size: calc(12 * var(--px)); border-radius: 8px; }
 .settings .mono-input { font-family: "JetBrains Mono", Consolas, monospace; }
 .settings .form-actions { display: flex; align-items: center; gap: 10px; }
@@ -483,8 +497,8 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 /* 验收 r2 §2.2：浮层压在柱子上时要看得见改色效果——半透明加轻微模糊，结构不动 */
 .marks-card { background: rgba(245,245,247,.58); -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); box-shadow: 0 8px 28px rgba(0,0,0,.16), 0 0 0 1px rgba(0,0,0,.04); }
 .marks-card [role="region"] { background: rgba(255,255,255,.42); }
-.errcard .tech-toggle { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0; border: none; background: none; font-size: calc(11 * var(--px)); color: #B3121B; opacity: .8; cursor: pointer; height: auto; }
-.errcard .tech-body { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: "JetBrains Mono", Consolas, monospace; font-size: calc(11 * var(--px)); color: #8C1D18; opacity: .85; }
+.errcard .tech-toggle, .test-fail .tech-toggle { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0; border: none; background: none; font-size: calc(11 * var(--px)); color: #B3121B; opacity: .8; cursor: pointer; height: auto; }
+.errcard .tech-body, .test-fail .tech-body { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: "JetBrains Mono", Consolas, monospace; font-size: calc(11 * var(--px)); color: #8C1D18; opacity: .85; }
 .dialog-close { position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; padding: 0; border: none; border-radius: 7px; background: transparent; color: #8E8E93; display: inline-flex; align-items: center; justify-content: center; }
 .dialog-close:hover { background: var(--bg-muted); }
 .expired .retry-note { margin-top: 10px; font-size: calc(12 * var(--px)); color: var(--danger-text, #B3121B); }
@@ -541,4 +555,6 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 /* ---------------- 阶段 5 收尾 C：设置页「测试连接」（凭证卡和模型三项下面） */
 .settings .test-conn { display: flex; flex-direction: column; gap: 10px; padding: 0 4px; }
 .settings .test-conn .key-ok { font-size: calc(12 * var(--px)); }
-.settings .test-fail { margin: 0; overflow-wrap: anywhere; }
+.settings .test-fail { margin: 0; overflow-wrap: anywhere; flex-direction: column; align-items: flex-start; gap: 2px; }
+.settings .test-fail-title, .settings .test-fail-hint { margin: 0; }
+.settings .test-fail-title { font-weight: 700; }

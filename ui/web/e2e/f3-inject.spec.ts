@@ -233,6 +233,11 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
   const st0 = all.filter((d) => d.chart === 0 && d.phase === "static");
   expect(st0[0]?.cw).toBe(1174); // 前提：图宽与改版前一致（V2a 改了对话列宽度，这里钉住）
   const xLabels0 = st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "xAxisLabel").map((d) => d.text);
+  // V2c §9：类目标签集合依赖字体度量（hideOverlap）。Windows 字体下 P5「{x|富文本}」更宽会被丢掉，前提先红、判定没执行到。
+  // 以 CI（linux）为准，和视觉基线一个口径（HANDOVER §6）：非 linux 上缺标签就跳过并写明原因；linux 上照旧严格断言。
+  const missing = (["P4", "P5", "P6", "P7"] as const).filter((k) => !xLabels0.includes(D[k]));
+  if (process.platform !== "linux")
+    test.skip(missing.length > 0, `类目标签集合依赖字体度量，本平台缺 ${missing.join("、")}，以 CI（linux）为准`);
   for (const k of ["P4", "P5", "P6", "P7"] as const) expect([k, xLabels0.includes(D[k])]).toEqual([k, true]);
   // 前提（第四步，防假绿）：每个载荷都确实画出来了——没有 fillText 记录就谈不上"没被解析"。
   // 'all' 会改变 hideOverlap 的类目标签集合，且集合依赖运行宽度：任何一个载荷掉出绘制，这里先红，而不是在判定表里静默变少

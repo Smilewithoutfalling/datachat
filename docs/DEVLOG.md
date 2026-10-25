@@ -2166,7 +2166,7 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 S 本机临时绕过（不依赖本修复）：`reg add "HKCU\Software\Classes\.js" /v "Content Type" /t REG_SZ /d text/javascript /f`。
 
 
-## [63] 2026-10-25 · F4 迭代 V2c 方案：F5 第一批发现 · commit <待提交>
+## [63] 2026-10-25 · F4 迭代 V2c 方案：F5 第一批发现 · commit 5f34e0b（PR #75）
 
 [62] 回填为 0c777a1（PR #74）。
 
@@ -2177,3 +2177,20 @@ F5 走查记录（进行中）：
 方案见 docs/roadmap/phase5-frontend.md「F4 迭代 V2c」：1、2 测试连接（旧结果 bug、失败文案折叠原文），3 返回入口，4 字号（先 px→rem 零变化，再根 13→14），5 结论 Markdown 排版，6 当前会话「⋯」常显，7 预览表去掉内层竖向滚动，8 Key 占位字体，9 f3-inject 前提限 linux。O1、O2 和本机环境问题只记录。
 
 S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
+
+
+## [64] 2026-10-25 · F4 迭代 V2c 实现 · commit <待提交>
+
+[63] 回填为 5f34e0b（PR #75）。按 phase5-frontend.md「F4 迭代 V2c」§1~9 实现。
+
+- §1 测试连接旧结果：结果带着发起时的 form / newKey / key 引用，渲染时比对，不一致就不显示（派生，不在 effect 里 setState，过 react-hooks/set-state-in-effect）；在飞请求回来时引用已过期，也看不见。auth / no_key 只在结果仍有效时聚焦 Key。
+- §2 失败文案：新增 views/llmErrorText.ts，按 llm_kind 给标题、建议，分 turn / settings 两种语境，TurnView 错误卡与测试连接共用；后端原文放默认折叠的「技术详情」。
+- §3 返回：Shell 记 anchor（进入设置/数据集前的首页或会话），设置⇄数据集互切不改；anchor 会话被删回首页。Topbar 新增 onBack + IconChevronLeft。
+- §4a（3143fd2，本 PR 内单独一个 commit）：styles.css 132 处固定字号改 `calc(N * var(--px))`，`--px: calc(1rem / 13)`。直接写 `N/13rem` 会被 Vite 压成有限小数，四屏出现 514 像素差；换变量表达式后四屏零差异。
+- §4b：根字号 13 → 14。四张视觉基线（08/11/24/25）随之更新。
+- §5 结论 Markdown：.answer 行高 1.7；h1~h4、ul/ol/li、table 间距与表头字重；首个子元素去上边距。新增 vitest「结论 Markdown：标题、列表、表格都渲染在 .md 下」。
+- §6 当前会话「⋯」常显；`@media (hover: none)` 全部常显。
+- §7 预览表去掉 `max-height: 60vh` 内层竖向滚动，只保留横向滚动。
+- §8 Key 占位 / 只读说明用界面字体（font-family: inherit），实际 Key 输入仍等宽。
+- §9 f3-inject：非 Linux 且缺 P4~P7 标签时 test.skip，Linux 仍严格断言。
+- HANDOVER：补 web-dist 工件解压位置与管理员解压导致 dist ACL / EPERM 的说明。

@@ -222,6 +222,27 @@ test("列表竞态：reload 在飞时新建会话，晚到的旧列表不能把�
   expect(be.calls.filter((c) => c.method === "GET" && c.path === "/datasets")).toHaveLength(2);
 });
 
+// V2c §3：设置页、数据集页的「← 返回」回到最近一次停留的首页或会话
+test("返回：会话 → 设置 → 数据集 → 返回，回到会话（设置 ↔ 数据集之间不改锚点）", async () => {
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: /^旧标题/ }));
+  await screen.findByTestId("session-view");
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  await screen.findByTestId("settings-view");
+  expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^销量/ }));
+  await screen.findByTestId("dataset-view");
+  fireEvent.click(screen.getByRole("button", { name: "返回" }));
+  expect(await screen.findByTestId("session-view")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "返回" })).toBeNull(); // 会话页本身不带返回
+});
+
+test("返回：首次启动没 Key 自动进设置页，不显示返回", async () => {
+  setup({}, { configured: false, source: null });
+  await screen.findByTestId("settings-view");
+  expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+});
+
 // ---- 阶段 5 收尾 C：设置页「测试连接」——测的是已保存的配置 -------------------------------------------------------
 describe("测试连接", () => {
   /** 可控的 JSON 响应：body 流先不关，调用方 resolve 时才写入并关闭（按钮的"测试中"态要能看到）。 */
@@ -252,23 +273,72 @@ describe("测试连接", () => {
     expect((within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  test("失败：显示后端给的 message；auth 时焦点移到 Key 输入框", async () => {
+  // V2c §2（S 10-25 定）：失败和错误卡一个口径——正文是标题 + 建议 + 编号，后端原文收进默认折叠的「技术详情」。
+  // 期望变了：原来断言正文就是整串 message（含上游英文 "invalid key"），现在正文不含原文，原文只在展开后的技术详情里。
+  test("失败：正文是标题 + 建议 + 编号，上游原文折叠在「技术详情」；auth 时焦点移到 Key 输入框", async () => {
     const message = "鉴权失败，请检查 API Key，共尝试 1 次：invalid key（编号 0123abcd）";
     setup({ "POST /settings/test": { ok: false, llm_kind: "auth", message, latency_ms: 120 } });
     const view = await open();
     await act(async () => fireEvent.click(within(view).getByRole("button", { name: "测试连接" })));
-    expect(within(view).getByTestId("test-result").textContent).toBe(message);
+    const r = within(view).getByTestId("test-result");
+    expect(r.querySelector(".test-fail-title")!.textContent).toBe("模型服务不认这个 API Key");
+    expect(r.querySelector(".test-fail-hint")!.textContent).toBe("检查或更换上面的 Key。（编号 0123abcd）");
+    const tech = within(view).getByTestId("test-tech");
+    expect(tech.hidden).toBe(true);
+    expect(tech.textContent).toBe(message);
+    const toggle = within(r).getByRole("button", { name: "技术详情" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(tech.hidden).toBe(false);
+  });
+
+  test("失败（auth）：焦点移到 Key 输入框", async () => {
+    setup({ "POST /settings/test": { ok: false, llm_kind: "auth", message: "x（编号 0123abcd）", latency_ms: 1 } });
+    const view = await open();
+    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "测试连接" })));
     expect(document.activeElement).toBe(within(view).getByLabelText("当前 Key"));
   });
 
-  test("失败（server）：显示 message，焦点不动", async () => {
-    setup({ "POST /settings/test": { ok: false, llm_kind: "server", message: "模型服务出错（编号 1）", latency_ms: 5 } });
+  test("失败（server）：标题、设置页口径的建议；message 不带编号时不拼编号；焦点不动", async () => {
+    setup({ "POST /settings/test": { ok: false, llm_kind: "server", message: "模型服务出错", latency_ms: 5 } });
     const view = await open();
     const btn = within(view).getByRole("button", { name: "测试连接" });
     btn.focus();
     await act(async () => fireEvent.click(btn));
-    expect(within(view).getByTestId("test-result").textContent).toBe("模型服务出错（编号 1）");
+    const r = within(view).getByTestId("test-result");
+    expect(r.querySelector(".test-fail-title")!.textContent).toBe("模型服务出错了");
+    expect(r.querySelector(".test-fail-hint")!.textContent).toBe("通常是临时的，稍后再测。");
     expect(document.activeElement).toBe(btn);
+  });
+
+  // V2c §1：结果只对测的那一份已保存配置有效
+  test("旧结果作废：改字段再改回、改字段再保存、填新 Key、在飞时改字段，结果都不再出现", async () => {
+    const p = pending();
+    let n = 0;
+    setup({ "POST /settings/test": () => (n++ === 2 ? p.response() : Response.json({ ok: true, latency_ms: 812, model: "deepseek-chat" })) });
+    const view = await open();
+    const btn = () => within(view).getByRole("button", { name: "测试连接" });
+    const model = () => within(view).getByLabelText("模型名");
+    // 改字段再改回原值：unsaved 回到 false，但结果已作废
+    await act(async () => fireEvent.click(btn()));
+    expect(within(view).getByTestId("test-result")).toBeTruthy();
+    fireEvent.change(model(), { target: { value: "m2" } });
+    fireEvent.change(model(), { target: { value: "qwen" } }); // 回到已保存的原值
+    expect(within(view).queryByTestId("test-result")).toBeNull();
+    // 改字段再保存（原来的 bug：保存后旧结果重新出现）
+    await act(async () => fireEvent.click(btn()));
+    expect(within(view).getByTestId("test-result")).toBeTruthy();
+    fireEvent.change(model(), { target: { value: "m3" } });
+    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
+    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
+    expect(within(view).queryByTestId("test-result")).toBeNull();
+    // 在飞时改字段：回来的是旧配置的结果，丢弃
+    await act(async () => fireEvent.click(btn()));
+    fireEvent.change(model(), { target: { value: "m4" } });
+    await act(async () => p.resolve({ ok: true, latency_ms: 1, model: "m3" }));
+    fireEvent.change(model(), { target: { value: "m3" } });
+    expect(within(view).queryByTestId("test-result")).toBeNull();
+    expect(within(view).getByRole("button", { name: "测试连接" })).toBeTruthy();
   });
 
   test("有未保存的改动时不可点，旁边写「先保存再测试」；保存后可点；填了新 Key 没保存也算未保存", async () => {
@@ -288,4 +358,15 @@ describe("测试连接", () => {
     fireEvent.change(within(view).getByLabelText("替换为新的 Key"), { target: { value: "sk-new" } });
     expect(btn().disabled).toBe(true);
   });
+});
+
+// V2c §5：结论排版的样式挂在 .md 下的 h1~h4、ul/ol/li、table 上——钉住渲染结构（观感以 25 屏基线为准）
+test("结论 Markdown：标题、列表、表格都渲染在 .md 下，第一个子元素是标题", async () => {
+  const { Markdown } = await import("./Markdown");
+  const { container } = render(<Markdown text={"## 结论\n\n- 第一条\n- 第二条\n\n| 列 | 值 |\n|---|---|\n| a | 1 |\n\n### 细节\n\n正文"} />);
+  const md = container.querySelector(".md")!;
+  expect(md.firstElementChild?.tagName).toBe("H2");
+  expect(md.querySelectorAll(":scope > ul > li")).toHaveLength(2);
+  expect(md.querySelector(":scope > table th")?.textContent).toBe("列");
+  expect(md.querySelector(":scope > h3")?.textContent).toBe("细节");
 });
