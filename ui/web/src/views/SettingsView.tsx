@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type Client, errText } from "../client";
 import type { KeyStatus, Settings, SettingsTest } from "../types";
-import { IconCheck, IconWarn } from "./icons";
+import { IconCheck, IconChevronDown, IconChevronUp, IconWarn } from "./icons";
+import { llmErrorText } from "./llmErrorText";
 import { Topbar } from "./ui";
 
 // API Key 只写不读：后端从不返回 Key 本身，这里也不保留输入值（保存后立即清空）。
@@ -10,16 +11,29 @@ import { Topbar } from "./ui";
 // 阶段 5 收尾 C：凭证卡和模型三项下面一个「测试连接」。测的是**已保存**的配置（POST /settings/test），所以表单有未保存的
 // 改动（模型三项和保存时不同、或填了新 Key 没保存）时按钮不可点，旁边写「先保存再测试」，避免"测的和用的不是一份"。
 // 结果三态：测试中 / 连接正常 · 0.8s · 模型名（绿）/ 失败显示 message；auth、no_key 时焦点移到 Key 输入框。
-export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: KeyStatus) => void }) {
+export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChange: (k: KeyStatus) => void; onBack?: () => void }) {
   const [key, setKey] = useState<KeyStatus | null>(null);
   const [form, setForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
   const [savedForm, setSavedForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
-  const [test, setTest] = useState<{ state: "running" } | { state: "done"; r: SettingsTest } | { state: "error"; text: string } | null>(null);
+  const [testRaw, setTest] = useState<
+    (({ state: "running" } | { state: "done"; r: SettingsTest } | { state: "error"; text: string }) & { at: TestAt }) | null
+  >(null);
   const keyInput = useRef<HTMLInputElement | null>(null);
   const [newKey, setNewKey] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+
+  // V2c §1：测试结果只对"测的那一份配置"有效。结果带着发起时的 form / newKey / key 引用（at）；任何字段改动、填新 Key、
+  // 保存或删除 Key 都换掉其中一个引用，结果就不再显示。在飞的测试同理：回来时 at 已不是当前的，写进去也看不见。
+  // 用派生而不是 effect 里 setTest(null)（react-hooks/set-state-in-effect）。
+  const formRef = useRef(form), newKeyRef = useRef(newKey), keyRef = useRef(key);
+  useEffect(() => {
+    formRef.current = form;
+    newKeyRef.current = newKey;
+    keyRef.current = key;
+  }, [form, newKey, key]);
+  const test = testRaw && testRaw.at.form === form && testRaw.at.newKey === newKey && testRaw.at.key === key ? testRaw : null;
 
   useEffect(() => {
     Promise.all([c.keyStatus(), c.settings()])
@@ -58,18 +72,20 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
   };
 
   const runTest = () => {
-    setTest({ state: "running" });
+    const at: TestAt = { form, newKey, key };
+    const current = () => at.form === formRef.current && at.newKey === newKeyRef.current && at.key === keyRef.current;
+    setTest({ state: "running", at });
     c.testSettings().then(
       (r) => {
-        setTest({ state: "done", r });
-        if (!r.ok && (r.llm_kind === "auth" || r.llm_kind === "no_key")) keyInput.current?.focus();
+        setTest({ state: "done", r, at });
+        if (current() && !r.ok && (r.llm_kind === "auth" || r.llm_kind === "no_key")) keyInput.current?.focus();
       },
-      (er) => setTest({ state: "error", text: errText(er) }),
+      (er) => setTest({ state: "error", text: errText(er), at }),
     );
   };
 
   const saved = msg ? <span className="badge success" role="status"><IconCheck size={10} />{msg}</span> : null;
-  const top = <Topbar title="设置" sub="模型凭证与连接参数" actions={saved} />;
+  const top = <Topbar title="设置" sub="模型凭证与连接参数" actions={saved} onBack={onBack} />;
   if (!key || !form) return <>{top}<div className="main" aria-busy={!error}>{error || "加载中…"}</div></>;
 
   const env = key.source === "env";
@@ -170,22 +186,40 @@ export function SettingsView({ c, onKeyChange }: { c: Client; onKeyChange: (k: K
                 {test?.state === "running" ? "测试中…" : "测试连接"}
               </button>
               {unsaved ? <span className="hint" data-testid="test-unsaved">先保存再测试</span> : null}
-              {!unsaved && test?.state === "done" && test.r.ok ? (
+              {test?.state === "done" && test.r.ok ? (
                 <span className="key-ok" role="status" data-testid="test-result">
                   <IconCheck size={11} />连接正常 · {(test.r.latency_ms / 1000).toFixed(1)}s · {test.r.model}
                 </span>
               ) : null}
             </div>
-            {!unsaved && test?.state === "done" && !test.r.ok ? (
-              <p className="banner danger test-fail" role="alert" data-testid="test-result">{test.r.message}</p>
-            ) : null}
-            {!unsaved && test?.state === "error" ? <p className="banner danger test-fail" role="alert">{test.text}</p> : null}
+            {test?.state === "done" && !test.r.ok ? <TestFail kind={test.r.llm_kind} message={test.r.message} /> : null}
+            {test?.state === "error" ? <p className="banner danger test-fail" role="alert">{test.text}</p> : null}
           </div>
         </section>
       </div>
     </>
   );
 }
+
+/** V2c §2：失败和分析的错误卡一个口径——正文是标题 + 建议 + 编号，后端原文（含上游 message）收进默认折叠的「技术详情」。
+ *  原文不去掉：模型名写错、Base URL 少 /v1 这类配置错误，上游原文是最直接的线索（S 10-25 定折叠保留）。 */
+function TestFail({ kind, message }: { kind: string; message: string }) {
+  const [tech, setTech] = useState(false);
+  const t = llmErrorText(kind, "settings");
+  const code = /（编号 ([0-9a-f]+)）$/.exec(message)?.[1];
+  return (
+    <div className="banner danger test-fail" role="alert" data-testid="test-result">
+      <p className="test-fail-title">{t.title}</p>
+      <p className="test-fail-hint">{t.hint}{code ? `（编号 ${code}）` : ""}</p>
+      <button type="button" className="tech-toggle" aria-expanded={tech} onClick={() => setTech(!tech)}>
+        技术详情{tech ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
+      </button>
+      <p className="tech-body" hidden={!tech} data-testid="test-tech">{message}</p>
+    </div>
+  );
+}
+
+type TestAt = { form: unknown; newKey: string; key: KeyStatus | null };
 
 function toForm(s: Settings) {
   return { model: s.model, base_url: s.base_url, timeout: String(s.timeout) };

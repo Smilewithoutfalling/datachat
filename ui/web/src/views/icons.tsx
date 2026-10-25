@@ -46,6 +46,7 @@ export const IconMore = (p: P) => (
 export const IconPlus = (p: P) => <Svg {...p}><path d="M8 3v10M3 8h10" /></Svg>;
 export const IconArrowUp = (p: P) => <Svg {...p}><path d="M8 13V3.5M4 7.2 8 3.2l4 4" /></Svg>;
 export const IconChevronRight = (p: P) => <Svg {...p}><path d="m6 3.5 4.5 4.5L6 12.5" /></Svg>;
+export const IconChevronLeft = (p: P) => <Svg {...p}><path d="M10 3.5 5.5 8l4.5 4.5" /></Svg>;
 export const IconChevronDown = (p: P) => <Svg {...p}><path d="m3.5 6 4.5 4.5L12.5 6" /></Svg>;
 export const IconChevronUp = (p: P) => <Svg {...p}><path d="m3.5 10 4.5-4.5 4.5 4.5" /></Svg>;
 export const IconPalette = (p: P) => (

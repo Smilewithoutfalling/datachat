@@ -60,7 +60,12 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
   const current = view.kind === "session" ? sessions.find((s) => s.id === view.id) : undefined;
   const activeDs = view.kind === "dataset" ? view.id : current?.dataset_id;
 
-  const go = (v: View) => (setView(v), setRailOpen(false));
+  // V2c §3：设置页、数据集页的「← 返回」回到最近一次停留的首页或会话（锚点）。从首页 / 会话离开时记下；
+  // 设置 ↔ 数据集之间来回不改锚点。首次启动自动进的设置页没有锚点，不显示返回。锚点会话被删了就回首页。
+  const [anchor, setAnchor] = useState<View | null>(null);
+  const go = (v: View) => (view.kind === "home" || view.kind === "session" ? setAnchor(view) : null, setView(v), setRailOpen(false));
+  const backTo: View | null = !anchor ? null : anchor.kind === "session" && !sessions.some((s) => s.id === anchor.id) ? { kind: "home" } : anchor;
+  const onBack = backTo ? () => go(backTo) : undefined;
   const noteDetail = (d: DatasetDetail) =>
     setFailed((f) => {
       const has = d.id in f;
@@ -193,6 +198,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
             displayName={label[view.id]}
             sessionCount={sessionCount(view.id)}
             onLoaded={noteDetail}
+            onBack={onBack}
             onNewSession={newSession}
             onDeleted={() => (touched(), setView({ kind: "home" }), reload())} // 先作废更早在飞的 reload，免得删掉的数据集被旧快照带回来
           />
@@ -210,7 +216,7 @@ export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
             onDeleted={() => (touched(), setView({ kind: "home" }), setSessions((xs) => xs.filter((x) => x.id !== view.id)))}
           />
         )}
-        {view.kind === "settings" && <SettingsView c={c} onKeyChange={setKey} />}
+        {view.kind === "settings" && <SettingsView c={c} onKeyChange={setKey} onBack={onBack} />}
       </section>
       <UploadDialog key={pending.map((f) => f.name).join("|")} c={c} files={pending} onClose={() => setPending([])} onDone={onUploaded} />
     </div>

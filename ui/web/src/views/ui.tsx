@@ -1,10 +1,14 @@
 // V2a 的小部件：顶栏、对话框（原生 <dialog> showModal，自带焦点圈和 Esc）、溢出菜单、相对时间。
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { IconClose, IconMore } from "./icons";
+import { IconChevronLeft, IconClose, IconMore } from "./icons";
 
-export function Topbar({ title, sub, actions }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
+/** onBack（V2c §3）：设置页、数据集页标题左侧的「← 返回」；没有可回的地方（首次启动自动进设置）时不传。 */
+export function Topbar({ title, sub, actions, onBack }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; onBack?: () => void }) {
   return (
     <header className="topbar">
+      {onBack ? (
+        <button type="button" className="topbar-back" onClick={onBack}><IconChevronLeft size={12} />返回</button>
+      ) : null}
       <div className="topbar-text">
         {typeof title === "string" ? <h1 className="topbar-title">{title}</h1> : title}
         {sub ? <div className="topbar-sub" data-testid="topbar-sub">{sub}</div> : null}

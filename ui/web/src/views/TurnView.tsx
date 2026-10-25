@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { type ChartSpec, EChart } from "../charts/EChart";
 import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn } from "../turn";
 import { IconAlert, IconChevronDown, IconChevronUp, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
+import { llmErrorText } from "./llmErrorText";
 import { Markdown } from "./Markdown";
 
 const SOURCE: Record<string, string> = { codegen: "生成代码", reviewer: "修正代码", tool_call: "执行代码" };
@@ -241,32 +242,15 @@ function ErrorCard({ errorKind, llmKind, message, messageId, act }: {
   errorKind: string | null; llmKind: string | null; message: string; messageId?: string; act: TurnActions;
 }) {
   const k = errorKind === "llm" ? llmKind ?? "unknown" : null;
-  const http = k ? /^http_(\d{3})$/.exec(k)?.[1] : undefined;
-  const rate = k === "rate_limit" || http === "429";
-  const auth = k === "auth" || k === "no_key" || http === "401" || http === "403";
-  const badReq = k === "bad_request" || (http !== undefined && http.startsWith("4") && !rate && !auth);
-  const server = k === "server" || (http !== undefined && http.startsWith("5"));
-  const [title, hint] = rate
-    ? ["模型服务限流了", "等一会儿再试。"]
-    : k === "no_key"
-      ? ["还没有配置 API Key", "到设置里填写后再提问。"]
-      : auth
-        ? ["模型服务不认这个 API Key", "到设置里检查或更换 Key。"]
-        : badReq
-          ? ["模型服务拒绝了这次请求", "换个问法通常能过。"]
-          : server
-            ? ["模型服务出错了", "通常是临时的，可以重试。"]
-            : k === "timeout"
-              ? ["模型服务响应超时", "可以重试；网络慢时可以在设置里调大超时。"]
-              : k === "connection"
-                ? ["连不上模型服务", "检查网络和 Base URL 后重试。"]
-                : k
-                  ? ["模型调用失败", "可以重试。"]
-                  : errorKind === "execution"
-                    ? ["代码没跑通", "可以重试，或者换个问法。"]
-                    : errorKind === "dataset"
-                      ? ["数据读取失败", ""]
-                      : ["分析流程出错", "可以重试。"];
+  const lt = k ? llmErrorText(k) : null;
+  const { rate, auth, badReq } = lt ?? { rate: false, auth: false, badReq: false };
+  const [title, hint] = lt
+    ? [lt.title, lt.hint]
+    : errorKind === "execution"
+      ? ["代码没跑通", "可以重试，或者换个问法。"]
+      : errorKind === "dataset"
+        ? ["数据读取失败", ""]
+        : ["分析流程出错", "可以重试。"];
   // dataset 的文案是我们自己的常量（errors.dataset_message），本身就是给用户看的，直接放正文
   const body = errorKind === "dataset" ? message : hint;
   const [tech, setTech] = useState(false);

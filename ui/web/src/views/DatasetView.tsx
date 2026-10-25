@@ -14,9 +14,10 @@ type Props = {
   onLoaded?: (d: DatasetDetail) => void;
   onDeleted: () => void;
   onNewSession: (datasetId: string, agent: Agent) => void;
+  onBack?: () => void; // V2c §3
 };
 
-export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onLoaded, onDeleted, onNewSession }: Props) {
+export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onLoaded, onDeleted, onNewSession, onBack }: Props) {
   // Shell 按 id 设了 key，换数据集会重新挂载，这里不用手动复位状态
   const [detail, setDetail] = useState<DatasetDetail | null>(initial?.id === id && initial.preview ? initial : null);
   const [tab, setTab] = useState(0);
@@ -56,6 +57,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
   return (
     <div className="view-root" data-testid="dataset-view">
       <Topbar
+        onBack={onBack}
         title={name}
         sub={sub}
         actions={
