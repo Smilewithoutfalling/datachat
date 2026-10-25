@@ -2151,7 +2151,7 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 
 当前阶段：阶段 5 收尾实现完成，待 S 评审 → 提交 / 推送（CI 上换 11、25 基线）→ S 用真 Key 走 F5 → 删 Streamlit。
 
-## [62] 2026-10-23 · Windows 上 /assets 的 .js 被当成 text/plain，整页白屏 · commit <待提交>
+## [62] 2026-10-23 · Windows 上 /assets 的 .js 被当成 text/plain，整页白屏 · commit 0c777a1（PR #74）
 
 现象：S 在 Windows 本机走 F5，`python -m app.server --open` 打开后整页白屏。标签标题是 datachat，说明 index.html 已经拿到了；`<script type="module" src="/assets/index-*.js">` 没执行。
 
@@ -2165,3 +2165,15 @@ CI 基线（PR #71，run 39889413891）：首跑 f4-visual 4 条全红，差异�
 
 S 本机临时绕过（不依赖本修复）：`reg add "HKCU\Software\Classes\.js" /v "Content Type" /t REG_SZ /d text/javascript /f`。
 
+
+## [63] 2026-10-25 · F4 迭代 V2c 方案：F5 第一批发现 · commit <待提交>
+
+[62] 回填为 0c777a1（PR #74）。
+
+F5 走查记录（进行中）：
+- 测试 agent 假模型预走（10-24~25，报告不入库）：①~⑥ 全过；本机 pytest 852、vitest 848、e2e 非视觉 35/35；#74 的 MIME 修复在 Windows 实机验证通过（`/assets/*.js` → text/javascript）。f3-inject 3 条本机红，定性为字体度量导致的测试可移植性问题（V2c §9）。
+- S 真 Key 走查：已报第一批 8 条（V2c §1~8），五条路径尚未走完。
+
+方案见 docs/roadmap/phase5-frontend.md「F4 迭代 V2c」：1、2 测试连接（旧结果 bug、失败文案折叠原文），3 返回入口，4 字号（先 px→rem 零变化，再根 13→14），5 结论 Markdown 排版，6 当前会话「⋯」常显，7 预览表去掉内层竖向滚动，8 Key 占位字体，9 f3-inject 前提限 linux。O1、O2 和本机环境问题只记录。
+
+S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
