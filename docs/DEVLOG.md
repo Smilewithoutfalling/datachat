@@ -39,7 +39,7 @@ Python · LangGraph（StateGraph 工作流版 + create_react_agent ReAct 版）�
 | B11 | P2 | eval/report.py:31-34, :40 | 正确率分母只算 executed（虚高）；无报错修复率记 100% | 1 |
 | B12 | P2 | eval/comparator.py _normalize_obj | Series 转 dict 比较忽略顺序（虚高）；答案形态不一致（虚低） | 1 |
 | B13 | P2 | eval/runner.py | 只测工作流版；双重执行；无耗时/token | 3 |
-| B14 | P2 | ui/streamlit_app.py | 未接字典 RAG，与 README 不符 | 1（随 Streamlit 下线） |
+| B14 | P2 | ui/streamlit_app.py | 未接字典 RAG，与 README 不符 | 1（随 Streamlit 下线，已删 [67]） |
 | B15 | P2 | tools/csv_io.py | latin-1 兜底静默乱码 | 1 |
 | B16 | P2 | 4 个入口 | 各自装配流程，无服务层 | 1 |
 | B17 | P2 | requirements.txt | 未锁版本；无测试、CI、日志框架 | 0 |
@@ -1903,6 +1903,16 @@ S 10-21 第二轮：
 走查记录：（S 跑完后填）
 
 
+**走查记录（S，2026-10-23 ~ 10-26，Windows + Firefox 缩放 90%，真 Key）**
+- 五条路径全部通过（S 10-26：「其他的没问题」「都是能接受的」）。⑥ 按 10-21 的约定不用复核。⑦ THREAT_MODEL §2.3 S 10-26 确认无异议。
+- 10-23 第一批发现：白屏（Windows .js MIME，#74）和观感 8 条，进了 V2c（#75 / #76）。测试 agent 的基线报告（假模型 ①~⑥ 全过）也一并处理了。
+- 10-26 真 Key 发现，S 定为**可接受、不处理**：
+  - token 消耗偏高。多表题出 4 张图，没取到数字；单轮预算 130,000 兜底（[66]）。
+  - 「写代码」阶段停不下来。停止只在事件之间检查（service.py:119-121），正在进行的模型调用要等它返回；单次 60 秒，加最多 3 次重试（llm.py:33-34）。这是 F2「不主动断流」的设计。
+  - 图表标题选不中、复制不了。标题是画在 ECharts canvas 上的。
+  - 会话页不显示模式（标准 / 边想边做），只能从步骤条有没有「理解问题」看出来。
+- 本机环境：ui\web\dist 是用管理员身份解压的，ACL 锁住了，要在管理员 PowerShell 里用 C:\Windows\System32\takeown.exe / icacls.exe 解锁后才能删（PATH 里没有 System32）。
+
 ## [56] 2026-10-22 · F4 迭代 V2a 方案：按 S 设计稿改版 · commit e4b6ef1
 
 [55] 回填为 b6769cd。
@@ -2204,7 +2214,7 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 
 方案见 docs/roadmap/phase5-frontend.md「V2d」：1 usage 拆分（cache_read / reasoning / estimated，零调用 reported=None，报告导出 6 个字段）；2 单轮预算默认 130,000（ReAct 闸门实测最高 63,817 的约 2 倍），调用前判定并预留收尾量，ReAct 走强制收尾、工作流不进 reviewer，缺 usage 按字数估算，卡片显示 tokens；3 finish_reason=length 作为明确错误，本节不设 max_tokens。其余各项记进 plan.md「外部审计待办」。
 
-## [66] 2026-10-26 · V2d 实现：token 观测与单轮预算 · commit <待提交>
+## [66] 2026-10-26 · V2d 实现：token 观测与单轮预算 · commit 2b283b6（PR #78）
 
 [65] 回填为 1144c27（PR #77；master tests run 40255033298 绿，这个提交只触发了 tests 工作流）。按 phase5-frontend.md「V2d」§1~3 实现，偏离写在该节「实现与偏离」。
 
@@ -2214,3 +2224,18 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - 测试设施：ScriptedChatModel tokens_per_call=None 模拟不回 usage；fake_llm 新增 tokens-<N> 场景、MARK_FINALIZE。
 - 判定变更：旧断言一条没改（零调用 reported=None 的路径以前没有测试断言）。新增 tests/test_v2d.py 20 条、src/views/v2d.test.tsx 5 条、e2e/f4-budget.spec.ts 1 条（fake 项目按文件名 f[34]* 匹配）。提示词、chart_fixtures 不变。视觉 11、25 两屏：token 文字让 `.acard-time` 遮罩框变宽（每张 1119 像素，只在遮罩框里），基线换成首跑 CI run 40260578380 的 x64 actual；我本地报的「基线不用重取」是错的——本地 aarch64 这 4 屏本来就红，看不出这个差异。
 
+
+## [67] 2026-10-26 · F5 通过，删 Streamlit · commit <待提交>
+
+[66] 回填为 2b283b6（PR #78；master tests run 40262438449 绿）。F5 走查记录补在 [55] 末尾：五条路径都过了；10-26 的 4 条发现 S 定为可接受，不处理。
+
+按 phase5「F5 · 通过与收尾」的清单逐条删除：
+- [x] `ui/streamlit_app.py`、`ui/chat_app.py`
+- [x] `requirements.txt` 的 `streamlit==1.65.0`
+- [x] `tests/test_ui_smoke.py`（3 个测试项：test_page_renders × 2 页 + test_chat_app_turn_goes_through_analyze）。pytest 基线从 872 降到 869，这是删除带来的，不是回归。
+- [x] `packaging/build_sidecar.py` 的 `--exclude-module streamlit`
+- [x] README 里的 Streamlit 界面介绍和两条 `streamlit run`
+- [x] HANDOVER 第 20 行；DEVLOG B14 标成「已删」
+- 另外改了：app/core/service.py 文件头的入口列表、plan.md 阶段 5 的状态（标成完成）。
+
+pyarrow：它只是 streamlit 的传递依赖（[18]，DEVLOG 第 771 行），所以删掉 streamlit 后，新装的环境里不会再有 pyarrow。pandas 3.0 在没有 pyarrow 时字符串后端改用 python，开发和打包也因此一致了。这样 [18] 留到阶段 6 的「pyarrow 去留」问题就不用再定了，sidecar 体积预计少约 78 MB，以 CI 的 sidecar 工件为准。验证：我用全新 venv 装 requirements-dev.txt，确认没有 streamlit 和 pyarrow，再跑全量 pytest。
