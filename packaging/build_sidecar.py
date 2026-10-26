@@ -28,7 +28,6 @@ ARGS = [
     "--copy-metadata", "keyring",
     "--collect-submodules", "keyring.backends",
     # 用不到、但会被分析器拖进来的大包
-    "--exclude-module", "streamlit",
     "--exclude-module", "tkinter",
     "--exclude-module", "IPython",
     "--exclude-module", "pytest",

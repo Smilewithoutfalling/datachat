@@ -51,8 +51,7 @@
 - `app/tools/schema.py`   —— CSV 表结构描述
 - `app/llm.py`       —— 兼容层（旧的 get_llm），实现已移到 `app/core/llm.py`
 - `app/eval/`        —— 评测：50 题用例、比较器（顺序/答案形态规则见 comparator.py 文件头）、报告
-- `ui/streamlit_app.py` —— 单轮网页界面（工作流版）
-- `ui/chat_app.py`   —— 多轮对话界面（ReAct 版 + 记忆，支持追问）
+- `ui/web/`          —— 前端（React + TS），由 `python -m app.server --open` 托管
 
 ## 运行
 
@@ -87,12 +86,6 @@ python run_eval.py
 python run_eval.py --oracle
 python run_eval.py --repeat 3            # 同一配置连跑 3 次，看均值与波动
 python run_eval.py --rescore outputs/eval_xxx.json   # 不调模型，按当前比较器/标准答案重新打分
-
-# 3d. 单轮网页界面（工作流版）
-streamlit run ui/streamlit_app.py
-
-# 3e. 多轮对话界面（ReAct 版，支持记忆与追问）
-streamlit run ui/chat_app.py
 ```
 
 在代码里调用：

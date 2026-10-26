@@ -1,6 +1,6 @@
 """统一的分析服务函数 analyze()（B16）。
 
-所有入口（run.py / run_react.py / run_eval.py / 两个 Streamlit 页面，以及以后的 FastAPI）
+所有入口（run.py / run_react.py / run_eval.py / app/server 的 FastAPI 后端）
 都只调这一个函数，不再各自装配 schema、字典检索、图和模型。
 
 约定：

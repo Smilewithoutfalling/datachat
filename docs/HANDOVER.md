@@ -17,12 +17,12 @@
 - `app/server`：FastAPI 本地后端（sidecar），SQLite（写法兼容 PG），SSE 推事件，Bearer token，托管前端 dist 并带 CSP。启动契约见 `docs/sidecar-contract.md`（壳必须 `--port 0`）。
 - `ui/web`：React 19 + TS 前端（Vite、vitest、Playwright），图表用 ECharts（按需引入）。**前端只通过 HTTP/SSE 和后端通信，不用 Tauri IPC**（S 定，2026-10-12）。
 - 外壳：Tauri 2 + PyInstaller 打包的 sidecar，在 GitHub Actions 的 Windows runner 上构建（`packaging/`、`.github/workflows/sidecar.yml`）。
-- Streamlit 旧界面（`ui/streamlit_app.py`、`ui/chat_app.py`）还在，F5 验收后单独 PR 删除（连带面 6 处，清单在 phase5「F5」）。
+- Streamlit 旧界面已在 F5 验收后删除（DEVLOG [67]）。
 
 进度：阶段 0–4 完成；**阶段 5（前端）收尾中**，方案是 `docs/roadmap/phase5-frontend.md`。
 - F0–F2（#32–#35）、F3 ECharts 六步（#41–#53）、F4 层 1 面板（#57）、F4 迭代 V1（#67）、F4 迭代 V2a（#70，按 S 的设计稿整体重做界面）都已合并。
 - 和 F 路径并行的：chart_errors 按执行记账（result.py:117，#55，已完成）、#49 矮画布紧凑几何（#58）、#44 sidecar 契约（#59）、T11 错误文案脱敏（#61）、A1 错题自动复跑（#63）、G1 闸门 oracle 上 CI（#65）、`llm_kind`（含在 #70 里）。
-- F5（S 用真 Key 走五条路径）的清单已合并（#68，DEVLOG [55]），**还没走**，在等 S。
+- F5：S 用真 Key 走完五条路径并通过（2026-10-26，走查记录在 DEVLOG [55]）；Streamlit 已删（DEVLOG [67]）。阶段 5 完成，下一步阶段 6。
 - 最近一步：四屏视觉回归（`ui/web/e2e/f4-visual.spec.ts`，DEVLOG [59]）。
 
 基线数字（39c4741 + [59]，Linux 沙箱）：pytest 837 passed（含闸门 25 条，需先下数据）、vitest 790、e2e 38、lint / tsc / build / `gen_ui_types --check` 全过。
@@ -79,7 +79,7 @@ S 的评审风格：逐条评审，会对照代码和截图核实，按 P0（挡
    - 设置页「测试连接」：要后端新接口。
    - P1-17：图表警告文案（"x 列 '…' 不存在"暴露变量名）在后端 `chart_warnings`，前端改写就是匹配后端文案，要改就改后端。
    - P1-16：失效页"重新打开应用"浏览器里做不到，放阶段 6。
-4. **F5**：S 用真 Key 走五条路径（清单在 phase5「F5」），走完把记录填进 DEVLOG [55]。然后单独 PR 删 Streamlit（pytest 基线 814 → 811 是当时的数，现在要按 837 重算）。
+4. **F5**：已通过（2026-10-26），Streamlit 已删，pytest 基线 872 → 869（DEVLOG [67]）。
 5. **阶段 6** Tauri 打包。代码签名证书要由有实名主体、能付款的一方办（S 没有），选型（大概率 OV 起步）在 phase5「F5」末尾的阶段 6 前置事项里。
 
 ## 6. 环境搭建与运行
