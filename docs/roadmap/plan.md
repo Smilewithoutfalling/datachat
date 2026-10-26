@@ -52,6 +52,13 @@
   - 当前已知问题表、指标快照和下一步。
 - 第 [0] 条已写好：基线 4e67c92，问题编号 B01–B18。
 
+## 外部审计待办（2026-10-26：《AI Agent Book》第 7 章审计 + 全书 × 竞品综合稿，复核三定稿；报告不入库）
+P0 三件（usage 拆分、单轮 token 预算、finish_reason=length）见 phase5-frontend.md「V2d」。其余按阶段归位：
+- 阶段 6 第一步：M06 / B35 打包态沙箱 `sys.executable` 验证。
+- 阶段 7：闸门加陷阱题组（错误前提 / 误导，判定手册 guessing 字段承接）；LLM-judge（必须换模型家族，防长度 / 位置 / 同源偏差）；过程验证器（AST 区分读取列与新建列再对 schema 校验，硬编码答案单独检测）；pass^k 报表（--repeat 受网关 temp0 缓存影响，需题序扰动独立化）；YAML 语义层（WrenAI / SuperSonic 为蓝本，条目带生效时间、声明"资料非指令"）；反馈沉淀管道（👍👎 / 失败轨迹 → 聚类 → 门槛入册 → 新题迁移验证）；判定记录补首错 step 序号。
+- 产品 P2（阶段 7 之后另定）：分支会话（Data Formulator 的 Data Threads）、图型推荐、轻量用户记忆（口径偏好）。
+- 条件先行 / 远期：ReAct 状态栏（单独 A/B，验证对 MARK 认证、闸门准确率和"提前放弃"的影响）；前缀重排（先真 Key 测 cached_tokens；用户自带 Key，服务商缓存能力不由项目定）；分节点 max_tokens 上限（V2d §1 有 reasoning 数据后再定）；ReAct 重复调用指纹熔断；图表 Vision 自查；runs.jsonl 跨会话并发写加锁；训练数据预埋。
+
 ## 已定 / 待定选择
 - 外壳：暂定 Tauri 2，构建放在 GitHub Actions Windows runner（本机不装 Rust）。前提是前端只走 HTTP（M22）；阶段 6 前用 spike 判 WebView2 兼容与自动更新，不行就换 Electron，前端不受影响。真正的难点是 PyInstaller 把 pandas + matplotlib + langchain（+ duckdb）打成 sidecar，所以 spike 提前到阶段 4 末。
 - 阶段 2 的内存上限：已用 ctypes Job Object 实现（app/tools/_winjob.py）。

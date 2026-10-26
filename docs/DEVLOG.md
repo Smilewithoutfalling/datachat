@@ -2179,7 +2179,7 @@ F5 走查记录（进行中）：
 S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 
 
-## [64] 2026-10-25 · F4 迭代 V2c 实现 · commit <待提交>
+## [64] 2026-10-25 · F4 迭代 V2c 实现 · commit 925465b（PR #76）
 
 [63] 回填为 5f34e0b（PR #75）。按 phase5-frontend.md「F4 迭代 V2c」§1~9 实现。
 
@@ -2194,3 +2194,12 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - §8 Key 占位 / 只读说明用界面字体（font-family: inherit），实际 Key 输入仍等宽。
 - §9 f3-inject：非 Linux 且缺 P4~P7 标签时 test.skip，Linux 仍严格断言。
 - HANDOVER：补 web-dist 工件解压位置与管理员解压导致 dist ACL / EPERM 的说明。
+
+
+## [65] 2026-10-26 · V2d 方案：token 观测与单轮预算 · commit <待提交>
+
+[64] 回填为 925465b（PR #76）。**更正**：[64] 合并前我报的「CI run 40199559877 绿」引错了 run——那是 sidecar 工作流；同一提交 7381969 的 tests 工作流 run 40199559981 是红的，master 合并后 run 40200328630 同样红，红的都是 web job 的 f4-visual 08/11/24/25 四张（每张约 1% 像素，只差在 14px 的 DOM 文字抗锯齿上，ECharts 画布文字和布局零差异）。原因：§4b 根字号改成 14 后，四张基线是在沙箱 aarch64 上重生成的，13px 时 aarch64 与 CI x64 一致，14px 时文字栅格化不一致。本 PR 顺带把四张基线换成本 PR 首跑 CI run 40252555398 的 actual（x64），master 由此恢复绿。教训：报 CI 结果按 head_sha 列全部工作流，不只看一个 run。
+
+来源：测试 agent 对照《AI Agent Book》第 7 章的审计 + 全书 × 竞品综合稿（报告不入库）。S 评审三轮：初版「真模型 usage 全盲、gate tokens 全空」不成立（13 份 gate 报告每题 tokens 都非零，runner.py:99 只在 reported 时写）；ReAct 上界按 recursion_limit 是图步数改为约 12 次模型调用；分节点紧 max_tokens 撤回；前缀重排、状态栏降级。
+
+方案见 docs/roadmap/phase5-frontend.md「V2d」：1 usage 拆分（cache_read / reasoning / estimated，零调用 reported=None，报告导出 6 个字段）；2 单轮预算默认 130,000（ReAct 闸门实测最高 63,817 的约 2 倍），调用前判定并预留收尾量，ReAct 走强制收尾、工作流不进 reviewer，缺 usage 按字数估算，卡片显示 tokens；3 finish_reason=length 作为明确错误，本节不设 max_tokens。其余各项记进 plan.md「外部审计待办」。

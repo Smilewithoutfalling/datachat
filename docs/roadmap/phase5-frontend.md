@@ -1005,7 +1005,7 @@ A 组净效果（25 屏 360 高）：plot 区高度 −4px（nameGap 多占 4）
 - B 组：vitest 组头当前值 5 组、整组不可用的理由在组头、「完成」关卡、按类目着色（单系列柱图才出现、写 colorBy、颜色行换成类目）、标题（空串回到后端标题、注入串 SSR 不产生 DOM、限长 100）、应用到同类（迁移字段 / 不迁移字段、自己改过的不被覆盖、清除图型默认）。e2e：f4-panel 加「应用到所有柱状图」跨两张图生效。
 - C 组、D 组：见上面各自的测试条目。
 
-### F4 迭代 V2c：F5 第一批发现（方案，待 S 评审；DEVLOG [63]）
+### F4 迭代 V2c：F5 第一批发现（已定，S 10-25 评审通过，PR #75；实现 PR #76；DEVLOG [63][64]）
 
 来源：S 10-23 本机走查（Windows + Firefox，缩放 90%）第一批 8 条，加测试 agent 10-24~25 的基线报告（假模型 F5 ①~⑥ 全过，pytest 852 / vitest 848 / e2e 非视觉 35/35；不入库）。白屏已由 #74 修掉（squash 0c777a1），不在本节。S 的真 Key 五条路径还没走完，走完的新发现**补进本节**，再一起评审；实现合一个 PR、最后统一跑闸门。
 
@@ -1066,6 +1066,55 @@ A 组净效果（25 屏 360 高）：plot 区高度 −4px（nameGap 多占 4）
 - f4-visual 四屏（08、11、24、25）基线全部重取（4b、5、7）；4a 那个 commit 必须零变化。
 - vitest、e2e 里写死字号或用 `opacity: 0` 判断「⋯」可见性的断言如有，逐条写理由改。
 - pytest、chart_fixtures 不变（本节没有后端改动）。
+
+### V2d：token 观测与单轮预算（方案，待 S 评审；DEVLOG [65]）
+
+来源：测试 agent 10-25~26 对照《AI Agent Book》第 7 章的审计（复核三定稿）和全书 × 竞品综合稿（都不入库）。两稿的 P0 三件在这里落成规则；P1~P3 记进 plan.md「外部审计待办」。三件**都不改提示词**，fake_llm 的 MARK 认证和闸门准确率不受影响，ScriptedChatModel / fake_llm 在 CI 里就能测，不需要真 Key。
+
+实测基线（docs/eval/gate_*.json，每题 `tokens` = total_tokens，`runner.py:99` 只在 reported 时写）：
+
+| 架构 | 题数 | p50 | p95 | 最高 |
+|---|---|---|---|---|
+| ReAct（25 题全量 ×5 份） | 125 | 8,975 | 28,846 | 63,817 |
+| 工作流（25 题全量 ×3 份） | 75 | 2,343 | 8,411 | 12,996 |
+
+#### 1. usage 拆分
+- 证据：`TokenUsage`（app/core/llm.py:60-67）只有 calls / input / output / total / retries / reported；`UsageTracker.add_message`（llm.py:76-88）只读 `usage_metadata` 的 input、output、total。评测报告每题只导 total（runner.py:99）。零调用就失败时 `reported` 停在默认值 True（dataclass 默认），报告里看起来像"上报了 0"。
+- 规则：
+  - TokenUsage 增加 `cache_read_tokens`、`reasoning_tokens`，从 `usage_metadata.input_token_details.cache_read`、`output_token_details.reasoning` 读（langchain-openai 把 OpenAI 兼容口的 `prompt_tokens_details.cached_tokens` / `completion_tokens_details.reasoning_tokens` 映射到这两处）；服务商不给就记 None（不是 0），表示"没上报"而不是"没用"。
+  - 增加 `estimated: bool`：任何一次调用缺 usage 时，这次调用按字符数估算（见 §2a）并置 True；`reported` 语义不变（每次都拿到真 usage 才为 True）。
+  - `reported` 初值改为"calls == 0 时为 None"：零调用时报告写 null，不写 True。
+  - 评测 / 闸门报告每题导出 `tokens_in`、`tokens_out`、`tokens_cache_read`、`tokens_reasoning`、`tokens_reported`、`tokens_estimated`；原 `tokens`（total）保留，旧报告可比。
+- 验收（pytest）：ScriptedChatModel 返回带 input/output_token_details 的 usage → 四个字段都累加；不带 details → 两个新字段 None；不带 usage → estimated=True、reported=False；零调用失败 → reported 为 None；runner 导出新字段且 `tokens` 与原口径一致。
+
+#### 2. 单轮 token 预算
+- 证据：没有任何 token 上限，只有 ReAct 的 `recursion_limit=25`（service.py:51；图步数，模型调用和工具调用各算一步，约 12 次模型调用）和工作流的 `max_attempts=3`。ReAct 每次模型调用都重发系统提示 + 全部历史（react_agent.py:102-104），花的是用户自己的 Key。
+- 规则：
+  - 单轮预算 `DATACHAT_TOKEN_BUDGET`，默认 **130,000**（ReAct 实测最高 63,817 的约 2 倍；工作流最高 12,996，正常碰不到）。设成 0 关闭。只在后端，不进设置页。
+  - a. 计数口径：每次调用后累加 total；缺 usage 的调用按「输入字符数 + 输出字符数」÷ 2 估算（中文约 1 字 1 token、英文约 4 字符 1 token 的折中，宁可多算），同一个预算线，置 `estimated`。
+  - b. 判定时机：每次模型调用**之前**检查"已用 + 预留 ≥ 预算"，预留 = 强制收尾那次调用的量（取最近一次调用的输入量，没有就 0）。这样超限后收尾那一笔也在预算内。
+  - c. ReAct 超限：停在当前步，走步数到顶的强制收尾通道（service.py:480-500）——用已有执行结果出结论，warning 写「本轮 token 用量达到上限（N），已根据已有执行结果收尾」；收尾也失败时与步数到顶相同，`error_kind=agent`。
+  - d. 工作流超限：executor 之后的条件边（graph.py:11-15 `_route_after_exec`）加预算条件，超限即使还有重试次数也不进 reviewer，直接走 summarizer——与重试用尽是同一条路径，warning 同上。planner / codegen 之前超限（只可能在预算设得很小时）直接以 `error_kind=agent` 结束。
+  - e. 前端：每轮卡片底部现有耗时（turn.ts:175 `timings.total`）旁加「约 N tokens」；`estimated` 时数字前加「≈」并在 title 写"服务商未返回用量，按字数估算"；`reported` 为 None（零调用）时不显示。
+- 验收：
+  - pytest：ReAct 用 ScriptedChatModel 每次报大 usage → 第 k 次调用前停、出 forced_answer、warning 文案；工作流第一次 exec 失败且已超限 → 不调 reviewer、走 summarizer；缺 usage 时按估算触发；预算 0 → 不触发；收尾预留：预算恰好卡在"再调一次就超"时先收尾。
+  - vitest：卡片显示 tokens；estimated 显示「≈」；零调用不显示。
+  - e2e：fake_llm 加一个场景按调用返回大 usage（现在固定 10/5，tests/fake_llm.py:301），断言卡片出现预算 warning 和结论。
+
+#### 3. finish_reason=length 作为明确错误
+- 证据：除测试连接（max_tokens=1）外，所有调用都不传 max_tokens（llm.py:198-205）。模型输出被服务商默认上限截断时，codegen 拿到半截代码 → 语法错误 → 进 reviewer 重试，用户看到的是"代码执行出错"，原因被掩盖。
+- 规则：节点调用和 ReAct agent 调用检查 `response_metadata.finish_reason == "length"`：codegen / reviewer 截断不执行半截代码，记一次失败、error 写「模型输出被截断（达到输出长度上限）」，照常进重试；summarizer / ReAct 结论截断时保留已有文字，加 warning「结论可能不完整（模型输出达到长度上限）」。
+- **本节不设 max_tokens 上限。** 理由：思考 token 是否计入 max_tokens 因服务商而异，当前看不见；等 §1 上线后用真 Key 跑一遍闸门，拿各节点 output / reasoning 分布，再定一个可配置的上限（取实测最高值的若干倍）。
+- 验收（pytest）：ScriptedChatModel 返回 finish_reason=length 的 codegen → 不进 executor、attempts+1；summarizer → 有 warning、answer 保留。
+
+#### 判定变更预告
+- pytest：新增上述用例；旧的 usage 断言里 `reported` 在零调用路径从 True 变 None，逐条写理由。
+- 闸门 / 评测报告结构加 6 个字段，旧报告不重写；FROZEN.md 的可比性规则不变（只比 total）。
+- vitest / e2e：卡片底部多一段 token 文字，f4-visual 的 11、25 屏基线大概率要重取。
+- 提示词、chart_fixtures 不变。
+
+#### 不做（记在 plan.md）
+- 前缀重排（P3，先用真 Key 测 cached_tokens）、ReAct 状态栏（P1，单独 A/B）、分节点紧 max_tokens（撤回）、陷阱题组 / LLM-judge / 过程验证器（阶段 7）、M06 打包沙箱（阶段 6 第一步）。
 
 ## 7. 与前端并行，不在 F 路径上
 - 错误文案脱敏（THREAT_MODEL T11）：单独一个 PR，F2 之后做；先定规则再改阶段 3/4 的代码。
