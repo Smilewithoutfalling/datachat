@@ -2198,7 +2198,7 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 
 ## [65] 2026-10-26 · V2d 方案：token 观测与单轮预算 · commit <待提交>
 
-[64] 回填为 925465b（PR #76，CI run 40199559877）。
+[64] 回填为 925465b（PR #76）。**更正**：[64] 合并前我报的「CI run 40199559877 绿」引错了 run——那是 sidecar 工作流；同一提交 7381969 的 tests 工作流 run 40199559981 是红的，master 合并后 run 40200328630 同样红，红的都是 web job 的 f4-visual 08/11/24/25 四张（每张约 1% 像素，只差在 14px 的 DOM 文字抗锯齿上，ECharts 画布文字和布局零差异）。原因：§4b 根字号改成 14 后，四张基线是在沙箱 aarch64 上重生成的，13px 时 aarch64 与 CI x64 一致，14px 时文字栅格化不一致。本 PR 顺带把四张基线换成本 PR 首跑 CI run 40252555398 的 actual（x64），master 由此恢复绿。教训：报 CI 结果按 head_sha 列全部工作流，不只看一个 run。
 
 来源：测试 agent 对照《AI Agent Book》第 7 章的审计 + 全书 × 竞品综合稿（报告不入库）。S 评审三轮：初版「真模型 usage 全盲、gate tokens 全空」不成立（13 份 gate 报告每题 tokens 都非零，runner.py:99 只在 reported 时写）；ReAct 上界按 recursion_limit 是图步数改为约 12 次模型调用；分节点紧 max_tokens 撤回；前缀重排、状态栏降级。
 
