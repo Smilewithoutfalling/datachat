@@ -57,40 +57,133 @@ class LLMConfig:
 
 
 # ---------------------------------------------------------------- token 统计
+DEFAULT_TOKEN_BUDGET = 130_000   # V2d §2：单轮预算，ReAct 闸门实测最高 63,817 的约 2 倍
+EST_CHARS_PER_TOKEN = 2          # V2d §2a：缺 usage 时按字符数估算（中文约 1 字 1 token、英文约 4 字符，宁可多算）
+
+
+def token_budget() -> int:
+    """单轮 token 预算：环境变量 DATACHAT_TOKEN_BUDGET，默认 DEFAULT_TOKEN_BUDGET；0 表示关闭。"""
+    v = os.getenv("DATACHAT_TOKEN_BUDGET")
+    try:
+        return max(0, int(v)) if v not in (None, "") else DEFAULT_TOKEN_BUDGET
+    except ValueError:
+        return DEFAULT_TOKEN_BUDGET
+
+
+def text_chars(x: Any) -> int:
+    """提示词 / 消息列表 / 回复内容的字符数（估算 token 用）。"""
+    if x is None:
+        return 0
+    if isinstance(x, str):
+        return len(x)
+    if isinstance(x, (list, tuple)):
+        return sum(text_chars(m) for m in x)
+    if isinstance(x, dict):
+        return text_chars(x.get("text") or x.get("content"))
+    content = getattr(x, "content", None)
+    n = text_chars(content) if content is not None else len(str(x))
+    for tc in getattr(x, "tool_calls", None) or []:
+        n += len(str(tc.get("args") or ""))
+    return n
+
+
+def _est(chars: int) -> int:
+    return -(-chars // EST_CHARS_PER_TOKEN)
+
+
+def is_truncated(msg: Any) -> bool:
+    """V2d §3：模型因达到输出长度上限而停（OpenAI 兼容口 finish_reason=length）。"""
+    meta = getattr(msg, "response_metadata", None) or {}
+    return meta.get("finish_reason") == "length"
+
+
+class BudgetExceeded(RuntimeError):
+    """V2d §2：本轮 token 用量（含预留）达到预算，由 service 走收尾通道，不是错误。"""
+
+    def __init__(self, used: int, budget: int):
+        super().__init__(f"本轮 token 用量达到上限（{used}/{budget}）")
+        self.used, self.budget = used, budget
+
+
 @dataclass
 class TokenUsage:
     calls: int = 0                 # 成功的模型调用次数
-    input_tokens: int = 0
+    input_tokens: int = 0          # 以下四项只累加服务商返回的真数
     output_tokens: int = 0
     total_tokens: int = 0
     retries: Optional[int] = 0     # 本模块执行的重试次数；ReAct 版由 SDK 内部重试，无法计数时为 None
-    reported: bool = True          # 是否每次调用都拿到了 usage（假模型/不返回 usage 的服务为 False）
+    # 是否每次调用都拿到了 usage（假模型/不返回 usage 的服务为 False）；一次调用都没有时为 None（V2d §1）
+    reported: Optional[bool] = None
+    # V2d §1：服务商在 input/output_token_details 里给了才有值；None = 没上报（不是 0）
+    cache_read_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    # V2d §2a：缺 usage 的调用按字符数估算的量（不混进上面的真数）；estimated = 至少一次是估算的
+    estimated_tokens: int = 0
+    estimated: bool = False
+    budget: int = 0                # 本轮预算（0 = 关闭）
+    budget_hit: bool = False       # 本轮因预算提前收尾
+
+    @property
+    def counted(self) -> int:
+        """预算口径：真数 + 估算。"""
+        return self.total_tokens + self.estimated_tokens
 
 
 class UsageTracker:
-    """线程安全的累加器，每次 analyze() 新建一个。"""
+    """线程安全的累加器，每次 analyze() 新建一个。budget>0 时供 over_budget() 判定（V2d §2）。"""
 
-    def __init__(self):
+    def __init__(self, budget: int = 0):
         self._lock = threading.Lock()
-        self.usage = TokenUsage()
+        self.usage = TokenUsage(budget=max(0, int(budget or 0)))
+        self._last_input = 0
 
-    def add_message(self, msg: Any) -> None:
+    def add_message(self, msg: Any, input_chars: int | None = None) -> None:
         meta = getattr(msg, "usage_metadata", None) or {}
         with self._lock:
-            self.usage.calls += 1
+            u = self.usage
+            u.calls += 1
             if not meta:
-                self.usage.reported = False
+                u.reported = False
+                ei = _est(input_chars or 0)
+                u.estimated_tokens += ei + _est(text_chars(msg))
+                u.estimated = True
+                self._last_input = ei
                 return
+            if u.reported is None:
+                u.reported = True
             i = int(meta.get("input_tokens") or 0)
             o = int(meta.get("output_tokens") or 0)
-            self.usage.input_tokens += i
-            self.usage.output_tokens += o
-            self.usage.total_tokens += int(meta.get("total_tokens") or (i + o))
+            u.input_tokens += i
+            u.output_tokens += o
+            u.total_tokens += int(meta.get("total_tokens") or (i + o))
+            self._last_input = i
+            cr = (meta.get("input_token_details") or {}).get("cache_read")
+            if cr is not None:
+                u.cache_read_tokens = (u.cache_read_tokens or 0) + int(cr)
+            rs = (meta.get("output_token_details") or {}).get("reasoning")
+            if rs is not None:
+                u.reasoning_tokens = (u.reasoning_tokens or 0) + int(rs)
 
     def add_retry(self) -> None:
         with self._lock:
             if self.usage.retries is not None:
                 self.usage.retries += 1
+
+    def over_budget(self) -> bool:
+        """下一次调用之前判定：已用 + 预留 ≥ 预算。预留 = 最近一次调用的输入量（收尾那次调用大致这么大），
+        这样超限后的收尾调用也落在预算内（V2d §2b）。"""
+        with self._lock:
+            u = self.usage
+            return bool(u.budget) and u.counted + self._last_input >= u.budget
+
+    def mark_budget_hit(self) -> None:
+        with self._lock:
+            self.usage.budget_hit = True
+
+    def check_budget(self) -> None:
+        if self.over_budget():
+            self.mark_budget_hit()
+            raise BudgetExceeded(self.usage.counted, self.usage.budget)
 
     def snapshot(self) -> TokenUsage:
         with self._lock:
@@ -98,15 +191,21 @@ class UsageTracker:
 
 
 class UsageCallbackHandler(BaseCallbackHandler):
-    """ReAct 版用：挂在 agent.invoke 的 callbacks 上，每次模型返回时记 token。"""
+    """ReAct 版用：挂在 agent.invoke 的 callbacks 上，每次模型返回时记 token。
+    开始时记下输入字符数，服务商不回 usage 时用来估算（V2d §2a）。"""
 
     def __init__(self, tracker: UsageTracker):
         self.tracker = tracker
+        self._input_chars: dict = {}
 
-    def on_llm_end(self, response, **kwargs):  # noqa: D401
+    def on_chat_model_start(self, serialized, messages, *, run_id=None, **kwargs):  # noqa: D401
+        self._input_chars[run_id] = text_chars(messages)
+
+    def on_llm_end(self, response, *, run_id=None, **kwargs):  # noqa: D401
+        chars = self._input_chars.pop(run_id, None)
         for gens in response.generations:
             for g in gens:
-                self.tracker.add_message(getattr(g, "message", None))
+                self.tracker.add_message(getattr(g, "message", None), input_chars=chars)
 
 
 # ---------------------------------------------------------------- 错误分类
@@ -262,7 +361,7 @@ class LLMClient:
                 msg = self.model.invoke(prompt)
                 bad = api_error_text(getattr(msg, "content", None))
                 if bad is not None:
-                    self.tracker.add_message(msg)
+                    self.tracker.add_message(msg, input_chars=text_chars(prompt))
                     raise GatewayErrorContent(bad)
             except Exception as e:  # noqa: BLE001
                 kind, retryable = classify_error(e)
@@ -279,11 +378,16 @@ class LLMClient:
                 self.tracker.add_retry()
                 self._sleep(self._delay(attempts - 1))
                 continue
-            self.tracker.add_message(msg)
+            self.tracker.add_message(msg, input_chars=text_chars(prompt))
             return msg
 
     def invoke(self, prompt) -> str:
         return self.invoke_message(prompt).content
+
+    def invoke_checked(self, prompt) -> tuple[str, bool]:
+        """返回 (文本, 是否被输出长度上限截断)（V2d §3）。"""
+        msg = self.invoke_message(prompt)
+        return msg.content, is_truncated(msg)
 
 
 _FENCE_RE = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\n(.*?)(?:\n[ \t]*```|\Z)", re.S | re.I)

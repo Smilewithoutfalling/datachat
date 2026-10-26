@@ -3,7 +3,7 @@
 // 终止原因只按 status / error_kind / llm_kind 分支（turn.ts 的 outcome），不对文案做匹配。所有用户数据按文本渲染（T9）。
 import { type ReactNode, useEffect, useState } from "react";
 import { type ChartSpec, EChart } from "../charts/EChart";
-import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn } from "../turn";
+import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn, turnTokens } from "../turn";
 import { IconAlert, IconChevronDown, IconChevronUp, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
 import { llmErrorText } from "./llmErrorText";
 import { Markdown } from "./Markdown";
@@ -131,6 +131,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         ? `用时 ${total < 10 ? total.toFixed(2) : total.toFixed(1)}s` // 验收 r2 #6：写明是用时
         : "";
   const hasCode = turn.events.some((e) => e.type === "code");
+  const tokens = o.kind === "running" ? null : turnTokens(turn);
 
   return (
     <div className="acard turn" data-status={turn.status}>
@@ -138,7 +139,18 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         <span className="avatar"><IconSpark size={13} /></span>
         <span className="acard-name">datachat</span>
         <span className={`badge ${badge.cls}`} data-testid="turn-badge">{badge.icon}{badge.text}</span>
-        <span className="acard-time">{time}</span>
+        <span className="acard-time">
+          {time}
+          {tokens ? (
+            <span
+              className="acard-tokens"
+              data-testid="turn-tokens"
+              title={tokens.estimated ? "服务商未返回用量，按字数估算" : undefined}
+            >
+              {time ? " · " : ""}{tokens.estimated ? "≈" : ""}{tokens.n.toLocaleString("en-US")} tokens
+            </span>
+          ) : null}
+        </span>
       </div>
 
       {list.length ? <StepBar list={list} open={open} onToggle={() => setOpen(!open)} canOpen={turn.events.length > 0} /> : null}

@@ -45,7 +45,9 @@ def review_and_fix(state, config=None):
         error=state["error"],
         chart_guide=CHART_GUIDE,
     )
+    text, truncated = llm.invoke_checked(msg)
     return {
-        "code": strip_code(llm.invoke(msg)),
+        "code": strip_code(text),
+        "truncated": truncated,
         "attempts": state.get("attempts", 0) + 1,
     }

@@ -12,13 +12,20 @@ def _dataset(state, config):
     return copy_data(df) if df is not None else load_data(state["df_path"])[0]
 
 
+TRUNCATED_CODE_ERROR = "模型输出被截断（达到输出长度上限），代码不完整，未执行"
+
+
 def execute(state, config=None):
-    chart_path = new_chart_path()
-    df = _dataset(state, config)
     cap = {}
-    result, chart, error = run_code(
-        state["code"], df, chart_path, timeout=state.get("exec_timeout", 20), capture=cap
-    )
+    if state.get("truncated"):
+        # V2d §3：半截代码不执行（执行只会得到一个掩盖原因的语法错误），按一次失败进 reviewer
+        result, chart, error = None, None, TRUNCATED_CODE_ERROR
+    else:
+        chart_path = new_chart_path()
+        df = _dataset(state, config)
+        result, chart, error = run_code(
+            state["code"], df, chart_path, timeout=state.get("exec_timeout", 20), capture=cap
+        )
 
     update = {
         "result": None if error else result,

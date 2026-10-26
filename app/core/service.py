@@ -20,8 +20,9 @@ import uuid
 from collections import defaultdict
 from functools import lru_cache
 
-from app.core.llm import (api_error_text, LLMClient, LLMConfig, LLMError, UsageCallbackHandler,
-                          UsageTracker, build_chat_model, classify_error)
+from app.core.llm import (api_error_text, BudgetExceeded, LLMClient, LLMConfig, LLMError,
+                          UsageCallbackHandler, UsageTracker, build_chat_model, classify_error, is_truncated,
+                          token_budget)
 from app.core.errors import NO_EXEC_MESSAGE, NO_KEY_MESSAGE, user_error
 from app.core.events import CANCELLED_MESSAGE, Emitter, Event
 from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, format_result, last_png,
@@ -29,6 +30,9 @@ from app.core.result import (AnalysisResult, Step, chart_items, chart_warnings, 
 
 AGENTS = ("workflow", "react")
 EVENT_TEXT_CHARS = 2000        # 事件里结果/输出文本的截断长度（完整结果在 done 事件里）
+# V2d：预算收尾与结论截断的 warning（界面原样显示）
+BUDGET_WARNING = "本轮 token 用量达到上限（{budget}），已根据已有执行结果收尾"
+ANSWER_TRUNCATED_WARNING = "结论可能不完整（模型输出达到长度上限）"
 
 logger = logging.getLogger("datachat.analyze")
 
@@ -128,7 +132,7 @@ def analyze_stream(
     if not isinstance(dataset, (list, tuple)):
         dataset = os.fspath(dataset)
     res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question, trace_id=trace_id)
-    tracker = UsageTracker()
+    tracker = UsageTracker(budget=token_budget())
     logger.info("analyze start trace=%s agent=%s dataset=%s", trace_id, agent, res.dataset)
 
     def cancelled():
@@ -261,6 +265,10 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         res.chart_path = state.get("chart_path") or None
         res.charts = chart_items(res.chart_path, state.get("chart_options") or [])
     res.warnings += chart_warnings(res, (state.get("chart_warnings") or []) if res.executed else [])
+    if tracker.snapshot().budget_hit:
+        res.warnings.append(BUDGET_WARNING.format(budget=tracker.usage.budget))
+    if state.get("answer_truncated") and res.answer:
+        res.warnings.append(ANSWER_TRUNCATED_WARNING)
     if res.error is None and state.get("error"):
         res.error, res.error_kind = state["error"], "execution"
     if res.answer and res.executed and refusal_from_answer(res.answer) is None:
@@ -368,7 +376,7 @@ def _react_invoke(graph, question, config, em, sink, attempt, out, history=None)
                                   chart=e.get("chart"), stdout=(e.get("stdout") or "")[:EVENT_TEXT_CHARS],
                                   attempt=attempt, **_chart_event_fields(e))
             seen = len(messages)
-    except GraphRecursionError as e:
+    except (GraphRecursionError, BudgetExceeded) as e:   # V2d §2c：超预算与步数到顶走同一个收尾通道
         err = e
     out["messages"], out["err"] = messages, err
 
@@ -448,6 +456,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
             start = i + 1
     execs = sink["execs"]
     obs_i = 0
+    answer_truncated = False
     evidence = [question]
     for m in messages[start:]:
         if isinstance(m, AIMessage) and m.tool_calls:
@@ -464,6 +473,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         elif isinstance(m, AIMessage):
             res.steps.append(Step("answer", content=str(m.content)))
             res.answer = str(m.content)
+            answer_truncated = is_truncated(m)
     bad = api_error_text(res.answer)
     if bad is not None:
         # 网关以错误 JSON 充当回复（B45 / B62）：不是答案，按 LLM 基础设施失败记
@@ -478,7 +488,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     out_of_steps = rec_err is not None or res.answer.strip().startswith("Sorry, need more steps")
     if out_of_steps:
         res.answer = ""
-        forced = None
+        forced, forced_truncated = None, False
         if res.error is None:
             obs = [t for t in evidence[1:] if t][-8:]
             try:
@@ -488,16 +498,22 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                                   + ("\n\n---\n\n".join(obs) if obs else "（无）"))],
                     config={"callbacks": [UsageCallbackHandler(tracker)]})
                 forced = str(getattr(msg, "content", "") or "")
+                forced_truncated = is_truncated(msg)
                 if api_error_text(forced) is not None or not forced.strip():
                     forced = None
             except Exception:  # noqa: BLE001
                 forced = None
+        over_budget = isinstance(rec_err, BudgetExceeded)
         if forced:
             res.answer = forced
             res.steps.append(Step("forced_answer", content=forced))
-            res.warnings.append(f"ReAct 达到步数上限（recursion_limit={recursion_limit}），已根据已有执行结果强制收尾")
+            res.warnings.append(BUDGET_WARNING.format(budget=rec_err.budget) if over_budget else
+                                f"ReAct 达到步数上限（recursion_limit={recursion_limit}），已根据已有执行结果强制收尾")
+            if forced_truncated:
+                res.warnings.append(ANSWER_TRUNCATED_WARNING)
         elif res.error is None:
-            res.error = user_error("text", f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论",
+            res.error = user_error("text", f"本轮 token 用量达到上限（{rec_err.budget}）仍未给出结论" if over_budget
+                                   else f"ReAct 超过步数上限（recursion_limit={recursion_limit}）仍未给出结论",
                                    trace_id=res.trace_id)
             res.error_kind = "agent"
 
@@ -537,6 +553,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.error_kind = "agent"
 
     res.warnings += chart_warnings(res, [w for e in ok for w in e.get("chart_warnings") or []])
+    if answer_truncated and res.answer and not out_of_steps:
+        res.warnings.append(ANSWER_TRUNCATED_WARNING)
     if res.answer and refusal is None:
         res.unverified_numbers = unverified_numbers(res.answer, evidence)
     if res.answer:

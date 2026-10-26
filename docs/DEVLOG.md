@@ -2196,10 +2196,21 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - HANDOVER：补 web-dist 工件解压位置与管理员解压导致 dist ACL / EPERM 的说明。
 
 
-## [65] 2026-10-26 · V2d 方案：token 观测与单轮预算 · commit <待提交>
+## [65] 2026-10-26 · V2d 方案：token 观测与单轮预算 · commit 1144c27（PR #77）
 
 [64] 回填为 925465b（PR #76）。**更正**：[64] 合并前我报的「CI run 40199559877 绿」引错了 run——那是 sidecar 工作流；同一提交 7381969 的 tests 工作流 run 40199559981 是红的，master 合并后 run 40200328630 同样红，红的都是 web job 的 f4-visual 08/11/24/25 四张（每张约 1% 像素，只差在 14px 的 DOM 文字抗锯齿上，ECharts 画布文字和布局零差异）。原因：§4b 根字号改成 14 后，四张基线是在沙箱 aarch64 上重生成的，13px 时 aarch64 与 CI x64 一致，14px 时文字栅格化不一致。本 PR 顺带把四张基线换成本 PR 首跑 CI run 40252555398 的 actual（x64），master 由此恢复绿。教训：报 CI 结果按 head_sha 列全部工作流，不只看一个 run。
 
 来源：测试 agent 对照《AI Agent Book》第 7 章的审计 + 全书 × 竞品综合稿（报告不入库）。S 评审三轮：初版「真模型 usage 全盲、gate tokens 全空」不成立（13 份 gate 报告每题 tokens 都非零，runner.py:99 只在 reported 时写）；ReAct 上界按 recursion_limit 是图步数改为约 12 次模型调用；分节点紧 max_tokens 撤回；前缀重排、状态栏降级。
 
 方案见 docs/roadmap/phase5-frontend.md「V2d」：1 usage 拆分（cache_read / reasoning / estimated，零调用 reported=None，报告导出 6 个字段）；2 单轮预算默认 130,000（ReAct 闸门实测最高 63,817 的约 2 倍），调用前判定并预留收尾量，ReAct 走强制收尾、工作流不进 reviewer，缺 usage 按字数估算，卡片显示 tokens；3 finish_reason=length 作为明确错误，本节不设 max_tokens。其余各项记进 plan.md「外部审计待办」。
+
+## [66] 2026-10-26 · V2d 实现：token 观测与单轮预算 · commit <待提交>
+
+[65] 回填为 1144c27（PR #77；master tests run 40255033298 绿，这个提交只触发了 tests 工作流）。按 phase5-frontend.md「V2d」§1~3 实现，偏离写在该节「实现与偏离」。
+
+- §1 llm.py：TokenUsage 新增 cache_read_tokens / reasoning_tokens（服务商没给为 None）、estimated_tokens / estimated、budget / budget_hit；reported 初值 None（零调用）。UsageCallbackHandler 在 on_chat_model_start 记输入字符数，LLMClient 用 prompt 字符数，缺 usage 时估算。runner.usage_fields + report.USAGE_KEYS 每题导出 6 个字段，`tokens` 不变。
+- §2 预算：`DATACHAT_TOKEN_BUDGET`（默认 130,000，0 关闭）。UsageTracker.over_budget()：已用（真数 + 估算）+ 最近一次输入 ≥ 预算。ReAct：agent 节点调用前 check_budget() 抛 BudgetExceeded，_react_invoke 与 GraphRecursionError 一起接住，走原有强制收尾，warning / 失败文案按原因区分。工作流：_route_after_exec 读 config 里的 tracker，超限不进 reviewer。前端 turnTokens + 卡片头部 token 文字。
+- §3：is_truncated（finish_reason=length）。codegen / reviewer 截断 → executor 不执行；summarizer、ReAct 结论、强制收尾截断 → 保留文字 + warning。
+- 测试设施：ScriptedChatModel tokens_per_call=None 模拟不回 usage；fake_llm 新增 tokens-<N> 场景、MARK_FINALIZE。
+- 判定变更：旧断言一条没改（零调用 reported=None 的路径以前没有测试断言）。新增 tests/test_v2d.py 20 条、src/views/v2d.test.tsx 5 条、e2e/f4-budget.spec.ts 1 条（fake 项目按文件名 f[34]* 匹配）。提示词、chart_fixtures 不变。视觉 11、25 两屏：token 文字让 `.acard-time` 遮罩框变宽（每张 1119 像素，只在遮罩框里），基线换成首跑 CI run 40260578380 的 x64 actual；我本地报的「基线不用重取」是错的——本地 aarch64 这 4 屏本来就红，看不出这个差异。
+

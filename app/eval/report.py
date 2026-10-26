@@ -19,6 +19,9 @@ from datetime import datetime
 from app.eval.cases import CATEGORY_MAP
 
 
+# V2d §1：每题 token 拆分（runner.usage_fields 产出）；旧报告没有这些键
+USAGE_KEYS = ("tokens_in", "tokens_out", "tokens_cache_read", "tokens_reasoning", "tokens_reported",
+              "tokens_estimated")
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -339,7 +342,9 @@ class EvalReport:
                 "initial_error": r.get("initial_error"), "infra_error": r.get("infra_error"),
                 "error_kind": r.get("error_kind"), "error": r.get("error"),
                 "attempts": r.get("attempts"), "duration_s": r.get("duration_s"),
-                "tokens": r.get("tokens"), "code": r.get("code"),
+                "tokens": r.get("tokens"),
+                **{k: r.get(k) for k in USAGE_KEYS},   # V2d §1
+                "code": r.get("code"),
                 "expected": str(r.get("expected"))[:500], "actual": str(r.get("actual"))[:500],
                 "answer": (r.get("answer") or "")[:2000],
                 "chart": r.get("chart_info"),
