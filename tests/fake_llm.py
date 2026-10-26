@@ -22,7 +22,9 @@ model 名语法（解析器严格，见 parse_model）：
       fail-echo-<code>    同 fail，但错误 message 回显本次请求里的用户问题整句（T11 回显剥离）
       fail-echocut-<code> 同上，但只回显问题的前 2/3（≥12 字），模拟网关截断 body 后的半句回显
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
-    step：plan | codegen | fix | answer（工作流）、act | final（ReAct）
+      tokens-<N>  同 ok，但每一次调用的 usage 报 prompt_tokens=N、completion_tokens=5（V2d 单轮预算 e2e）。不带 @step。
+    step：plan | codegen | fix | answer（工作流）、act | final（ReAct；步数到顶 / 超预算的强制收尾调用也认作 final，
+      靠 MARK_FINALIZE）
       不写 @step 时目标调用是"第一次调用"：工作流的 plan、ReAct 的 act（无状态可判定，不需要计数）。
     设置页「测试连接」（阶段 5 收尾 C）：请求只有一条 user 消息、内容正好是 MARK_PING（= app/core/llm.py 的 PING_MESSAGE）
       时认作 ping 链路，唯一一步 ping。ok / chart-* / inject-* 回 "pong"；fail-<code>、hang-<N>s、slow-<N>s 照常作用于它；
@@ -141,6 +143,7 @@ MARK_FIX = "之前生成的 pandas 代码执行出错了，请修正它"
 MARK_CODEGEN = "根据分析计划写一段 pandas 代码"
 MARK_ANSWER_OK = "根据分析结果，用中文简洁、直接地回答用户问题"
 MARK_ANSWER_FAIL = "分析未能成功完成"
+MARK_FINALIZE = "工具调用次数已经用完"   # service.py FINALIZE_PROMPT（强制收尾，V2d 起超预算也走它）
 MARK_PING = "ping"   # 设置页「测试连接」的固定消息（app/core/llm.py PING_MESSAGE）；整条消息相等才算，不做子串匹配
 PING_REPLY = "pong"
 
@@ -151,7 +154,7 @@ class FakeError(Exception):
 
 @dataclass(frozen=True)
 class Scenario:
-    kind: str                    # ok | hang | fail | slow | chart | inject
+    kind: str                    # ok | hang | fail | slow | chart | inject | tokens
     value: int = 0               # 秒数或 HTTP 状态码
     step: Optional[str] = None   # 目标步骤；None = 第一次调用
     chart: Optional[str] = None  # chart / inject 场景的图型（inject 另有 "error"）
@@ -165,7 +168,7 @@ class Scenario:
 
 _CHART_RE = re.compile(r"^chart-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _INJECT_RE = re.compile(r"^inject-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
-_MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow)(?:-(?P<echo>echo|echocut))?"
+_MODEL_RE = re.compile(r"^(?P<kind>ok|hang|fail|slow|tokens)(?:-(?P<echo>echo|echocut))?"
                        r"(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
 
 
@@ -199,6 +202,10 @@ def parse_model(name: str) -> Scenario:
     if val is None:
         raise FakeError(f"{kind} 需要参数：{name!r}")
     n = int(val)
+    if kind == "tokens":
+        if unit or step is not None or n < 1:
+            raise FakeError(f"tokens 的参数是每次调用的 prompt_tokens（正整数，不带单位、不带 @step）：{name!r}")
+        return Scenario("tokens", n)
     if kind in ("hang", "slow"):
         if unit != "s":
             raise FakeError(f"{kind} 的参数要带单位 s（如 {kind}-30s）：{name!r}")
@@ -233,6 +240,8 @@ def recognize(messages: list) -> tuple[str, str]:
     if MARK_REACT in whole:
         # 边界：只按"最后一条是不是 tool"分 act / final，适用于单轮工具调用的剧本。多轮（连调两次工具再收尾）
         # 分不出第几轮——真要测时按 tool 消息个数分，仍然无状态，不要加计数器。
+        if MARK_FINALIZE in whole:
+            return "react", "final"
         return "react", ("final" if messages[-1].get("role") == "tool" else "act")
     for mark, step in ((MARK_PLAN, "plan"), (MARK_FIX, "fix"), (MARK_CODEGEN, "codegen"),
                        (MARK_ANSWER_OK, "answer"), (MARK_ANSWER_FAIL, "answer")):
@@ -298,7 +307,8 @@ def handle(body: dict, sleep=time.sleep) -> tuple[int, dict]:
         "id": f"chatcmpl-fake-{uuid.uuid4().hex[:8]}", "object": "chat.completion", "created": int(time.time()),
         "model": body["model"],
         "choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls" if msg.get("tool_calls") else "stop"}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        "usage": ({"prompt_tokens": sc.value, "completion_tokens": 5, "total_tokens": sc.value + 5}
+                  if sc.kind == "tokens" else {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
     }
 
 

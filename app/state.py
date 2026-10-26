@@ -26,3 +26,5 @@ class AgentState(TypedDict, total=False):
     attempts: int        # 已重试次数
     max_attempts: int    # 最大重试次数
     exec_timeout: int    # 单次代码执行超时（秒）
+    truncated: bool      # V2d §3：本次 codegen / reviewer 输出被长度上限截断（executor 不执行半截代码）
+    answer_truncated: bool  # V2d §3：summarizer 的结论被截断（service 加 warning）

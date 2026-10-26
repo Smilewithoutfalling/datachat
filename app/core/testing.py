@@ -22,7 +22,7 @@ class ScriptedChatModel(BaseChatModel):
     responder: Any = None
     replies: list = []
     calls: list = []
-    tokens_per_call: tuple = (10, 5)
+    tokens_per_call: Any = (10, 5)   # None = 不带 usage_metadata
 
     def _next(self, messages):
         if self.responder is not None:
@@ -35,6 +35,8 @@ class ScriptedChatModel(BaseChatModel):
             raise out
         if isinstance(out, str):
             out = AIMessage(content=out)
+        if self.tokens_per_call is None:      # 模拟不回 usage 的服务商（V2d §2a）
+            return out
         i, o = self.tokens_per_call
         if out.usage_metadata is None:
             out = out.model_copy(update={"usage_metadata": {

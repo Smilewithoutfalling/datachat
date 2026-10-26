@@ -1067,7 +1067,7 @@ A 组净效果（25 屏 360 高）：plot 区高度 −4px（nameGap 多占 4）
 - vitest、e2e 里写死字号或用 `opacity: 0` 判断「⋯」可见性的断言如有，逐条写理由改。
 - pytest、chart_fixtures 不变（本节没有后端改动）。
 
-### V2d：token 观测与单轮预算（方案，待 S 评审；DEVLOG [65]）
+### V2d：token 观测与单轮预算（方案 DEVLOG [65]，已实现 DEVLOG [66]）
 
 来源：测试 agent 10-25~26 对照《AI Agent Book》第 7 章的审计（复核三定稿）和全书 × 竞品综合稿（都不入库）。两稿的 P0 三件在这里落成规则；P1~P3 记进 plan.md「外部审计待办」。三件**都不改提示词**，fake_llm 的 MARK 认证和闸门准确率不受影响，ScriptedChatModel / fake_llm 在 CI 里就能测，不需要真 Key。
 
@@ -1112,6 +1112,13 @@ A 组净效果（25 屏 360 高）：plot 区高度 −4px（nameGap 多占 4）
 - 闸门 / 评测报告结构加 6 个字段，旧报告不重写；FROZEN.md 的可比性规则不变（只比 total）。
 - vitest / e2e：卡片底部多一段 token 文字，f4-visual 的 11、25 屏基线大概率要重取。
 - 提示词、chart_fixtures 不变。
+
+#### 实现与偏离（DEVLOG [66]）
+- §2a 估算量单独记 `TokenUsage.estimated_tokens`，**不混进** input / output / total：这三项和报告里的 `tokens` 只放服务商真数，旧口径不变；预算按 `total + estimated`（`TokenUsage.counted`）算。
+- §2d「planner / codegen 之前超限直接 agent 失败」没做：工作流每轮最多 planner + codegen + 3 次 reviewer + summarizer 共 6 次调用，唯一的循环是 reviewer，预算只卡 `_route_after_exec` 就够；为了一个只在预算设得极小时才会走到的分支，往每个节点里加检查不划算。
+- §2e 耗时其实在卡片**头部**（TurnView.tsx `acard-time`），不在底部，token 跟在后面：真数写「· 140,010 tokens」（真数不加「约」），估算写「· ≈900 tokens」并带 title。`.acard-time` 在 f4-visual 里本来就被遮罩（f4-visual.spec.ts:60 `DYNAMIC`），所以四屏基线**不用重取**。
+- §3 codegen / reviewer 截断：节点返回 `truncated=True`，executor 见到就不执行，error 写 `TRUNCATED_CODE_ERROR`；reviewer 收到的是这条原因，不是语法错误。
+- fake_llm：新增 `tokens-<N>` 场景（每次调用报 prompt_tokens=N）；强制收尾的提示词（FINALIZE_PROMPT）以前被认成 act，现在用 `MARK_FINALIZE` 认成 final。
 
 #### 不做（记在 plan.md）
 - 前缀重排（P3，先用真 Key 测 cached_tokens）、ReAct 状态栏（P1，单独 A/B）、分节点紧 max_tokens（撤回）、陷阱题组 / LLM-judge / 过程验证器（阶段 7）、M06 打包沙箱（阶段 6 第一步）。

@@ -39,4 +39,5 @@ def generate_code(state, config=None):
         plan=state.get("plan", ""),
         chart_guide=CHART_GUIDE,
     )
-    return {"code": strip_code(llm.invoke(msg))}
+    text, truncated = llm.invoke_checked(msg)
+    return {"code": strip_code(text), "truncated": truncated}

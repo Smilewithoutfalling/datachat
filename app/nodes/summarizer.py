@@ -29,4 +29,5 @@ def summarize(state, config=None):
         if text is None:
             text = str(state.get("result"))
         msg = _OK_PROMPT.format(question=state["question"], result=text, chart_note=note)
-    return {"answer": llm.invoke(msg)}
+    text, truncated = llm.invoke_checked(msg)
+    return {"answer": text, "answer_truncated": truncated}

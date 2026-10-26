@@ -13,6 +13,14 @@ from app.tools.csv_io import read_csv
 from app.tools.sandbox import run_trusted
 
 
+
+def usage_fields(u) -> dict:
+    """评测 / 闸门报告每题的 token 拆分（V2d §1）。没上报的项为 None。"""
+    rep = bool(u.reported)
+    return {"tokens_in": u.input_tokens if rep else None, "tokens_out": u.output_tokens if rep else None,
+            "tokens_cache_read": u.cache_read_tokens, "tokens_reasoning": u.reasoning_tokens,
+            "tokens_reported": u.reported, "tokens_estimated": u.estimated}
+
 class EvalRunner:
     def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
                  model_factory=None, use_dictionary: bool = True, max_attempts: int = 3,
@@ -97,6 +105,8 @@ class EvalRunner:
             "error": res.error, "error_kind": res.error_kind,
             "chart": res.chart_path, "chart_info": chart_row(res), "duration_s": res.timings.get("total"),
             "tokens": res.usage.total_tokens if res.usage.reported else None,
+            # V2d §1：拆分字段；旧报告只有 tokens（total），可比性只看它
+            **usage_fields(res.usage),
         })
 
         # 3. 打分：直接用 analyze 的结构化结果

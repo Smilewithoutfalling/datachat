@@ -100,6 +100,8 @@ def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None,
     by_name = {t.name: t for t in tools}
 
     def agent(state: AgentState, config):
+        if tracker is not None:
+            tracker.check_budget()   # V2d §2b：调用之前判定（含收尾预留），超限抛 BudgetExceeded 由 service 收尾
         msg = _invoke_with_retry(bound, [SystemMessage(system)] + list(state["messages"]), config,
                                  llm_config, tracker, sleep)
         return {"messages": [msg]}

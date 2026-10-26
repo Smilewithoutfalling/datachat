@@ -172,6 +172,16 @@ export function partialSignals(t: Turn): string[] {
   return out;
 }
 
+/** V2d §2e：整轮 token（done 里的 usage）。真数 + 估算；有估算时 estimated=true；一次调用都没有（reported 为 null）或没有 usage 时 null。 */
+export function turnTokens(t: Turn): { n: number; estimated: boolean } | null {
+  const u = t.result?.usage as
+    | { total_tokens?: unknown; estimated_tokens?: unknown; estimated?: unknown; reported?: unknown; calls?: unknown }
+    | undefined;
+  if (!u || u.reported === null || u.reported === undefined || !Number(u.calls)) return null;
+  const n = (Number(u.total_tokens) || 0) + (Number(u.estimated_tokens) || 0);
+  return { n, estimated: u.estimated === true };
+}
+
 /** 整轮耗时（秒）：done 里的 timings.total；没有就用首末事件的 ts 差。 */
 export function totalSeconds(t: Turn): number | null {
   const tm = t.result?.timings as { total?: unknown } | undefined;
