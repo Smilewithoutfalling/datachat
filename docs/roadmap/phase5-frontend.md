@@ -1116,7 +1116,7 @@ A 组净效果（25 屏 360 高）：plot 区高度 −4px（nameGap 多占 4）
 #### 实现与偏离（DEVLOG [66]）
 - §2a 估算量单独记 `TokenUsage.estimated_tokens`，**不混进** input / output / total：这三项和报告里的 `tokens` 只放服务商真数，旧口径不变；预算按 `total + estimated`（`TokenUsage.counted`）算。
 - §2d「planner / codegen 之前超限直接 agent 失败」没做：工作流每轮最多 planner + codegen + 3 次 reviewer + summarizer 共 6 次调用，唯一的循环是 reviewer，预算只卡 `_route_after_exec` 就够；为了一个只在预算设得极小时才会走到的分支，往每个节点里加检查不划算。
-- §2e 耗时其实在卡片**头部**（TurnView.tsx `acard-time`），不在底部，token 跟在后面：真数写「· 140,010 tokens」（真数不加「约」），估算写「· ≈900 tokens」并带 title。`.acard-time` 在 f4-visual 里本来就被遮罩（f4-visual.spec.ts:60 `DYNAMIC`），所以四屏基线**不用重取**。
+- §2e 耗时其实在卡片**头部**（TurnView.tsx `acard-time`），不在底部，token 跟在后面：真数写「· 140,010 tokens」（真数不加「约」），估算写「· ≈900 tokens」并带 title。`.acard-time` 在 f4-visual 里被遮罩（f4-visual.spec.ts:60 `DYNAMIC`），但遮罩框随文字变宽，已完成轮次的 11、25 两屏差 1119 像素（只在遮罩框），基线换成 PR #78 首跑 CI run 40260578380 的 x64 actual（与预告一致）。
 - §3 codegen / reviewer 截断：节点返回 `truncated=True`，executor 见到就不执行，error 写 `TRUNCATED_CODE_ERROR`；reviewer 收到的是这条原因，不是语法错误。
 - fake_llm：新增 `tokens-<N>` 场景（每次调用报 prompt_tokens=N）；强制收尾的提示词（FINALIZE_PROMPT）以前被认成 act，现在用 `MARK_FINALIZE` 认成 final。
 

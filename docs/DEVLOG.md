@@ -2212,5 +2212,5 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - §2 预算：`DATACHAT_TOKEN_BUDGET`（默认 130,000，0 关闭）。UsageTracker.over_budget()：已用（真数 + 估算）+ 最近一次输入 ≥ 预算。ReAct：agent 节点调用前 check_budget() 抛 BudgetExceeded，_react_invoke 与 GraphRecursionError 一起接住，走原有强制收尾，warning / 失败文案按原因区分。工作流：_route_after_exec 读 config 里的 tracker，超限不进 reviewer。前端 turnTokens + 卡片头部 token 文字。
 - §3：is_truncated（finish_reason=length）。codegen / reviewer 截断 → executor 不执行；summarizer、ReAct 结论、强制收尾截断 → 保留文字 + warning。
 - 测试设施：ScriptedChatModel tokens_per_call=None 模拟不回 usage；fake_llm 新增 tokens-<N> 场景、MARK_FINALIZE。
-- 判定变更：旧断言一条没改（零调用 reported=None 的路径以前没有测试断言）。新增 tests/test_v2d.py 20 条、src/views/v2d.test.tsx 5 条、e2e/f4-budget.spec.ts 1 条（fake 项目按文件名 f[34]* 匹配）。提示词、chart_fixtures、视觉基线不变。
+- 判定变更：旧断言一条没改（零调用 reported=None 的路径以前没有测试断言）。新增 tests/test_v2d.py 20 条、src/views/v2d.test.tsx 5 条、e2e/f4-budget.spec.ts 1 条（fake 项目按文件名 f[34]* 匹配）。提示词、chart_fixtures 不变。视觉 11、25 两屏：token 文字让 `.acard-time` 遮罩框变宽（每张 1119 像素，只在遮罩框里），基线换成首跑 CI run 40260578380 的 x64 actual；我本地报的「基线不用重取」是错的——本地 aarch64 这 4 屏本来就红，看不出这个差异。
 
