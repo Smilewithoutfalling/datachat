@@ -2,6 +2,7 @@
 
 接口（除 /health 和前端静态文件外都要 Authorization: Bearer <token>；图表另可用 ?token=，方便 <img>）：
     GET    /health
+    POST   /shutdown                     桌面壳退出前请求后端自行退出（202；未挂退出钩子时 503）
     POST   /datasets                     multipart：files（一个或多个 CSV，可含 *.dict.csv 字典）、name
     GET    /datasets                     列表
     GET    /datasets/{id}?rows=20        详情（文件、每张表的列与概要）；带 rows（1–100）时加每张表前 N 行预览，
@@ -318,6 +319,19 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     # ------------------------------------------------------------------ 路由
     @app.get("/health")
     def health():
+        return {"ok": True}
+
+    # 阶段 6 D1：桌面壳正常退出时先请求后端自己退（SQLite 收尾、worker 清理），等 3 s 再靠 Job Object 强杀。
+    # app.state.request_shutdown 由 app.server.__main__ 挂上（uvicorn.Server.should_exit）；
+    # 没挂时（TestClient、被别的程序嵌入）返回 503，不假装成功。
+    app.state.request_shutdown = None
+
+    @app.post("/shutdown", dependencies=[Depends(auth)], status_code=202)
+    def shutdown():
+        fn = app.state.request_shutdown
+        if fn is None:
+            raise HTTPException(503, "shutdown not available")
+        fn()
         return {"ok": True}
 
     @app.post("/datasets", dependencies=[Depends(auth)])

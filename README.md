@@ -53,6 +53,18 @@
 - `app/eval/`        —— 评测：50 题用例、比较器（顺序/答案形态规则见 comparator.py 文件头）、报告
 - `ui/web/`          —— 前端（React + TS），由 `python -m app.server --open` 托管
 
+## 安装（Windows 桌面版，阶段 6）
+
+DataChat 用来**分析你自己的数据**：表里的内容会被模型读到，不要加载来路不明的 CSV（THREAT_MODEL §4 (a)）。
+
+1. 从 GitHub Actions 的 `desktop` 工作流下载工件 `datachat-setup-win64`，解压得到 `DataChat_<版本>_x64-setup.exe`。
+2. 双击安装（装在当前用户下，不要管理员权限）。安装包没有签名，第一次运行 SmartScreen 会拦：点「更多信息 → 仍要运行」。没有 WebView2 时安装程序会在线下载。
+3. 从开始菜单打开 DataChat。第一次会直接进设置页：先填 API Key 并保存，再上传 CSV。
+4. 升级：直接装新版本的安装包，数据不会丢。
+5. 卸载：「设置 → 应用」里卸载。数据目录 `%LOCALAPPDATA%\datachat` 默认保留（卸载页勾选「删除应用数据」才删）；保存在 Windows 凭据管理器里的 Key 不会被删，要删就运行 `python -m app.core.keystore delete`，或在凭据管理器里删掉 datachat 那一项。
+
+桌面版和浏览器模式（`python -m app.server --open`）共用同一个数据目录，两种方式随便切换，但不要同时开。
+
 ## 运行
 
 ```bash

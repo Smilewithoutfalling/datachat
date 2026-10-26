@@ -2240,7 +2240,7 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 
 pyarrow：它只是 streamlit 的传递依赖（[18]，DEVLOG 第 771 行），所以删掉 streamlit 后，新装的环境里不会再有 pyarrow。pandas 3.0 在没有 pyarrow 时字符串后端改用 python，开发和打包也因此一致了。这样 [18] 留到阶段 6 的「pyarrow 去留」问题就不用再定了，sidecar 体积预计少约 78 MB，以 CI 的 sidecar 工件为准。验证：我用全新 venv 装 requirements-dev.txt，确认没有 streamlit 和 pyarrow，再跑全量 pytest。
 
-## [68] 2026-10-26 · 阶段 6 方案：桌面打包 · commit <待提交>
+## [68] 2026-10-26 · 阶段 6 方案：桌面打包 · commit bf6413f（PR #80）
 
 [67] 回填为 c668ff4（PR #79；master tests run 40283639951 绿）。
 
@@ -2255,3 +2255,13 @@ pyarrow：它只是 streamlit 的传递依赖（[18]，DEVLOG 第 771 行），�
 更正：phase5 F5 末尾和 plan.md 阶段 6 的验收里写着「EV 对 SmartScreen 立刻生效 / SmartScreen 不拦」，这在 2024 年以后已经不成立（微软 2024 年 8 月去掉了 EV OID，OV 和 EV 都要积累信誉）。验收改成「显示已验证的发布者」。Azure Artifact Signing 目前不对中国主体开放。
 
 S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对外分发之前再做，本阶段只做 D1 + D2（方案「范围」一节）。网页端（`--open` 浏览器模式）保留，壳的功能不能让它坏掉。
+
+## [69] 2026-10-26 · 阶段 6 D1 壳 + D2 首次启动 · commit <待提交>
+
+[68] 回填为 bf6413f（PR #80；master tests run 40290000283 绿）。按 phase6-desktop.md §2、§3 实现，偏离写在该文档「D1/D2 实现与偏离」。
+
+- 后端：`POST /shutdown`（Bearer；202；没挂退出钩子时 503）。`__main__` 把 `uvicorn.Server.should_exit` 挂到 `app.state.request_shutdown`，并设 `timeout_graceful_shutdown=2`（SSE 长连接不会自己断）。测试：test_server.py::test_shutdown_requires_token_and_hook、test_sidecar_contract.py::test_shutdown_endpoint_exits_process（真进程：无 token 401 → 带 token 202 → 退出码 0）。
+- 壳：`desktop/src-tauri`（Tauri 2）。sidecar.rs：握手、/health 轮询、Job Object（KILL_ON_JOB_CLOSE）、stop（/shutdown → 3 s → 强杀）、`--smoke`、`--smoke-hold`。main.rs：单实例、窗口 1280×800 / 最小 1024×640 + window-state、导航边界（on_navigation + on_new_window，外链交给系统浏览器）、sidecar 中途退出 → 本地错误页、「重新启动」。没有 capabilities，页面拿不到 Tauri API。
+- 前端：`desktop.ts` 能力探测（`#shell=desktop`，不看 UA）；失效页在壳里换成「重新启动 DataChat」（P1-16）；上传对话框常驻「来路不明」提示（THREAT_MODEL §4 (a)）；设置页引导文案改成「先填 API Key 并保存，再上传 CSV」。浏览器模式不变（App.test.tsx 两条对照）。
+- CI：新工作流 desktop.yml（windows-latest）：打包 → 静默安装 → `--smoke` → 强杀壳查孤儿 → 静默卸载查数据目录。run id 待推送后补。
+- 本地：Rust 只能 `cargo check --target x86_64-pc-windows-msvc`（沙箱 aarch64、没有 MSVC），真编译和安装冒烟以 CI 为准。

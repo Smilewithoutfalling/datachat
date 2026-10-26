@@ -1,0 +1,4 @@
+src-tauri/target/
+src-tauri/gen/
+src-tauri/sidecar/*
+!src-tauri/sidecar/.gitkeep

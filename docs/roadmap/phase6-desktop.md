@@ -57,6 +57,18 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 
 **验收**：vitest 断言首次进入时落在设置页，并且上传对话框里有这行提示；e2e 加一条首次启动的用例（fake 项目，文件名按 f[34]* 的规则）。
 
+## D1/D2 实现与偏离（10-26，DEVLOG [69]）
+
+- §2 第 2 条：导航地址多带一个 `&shell=desktop`，给前端做能力探测（`ui/web/src/desktop.ts`）。`takeToken` 只抹 token，这个标记留在 fragment 里。
+- §2 第 4 条：错误页**只显示退出码和 server.log 的路径，不显示日志内容**。T11 的打码函数在 Python 里，壳是 Rust，重写一遍打码规则容易漏，宁可不显示。要看日志就按路径打开。
+- §2 第 4 条「重新启动」：不用 IPC。错误页和前端失效页都跳到 `http://restart.datachat.invalid/`，壳的 `on_navigation` 拦下（返回 false）后重启 sidecar。`.invalid` 保证真去解析也解析不到。
+- §2 第 6 条：`blob:` / `data:` / `about:` 放行（导出 PNG 的下载链接是 blob:）。外链只放行 http / https / mailto 交给系统浏览器，其他协议直接丢弃。
+- §2 第 8 条（代理）：CI 的 `--smoke` 用 Rust 直连 127.0.0.1，测不到 WebView2 的代理行为，没有在 runner 上做。改由 S 本机验收（S 的机器本来就配了系统代理）。
+- §3 第 1 条：首次启动落在设置页是现状（Shell.tsx：没 Key 时初始视图就是设置），只改了引导文案。
+- §3 验收「e2e 首次启动用例」：放在 f0.spec.ts（nokey 项目），不放 f[34]*。fake 项目已经配了 Key，测不了「没有 Key」。
+- 卸载页「删除应用数据」：Tauri 自带的勾选框只删 `%LOCALAPPDATA%\<identifier>`，而数据目录是 `%LOCALAPPDATA%\datachat`（和浏览器模式共用），所以用 `hooks.nsh` 的 POSTUNINSTALL 补删；默认不勾，静默卸载不删。钥匙串里的 Key 不删（README「安装」写了怎么手动删）。
+- 图标是临时的（蓝底白柱，PIL 生成），对外分发前再换。
+
 ## 4. D3 自动更新
 
 1. `tauri-plugin-updater`，endpoint 指向 GitHub Releases 的 `latest.json`。启动 10 s 后检查一次：有新版本就在顶栏提示「有新版本 x.y.z」，用户点了才下载、安装、重启，不静默更新。

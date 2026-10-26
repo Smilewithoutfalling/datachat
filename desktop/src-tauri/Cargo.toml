@@ -1,0 +1,26 @@
+[package]
+name = "datachat-desktop"
+version = "0.1.0"
+description = "DataChat 桌面壳（阶段 6 D1）：管 sidecar 进程，窗口只加载 sidecar 托管的前端"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-opener = "2"
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -57,8 +57,11 @@ def main(argv=None):
         import webbrowser
         url = f"http://127.0.0.1:{port}/#token={app.state.token}"
         threading.Timer(1.0, webbrowser.open, [url]).start()
-    config = uvicorn.Config(app, log_level="info", log_config=None)
-    uvicorn.Server(config).run(sockets=[sock])
+    # timeout_graceful_shutdown：SSE 长连接不会自己断，不设的话 should_exit 之后会一直等下去
+    config = uvicorn.Config(app, log_level="info", log_config=None, timeout_graceful_shutdown=2)
+    server = uvicorn.Server(config)
+    app.state.request_shutdown = lambda: setattr(server, "should_exit", True)   # POST /shutdown（阶段 6 D1）
+    server.run(sockets=[sock])
 
 
 if __name__ == "__main__":
