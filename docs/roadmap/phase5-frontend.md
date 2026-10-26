@@ -754,8 +754,8 @@ F5 不是回归清单，而是一次真 Key 的手动走查加观感判断，预
 - 代码签名证书挪到**阶段 6 前置事项**。它需要实名主体、付款和 CA 审核，agent 和评审都办不了，要由有主体的人申请；周期长，而且不依赖 F5 的结论，主体一旦确定就可以启动。目标是「Windows 一键安装不弹 SmartScreen 黄条」，所以大概率要 OV 起步。选型：
   - DV / 个人验证：最快，但 SmartScreen 信誉要靠下载量慢慢攒。
   - OV：需要营业执照和电话回访，签名后信誉建立比 DV 快。
-  - EV：私钥放在硬件 token 或云 HSM 上，对 SmartScreen 立刻生效。
-  材料清单在阶段 6 方案里给出。
+  - EV：私钥放在硬件 token 或云 HSM 上。~~对 SmartScreen 立刻生效~~ **更正（10-26）**：2024 年起 EV 不再立刻免掉 SmartScreen 提示，和 OV 一样要靠信誉慢慢积累，详见 phase6-desktop.md §6。
+  材料清单写在 docs/roadmap/phase6-desktop.md §6。
 
 **F5 覆盖不到的：#49 矮画布紧凑几何**。在产品里不可达：`.echart` 固定 `height: 360px`（styles.css:110），EChart.tsx 用 `isCompact(el.clientHeight)`，而 COMPACT_BELOW = 300，所以 isCompact(360) 恒为 false，COMPACT_KEYS 在真实用户路径上从来不会下发。窗口变矮只会出现滚动条，图本身不会变矮。f3-themes 里 #49 的用例能绿，是因为 measure() 人为把 style.height 设成了 220px，**测试绿不等于产品生效**。要人工验只能在 devtools 里改 style.height。#49 的状态是：契约、单测、e2e 都已完成，产品行为不变。
 
