@@ -2225,7 +2225,7 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - 判定变更：旧断言一条没改（零调用 reported=None 的路径以前没有测试断言）。新增 tests/test_v2d.py 20 条、src/views/v2d.test.tsx 5 条、e2e/f4-budget.spec.ts 1 条（fake 项目按文件名 f[34]* 匹配）。提示词、chart_fixtures 不变。视觉 11、25 两屏：token 文字让 `.acard-time` 遮罩框变宽（每张 1119 像素，只在遮罩框里），基线换成首跑 CI run 40260578380 的 x64 actual；我本地报的「基线不用重取」是错的——本地 aarch64 这 4 屏本来就红，看不出这个差异。
 
 
-## [67] 2026-10-26 · F5 通过，删 Streamlit · commit <待提交>
+## [67] 2026-10-26 · F5 通过，删 Streamlit · commit c668ff4（PR #79）
 
 [66] 回填为 2b283b6（PR #78；master tests run 40262438449 绿）。F5 走查记录补在 [55] 末尾：五条路径都过了；10-26 的 4 条发现 S 定为可接受，不处理。
 
@@ -2239,3 +2239,19 @@ S 10-25 定：§2 上游原文折叠保留；§4 根字号 14。
 - 另外改了：app/core/service.py 文件头的入口列表、plan.md 阶段 5 的状态（标成完成）。
 
 pyarrow：它只是 streamlit 的传递依赖（[18]，DEVLOG 第 771 行），所以删掉 streamlit 后，新装的环境里不会再有 pyarrow。pandas 3.0 在没有 pyarrow 时字符串后端改用 python，开发和打包也因此一致了。这样 [18] 留到阶段 6 的「pyarrow 去留」问题就不用再定了，sidecar 体积预计少约 78 MB，以 CI 的 sidecar 工件为准。验证：我用全新 venv 装 requirements-dev.txt，确认没有 streamlit 和 pyarrow，再跑全量 pytest。
+
+## [68] 2026-10-26 · 阶段 6 方案：桌面打包 · commit <待提交>
+
+[67] 回填为 c668ff4（PR #79；master tests run 40283639951 绿）。
+
+新文件 docs/roadmap/phase6-desktop.md。阶段 6 是新阶段，就不再往 phase5（已经 1300 多行）里写了。内容：
+- D0：要 S 定的 6 件事——外壳、安装包格式、WebView2、卸载时是否保留数据、发布渠道、仓库许可证（仓库目前没有 LICENSE）。
+- D1：壳的进程管理。sidecar 走 bundle.resources，不用 externalBin（onedir 的 `_internal` 会丢）；用 Job Object 防止留下孤儿进程；单实例；导航边界和空 capabilities；代理绕过要实测。CI 自动冒烟覆盖静默安装、`--smoke`、强杀壳后 sidecar 跟着退出、卸载后数据还在。
+- D2：首次启动先进设置页；补上 THREAT_MODEL §4 (a) 欠的「来路不明」提示（现在代码里没有这句）。
+- D3：自动更新，用 minisign 签名，和 Authenticode 无关。
+- D4：许可证审计闸门。
+- D5：签名路线表，D1~D4 按未签名先做完。
+
+更正：phase5 F5 末尾和 plan.md 阶段 6 的验收里写着「EV 对 SmartScreen 立刻生效 / SmartScreen 不拦」，这在 2024 年以后已经不成立（微软 2024 年 8 月去掉了 EV OID，OV 和 EV 都要积累信誉）。验收改成「显示已验证的发布者」。Azure Artifact Signing 目前不对中国主体开放。
+
+S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对外分发之前再做，本阶段只做 D1 + D2（方案「范围」一节）。网页端（`--open` 浏览器模式）保留，壳的功能不能让它坏掉。
