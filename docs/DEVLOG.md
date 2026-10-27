@@ -2290,7 +2290,7 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 
 **没做：** 安装目录 `%LOCALAPPDATA%\DataChat`（Tauri currentUser 默认的 `$LOCALAPPDATA\${PRODUCTNAME}`）和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上不区分大小写，其实是同一个目录。目前不出错的原因是：卸载器只删它自己装的文件，最后执行的是非递归的 RMDir；勾选「删除应用数据」时整个目录都会被删，而这本来就是卸载。要把两者分开，得改安装目录（需要改 NSIS 模板或 productName），或者改数据目录（会和浏览器模式分家，需要迁移已有数据），两种都超出收尾的范围，所以推迟到 D3 更新之前，记在 phase6-desktop.md 里。desktop.yml 卸载检查 ③ 的 data_kept 结论仍然成立，因为它验证的正是「卸载不递归删除」。
 
-## [71] 2026-10-27 · 阶段 7 方案 · commit <待提交>
+## [71] 2026-10-27 · 阶段 7 方案 · commit 906d98f（PR #83）
 
 新文件 docs/roadmap/phase7-accuracy.md（P0 + E0~E4 + A1~A6）。要点：
 - 先做评测，再做改进。闸门已经快满分（react 14/15 + 9/10，workflow 多表 10/10），而且已经被逐题分析过，不能再作为目标；M20 的目标改为定在新的留出集 H1 上：先测基线，再由 S 定 X。
@@ -2298,3 +2298,11 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - A4 DuckDB、A5 YAML 语义层是有条件做的（看 H1 的失败分布）；A6 反馈沉淀推迟。
 - plan.md 阶段 7 的交付物和验收按上面改写。
 - 待 S 定：§1 的 5 条（模型 / 网关、每轮预算、出题分工、judge 模型、数据许可）。
+
+## [72] 2026-10-27 · 阶段 6.5 方案：多服务商模型接入 · commit <待提交>
+
+新文件 docs/roadmap/phase65-models.md。起因：S 10-27 要求模型接入要尽量兼容市面上所有接口，参考 LangBot。
+- 调研了 LangBot、LobeChat、Cherry Studio、Cline、Pydantic AI、any-llm、Open WebUI、Aider、PandasAI 九个项目。共同的结构都是三层：协议（不超过 5 种）、服务商预设（是数据，不是代码）、模型怪癖和能力。LangBot 的 44 个预设里有 31 个是 OpenAI 兼容接口；LobeChat 的 88 个服务商里有 69 个走兼容工厂。
+- 不用 LiteLLM：沙箱实测 litellm 1.106.4 安装后占 152 MB，还会带上 boto3/botocore（28 MB）和 tokenizers（11 MB）；sidecar 工件现在是 85.7 MB。
+- S 10-27 定：每个服务商各存一个 Key，并且可以建多个用户自己命名的连接（同一个服务商可以有多份）；要做「获取模型列表」；真连接只实测 S 那一个连接；迁移后的连接默认名「我的连接」。
+- plan.md 在阶段 6 和 7 之间插入 6.5 一行。
