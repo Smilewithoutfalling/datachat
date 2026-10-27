@@ -46,6 +46,18 @@ def test_auth_and_host(home):
     assert c.get("/datasets", headers={**H, "Host": "evil.example"}).status_code == 400   # DNS rebinding
 
 
+
+def test_shutdown_requires_token_and_hook(home):
+    """阶段 6 D1：POST /shutdown 要 Bearer；没挂退出钩子（TestClient）时 503，挂了就调用并返回 202。"""
+    app = create_app(home, TOKEN)
+    c = TestClient(app)
+    assert c.post("/shutdown").status_code == 401
+    assert c.post("/shutdown", headers=H).status_code == 503
+    called = []
+    app.state.request_shutdown = lambda: called.append(1)
+    r = c.post("/shutdown", headers=H)
+    assert r.status_code == 202 and r.json() == {"ok": True} and called == [1]
+
 def test_full_flow_workflow_and_restart(home, sample_path):
     c = client(home, lambda: wf_model(["result = int(df['units'].sum())"], answer="总销量 1685"))
     ds = upload(c, sample_path, os.path.join(os.path.dirname(sample_path), "sample.dict.csv"))

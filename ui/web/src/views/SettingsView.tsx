@@ -113,7 +113,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
               </span>
             </div>
             {!key.configured ? (
-              <p className="banner" style={{ margin: 0 }}><IconWarn size={13} />还没有 API Key，提问会被拦下。填写后保存。</p>
+              <p className="banner" style={{ margin: 0 }}><IconWarn size={13} />还没有 API Key：先填 API Key 并保存，再上传 CSV。没有 Key 时提问会被拦下。</p>
             ) : null}
             <div className="stack">
               API Key

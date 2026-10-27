@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 import pytest
@@ -68,3 +69,22 @@ def test_main_sets_no_reuse_options():
     # 代码证据：bind 前不设任何 SO_* 选项（#44：不要用 SO_REUSEADDR 解决 TIME_WAIT，壳用 --port 0）
     src = open(os.path.join(os.path.dirname(__file__), "..", "app", "server", "__main__.py"), encoding="utf-8").read()
     assert "setsockopt" not in src and "SO_REUSE" not in src.replace("不设 SO_REUSEADDR", "")
+
+
+def test_shutdown_endpoint_exits_process(sidecar):
+    """阶段 6 D1：壳正常退出时 POST /shutdown，sidecar 自己退出（退出码 0），不用等强杀。"""
+    import time
+    p, line, _ = sidecar
+    info = json.loads(line)
+    assert _health(info["port"]) == 200
+    req = urllib.request.Request(f"http://127.0.0.1:{info['port']}/shutdown", method="POST")
+    with pytest.raises(urllib.error.HTTPError) as e:       # 不带 token：401，不能让本机任意进程关掉它
+        urllib.request.urlopen(req, timeout=5)
+    assert e.value.code == 401
+    assert p.poll() is None
+    req.add_header("Authorization", f"Bearer {info['token']}")
+    t = time.monotonic()
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.status == 202
+    assert p.wait(timeout=10) == 0
+    assert time.monotonic() - t < 8

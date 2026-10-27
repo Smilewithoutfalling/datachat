@@ -88,6 +88,15 @@ test("详情与预览只发一个请求；上传后直接用响应里的预览�
   expect(be.calls.some((x) => x.path.startsWith("/datasets/d2"))).toBe(false);
 });
 
+test("上传对话框常驻「来路不明」提示（THREAT_MODEL §4 (a)，阶段 6 D2）", async () => {
+  setup({});
+  await screen.findByRole("button", { name: /^销量/ });
+  const file = new File(["a,b\n1,2\n"], "x.csv", { type: "text/csv" });
+  fireEvent.change(screen.getByLabelText("选择 CSV 文件"), { target: { files: [file] } });
+  const dlg = await screen.findByRole("dialog", { name: "上传数据集" });
+  expect(within(dlg).getByTestId("upload-trust").textContent).toBe("只分析你自己的数据。不要加载来路不明的 CSV：表里的内容会被模型读到。");
+});
+
 test("多表：tab 上带行列数与编码，读坏的表标出；顶层 error 提示分析会失败", async () => {
   setup({
     "GET /datasets/d1?rows=20": {

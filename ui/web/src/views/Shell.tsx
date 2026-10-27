@@ -335,6 +335,8 @@ function UploadDialog({ c, files, onClose, onDone }: { c: Client; files: File[];
         <div className="dialog-icon"><IconUpload size={18} /></div>
         <h2>上传 {files.length} 个文件</h2>
         <p>多张表会放在同一个数据集里；文件名以 .dict.csv 结尾的会当作数据字典。</p>
+        {/* THREAT_MODEL §4 (a)（阶段 6 D2）：常驻一行，不做弹窗、不做「不再提示」 */}
+        <p className="small muted" data-testid="upload-trust">只分析你自己的数据。不要加载来路不明的 CSV：表里的内容会被模型读到。</p>
         <ul>
           {files.map((f) => (
             <li key={f.name}><IconTable size={13} />{f.name}<span className="size">{formatSize(f.size)}</span></li>
