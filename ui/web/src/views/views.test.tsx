@@ -166,6 +166,44 @@ test("设置：超时越界前端拦下，不发请求；合法值以数字发�
   });
 });
 
+// 阶段 6 收尾（S 10-27）：桌面端不读 .env，用户看不出生效的是默认 api.deepseek.com；每项标来源。旧后端没 sources 时不显示
+test("设置：显示每项当前生效值的来源；保存后按返回的 sources 刷新；没有 sources 不显示", async () => {
+  setup({
+    "GET /settings": { model: "deepseek-chat", base_url: "https://api.deepseek.com/v1", timeout: 60,
+      sources: { model: "default", base_url: "default", timeout: "env" } },
+    "PUT /settings": (b: unknown) => ({ model: "qwen", base_url: "https://gw/v1", timeout: 60, ...(b as object),
+      sources: { model: "settings", base_url: "settings", timeout: "env" } }),
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const view = await screen.findByTestId("settings-view");
+  const src = within(view).getByTestId("settings-sources");
+  expect(src.textContent).toContain("模型名是默认值，Base URL 是默认值，超时来自环境变量");
+  expect(src.textContent).toContain("桌面版不读取仓库里的 .env 文件");
+  await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
+  expect(within(view).getByTestId("settings-sources").textContent).toContain("模型名来自本页设置，Base URL 来自本页设置");
+});
+
+test("设置：后端没给 sources（旧版本）时不显示来源行", async () => {
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const view = await screen.findByTestId("settings-view");
+  expect(within(view).queryByTestId("settings-sources")).toBeNull();
+});
+
+// 阶段 6 收尾：只有桌面壳里注册导出 saver（浏览器模式照旧 <a download>）
+test("Shell：desktop 时注册 PNG saver，卸载时撤销；浏览器模式不注册", async () => {
+  const { getPngSaver } = await import("../charts/pngSaver");
+  const be = fakeBackend({ "GET /datasets": [], "GET /sessions": [] });
+  const key: KeyStatus = { configured: true, source: "keyring" };
+  const a = render(<Shell c={client(new Api("t", be.fetchImpl))} initialKey={key} desktop={false} />);
+  expect(getPngSaver()).toBeNull();
+  a.unmount();
+  const b = render(<Shell c={client(new Api("t", be.fetchImpl))} initialKey={key} desktop />);
+  expect(getPngSaver()).toBeTypeOf("function");
+  b.unmount();
+  expect(getPngSaver()).toBeNull();
+});
+
 test("删除数据集：输入名称才能确认，写明连带删除的会话数", async () => {
   // V2a §5.2：数据集是硬删并级联删会话（app.py:356），两次点击改成对话框 + 输入名称
   const be = setup({ "DELETE /datasets/d1": { ok: true } });

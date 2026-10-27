@@ -6,6 +6,7 @@
 
 - 壳**必须**用 `--port 0` 启动 sidecar，由系统分配空闲端口。不要传固定端口：上一次运行的端口可能还处在 TIME_WAIT，会报 Address already in use。
 - `--home <目录>`：数据目录。不传时用 `DATACHAT_HOME`，再不行用 `%LOCALAPPDATA%\datachat`。
+- `--desktop`：桌面壳**必须**传。开启 `POST /exports/png`，把前端导出的 PNG 写进用户的「下载」文件夹（取 Windows 已知文件夹 FOLDERID_Downloads；`DATACHAT_EXPORT_DIR` 可覆盖）。不传时这个接口返回 404，浏览器模式照旧用 `<a download>`。
 - `--token`：一般不传，sidecar 每次启动随机生成。
 
 ## 握手

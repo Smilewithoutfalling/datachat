@@ -81,6 +81,13 @@ jobs:
           Get-Content smoke-shell.json | Tee-Object -FilePath $rep -Append
           if ($p.ExitCode -ne 0) { throw "--smoke 失败，退出码 $($p.ExitCode)" }
 
+          # ①b 嵌套 Job：sidecar --selftest 放进壳的 Job Object 里跑，worker 的内存上限等八项必须仍然生效
+          $p = Start-Process $exe.FullName -ArgumentList "--smoke-selftest", "$PWD\selftest-in-job.json" -Wait -PassThru
+          $st = Get-Content selftest-in-job.json -Raw -Encoding utf8 | ConvertFrom-Json
+          $mem = $st.checks | Where-Object { $_.name -eq "memory" }
+          "selftest_in_job_ok=$($st.ok) memory_ok=$($mem.ok) memory_seconds=$($mem.seconds)" | Tee-Object -FilePath $rep -Append
+          if ($p.ExitCode -ne 0 -or -not $st.ok) { throw "嵌套 Job 下 selftest 失败：$(($st.checks | Where-Object { -not $_.ok } | ForEach-Object { $_.name + ': ' + $_.detail }) -join '; ')" }
+
           # ② 强杀壳，sidecar 必须被 Job Object 一起带走
           $hold = Start-Process $exe.FullName -ArgumentList "--smoke-hold", "$PWD\sidecar.pid" -PassThru
           for ($i = 0; $i -lt 60 -and -not (Test-Path sidecar.pid); $i++) { Start-Sleep -Milliseconds 500 }
@@ -111,6 +118,7 @@ jobs:
           path: |
             desktop-report.txt
             smoke-shell.json
+            selftest-in-job.json
           retention-days: 30
       - uses: actions/upload-artifact@v7
         with:

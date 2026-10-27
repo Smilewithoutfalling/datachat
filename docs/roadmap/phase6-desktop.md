@@ -1,4 +1,4 @@
-# 阶段 6：桌面打包（方案，待 S 评审）
+# 阶段 6：桌面打包（D1、D2 已完成；D3~D5 推迟到对外分发前）
 
 来源：plan.md 阶段 6 的交付物与验收；M19（签名 / SmartScreen / 干净机器验证）、M22（外壳选型）；sidecar 契约 docs/sidecar-contract.md；阶段 4 spike DEVLOG [18]；phase5 F5 末尾的「阶段 6 前置事项」。
 
@@ -37,6 +37,7 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 2. 启动：`--port 0 --home %LOCALAPPDATA%\datachat`，`CREATE_NO_WINDOW`（不弹黑框），stdout 用管道接，stderr 丢弃（日志已经写进 server.log）。读第一行 JSON（超时 20 s）→ 轮询 `/health`（每 100 ms 一次，总超时 20 s）→ 主窗口 `navigate` 到 `http://127.0.0.1:<port>/#token=<token>`。等待期间窗口显示本地的「正在启动…」页（打包进壳的静态 html，不经 sidecar）。
 3. **sidecar 不能变成孤儿进程**：壳一启动就建一个 Job Object，设 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，把 sidecar 放进去。壳不管是正常退出、崩溃还是被任务管理器结束，sidecar 都会被系统一起杀掉。正常退出时先 `POST /shutdown`（新接口，要 Bearer），等 3 s 再强杀。理由：Windows 没有「父进程死了子进程跟着死」的默认行为，没有 Job Object 的话，残留的 sidecar 会一直占着 SQLite 和端口。
    - 注意：沙箱 worker 已经在**另一个** Job Object 里（内存上限）。Win8 起 Job 可以嵌套，嵌套是否生效要在 spike 里实测（worker 的内存上限在嵌套后仍然生效、壳被杀后 worker 也会消失）。
+   - 实测（DEVLOG [70]）：内存上限由 desktop.yml ①b 的 `--smoke-selftest` 在 CI 验证；「壳被杀后正在运行的 worker 也消失」由 S 本机验收。
 4. sidecar 中途退出：窗口切到本地错误页，显示退出码和 server.log 最后 20 行（先打码，复用 T11 的打码函数），并提供「重新启动」按钮。顺带解决 P1-16（「重新打开应用」在浏览器里做不到，到了壳里就能做）。
 5. 单实例：`tauri-plugin-single-instance`。第二次打开时聚焦已有窗口，不再起第二个 sidecar（两个 sidecar 写同一个 SQLite 会冲突）。
 6. 导航边界：主窗口只允许 `http://127.0.0.1:<本次端口>/` 和本地启动页、错误页。其他地址（结论里的 Markdown 链接、`target=_blank`）一律用系统默认浏览器打开，不在壳里打开（`on_navigation` + `on_new_window`）。capabilities 给远程 URL 的权限为空：127.0.0.1 页面拿不到任何 Tauri API，T9 的防线不因为套了壳而变弱。
@@ -68,6 +69,10 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 - §3 验收「e2e 首次启动用例」：放在 f0.spec.ts（nokey 项目），不放 f[34]*。fake 项目已经配了 Key，测不了「没有 Key」。
 - 卸载页「删除应用数据」：Tauri 自带的勾选框只删 `%LOCALAPPDATA%\<identifier>`，而数据目录是 `%LOCALAPPDATA%\datachat`（和浏览器模式共用），所以用 `hooks.nsh` 的 POSTUNINSTALL 补删；默认不勾，静默卸载不删。钥匙串里的 Key 不删（README「安装」写了怎么手动删）。
 - 图标是临时的（蓝底白柱，PIL 生成），对外分发前再换。
+- S 10-27 本机试装后的修改（DEVLOG [70]）：
+  - 导出 PNG 在桌面模式下改由后端写进「下载」文件夹：`POST /exports/png`，只在 `--desktop` 时开放。这样 §2 第 6 条放行 `blob:` / `data:` 的规则就不再承担下载。
+  - `GET /settings` 新增 `sources`，设置页显示每一项值的来源，并注明桌面版不读取 `.env`。
+- **遗留（D3 之前处理）**：安装目录 `%LOCALAPPDATA%\DataChat` 和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上其实是同一个目录。目前不会出错，因为卸载时只删自己装的文件，删目录用的是不递归的 RMDir。但做自动更新之前必须把两者分开，有两种办法：一是改安装目录（NSIS 模板或 productName），二是改数据目录（要迁移数据，还会影响浏览器模式共用同一份数据）。
 
 ## 4. D3 自动更新
 

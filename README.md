@@ -59,7 +59,8 @@ DataChat 用来**分析你自己的数据**：表里的内容会被模型读到�
 
 1. 从 GitHub Actions 的 `desktop` 工作流下载工件 `datachat-setup-win64`，解压得到 `DataChat_<版本>_x64-setup.exe`。
 2. 双击安装（装在当前用户下，不要管理员权限）。安装包没有签名，第一次运行 SmartScreen 会拦：点「更多信息 → 仍要运行」。没有 WebView2 时安装程序会在线下载。
-3. 从开始菜单打开 DataChat。第一次会直接进设置页：先填 API Key 并保存，再上传 CSV。
+3. 从开始菜单打开 DataChat。第一次会直接进设置页：先填 API Key 并保存，再上传 CSV。**桌面版不读取仓库里的 `.env`**：用自己的网关或模型时，在设置页填「模型名」和「Base URL」并保存，再点「测试连接」。设置页会标出每一项当前生效的值来自本页设置、环境变量还是默认值（默认是 `https://api.deepseek.com/v1` + `deepseek-chat`）。
+   导出 PNG 时，桌面版会把图片直接存进你的「下载」文件夹，并在按钮旁显示完整路径；重名时自动加 (1)、(2)。
 4. 升级：直接装新版本的安装包，数据不会丢。
 5. 卸载：「设置 → 应用」里卸载。数据目录 `%LOCALAPPDATA%\datachat` 默认保留（卸载页勾选「删除应用数据」才删）；保存在 Windows 凭据管理器里的 Key 不会被删，要删就运行 `python -m app.core.keystore delete`，或在凭据管理器里删掉 datachat 那一项。
 
