@@ -2263,5 +2263,5 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - 后端：`POST /shutdown`（Bearer；202；没挂退出钩子时 503）。`__main__` 把 `uvicorn.Server.should_exit` 挂到 `app.state.request_shutdown`，并设 `timeout_graceful_shutdown=2`（SSE 长连接不会自己断）。测试：test_server.py::test_shutdown_requires_token_and_hook、test_sidecar_contract.py::test_shutdown_endpoint_exits_process（真进程：无 token 401 → 带 token 202 → 退出码 0）。
 - 壳：`desktop/src-tauri`（Tauri 2）。sidecar.rs：握手、/health 轮询、Job Object（KILL_ON_JOB_CLOSE）、stop（/shutdown → 3 s → 强杀）、`--smoke`、`--smoke-hold`。main.rs：单实例、窗口 1280×800 / 最小 1024×640 + window-state、导航边界（on_navigation + on_new_window，外链交给系统浏览器）、sidecar 中途退出 → 本地错误页、「重新启动」。没有 capabilities，页面拿不到 Tauri API。
 - 前端：`desktop.ts` 能力探测（`#shell=desktop`，不看 UA）；失效页在壳里换成「重新启动 DataChat」（P1-16）；上传对话框常驻「来路不明」提示（THREAT_MODEL §4 (a)）；设置页引导文案改成「先填 API Key 并保存，再上传 CSV」。浏览器模式不变（App.test.tsx 两条对照）。
-- CI：新工作流 desktop.yml（windows-latest）：打包 → 静默安装 → `--smoke` → 强杀壳查孤儿 → 静默卸载查数据目录。run id 待推送后补。
+- CI：新工作流 desktop.yml（windows-latest）：打包 → 静默安装 → `--smoke` → 强杀壳查孤儿 → 静默卸载查数据目录。PR #81 head 393e1e0：desktop run 40295387628 绿（安装包 65.5 MB、打包 347 s、--smoke 启动 2027 ms / 退出 505 ms 退出码 0、强杀后无孤儿、卸载后数据保留），tests 40295387542、sidecar 40295387588 绿。
 - 本地：Rust 只能 `cargo check --target x86_64-pc-windows-msvc`（沙箱 aarch64、没有 MSVC），真编译和安装冒烟以 CI 为准。
