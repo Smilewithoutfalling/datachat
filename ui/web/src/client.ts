@@ -1,5 +1,6 @@
 // 各接口的薄封装。全部经过 Api（统一 Bearer 与 401 处理）。
 import type { Api } from "./api";
+import { dataUrlBytes } from "./charts/pngSaver";
 import { parseSse } from "./sse";
 import type { Ev } from "./turn";
 import type { Agent, Dataset, DatasetDetail, KeyStatus, Rating, Session, SessionDetail, Settings, SettingsTest } from "./types";
@@ -73,6 +74,13 @@ export function client(api: Api) {
     deleteKey: () => api.json<KeyStatus>("/settings/api-key", { method: "DELETE" }),
     /** 测试连接：测的是已保存的配置；同时只许一个，第二个 409。 */
     testSettings: () => api.json<SettingsTest>("/settings/test", { method: "POST" }),
+    /** 桌面模式导出 PNG（阶段 6 收尾）：后端写进「下载」文件夹，返回完整路径。浏览器模式后端 404，前端也不会调用。 */
+    savePng: async (dataUrl: string, filename: string) =>
+      (await api.json<{ path: string }>(`/exports/png?filename=${encodeURIComponent(filename)}`, {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: dataUrlBytes(dataUrl) as BodyInit,
+      })).path,
   };
 }
 export type Client = ReturnType<typeof client>;

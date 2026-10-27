@@ -43,7 +43,14 @@ export type Rating = "up" | "down" | null;
 export type Feedback = { rating: Rating; note: string };
 export type SessionDetail = Session & { messages: Message[] };
 
-export type Settings = { model: string; base_url: string; timeout: number };
+export type SettingSource = "settings" | "env" | "default";
+/** GET /settings：sources 是每项当前生效值的来源（阶段 6 收尾；旧后端没有这个字段）。 */
+export type Settings = {
+  model: string;
+  base_url: string;
+  timeout: number;
+  sources?: { model: SettingSource; base_url: SettingSource; timeout: SettingSource };
+};
 export type KeyStatus = { configured: boolean; source: string | null };
 /** POST /settings/test（阶段 5 收尾 C）：用已保存的设置发一次最小请求。message 是 T11 user_error 的文案（带编号）。 */
 export type SettingsTest =

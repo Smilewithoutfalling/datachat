@@ -15,6 +15,7 @@ import { IconChevronDown, IconDownload } from "../views/icons";
 import { init } from "echarts/core";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
+import { getPngSaver } from "./pngSaver";
 import { safeFilename } from "./filename";
 import { effectiveKind, normalize, type Ctx, type Option, prepare, type UiState } from "./prepare";
 import { registerCharts } from "./register";
@@ -67,6 +68,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
   const viewFor = useRef<{ spec: ChartSpec; target: Kind | null } | null>(null);
   const [light, setLight] = useState(false); // 导出为浅色（经典配色）：不持久化
   const [exportFailed, setExportFailed] = useState(false);
+  const [savedTo, setSavedTo] = useState(""); // 桌面模式：后端写到的完整路径（pngSaver.ts）
   const src = asKind(spec.kind);
   const kind = effectiveKind(spec, { kind: target }); // 只看能不能换图型；签名只收 kind，开关传不进去
   const prefKind = kind ?? "bar";
@@ -235,8 +237,15 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
       const t = theme === "darkCanvas" && light ? "classic" : theme;
       const url = exportPng(spec, { ...ui, view: view.current }, t, size);
       // V2b B3：用户设了标题就用它（已过 sanitizeTitle），文件名仍经 safeFilename
-      download(url, safeFilename(edit.title ?? backendTitle, kind ? KIND_LABEL[kind] : undefined));
+      const name = safeFilename(edit.title ?? backendTitle, kind ? KIND_LABEL[kind] : undefined);
+      const saver = getPngSaver();
+      setSavedTo("");
       setExportFailed(false);
+      if (saver) {
+        saver(url, name).then(setSavedTo, () => setExportFailed(true));
+      } else {
+        download(url, name);
+      }
     } catch {
       setExportFailed(true);
     }
@@ -279,6 +288,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
               </label>
             )}
             {exportFailed && <span className="warn small" role="alert">导出失败</span>}
+            {savedTo && <span className="hint small" role="status" data-testid="export-saved" title={savedTo}>已保存到 {savedTo}</span>}
           </span>
           {marksOpen && (
             <MarksCard shape={shape} sw={sw} onSwitch={set} edit={edit} onChange={changeEdit} items={items}

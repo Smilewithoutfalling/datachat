@@ -1,5 +1,7 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api";
+import { setPngSaver } from "../charts/pngSaver";
+import { inDesktopShell } from "../desktop";
 import { type Client, errText, formatSize } from "../client";
 import type { Agent, Dataset, DatasetDetail, KeyStatus, Session } from "../types";
 import { DatasetView } from "./DatasetView";
@@ -14,7 +16,13 @@ type View = { kind: "home" } | { kind: "dataset"; id: string } | { kind: "sessio
 const isDict = (f: string) => /\.dict\.csv$/i.test(f);
 const stem = (f: string) => f.replace(/\.csv$/i, "");
 
-export function Shell({ c, initialKey }: { c: Client; initialKey: KeyStatus }) {
+export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client; initialKey: KeyStatus; desktop?: boolean }) {
+  // 阶段 6 收尾：桌面壳里导出 PNG 改由后端写进「下载」文件夹（charts/pngSaver.ts）；浏览器模式不注册，照旧 <a download>
+  useEffect(() => {
+    if (!desktop) return;
+    setPngSaver(c.savePng);
+    return () => setPngSaver(null);
+  }, [c, desktop]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [view, setView] = useState<View>(initialKey.configured ? { kind: "home" } : { kind: "settings" });

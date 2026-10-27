@@ -2256,7 +2256,7 @@ pyarrow：它只是 streamlit 的传递依赖（[18]，DEVLOG 第 771 行），�
 
 S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对外分发之前再做，本阶段只做 D1 + D2（方案「范围」一节）。网页端（`--open` 浏览器模式）保留，壳的功能不能让它坏掉。
 
-## [69] 2026-10-26 · 阶段 6 D1 壳 + D2 首次启动 · commit <待提交>
+## [69] 2026-10-26 · 阶段 6 D1 壳 + D2 首次启动 · commit cdabfcf（PR #81）
 
 [68] 回填为 bf6413f（PR #80；master tests run 40290000283 绿）。按 phase6-desktop.md §2、§3 实现，偏离写在该文档「D1/D2 实现与偏离」。
 
@@ -2265,3 +2265,27 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - 前端：`desktop.ts` 能力探测（`#shell=desktop`，不看 UA）；失效页在壳里换成「重新启动 DataChat」（P1-16）；上传对话框常驻「来路不明」提示（THREAT_MODEL §4 (a)）；设置页引导文案改成「先填 API Key 并保存，再上传 CSV」。浏览器模式不变（App.test.tsx 两条对照）。
 - CI：新工作流 desktop.yml（windows-latest）：打包 → 静默安装 → `--smoke` → 强杀壳查孤儿 → 静默卸载查数据目录。PR #81 head 393e1e0：desktop run 40295387628 绿（安装包 65.5 MB、打包 347 s、--smoke 启动 2027 ms / 退出 505 ms 退出码 0、强杀后无孤儿、卸载后数据保留），tests 40295387542、sidecar 40295387588 绿。
 - 本地：Rust 只能 `cargo check --target x86_64-pc-windows-msvc`（沙箱 aarch64、没有 MSVC），真编译和安装冒烟以 CI 为准。
+
+## [70] 2026-10-27 · 阶段 6 收尾：嵌套 Job 实测 + 重估 · commit <待提交>
+
+[69] 回填为 cdabfcf（PR #81，S 10-27 同意合并；合并前 head cb9e840 的 tests 40426911618、sidecar 40426911472、desktop 40426911624 都绿）。
+
+- 壳新增 `--smoke-selftest <out.json>`（sidecar.rs::smoke_selftest）：用和正式启动同一个 `job_for`（KILL_ON_JOB_CLOSE）把 `sidecar --selftest` 放进 Job 里跑，stdout 的 JSON 原样落盘，退出码透传。selftest 的 memory 项会让 worker 在 512 MB 上限下申请约 1.6 GB，worker 自己的 Job 这时嵌套在壳的 Job 里面，所以这一项就是 phase6-desktop.md §2 第 3 条「嵌套后内存上限仍然生效」的实测。其余七项（读文件拦截、import 拦截、超时等）一起验证。
+- desktop.yml 安装冒烟加 ①b：对安装好的 exe 跑 `--smoke-selftest`，八项全过才绿，`memory_ok` / `memory_seconds` 写进 desktop-report.txt，selftest-in-job.json 一起上传。
+- 没覆盖：「壳被强杀时正在运行的 worker 也被带走」。worker 只在分析时存在，CI 上要先起一次真实分析才能测，留给 S 本机验收（分析进行中关掉窗口，任务管理器里不应留下 datachat-sidecar.exe）。
+- plan.md：进度表补阶段 6 一行，并按 M18 重估一次（见该节）。
+- 本地：`cargo check --target x86_64-pc-windows-msvc` 通过，无 warning。
+
+### S 10-27 本机试装发现的两个问题
+
+1. **点「导出 PNG」没有反应**。exportPng.ts 用的是 data URL 加 `<a download>`，而壳里没有下载处理器，WebView2 遇到这个链接什么也不做。修法是桌面模式改由后端写盘：
+   - 新增 `POST /exports/png?filename=`（app/server/exports.py）。要带 Bearer，并且只在 sidecar 以 `--desktop` 启动时开启；浏览器模式下返回 404。壳的 sidecar.rs::start 会传 `--desktop`，sidecar-contract.md 已补上这一条。
+   - 只接受 PNG：检查 8 字节文件头，大小上限 64 MB，超限时先按 Content-Length 返回 413。
+   - 文件名在后端再清洗一遍，不信任前端：去掉控制字符和 bidi，替换路径分隔符和非法字符，限 60 字，保留名前面加 `_`，只取 basename。重名时自动编号成「名 (1).png」，用 `open(..., "xb")` 独占创建，所以不会覆盖已有文件。
+   - 写到 Windows 已知文件夹 FOLDERID_Downloads（用户可能把它挪到别的盘），可以用 `DATACHAT_EXPORT_DIR` 覆盖。
+   - 前端改动：Shell 只在 `inDesktopShell()` 时通过 charts/pngSaver.ts 注册 saver，EChart 有 saver 时交给它处理，并显示「已保存到 路径」；浏览器模式保持原来的 `<a download>`。
+2. **连不上模型**（WinError 10054）。为了定位做了几组对照：A 浏览器模式能连；B 在 dc 窗口里直接运行安装好的 sidecar（用同一个 --home）能连；C 在普通 cmd 里运行也能连。这说明 exe、设置和证书都没问题。之后 S 再打开桌面端，就正常了。**根因没有实证**，推断是第一次连接时设置还没保存好、或者没有重启。不过桌面端不读 `.env` 这一点确实会让人误判，所以：
+   - `GET /settings` 新增 `sources`，标出每一项当前生效的值来自 settings、env 还是 default。设置页显示一行「当前生效：…」，并写明桌面版不读取 .env。后端没有返回 sources 的旧版本不显示这一行。
+   - README「安装」第 3 步说明了这一点。
+
+**没做：** 安装目录 `%LOCALAPPDATA%\DataChat`（Tauri currentUser 默认的 `$LOCALAPPDATA\${PRODUCTNAME}`）和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上不区分大小写，其实是同一个目录。目前不出错的原因是：卸载器只删它自己装的文件，最后执行的是非递归的 RMDir；勾选「删除应用数据」时整个目录都会被删，而这本来就是卸载。要把两者分开，得改安装目录（需要改 NSIS 模板或 productName），或者改数据目录（会和浏览器模式分家，需要迁移已有数据），两种都超出收尾的范围，所以推迟到 D3 更新之前，记在 phase6-desktop.md 里。desktop.yml 卸载检查 ③ 的 data_kept 结论仍然成立，因为它验证的正是「卸载不递归删除」。

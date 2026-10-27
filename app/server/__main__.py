@@ -36,6 +36,7 @@ def main(argv=None):
     ap.add_argument("--home", default=None, help="数据目录（默认 DATACHAT_HOME 或 %%LOCALAPPDATA%%\\datachat）")
     ap.add_argument("--token", default=os.getenv("DATACHAT_TOKEN"), help="默认每次启动随机生成")
     ap.add_argument("--open", action="store_true", help="启动后在浏览器打开前端")
+    ap.add_argument("--desktop", action="store_true", help="由桌面壳启动：开启 POST /exports/png（写入「下载」文件夹）")
     a = ap.parse_args(argv)
 
     from dotenv import load_dotenv
@@ -44,6 +45,9 @@ def main(argv=None):
     from app.server.app import create_app
 
     app = create_app(a.home, a.token)
+    if a.desktop:
+        from app.server.exports import default_export_dir
+        app.state.export_dir = default_export_dir()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s",
                         handlers=[logging.FileHandler(os.path.join(app.state.home, "server.log"), encoding="utf-8"),
                                   logging.StreamHandler(sys.stderr)])

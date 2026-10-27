@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type Client, errText } from "../client";
-import type { KeyStatus, Settings, SettingsTest } from "../types";
+import type { KeyStatus, Settings, SettingSource, SettingsTest } from "../types";
 import { IconCheck, IconChevronDown, IconChevronUp, IconWarn } from "./icons";
 import { llmErrorText } from "./llmErrorText";
 import { Topbar } from "./ui";
@@ -11,10 +11,14 @@ import { Topbar } from "./ui";
 // 阶段 5 收尾 C：凭证卡和模型三项下面一个「测试连接」。测的是**已保存**的配置（POST /settings/test），所以表单有未保存的
 // 改动（模型三项和保存时不同、或填了新 Key 没保存）时按钮不可点，旁边写「先保存再测试」，避免"测的和用的不是一份"。
 // 结果三态：测试中 / 连接正常 · 0.8s · 模型名（绿）/ 失败显示 message；auth、no_key 时焦点移到 Key 输入框。
+// 阶段 6 收尾（S 10-27）：每项标出当前生效值的来源，桌面端没读到 .env 时一眼能看出用的是默认值
+const SOURCE_TEXT: Record<SettingSource, string> = { settings: "来自本页设置", env: "来自环境变量", default: "是默认值" };
+
 export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChange: (k: KeyStatus) => void; onBack?: () => void }) {
   const [key, setKey] = useState<KeyStatus | null>(null);
   const [form, setForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
   const [savedForm, setSavedForm] = useState<{ model: string; base_url: string; timeout: string } | null>(null);
+  const [sources, setSources] = useState<Settings["sources"]>(undefined);
   const [testRaw, setTest] = useState<
     (({ state: "running" } | { state: "done"; r: SettingsTest } | { state: "error"; text: string }) & { at: TestAt }) | null
   >(null);
@@ -37,7 +41,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
 
   useEffect(() => {
     Promise.all([c.keyStatus(), c.settings()])
-      .then(([k, s]) => (setKey(k), setForm(toForm(s)), setSavedForm(toForm(s))))
+      .then(([k, s]) => (setKey(k), setForm(toForm(s)), setSavedForm(toForm(s)), setSources(s.sources)))
       .catch((e) => setError(errText(e)));
   }, [c]);
 
@@ -66,7 +70,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
       return;
     }
     c.saveSettings({ model: form.model, base_url: form.base_url, timeout: t }).then(
-      (s) => (setForm(toForm(s)), setSavedForm(toForm(s)), setMsg("设置已保存。"), setError("")),
+      (s) => (setForm(toForm(s)), setSavedForm(toForm(s)), setSources(s.sources), setMsg("设置已保存。"), setError("")),
       (er) => setError(errText(er)),
     );
   };
@@ -175,6 +179,12 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
                 <span className="hint">5–600 秒</span>
               </span>
             </label>
+            {sources ? (
+              <p className="hint" data-testid="settings-sources">
+                当前生效：模型名{SOURCE_TEXT[sources.model]}，Base URL {SOURCE_TEXT[sources.base_url]}，超时{SOURCE_TEXT[sources.timeout]}。
+                桌面版不读取仓库里的 .env 文件，要用自己的网关请在这里填写并保存。
+              </p>
+            ) : null}
             <div className="form-actions">
               <button type="submit" className="primary">保存设置</button>
             </div>

@@ -53,7 +53,7 @@ pub fn start(exe: &Path, home: &Path) -> Result<Running, String> {
         return Err(format!("找不到后台服务程序：{}", exe.display()));
     }
     let mut cmd = Command::new(exe);
-    cmd.arg("--port").arg("0").arg("--home").arg(home);
+    cmd.arg("--port").arg("0").arg("--home").arg(home).arg("--desktop"); // --desktop：开启导出 PNG 落盘（app/server/exports.py）
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()); // 日志在 home/server.log
     cmd.env_remove("DATACHAT_TOKEN"); // token 每次随机生成（sidecar-contract.md）
     #[cfg(windows)]
@@ -202,6 +202,43 @@ pub fn smoke(out: &Path) -> i32 {
     let _ = std::fs::write(out, serde_json::to_vec_pretty(&rep).unwrap_or_default());
     let _ = std::fs::remove_dir_all(&home);
     if ok { 0 } else { 1 }
+}
+
+/// `--smoke-selftest <out.json>`：把 `sidecar --selftest` 放进和正式启动一样的 Job Object（KILL_ON_JOB_CLOSE）里跑，
+/// stdout 的 JSON 原样写进文件，退出码透传。用来验证嵌套 Job 下沙箱 worker 的内存上限（selftest 的 memory 项）
+/// 和其余各项限制是否仍然生效（phase6-desktop.md「D1/D2 实现与偏离」的待验证项）。
+pub fn smoke_selftest(out: &Path) -> i32 {
+    let exe = exe_path();
+    let mut cmd = Command::new(&exe);
+    cmd.arg("--selftest").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = std::fs::write(out, format!("{{\"ok\": false, \"error\": {:?}}}", e.to_string()));
+            return 1;
+        }
+    };
+    #[cfg(windows)]
+    let _job = match job_for(&child) {
+        Ok(j) => j,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = std::fs::write(out, format!("{{\"ok\": false, \"error\": {:?}}}", format!("Job Object：{e}")));
+            return 1;
+        }
+    };
+    let mut text = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = so.read_to_string(&mut text);
+    }
+    let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(1);
+    let _ = std::fs::write(out, text);
+    code
 }
 
 /// `--smoke-hold <pid.txt>`：起 sidecar，把它的 pid 写进文件后一直挂着。CI 用 taskkill /F 结束壳，

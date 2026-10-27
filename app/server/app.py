@@ -19,7 +19,10 @@
     PUT    /messages/{id}/feedback       {"rating": "up"|"down"|null, "note"?}（只限已结束的助手消息）
     GET    /  、/assets/*                前端（ui/web 构建产物）。不要 token——页面本身不含机密，token 由
                                          URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
-    GET    /settings  PUT /settings      非机密设置：model、base_url、timeout（单次请求超时，秒）
+    GET    /settings  PUT /settings      非机密设置：model、base_url、timeout（单次请求超时，秒）；
+                                         sources 给出每项当前生效值的来源 settings | env | default（阶段 6 收尾）
+    POST   /exports/png?filename=        桌面模式（--desktop）：请求体是 PNG 字节，写进「下载」文件夹，返回 {"path"}；
+                                         浏览器模式 404（前端走 <a download>）。见 app/server/exports.py
     GET    /settings/api-key             {"configured", "source"}——从不返回 Key 本身
     PUT    /settings/api-key             {"api_key"} → 存进系统钥匙串
     DELETE /settings/api-key
@@ -334,6 +337,32 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         fn()
         return {"ok": True}
 
+    # 阶段 6 收尾：桌面端导出 PNG。export_dir 由 app.server.__main__ 在 --desktop 时挂上；None（浏览器模式、TestClient
+    # 默认）时 404，前端在浏览器里本来也不会调它。先看 Content-Length 再读体，超限不读进内存。
+    app.state.export_dir = None
+
+    @app.post("/exports/png", dependencies=[Depends(auth)])
+    async def export_png(request: Request, filename: str = Query("", max_length=500)):
+        from app.server.exports import MAX_PNG_BYTES, ExportError, save_png
+        if app.state.export_dir is None:
+            raise HTTPException(404, "仅桌面版可用")
+        try:
+            declared = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            declared = 0
+        if declared > MAX_PNG_BYTES:
+            raise HTTPException(413, "图片太大")
+        data = await request.body()
+        try:
+            path = save_png(app.state.export_dir, filename, data)
+        except ExportError as e:
+            raise HTTPException(400, str(e)) from None
+        except OSError as e:
+            logger.warning("导出 PNG 写盘失败：%s", type(e).__name__)
+            raise HTTPException(500, "写入下载文件夹失败") from None
+        logger.info("导出 PNG：%s（%d 字节）", os.path.basename(path), len(data))
+        return {"path": path}
+
     @app.post("/datasets", dependencies=[Depends(auth)])
     def create_dataset(files: list[UploadFile] = File(...), name: str = Form(""), db=Depends(db_dep)):
         if not files or len(files) > MAX_FILES:
@@ -538,12 +567,24 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(404, "图表不存在")
         return FileResponse(path, media_type="image/png")
 
+    # sources（阶段 6 收尾，S 10-27）：桌面端不读仓库里的 .env，没在设置页填时会回退到默认的 api.deepseek.com，
+    # 用户看不出"现在用的是哪一份"。每项标出当前生效值来自 设置页 / 环境变量 / 默认值。
+    SETTING_ENV = {"model": "DEEPSEEK_MODEL", "base_url": "DEEPSEEK_BASE_URL", "timeout": "DATACHAT_LLM_TIMEOUT"}
+
     @app.get("/settings", dependencies=[Depends(auth)])
     def get_settings(db=Depends(db_dep)):
         st = {r.key: r.value for r in db.scalars(select(Setting))}
         cfg = llm_config()
+        over = {k for k, v in st.items() if k in SETTING_KEYS and v}
+        if "timeout" in over:
+            try:
+                float(st["timeout"])
+            except ValueError:
+                over.discard("timeout")      # 同 llm_config：坏值不生效
+        sources = {k: "settings" if k in over else "env" if os.getenv(SETTING_ENV[k]) else "default"
+                   for k in SETTING_KEYS}
         return {"model": st.get("model") or cfg.model, "base_url": st.get("base_url") or cfg.base_url,
-                "timeout": cfg.timeout}
+                "timeout": cfg.timeout, "sources": sources}
 
     @app.put("/settings", dependencies=[Depends(auth)])
     def put_settings(body: SettingsIn, db=Depends(db_dep)):

@@ -8,6 +8,7 @@ import type { Turn } from "../turn";
 import { TurnView } from "../views/TurnView";
 import { EChart, type ChartSpec, placeCard, resetMarksForTest } from "./EChart";
 import * as exp from "./exportPng";
+import { setPngSaver } from "./pngSaver";
 import { DEFAULT_SWITCHES } from "./switches";
 import { setChartTheme, THEMES } from "./themes";
 import { getPrefs, resetPrefsForTest, setPrefs } from "./uiPrefs";
@@ -317,6 +318,25 @@ describe("F3 第六步：导出与交互态", () => {
     expect(downloadSpy.mock.calls.at(-1)![1]).toBe("_img src=x onerror=_window.__pwned=1__.png");
     fireEvent.click(b);
     expect(downloadSpy.mock.calls.at(-1)![1]).toBe("柱状图.png");
+  });
+
+  // 阶段 6 收尾：桌面壳注册了 saver 时不走 <a download>（WebView2 里没反应，S 10-27），改交给 saver，并显示保存路径
+  test("桌面模式：有 saver 时交给 saver、不调 download，成功显示「已保存到 路径」，失败显示导出失败", async () => {
+    const saver = vi.fn(async () => "C:\\Users\\S\\Downloads\\各城市销量.png");
+    setPngSaver(saver);
+    try {
+      render(<EChart spec={spec("bar")} />);
+      clickExport();
+      expect(saver).toHaveBeenCalledWith(expect.stringMatching(/^data:image\//), "各城市销量.png");
+      expect(downloadSpy).not.toHaveBeenCalled();
+      expect((await screen.findByTestId("export-saved")).textContent).toBe("已保存到 C:\\Users\\S\\Downloads\\各城市销量.png");
+      saver.mockRejectedValueOnce(new Error("500"));
+      clickExport();
+      expect((await screen.findByRole("alert")).textContent).toBe("导出失败");
+      expect(screen.queryByTestId("export-saved")).toBeNull();
+    } finally {
+      setPngSaver(null);
+    }
   });
 
   test("导出为浅色（经典配色）：只在暗色画布下出现；勾上用 classic，不勾用 darkCanvas；不持久化", () => {
