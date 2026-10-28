@@ -1,4 +1,6 @@
 """阶段 6.6 M3 回合快照 + M5 失败轮：历史渲染成数据块（全部由代码生成）。"""
+from datetime import timedelta, timezone
+
 import pandas as pd
 
 from app.memory.snapshots import (BLOCK_HEAD, BLOCK_TAIL, MAX_TURNS, TurnSnapshot, brief, chart_ref, coerce,
@@ -29,18 +31,14 @@ def test_chart_ref_from_option_and_png():
     assert chart_ref([{"png": "C:\\Users\\me\\charts\\chart_1_abc.png", "option": None}]) == "PNG chart_1_abc.png"
 
 
-def test_render_block_format(monkeypatch):
-    monkeypatch.setenv("TZ", "Asia/Shanghai")
-    import time
-    time.tzset()
-    try:
-        snaps = [TurnSnapshot(q="各地区销售额？", a_brief="华北最高。", result_digest="Series(5) 索引=地区",
-                              chart_ref="bar「各地区销售额」", ts="2026-10-20T06:03:00.123+00:00"),
-                 TurnSnapshot(q="改成堆叠", status="cancelled", ts="2026-10-20T06:05:00.000+00:00")]
-        block, dropped = render_block(snaps, 6000)
-    finally:
-        monkeypatch.delenv("TZ")
-        time.tzset()
+def test_render_block_format():
+    # 时区显式传进去，不靠 TZ 环境变量 + time.tzset()：Windows 没有 time.tzset()，
+    # 那种写法在 CI 的 windows-latest 上直接 AttributeError（#90 就红在这里）。
+    tz = timezone(timedelta(hours=8))
+    snaps = [TurnSnapshot(q="各地区销售额？", a_brief="华北最高。", result_digest="Series(5) 索引=地区",
+                          chart_ref="bar「各地区销售额」", ts="2026-10-20T06:03:00.123+00:00"),
+             TurnSnapshot(q="改成堆叠", status="cancelled", ts="2026-10-20T06:05:00.000+00:00")]
+    block, dropped = render_block(snaps, 6000, tz=tz)
     assert dropped == 0
     assert block == (BLOCK_HEAD + "\n"
                      "[第1轮 · 2026-10-20 14:03]\n问：各地区销售额？\n答：华北最高。\n结果：Series(5) 索引=地区\n"

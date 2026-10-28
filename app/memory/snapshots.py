@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, tzinfo
 
 from app.memory.budget import estimate_tokens
 
@@ -153,7 +153,12 @@ def coerce(history) -> list[TurnSnapshot]:
     return out
 
 
-def _local_ts(ts: str) -> str:
+def _local_ts(ts: str, tz: tzinfo | None = None) -> str:
+    """tz=None → 系统本地时区（正常路径）；显式传 tz 只给测试用。
+
+    不要在测试里靠 TZ 环境变量 + time.tzset() 切时区：Windows 没有 time.tzset()，
+    那写法在 CI 的 windows-latest 上直接 AttributeError（#90 就是这么红的）。
+    """
     if not ts:
         return "时间未知"
     try:
@@ -161,7 +166,7 @@ def _local_ts(ts: str) -> str:
     except ValueError:
         return "时间未知"
     if dt.tzinfo is not None:
-        dt = dt.astimezone()          # db.now() 存的是 UTC，渲染用本地时区
+        dt = dt.astimezone(tz)        # db.now() 存的是 UTC，渲染用本地时区（tz=None 即本地）
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
@@ -172,9 +177,9 @@ def status_line(s: TurnSnapshot) -> str:
     return "状态：" + STATUS_TEXT.get(s.status, s.status)
 
 
-def render_turn(n: int, s: TurnSnapshot) -> str:
+def render_turn(n: int, s: TurnSnapshot, tz: tzinfo | None = None) -> str:
     ok = s.status == "ok"
-    head = f"[第{n}轮 · {_local_ts(s.ts)}" + ("" if ok else " · 未完成") + "]"
+    head = f"[第{n}轮 · {_local_ts(s.ts, tz)}" + ("" if ok else " · 未完成") + "]"
     lines = [head, f"问：{s.q}"]
     if ok:
         if s.a_brief:
@@ -188,21 +193,21 @@ def render_turn(n: int, s: TurnSnapshot) -> str:
     return "\n".join(lines)
 
 
-def render_block(snaps: list[TurnSnapshot], max_tokens: int) -> tuple[str, int]:
+def render_block(snaps: list[TurnSnapshot], max_tokens: int, tz: tzinfo | None = None) -> tuple[str, int]:
     """渲染历史块（§3.4 的格式）。最多 MAX_TURNS 轮；超过 max_tokens 时从最早的一轮开始丢。
     返回 (块, 丢掉的轮数)。空历史 → ("", 0)：整块不出现（P8）。轮次编号按会话里的真实序号。"""
     snaps = list(snaps or [])
     dropped = max(0, len(snaps) - MAX_TURNS)
     keep = list(enumerate(snaps, 1))[-MAX_TURNS:]
     while keep:
-        body = "\n\n".join(render_turn(n, s) for n, s in keep)
+        body = "\n\n".join(render_turn(n, s, tz) for n, s in keep)
         block = f"{BLOCK_HEAD}\n{body}\n{BLOCK_TAIL}"
         if estimate_tokens(block) <= max_tokens or len(keep) == 1:
             if estimate_tokens(block) > max_tokens:      # 只剩一轮还超：截问题原文
                 n, s = keep[0]
                 over = (estimate_tokens(block) - max_tokens) * 2   # 估算按 2 字符/token，换回字符数
                 s2 = TurnSnapshot(**{**s.__dict__, "q": _head(s.q, max(20, len(s.q) - over - 2))})
-                block = f"{BLOCK_HEAD}\n{render_turn(n, s2)}\n{BLOCK_TAIL}"
+                block = f"{BLOCK_HEAD}\n{render_turn(n, s2, tz)}\n{BLOCK_TAIL}"
             return block, dropped
         keep = keep[1:]
         dropped += 1
