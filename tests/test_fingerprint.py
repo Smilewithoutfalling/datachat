@@ -110,10 +110,46 @@ def test_workflow_render_not_supported():
     assert r["supported"] is False and "workflow" in r["reason"]
 
 
+# ---------------------------------------------------------------- 运行时配置
+
+def test_runtime_config_defaults(monkeypatch):
+    monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
+    cfg = fp.runtime_config()
+    assert cfg["rewrite"] == "off"
+    assert cfg["memory_mode"] in ("off", "unknown")   # 记忆系统未落地时是 off
+
+
+def test_env_flag_normalizes(monkeypatch):
+    monkeypatch.setenv("DATACHAT_REWRITE", " TRUE ")
+    assert fp.runtime_config()["rewrite"] == "on"
+    monkeypatch.setenv("DATACHAT_REWRITE", "weird-value")
+    assert fp.runtime_config()["rewrite"] == "weird-value"   # 认不出的值原样保留，不抹平成 off
+
+
+def test_memory_mode_uses_resolver_when_present(monkeypatch):
+    """记忆系统给出 resolve_memory_mode() 后，报告记的是它解析出来的生效值。"""
+    import sys
+    import types
+
+    pkg = types.ModuleType("app.memory")
+    mod = types.ModuleType("app.memory.config")
+    pkg.config = mod
+    monkeypatch.setitem(sys.modules, "app.memory", pkg)
+    monkeypatch.setitem(sys.modules, "app.memory.config", mod)
+
+    mod.resolve_memory_mode = lambda: "state"
+    assert fp.memory_mode() == "state"
+
+    def boom():
+        raise RuntimeError("no db")
+    mod.resolve_memory_mode = boom
+    assert fp.memory_mode() == "unknown"    # 读不到就 unknown，不猜 off
+
+
 # ---------------------------------------------------------------- 可比性判定
 
 BASE = {"agent": "react", "memory_mode": "off", "rewrite": "0", "use_dictionary": True,
-        "affects_results_sha256": "aaa", "evalset_sha256": "bbb", "rendered_set_sha12": "ccc"}
+        "evalset_sha12": "bbb", "code_sha12": "aaa", "rendered_set_sha12": "ccc"}
 
 
 def test_comparable_when_gate_equal():
@@ -122,17 +158,17 @@ def test_comparable_when_gate_equal():
 
 
 def test_comparable_exempt_when_rendered_equal():
-    now = dict(BASE, affects_results_sha256="zzz")
+    now = dict(BASE, code_sha12="zzz")
     r = fp.comparable(now, dict(BASE))
     assert r["comparable"] is True and r["basis"] == "rendered-equal"
-    assert r["diffs"] == ["affects_results_sha256"]
+    assert r["diffs"] == ["code_sha12"]
 
 
 def test_not_comparable_when_rendered_differs():
-    now = dict(BASE, affects_results_sha256="zzz", rendered_set_sha12="ddd")
+    now = dict(BASE, code_sha12="zzz", rendered_set_sha12="ddd")
     r = fp.comparable(now, dict(BASE))
     assert r["comparable"] is False
-    assert "affects_results_sha256" in r["diffs"]
+    assert "code_sha12" in r["diffs"]
 
 
 def test_not_comparable_without_fingerprint():
@@ -147,8 +183,36 @@ def test_memory_mode_change_blocks_comparison():
     assert fp.comparable(now, dict(BASE))["comparable"] is False
 
 
+def test_unknown_mode_blocks_even_against_unknown():
+    """取不到 memory_mode 时两个 unknown 也不能判可比：两个"不知道"不等于配置相同。"""
+    a = dict(BASE, memory_mode="unknown")
+    r = fp.comparable(dict(a), a)
+    assert r["comparable"] is False and r["basis"] == "unknown"
+
+
 def test_evalset_change_not_exempted_by_rendered():
     """期望值改了但题面和数据没变时，渲染串一样；这不能算可比——尺子的刻度变了。"""
-    now = dict(BASE, evalset_sha256="zzz")
+    now = dict(BASE, evalset_sha12="zzz")
     r = fp.comparable(now, dict(BASE))
-    assert r["comparable"] is False and r["diffs"] == ["evalset_sha256"]
+    assert r["comparable"] is False and r["diffs"] == ["evalset_sha12"]
+
+
+def test_report_emits_fingerprints_and_null_comparable():
+    from app.eval.cases import ALL_CASES
+    from app.eval.report import EvalReport
+
+    case = ALL_CASES[0]
+    results = [{"case": case, "agent": "react", "correct": True, "executed": True}]
+    rep = EvalReport(results, meta={"use_dictionary": True, "memory_mode": "off", "rewrite": "0"})
+    s = rep.summary()
+    f = s["fingerprints"]
+    assert set(f) >= {"agent", "memory_mode", "rewrite", "use_dictionary",
+                      "evalset_sha12", "code_sha12", "rendered_set_sha12", "rendered"}
+    assert f["agent"] == "react" and f["memory_mode"] == "off"
+    assert f["evalset_sha12"] == s["evalset"]["sha256"]
+    assert f["rendered_set_sha12"] and f["rendered"]["supported"] is True
+    assert s["comparable"] is None            # 没给 --baseline
+
+    # 给一个空基准：必须判不可比，而不是当成可比（复用已算好的指纹，不再渲一遍 130 题）
+    rep.baseline = {}
+    assert rep.summary()["comparable"]["comparable"] is False

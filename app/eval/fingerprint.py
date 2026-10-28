@@ -125,6 +125,42 @@ def code_fingerprint() -> dict:
             "files": parts}
 
 
+# ------------------------------------------------------------------ 运行时配置
+
+def _env_flag(name: str, default: str = "off") -> str:
+    """环境变量开关归一成 on/off；认不出的值原样保留（原样才能被比较，而不是被抹平成 off）。"""
+    v = (os.environ.get(name) or "").strip().lower()
+    if not v:
+        return default
+    if v in ("1", "true", "yes", "on"):
+        return "on"
+    if v in ("0", "false", "no", "off"):
+        return "off"
+    return v
+
+
+def memory_mode() -> str:
+    """本轮实际生效的记忆模式。
+
+    记忆系统落地后由 app/memory/config.py 的 resolve_memory_mode() 给（env → settings → off，
+    见 memory-system-spec.md §3.7）；现在还没有这个模块，行为等价于 off。
+    两者都取不到时返回 "unknown"——comparable 遇到 unknown 一律判不可比，不猜。
+    """
+    try:
+        from app.memory.config import resolve_memory_mode
+    except ImportError:
+        return "off"
+    try:
+        return resolve_memory_mode() or "unknown"
+    except Exception:  # noqa: BLE001  读 settings 失败（没有库、库坏了）不该让评测崩
+        return "unknown"
+
+
+def runtime_config() -> dict:
+    """影响输入或评分的运行时开关。报告必须记这里的值，不能记环境变量原值。"""
+    return {"memory_mode": memory_mode(), "rewrite": _env_flag("DATACHAT_REWRITE")}
+
+
 # ------------------------------------------------------------------ 渲染后的 prompt
 
 class _NoModel:
@@ -190,30 +226,40 @@ def rendered_fingerprints(cases=None, datasets=None, agent: str = "react",
 
 # ------------------------------------------------------------------ 可比性判定
 
-GATE_KEYS = ("agent", "memory_mode", "rewrite", "use_dictionary", "evalset_sha256",
-             "affects_results_sha256")
+GATE_KEYS = ("agent", "memory_mode", "rewrite", "use_dictionary", "evalset_sha12", "code_sha12")
 
 # 只有代码指纹可以被渲染哈希豁免：它衡量的就是"代码变了，但模型收到的字符串没变"。
 # 其余门禁项都不能豁免——
 #   memory_mode / rewrite：改的是 messages 里的上下文，不进 system prompt，渲染哈希看不见；
 #   evalset：可能只改了某题的期望值或数据，题目文本没变，渲染哈希也看不见；
 #   agent：react 与 workflow 是两套系统，分数本来就不可比。
-_EXEMPTABLE = {"affects_results_sha256"}
+_EXEMPTABLE = {"code_sha12"}
+
+
+def _is_unknown(v) -> bool:
+    """取不到的值记 unknown（如 memory_mode 在没有 settings 也没有 env 时）。
+    unknown 与任何值都不可比——包括另一个 unknown：两个"不知道"不代表配置相同。"""
+    return v is None or v == "unknown"
 
 
 def comparable(now: dict, before: dict) -> dict:
     """比较两批的指纹，返回判定结果。
 
-    now / before: {"agent","memory_mode","rewrite","affects_results_sha256",
-                   "evalset_sha256","rendered_set_sha12"（可选）}
+    now / before: {"agent","memory_mode","rewrite","use_dictionary","evalset_sha12",
+                   "code_sha12","rendered_set_sha12"（可选）}
 
     判定：
+    - 有取不到的项（None / "unknown"）→ 不可比（basis=unknown）
     - 门禁字段全等 → 可比（basis=gate）
-    - 只有可豁免项不等，且 rendered_set_sha12 全等 → 等价可比（basis=rendered-equal），记下差异项
+    - 只有 code_sha12 不等，且 rendered_set_sha12 全等 → 等价可比（basis=rendered-equal）
     - 有不可豁免项不等，或渲染串不等 → 不可比，列出所有差异项
-    缺字段一律按"不等"处理：老报告没有指纹，不能当可比。
     """
+    missing = [k for k in GATE_KEYS if _is_unknown(now.get(k)) or _is_unknown(before.get(k))]
     diffs = [k for k in GATE_KEYS if now.get(k) != before.get(k)]
+    if missing:
+        return {"comparable": False, "basis": "unknown",
+                "diffs": sorted(set(diffs) | set(missing)),
+                "note": "有门禁项取不到值，无法判定可比"}
     if not diffs:
         return {"comparable": True, "basis": "gate", "diffs": []}
     hard = [k for k in diffs if k not in _EXEMPTABLE]

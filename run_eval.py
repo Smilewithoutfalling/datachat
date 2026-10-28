@@ -78,11 +78,26 @@ def main():
     parser.add_argument("--out", default=None, help="JSON 报告路径（默认 outputs/eval_<agent>_<时间>.json）")
     parser.add_argument("--repeat", type=int, default=1, help="同一配置连跑几次（默认 1）")
     parser.add_argument("--rescore", default=None, metavar="REPORT", help="离线重新打分一份已有报告，不调用模型")
+    parser.add_argument("--baseline", default=None, metavar="REPORT",
+                        help="基准报告的 JSON 路径：填 comparable，判定两批分数能不能直接比（EV-A3）")
     args = parser.parse_args()
 
     if args.rescore:
         _rescore(args.rescore, args.data)
         return
+
+    baseline_fp = None
+    if args.baseline:
+        import json
+        try:
+            with open(args.baseline, encoding="utf-8") as f:
+                baseline_fp = (json.load(f) or {}).get("fingerprints") or {}
+        except (OSError, ValueError) as e:
+            print(f"读不了基准报告 {args.baseline}: {e}")
+            sys.exit(1)
+        if not baseline_fp:
+            print(f"⚠ 基准报告没有 fingerprints（{args.baseline}），只能判为不可比")
+    args.baseline_fp = baseline_fp
 
     if args.data and not os.path.exists(args.data):
         print(f"数据文件不存在: {args.data}")
@@ -131,7 +146,7 @@ def _run_agent(agent, cases, args, llm_config, stamp):
             print(f"\n======== {agent} 第 {k}/{args.repeat} 次 ========")
         results = runner.run_all(cases, verbose=True)
         report = EvalReport(results, meta={**meta, "run": k, "repeat": args.repeat},
-                            datasets=runner.datasets)
+                            datasets=runner.datasets, baseline=getattr(args, "baseline_fp", None))
         report.print_summary()
         report.print_details(verbose=args.verbose)
         if args.out and args.repeat == 1 and args.agent != "both":
