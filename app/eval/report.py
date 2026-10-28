@@ -243,11 +243,19 @@ def load_obj(d):
 
 
 class EvalReport:
-    def __init__(self, results: list, meta: dict | None = None):
-        """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果"""
+    def __init__(self, results: list, meta: dict | None = None, datasets: dict | None = None,
+                 baseline: dict | None = None):
+        """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果；
+        datasets: 本轮实际用的数据表（runner.datasets），用于算渲染指纹；None 时用默认 DATASETS。
+        baseline: 基准报告的 fingerprints 块（run_eval.py --baseline）。None = 没给基准，
+        summary() 里 comparable 为 null；给了但读不到指纹时传 {}，判定结果是"不可比"。
+        """
         self.results = results
         self.meta = meta or {}
+        self.datasets = datasets
+        self.baseline = baseline
         self.total = len(results)
+        self._fingerprint = None
         self.by_category = {}
         self.by_dataset = {}
         for r in results:
@@ -288,6 +296,45 @@ class EvalReport:
         vals = [r[key] for r in self._items(items) if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else None
 
+    def fingerprint(self, evalset_sha12: str | None = None) -> dict:
+        """本轮的可比性指纹（EV-A3），算一次缓存住——summary() 会被 to_json / print_summary 各调一次。
+
+        code_sha12：app/ 下"影响分数"的源码全量哈希，含 prompt 全部来源（react_agent 的内联
+        system、nodes/*、tools/{schema,dataset,dictionary,plotting}）和评分器 comparator.py。
+        evalset 指纹不含 comparator，所以单靠它判不出"尺子变了"。
+        rendered：每题 system prompt 的渲染指纹，用途是当 code_sha12 变了但逐题渲染串完全相同时
+        允许标"等价可比"，不必为空改动重跑 baseline。workflow 路径不提供（见 fingerprint.py）。
+        memory_mode 取不到就记 unknown——comparable 遇到 unknown 一律判不可比。
+        """
+        if self._fingerprint is None:
+            from app.eval.fingerprint import code_fingerprint, rendered_fingerprints, runtime_config
+            code = code_fingerprint()
+            runtime = runtime_config()
+            agents = {r.get("agent", "workflow") for r in self.results}
+            agent = next(iter(agents)) if len(agents) == 1 else "mixed"
+            rendered = rendered_fingerprints(
+                datasets=self.datasets, agent=agent,
+                use_dictionary=self.meta.get("use_dictionary", True))
+            self._fingerprint = {
+                "agent": agent,
+                "memory_mode": self.meta.get("memory_mode") or runtime["memory_mode"],
+                "rewrite": self.meta.get("rewrite") or runtime["rewrite"],
+                "use_dictionary": self.meta.get("use_dictionary", True),
+                "evalset_sha12": evalset_sha12 or evalset_fingerprint()["sha256"],
+                "code_sha12": code["affects_results_sha256"],
+                "code_all_sha12": code["sha256"],
+                "rendered_set_sha12": rendered.get("set_sha12"),
+                "rendered": rendered,
+            }
+        return self._fingerprint
+
+    def comparable(self) -> dict | None:
+        """与 --baseline 的可比性判定；没给基准时为 None。"""
+        if self.baseline is None:
+            return None
+        from app.eval.fingerprint import comparable
+        return comparable(self.fingerprint(), self.baseline)
+
     def summary(self) -> dict:
         def block(items):
             return {
@@ -306,12 +353,15 @@ class EvalReport:
                 "match_kinds": dict(Counter(r.get("match") for r in items if r.get("correct"))),
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
+        evalset = evalset_fingerprint()
         return {
             "time": datetime.now().isoformat(timespec="seconds"),
             "git_sha": (sha := git_sha()),
             **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),
             "agent": agents[0] if len(agents) == 1 else agents,
-            "evalset": evalset_fingerprint(),
+            "evalset": evalset,
+            "fingerprints": self.fingerprint(evalset["sha256"]),
+            "comparable": self.comparable(),
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
@@ -370,6 +420,12 @@ class EvalReport:
             print(f"  ⚠ commit 后的 ? 表示没能确认工作区是否干净：{s['git_sha_note']}")
         if s.get("model"):
             print(f"  模型: {s['model']}    temperature: {s.get('temperature')}    数据指纹: {s.get('data_sha256')}")
+        cmp_ = s.get("comparable")
+        if cmp_ is not None:
+            if cmp_.get("comparable"):
+                print(f"  与基准: ✓ 可比（{cmp_.get('basis')}）")
+            else:
+                print(f"  与基准: ✗ 不可比   差异项: {', '.join(cmp_.get('diffs') or [])}")
         print(f"  总用例: {self.total}")
         print("=" * 60)
 

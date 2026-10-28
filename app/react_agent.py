@@ -147,7 +147,8 @@ def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None,
 
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20,
-                      llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False):
+                      llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False,
+                      out_system: dict | None = None):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -161,6 +162,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
     llm_config / tracker: 模型调用的重试参数与重试计数（B21）；llm_config 为 None 时不重试。
     nudge_no_exec: 单轮分析时为 True：没执行代码也没按契约拒答就要结束时提醒一次（B70），
           提醒次数记进 sink["nudges"]。多轮追问可以只凭上下文作答，不开。
+    out_system: 可选 dict。构造完成后把最终的 system prompt 原串写进 out_system["system"]，
+          供评测算渲染指纹（app/eval/fingerprint.py）。指纹必须拿真实字符串，不能复刻拼接逻辑。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -243,6 +246,9 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "最终用中文给出简洁、直接的结论；结论里的数字必须来自工具返回的 result 或 print 输出，不要估算或编造；"
         "若已生成图表，说明图表展示了什么。"
     )
+
+    if out_system is not None:
+        out_system["system"] = system
 
     def _count_nudge():
         if sink is not None:
