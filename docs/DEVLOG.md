@@ -2560,7 +2560,7 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 1. EV-C3：`stability` 块 + `--repeat` 的 flip_rate，把上面这个 2.3% 量化成区间。
 2. `emp_022` 的拒答契约（"说了没有这个字段，就不能接着推测"）需要单独看是否要加提示。
 
-## [78] 2026-10-28 · 记忆批 1：M0 保留删除 + 开关 + M12 预算 + M5 失败轮 + M1 工作状态 + M3 快照 · commit 3bad865
+## [78] 2026-10-28 · 记忆批 1：M0 保留删除 + 开关 + M12 预算 + M5 失败轮 + M1 工作状态 + M3 快照 · commit 048c268（PR #90，squash 合并）
 
 - 新包 app/memory/：config（resolve_memory_mode：env → settings → off；full 批 1 解析为 state）、budget、working_state、snapshots、context。
 - off（默认）：送进模型的消息与 3ce6b77 逐字节一致，tests/test_memory_p8.py 用 3ce6b77 上算出的三个哈希钉住（react 单轮 / react 带历史 / workflow）。
@@ -2572,3 +2572,5 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - 偏离写进 spec §3.8：模块放 app/memory/；不建 session_state 表（状态是历史的纯函数）；不改图表命名；DATACHAT_HISTORY 推迟。
 - 删单条时发现：问与答常在同一毫秒落库，按 (created_at, id) 排序会把答排到问前面，所以删除路径沿用 relationship 的顺序（test_delete_message_keeps_history_alternating）。
 - 闸门（沙箱 aarch64，最后一次改动之后）：pytest 1039 passed；vitest 888 passed；lint、tsc、build、gen_ui_types --check、gen_eval_data --check 全过；e2e --grep-invert 视觉 41 passed。旧库启动时转换的耗时还没有在大库上实测，上限暂定 512 MB。
+- Windows 上的 `time.tzset()` 不存在，CI 的 windows-latest 两个 Python 版本都挂在 AttributeError。改成 `_local_ts` / `render_turn` / `render_block` 接可选 `tz`，默认 `None` 仍是系统本地时区（生产路径逐字不变），测试显式传 UTC+8；没加 skip —— 本机开发就在 Windows 上，skip 等于这条覆盖永久消失。之后本机 82 passed（快照 / 记忆四件套 / 指纹 / 执行器），CI 9/9 success。
+- 合并路径：本分支 rebase 到含 #88/#89 的 master 后 squash 成 048c268。`code_sha12` 变为 `28d8b0d21488`（A 组 47，新增 `app/memory/` 6 个文件），`rendered_set_sha12` 仍是 `6b23655c28a6` —— off 模式下送进模型的 system 一个字节没变，但 `comparable()` 按门禁判「与 eval-v0 不可比」。要批 1 的分数只能重跑，不走渲染串豁免。
