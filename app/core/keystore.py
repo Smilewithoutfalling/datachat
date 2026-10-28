@@ -29,6 +29,11 @@ ACCOUNT = "llm_api_key"
 ENV_VAR = "DEEPSEEK_API_KEY"
 
 
+def conn_account(connection_id: str) -> str:
+    """阶段 6.5：每个连接单独一条凭据，SERVICE 不变、ACCOUNT = conn:<id>。旧的 llm_api_key 条目保留一个版本。"""
+    return f"conn:{connection_id}"
+
+
 class KeyStoreError(RuntimeError):
     """钥匙串不可用或写入失败。消息里不含 Key，也不含异常类型名、后端全限定名（T11：这条会经 400 到界面）；
     细节只进日志。"""
@@ -70,19 +75,19 @@ def _usable(kr) -> bool:
     return True
 
 
-def get_api_key() -> Optional[str]:
-    """钥匙串里的 Key；没有或钥匙串不可用时返回 None（不抛异常）。"""
+def get_api_key(account: str = ACCOUNT) -> Optional[str]:
+    """钥匙串里的 Key；没有或钥匙串不可用时返回 None（不抛异常）。account 默认是旧的 llm_api_key。"""
     try:
         kr = _keyring()
         if not _usable(kr):
             return None
-        v = kr.get_password(SERVICE, ACCOUNT)
+        v = kr.get_password(SERVICE, account)
     except Exception:  # noqa: BLE001
         return None
     return v or None
 
 
-def set_api_key(key: str) -> None:
+def set_api_key(key: str, account: str = ACCOUNT) -> None:
     key = (key or "").strip()
     if not key:
         raise KeyStoreError("Key 为空")
@@ -93,20 +98,20 @@ def set_api_key(key: str) -> None:
         _log.warning("keyring unusable, backend=%s", backend_name())
         raise KeyStoreError("系统钥匙串不可用")
     try:
-        kr.set_password(SERVICE, ACCOUNT, key)
+        kr.set_password(SERVICE, account, key)
     except Exception as e:  # noqa: BLE001
         _log.warning("keyring set_password failed: %s: %s", type(e).__name__, e)
         raise KeyStoreError("写入系统钥匙串失败") from None
 
 
-def delete_api_key() -> bool:
+def delete_api_key(account: str = ACCOUNT) -> bool:
     """删除成功返回 True；本来就没有返回 False。"""
     kr = _keyring()
     if not _usable(kr):
         _log.warning("keyring unusable, backend=%s", backend_name())
         raise KeyStoreError("系统钥匙串不可用")
     try:
-        kr.delete_password(SERVICE, ACCOUNT)
+        kr.delete_password(SERVICE, account)
         return True
     except kr.errors.PasswordDeleteError:
         return False

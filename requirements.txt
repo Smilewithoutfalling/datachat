@@ -3,6 +3,11 @@ langgraph==1.2.14
 langchain-core==1.6.9
 langchain-openai==1.7.0
 openai==3.26.1
+# 阶段 6.5：Anthropic 协议（ChatAnthropic）。anthropic 的其余依赖（anyio、httpx2、jiter、pydantic、sniffio、
+# typing-extensions、opentelemetry-api）已随 openai / fastapi 装上；新增的只有这三个，装上后共 14.8 MB（DEVLOG [73]）
+langchain-anthropic==1.7.5
+anthropic==1.17.0
+docstring-parser==0.18.0
 pandas==3.0.6
 numpy==2.4.6
 matplotlib==3.11.2

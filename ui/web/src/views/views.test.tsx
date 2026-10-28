@@ -3,6 +3,7 @@ import { Api } from "../api";
 import { client } from "../client";
 import { fakeBackend } from "../fakeBackend";
 import type { KeyStatus } from "../types";
+import { conn, connRoutes } from "./connFixtures";
 import { Shell } from "./Shell";
 
 const INJECT = '<img src=x onerror="window.__pwned=1">';
@@ -44,9 +45,8 @@ function setup(extra: Record<string, unknown> = {}, key: KeyStatus = { configure
     },
     "PATCH /sessions/s1": (b: unknown) => ({ ...SESSION, title: (b as { title: string }).title }),
     "GET /settings/api-key": key,
-    "GET /settings": { model: "qwen", base_url: "https://x/v1", timeout: 60 },
-    "PUT /settings": (b: unknown) => ({ model: "qwen", base_url: "https://x/v1", ...(b as object) }),
-    "PUT /settings/api-key": { configured: true, source: "keyring" },
+    // 阶段 6.5：设置页读 /providers、/connections；有 Key 时是一个已配好的连接，没 Key 时只有「环境变量」虚拟连接
+    ...connRoutes(key.configured ? [conn({ name: "qwen 网关", provider: "custom", model: "qwen", base_url: "https://x/v1" })] : []).routes,
     ...extra,
   });
   render(<Shell c={client(new Api("t", be.fetchImpl))} initialKey={key} />);
@@ -135,19 +135,22 @@ test("会话：消息按文本渲染；改名走 PATCH 并更新左栏", async (
   expect(await screen.findByRole("button", { name: /^新标题/ })).toBeTruthy();
 });
 
-test("没设 Key → 直接进设置页；保存后输入框清空，Key 不出现在任何请求以外的地方", async () => {
+// 阶段 6.5（D2 改为新建第一个连接）：期望变了——原来是填「模型凭证」一栏的 Key（PUT /settings/api-key），
+// 现在没有可用连接时直接打开「新建连接」表单，Key 存到这个连接上（PUT /connections/{id}/api-key）。「Key 只出现在请求里」不变。
+test("没设 Key → 直接进设置页并打开新建连接；保存后 Key 不出现在任何请求以外的地方", async () => {
   const be = setup({}, { configured: false, source: null });
   const view = await screen.findByTestId("settings-view");
-  expect(within(view).getByTestId("key-status").textContent).toBe("未设置");
-  const input = view.querySelector('input[type="password"]') as HTMLInputElement;
+  expect(within(view).getByTestId("key-status").textContent).toContain("未设置"); // 「环境变量」卡上
+  const form = await within(view).findByTestId("conn-form");
+  const input = within(form).getByLabelText("API Key") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "sk-secret" } });
-  await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存 Key" })));
-  expect(be.calls.find((x) => x.path === "/settings/api-key" && x.method === "PUT")?.body).toEqual({ api_key: "sk-secret" });
-  expect(input.value).toBe("");
+  await act(async () => fireEvent.click(within(form).getByRole("button", { name: "新建并保存" })));
+  expect(be.calls.find((x) => x.path === "/connections/c101/api-key" && x.method === "PUT")?.body).toEqual({ api_key: "sk-secret" });
   expect(document.body.textContent).not.toContain("sk-secret");
-  expect(within(view).getByTestId("key-status").textContent).toContain("系统凭据") // 验收 P1-15：界面不再用 macOS 的"钥匙串";
+  expect(within(view).queryByTestId("conn-form")).toBeNull();
 });
 
+// 阶段 6.5：期望变了——全局表单只剩超时（§3「超时仍然是全局设置」），model / base_url 归连接，所以请求体只有 timeout
 test("设置：超时越界前端拦下，不发请求；合法值以数字发出", async () => {
   const be = setup();
   fireEvent.click(await screen.findByRole("button", { name: "设置" }));
@@ -159,32 +162,36 @@ test("设置：超时越界前端拦下，不发请求；合法值以数字发�
   expect(be.calls.some((x) => x.method === "PUT" && x.path === "/settings")).toBe(false);
   fireEvent.change(t, { target: { value: "120" } });
   await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
-  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({
-    model: "qwen",
-    base_url: "https://x/v1",
-    timeout: 120,
-  });
+  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({ timeout: 120 });
+  expect(screen.getByRole("status").textContent).toBe("设置已保存。");
 });
 
-// 阶段 6 收尾（S 10-27）：桌面端不读 .env，用户看不出生效的是默认 api.deepseek.com；每项标来源。旧后端没 sources 时不显示
-test("设置：显示每项当前生效值的来源；保存后按返回的 sources 刷新；没有 sources 不显示", async () => {
+// 阶段 6 收尾（S 10-27）：桌面端不读 .env，用户看不出生效的是默认 api.deepseek.com；每项标来源。旧后端没 sources 时不显示。
+// 阶段 6.5：期望变了——「当前生效」加上连接名；没有连接（环境变量虚拟连接）时仍逐项写来源和 .env 提示，有连接时 model / base_url
+// 来自连接，只写连接名 + 模型 + 超时来源。
+test("设置：当前生效写出连接名；环境变量时逐项标来源并提示 .env；没有 sources 不显示", async () => {
   setup({
     "GET /settings": { model: "deepseek-chat", base_url: "https://api.deepseek.com/v1", timeout: 60,
-      sources: { model: "default", base_url: "default", timeout: "env" } },
-    "PUT /settings": (b: unknown) => ({ model: "qwen", base_url: "https://gw/v1", timeout: 60, ...(b as object),
-      sources: { model: "settings", base_url: "settings", timeout: "env" } }),
+      sources: { model: "default", base_url: "default", timeout: "env" }, connection: { id: "env", name: "环境变量" } },
   });
   fireEvent.click(await screen.findByRole("button", { name: "设置" }));
   const view = await screen.findByTestId("settings-view");
   const src = within(view).getByTestId("settings-sources");
-  expect(src.textContent).toContain("模型名是默认值，Base URL 是默认值，超时来自环境变量");
+  expect(src.textContent).toContain("当前生效：连接「环境变量」，模型 deepseek-chat，超时来自环境变量。");
+  expect(src.textContent).toContain("模型名是默认值，Base URL 是默认值");
   expect(src.textContent).toContain("桌面版不读取仓库里的 .env 文件");
-  await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
-  expect(within(view).getByTestId("settings-sources").textContent).toContain("模型名来自本页设置，Base URL 来自本页设置");
+});
+
+test("设置：有生效连接时来源行写连接名和模型，不再提 .env", async () => {
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const view = await screen.findByTestId("settings-view");
+  const src = within(view).getByTestId("settings-sources");
+  expect(src.textContent).toBe("当前生效：连接「qwen 网关」，模型 qwen，超时是默认值。");
 });
 
 test("设置：后端没给 sources（旧版本）时不显示来源行", async () => {
-  setup();
+  setup({ "GET /settings": { model: "qwen", base_url: "https://x/v1", timeout: 60 } });
   fireEvent.click(await screen.findByRole("button", { name: "设置" }));
   const view = await screen.findByTestId("settings-view");
   expect(within(view).queryByTestId("settings-sources")).toBeNull();
@@ -290,122 +297,8 @@ test("返回：首次启动没 Key 自动进设置页，不显示返回", async 
   expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
 });
 
-// ---- 阶段 5 收尾 C：设置页「测试连接」——测的是已保存的配置 -------------------------------------------------------
-describe("测试连接", () => {
-  /** 可控的 JSON 响应：body 流先不关，调用方 resolve 时才写入并关闭（按钮的"测试中"态要能看到）。 */
-  function pending() {
-    let ctrl!: ReadableStreamDefaultController<Uint8Array>;
-    const stream = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
-    return {
-      response: () => new Response(stream, { status: 200, headers: { "Content-Type": "application/json" } }),
-      resolve: (v: unknown) => { ctrl.enqueue(new TextEncoder().encode(JSON.stringify(v))); ctrl.close(); },
-    };
-  }
-  const open = async () => {
-    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
-    return screen.findByTestId("settings-view");
-  };
-
-  test("三态：可点 → 测试中（不可点）→ 连接正常 · 0.8s · 模型名；请求是 POST /settings/test", async () => {
-    const p = pending();
-    const be = setup({ "POST /settings/test": () => p.response() });
-    const view = await open();
-    const btn = within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
-    await act(async () => fireEvent.click(btn));
-    expect((within(view).getByRole("button", { name: "测试中…" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(be.calls.filter((x) => x.method === "POST" && x.path === "/settings/test")).toHaveLength(1);
-    await act(async () => p.resolve({ ok: true, latency_ms: 812, model: "deepseek-chat" }));
-    expect(within(view).getByTestId("test-result").textContent).toBe("连接正常 · 0.8s · deepseek-chat");
-    expect((within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  // V2c §2（S 10-25 定）：失败和错误卡一个口径——正文是标题 + 建议 + 编号，后端原文收进默认折叠的「技术详情」。
-  // 期望变了：原来断言正文就是整串 message（含上游英文 "invalid key"），现在正文不含原文，原文只在展开后的技术详情里。
-  test("失败：正文是标题 + 建议 + 编号，上游原文折叠在「技术详情」；auth 时焦点移到 Key 输入框", async () => {
-    const message = "鉴权失败，请检查 API Key，共尝试 1 次：invalid key（编号 0123abcd）";
-    setup({ "POST /settings/test": { ok: false, llm_kind: "auth", message, latency_ms: 120 } });
-    const view = await open();
-    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "测试连接" })));
-    const r = within(view).getByTestId("test-result");
-    expect(r.querySelector(".test-fail-title")!.textContent).toBe("模型服务不认这个 API Key");
-    expect(r.querySelector(".test-fail-hint")!.textContent).toBe("检查或更换上面的 Key。（编号 0123abcd）");
-    const tech = within(view).getByTestId("test-tech");
-    expect(tech.hidden).toBe(true);
-    expect(tech.textContent).toBe(message);
-    const toggle = within(r).getByRole("button", { name: "技术详情" });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(toggle);
-    expect(tech.hidden).toBe(false);
-  });
-
-  test("失败（auth）：焦点移到 Key 输入框", async () => {
-    setup({ "POST /settings/test": { ok: false, llm_kind: "auth", message: "x（编号 0123abcd）", latency_ms: 1 } });
-    const view = await open();
-    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "测试连接" })));
-    expect(document.activeElement).toBe(within(view).getByLabelText("当前 Key"));
-  });
-
-  test("失败（server）：标题、设置页口径的建议；message 不带编号时不拼编号；焦点不动", async () => {
-    setup({ "POST /settings/test": { ok: false, llm_kind: "server", message: "模型服务出错", latency_ms: 5 } });
-    const view = await open();
-    const btn = within(view).getByRole("button", { name: "测试连接" });
-    btn.focus();
-    await act(async () => fireEvent.click(btn));
-    const r = within(view).getByTestId("test-result");
-    expect(r.querySelector(".test-fail-title")!.textContent).toBe("模型服务出错了");
-    expect(r.querySelector(".test-fail-hint")!.textContent).toBe("通常是临时的，稍后再测。");
-    expect(document.activeElement).toBe(btn);
-  });
-
-  // V2c §1：结果只对测的那一份已保存配置有效
-  test("旧结果作废：改字段再改回、改字段再保存、填新 Key、在飞时改字段，结果都不再出现", async () => {
-    const p = pending();
-    let n = 0;
-    setup({ "POST /settings/test": () => (n++ === 2 ? p.response() : Response.json({ ok: true, latency_ms: 812, model: "deepseek-chat" })) });
-    const view = await open();
-    const btn = () => within(view).getByRole("button", { name: "测试连接" });
-    const model = () => within(view).getByLabelText("模型名");
-    // 改字段再改回原值：unsaved 回到 false，但结果已作废
-    await act(async () => fireEvent.click(btn()));
-    expect(within(view).getByTestId("test-result")).toBeTruthy();
-    fireEvent.change(model(), { target: { value: "m2" } });
-    fireEvent.change(model(), { target: { value: "qwen" } }); // 回到已保存的原值
-    expect(within(view).queryByTestId("test-result")).toBeNull();
-    // 改字段再保存（原来的 bug：保存后旧结果重新出现）
-    await act(async () => fireEvent.click(btn()));
-    expect(within(view).getByTestId("test-result")).toBeTruthy();
-    fireEvent.change(model(), { target: { value: "m3" } });
-    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
-    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
-    expect(within(view).queryByTestId("test-result")).toBeNull();
-    // 在飞时改字段：回来的是旧配置的结果，丢弃
-    await act(async () => fireEvent.click(btn()));
-    fireEvent.change(model(), { target: { value: "m4" } });
-    await act(async () => p.resolve({ ok: true, latency_ms: 1, model: "m3" }));
-    fireEvent.change(model(), { target: { value: "m3" } });
-    expect(within(view).queryByTestId("test-result")).toBeNull();
-    expect(within(view).getByRole("button", { name: "测试连接" })).toBeTruthy();
-  });
-
-  test("有未保存的改动时不可点，旁边写「先保存再测试」；保存后可点；填了新 Key 没保存也算未保存", async () => {
-    const be = setup({ "POST /settings/test": { ok: true, latency_ms: 1, model: "m2" } });
-    const view = await open();
-    const btn = () => within(view).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
-    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
-    fireEvent.change(within(view).getByLabelText("模型名"), { target: { value: "m2" } });
-    expect(btn().disabled).toBe(true);
-    expect(within(view).getByTestId("test-unsaved").textContent).toBe("先保存再测试");
-    fireEvent.click(btn());
-    expect(be.calls.some((x) => x.path === "/settings/test")).toBe(false);
-    await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存设置" })));
-    expect(btn().disabled).toBe(false);
-    expect(within(view).queryByTestId("test-unsaved")).toBeNull();
-    fireEvent.click(within(view).getByRole("button", { name: "更换" }));
-    fireEvent.change(within(view).getByLabelText("替换为新的 Key"), { target: { value: "sk-new" } });
-    expect(btn().disabled).toBe(true);
-  });
-});
+// 阶段 5 收尾 C 的「测试连接」6 条用例（views.test.tsx 原 300–400 行）随阶段 6.5 移到 connections.test.tsx「测试连接（两行）」：
+// 测试改成每张连接卡片上测**已保存**的那个连接（两步），表单里不再有测试按钮。对照见 DEVLOG [73]「判定表」。
 
 // V2c §5：结论排版的样式挂在 .md 下的 h1~h4、ul/ol/li、table 上——钉住渲染结构（观感以 25 屏基线为准）
 test("结论 Markdown：标题、列表、表格都渲染在 .md 下，第一个子元素是标题", async () => {

@@ -27,6 +27,8 @@ ARGS = [
     "--collect-data", "jieba",
     "--copy-metadata", "keyring",
     "--collect-submodules", "keyring.backends",
+    # 阶段 6.5：服务商预设是数据文件（app/core/providers.py 按 __file__ 旁边读），不是模块，要显式带上
+    "--add-data", f"{os.path.join(ROOT, 'app', 'core', 'providers.json')}{os.pathsep}app/core",
     # 用不到、但会被分析器拖进来的大包
     "--exclude-module", "tkinter",
     "--exclude-module", "IPython",

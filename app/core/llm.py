@@ -15,12 +15,17 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from typing import Any, Callable, Optional
 
 from langchain_core.callbacks import BaseCallbackHandler
 
 # DeepSeek 提供 OpenAI 兼容接口，直接用 ChatOpenAI 指向其 base_url 即可。
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+
+# 阶段 6.5 §2a：4 种协议，都走 LangChain，共用 LLMClient 重试、classify_error、UsageTracker。
+PROTOCOLS = ("openai_chat", "openai_responses", "azure", "anthropic")
+ANTHROPIC_MAX_TOKENS = 8192          # Anthropic 的 max_tokens 必填；分析一步的回复远小于它
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,10 @@ class LLMConfig:
     max_retries: int = 3           # 失败后最多再试几次（不含首次）
     backoff_base: float = 1.0      # 退避基数：第 i 次重试前等待 base * 2**i 秒（加抖动）
     backoff_max: float = 20.0      # 单次等待上限（秒）
+    # 阶段 6.5：协议与连接上的附加项。extra = {"quirks": {...已合并的怪癖}, "thinking": bool,
+    # "deployment": Azure 部署名}；环境变量那条路径恒为 openai_chat + {}
+    protocol: str = "openai_chat"
+    extra: dict = field(default_factory=dict, compare=False, hash=False)
 
     @classmethod
     def from_env(cls, **overrides) -> "LLMConfig":
@@ -92,9 +101,26 @@ def _est(chars: int) -> int:
 
 
 def is_truncated(msg: Any) -> bool:
-    """V2d §3：模型因达到输出长度上限而停（OpenAI 兼容口 finish_reason=length）。"""
+    """V2d §3：模型因达到输出长度上限而停。OpenAI 兼容口 finish_reason=length；阶段 6.5 起另认
+    Anthropic 的 stop_reason=max_tokens 和 Responses API 的 incomplete_details.reason=max_output_tokens。"""
     meta = getattr(msg, "response_metadata", None) or {}
-    return meta.get("finish_reason") == "length"
+    inc = meta.get("incomplete_details") or {}
+    return (meta.get("finish_reason") == "length" or meta.get("stop_reason") == "max_tokens"
+            or (isinstance(inc, dict) and inc.get("reason") == "max_output_tokens"))
+
+
+def message_text(msg: Any) -> str:
+    """AIMessage 的文字部分。OpenAI Chat 回的是字符串；Responses API 和 Anthropic 回内容块列表
+    （文字、推理、tool_use 混在一起），只取文字块拼起来。内容块本身不改：多轮工具调用要原样带回推理块。"""
+    content = getattr(msg, "content", None)
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    text = getattr(msg, "text", None)
+    if isinstance(text, str):
+        return text
+    return _flatten_content(content) if isinstance(content, list) else str(content)
 
 
 class BudgetExceeded(RuntimeError):
@@ -259,25 +285,32 @@ class GatewayErrorContent(Exception):
     """模型接口返回了错误 JSON 而不是回复（B45）。按短暂故障处理，可重试。"""
 
 
+def _sdk_modules():
+    """openai 和 anthropic 两个 SDK（异常类同名同构：都由 Stainless 生成）。没装的跳过。"""
+    mods = []
+    for name in ("openai", "anthropic"):
+        try:
+            mods.append(__import__(name))
+        except Exception:  # pragma: no cover
+            pass
+    return mods
+
+
 def classify_error(exc: BaseException) -> tuple[str, bool]:
-    """返回 (kind, 是否可重试)。只重试短暂性故障；鉴权/参数错误重试无意义。"""
-    try:
-        import openai
-    except Exception:  # pragma: no cover
-        openai = None
-    if openai is not None:
-        if isinstance(exc, openai.APITimeoutError):
+    """返回 (kind, 是否可重试)。只重试短暂性故障；鉴权/参数错误重试无意义。
+    阶段 6.5：anthropic SDK 的异常按同一张表分（529 overloaded 是 5xx → server，可重试）。"""
+    for sdk in _sdk_modules():
+        if isinstance(exc, sdk.APITimeoutError):
             return "timeout", True
-        if isinstance(exc, openai.APIConnectionError):
+        if isinstance(exc, sdk.APIConnectionError):
             return "connection", True
-        if isinstance(exc, openai.RateLimitError):
+        if isinstance(exc, sdk.RateLimitError):
             return "rate_limit", True
-        if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
+        if isinstance(exc, (sdk.AuthenticationError, sdk.PermissionDeniedError)):
             return "auth", False
-        if isinstance(exc, (openai.BadRequestError, openai.NotFoundError,
-                            openai.UnprocessableEntityError)):
+        if isinstance(exc, (sdk.BadRequestError, sdk.NotFoundError, sdk.UnprocessableEntityError)):
             return "bad_request", False
-        if isinstance(exc, openai.APIStatusError):
+        if isinstance(exc, sdk.APIStatusError):
             code = getattr(exc, "status_code", 0) or 0
             return ("server", True) if code >= 500 else ("http_%d" % code, False)
     if isinstance(exc, GatewayErrorContent):
@@ -290,48 +323,201 @@ def classify_error(exc: BaseException) -> tuple[str, bool]:
 
 
 # ---------------------------------------------------------------- 构建与调用
-def build_chat_model(cfg: LLMConfig, *, sdk_retries: int | None = 0):
-    """按配置构建 ChatOpenAI。超时总是显式传入；sdk_retries 默认 0（由 LLMClient 重试）。"""
+def quirks_of(cfg: LLMConfig) -> dict:
+    from app.core.providers import QUIRK_KEYS
+    q = (cfg.extra or {}).get("quirks") or {}
+    return {k: q.get(k) for k in QUIRK_KEYS}
+
+
+def thinking_body(cfg: LLMConfig) -> Optional[dict]:
+    """thinking_param 怪癖（§2c）：Qwen 一类用 enable_thinking，GLM / 方舟一类用 thinking={type}。默认关思考，
+    连接上 extra.thinking=true 才开。没设 thinking_param 时什么都不发（不猜服务商认不认）。"""
+    tp = quirks_of(cfg).get("thinking_param")
+    on = bool((cfg.extra or {}).get("thinking"))
+    if tp == "enable_thinking":
+        return {"enable_thinking": on}
+    if tp == "thinking":
+        return {"thinking": {"type": "enabled" if on else "disabled"}}
+    return None
+
+
+def _flatten_content(content):
+    if not isinstance(content, list):
+        return content
+    return "".join(p if isinstance(p, str) else str(p.get("text", "")) for p in content
+                   if isinstance(p, str) or (isinstance(p, dict) and p.get("type", "text") == "text"))
+
+
+@lru_cache(maxsize=None)
+def _quirk_class(base_name: str):
+    """ChatOpenAI 的子类，承载三个改请求体的怪癖。只改 Chat Completions 的 messages；
+    Responses API 的请求体结构不同，这三个怪癖对它不生效（预设里也没有 Responses 协议的服务商开它们）。"""
+    from langchain_core.messages import AIMessage
     from langchain_openai import ChatOpenAI
 
-    return ChatOpenAI(
-        model=cfg.model,
-        api_key=cfg.api_key or "missing-api-key",   # 缺 Key 时让请求以 401 失败，而不是构建时崩溃
-        base_url=cfg.base_url,
-        temperature=cfg.temperature,
-        timeout=cfg.timeout,
-        max_retries=sdk_retries,
-    )
+    base = {"ChatOpenAI": ChatOpenAI}[base_name]
+
+    class _Quirky(base):  # type: ignore[misc, valid-type]
+        dc_no_stream_options: bool = False   # 不发 stream_options（流式时 SDK 会加 include_usage，有的网关 400）
+        dc_no_array_content: bool = False    # content 只发字符串（有的网关不认分段 content）
+        dc_reasoning_replay: bool = False    # 多轮工具调用时把 reasoning_content 带回去（DeepSeek 推理模型一类）
+
+        def _get_request_payload(self, input_, *, stop=None, **kwargs):
+            payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+            if self.dc_no_stream_options:
+                payload.pop("stream_options", None)
+            msgs = payload.get("messages")
+            if not isinstance(msgs, list):
+                return payload
+            if self.dc_no_array_content:
+                for m in msgs:
+                    if isinstance(m, dict) and isinstance(m.get("content"), list):
+                        m["content"] = _flatten_content(m["content"])
+            if self.dc_reasoning_replay:
+                src = self._convert_input(input_).to_messages()   # 与 payload["messages"] 一一对应（见父类实现）
+                for lm, pm in zip(src, msgs):
+                    rc = lm.additional_kwargs.get("reasoning_content") if isinstance(lm, AIMessage) else None
+                    if rc and isinstance(pm, dict) and pm.get("role") == "assistant":
+                        pm["reasoning_content"] = rc
+            return payload
+
+        def _create_chat_result(self, response, generation_info=None):
+            result = super()._create_chat_result(response, generation_info)
+            if self.dc_reasoning_replay:
+                d = response if isinstance(response, dict) else response.model_dump()
+                for gen, ch in zip(result.generations, d.get("choices") or []):
+                    rc = ((ch or {}).get("message") or {}).get("reasoning_content")
+                    if rc:
+                        gen.message.additional_kwargs["reasoning_content"] = rc
+            return result
+
+    _Quirky.__name__ = _Quirky.__qualname__ = f"Datachat{base_name}"
+    return _Quirky
+
+
+def build_chat_model(cfg: LLMConfig, *, sdk_retries: int | None = 0, max_tokens: int | None = None):
+    """按协议构建 LangChain ChatModel（§2a）。超时总是显式传入；sdk_retries 默认 0（由 LLMClient 重试）。
+    缺 Key 时用占位串，让请求以 401 失败，而不是构建时崩溃。"""
+    key = cfg.api_key or "missing-api-key"
+    if cfg.protocol == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(model=cfg.model, api_key=key, base_url=cfg.base_url or None,
+                             temperature=cfg.temperature, default_request_timeout=cfg.timeout,
+                             max_retries=2 if sdk_retries is None else sdk_retries,
+                             max_tokens=max_tokens or ANTHROPIC_MAX_TOKENS)
+    if cfg.protocol not in PROTOCOLS:
+        raise ValueError(f"未知协议 {cfg.protocol!r}，可选 {PROTOCOLS}")
+    q = quirks_of(cfg)
+    kw: dict = dict(model=cfg.model, api_key=key, temperature=cfg.temperature, timeout=cfg.timeout,
+                    max_retries=sdk_retries)
+    if max_tokens is not None:
+        kw["max_tokens"] = max_tokens
+    body = thinking_body(cfg)
+    if body:
+        kw["extra_body"] = body
+    flags = dict(dc_no_stream_options=bool(q.get("no_stream_options")),
+                 dc_no_array_content=bool(q.get("no_array_content")),
+                 dc_reasoning_replay=bool(q.get("reasoning_replay")))
+    if flags["dc_no_stream_options"]:
+        kw["stream_usage"] = False
+    base_url = cfg.base_url
+    if cfg.protocol == "azure":
+        # Azure v1 路径（learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle）：普通 OpenAI 客户端 +
+        # {资源}/openai/v1/，不再需要 api-version；model 填部署名。
+        base_url = azure_v1_url(cfg.base_url)
+        kw["model"] = (cfg.extra or {}).get("deployment") or cfg.model
+    if cfg.protocol == "openai_responses":
+        kw["use_responses_api"] = True
+    if any(flags.values()):
+        return _quirk_class("ChatOpenAI")(base_url=base_url, **kw, **flags)
+    from langchain_openai import ChatOpenAI
+    return ChatOpenAI(base_url=base_url, **kw)
+
+
+def azure_v1_url(url: str) -> str:
+    """资源地址 → v1 地址；已经带 /openai/v1 的原样保留。"""
+    u = (url or "").rstrip("/")
+    return u if u.endswith("/openai/v1") else u + "/openai/v1"
 
 
 # 设置页「测试连接」（阶段 5 收尾 C）：一条固定的 user 消息、max_tokens=1、不重试、超时最多 15 秒。
 # tests/fake_llm.py 的 MARK_PING 认这条消息（改了这里，fake 认不出 → 400，tests/test_settings_test.py 的 ok 那条红）。
 PING_MESSAGE = "ping"
 PING_TIMEOUT_MAX = 15.0
+# Responses API 的 max_output_tokens 下限是 16（OpenAI 文档），1 会被 400；其余协议仍用 1
+PING_MAX_TOKENS = {"openai_responses": 16}
+# 阶段 6.5 §2d 第 2 步：只有一个工具、tool_choice 强制调用它，看回复里有没有这个 tool_call。
+# tests/fake_llm.py 的 MARK_PROBE_TOOL 认这个工具名
+PROBE_TOOL = "datachat_probe"
+PROBE_MESSAGE = "连接测试：请调用 datachat_probe 工具，参数 ok=true。"
+PROBE_MAX_TOKENS = 64
+
+
+def _wrap_error(e: BaseException, what: str) -> "LLMError":
+    from app.core.errors import upstream_message
+    kind, _ = classify_error(e)
+    up = upstream_message(e)
+    if isinstance(e, GatewayErrorContent):
+        up = f"接口返回错误内容：{up}"
+    return LLMError(f"{what}失败（{kind}）：{type(e).__name__}: {e}", kind=kind, attempts=1, cause=e, upstream=up)
+
+
+def _short(cfg: LLMConfig) -> LLMConfig:
+    return replace(cfg, timeout=min(cfg.timeout, PING_TIMEOUT_MAX))
 
 
 def ping(cfg: LLMConfig) -> None:
     """用 cfg 发一次最小请求。成功返回 None；失败抛 LLMError（kind 取 classify_error，upstream 是上游 message 原文）。
-    不重试（max_retries=0），不经 LLMClient 的退避；调用方负责"没 Key 不发请求"。"""
+    不重试（max_retries=0），不经 LLMClient 的退避；调用方负责"没 Key 不发请求"。按协议分发（build_chat_model）。"""
     from langchain_core.messages import HumanMessage
-    from langchain_openai import ChatOpenAI
 
-    model = ChatOpenAI(model=cfg.model, api_key=cfg.api_key or "missing-api-key", base_url=cfg.base_url,
-                       temperature=cfg.temperature, timeout=min(cfg.timeout, PING_TIMEOUT_MAX), max_retries=0,
-                       max_tokens=1)
+    model = build_chat_model(_short(cfg), sdk_retries=0, max_tokens=PING_MAX_TOKENS.get(cfg.protocol, 1))
     try:
         msg = model.invoke([HumanMessage(content=PING_MESSAGE)])
-        bad = api_error_text(getattr(msg, "content", None))
+        bad = api_error_text(message_text(msg))
         if bad is not None:
             raise GatewayErrorContent(bad)
     except Exception as e:  # noqa: BLE001
-        from app.core.errors import upstream_message
-        kind, _ = classify_error(e)
-        up = upstream_message(e)
-        if isinstance(e, GatewayErrorContent):
-            up = f"接口返回错误内容：{up}"
-        raise LLMError(f"测试连接失败（{kind}）：{type(e).__name__}: {e}", kind=kind, attempts=1, cause=e,
-                       upstream=up) from e
+        raise _wrap_error(e, "测试连接") from e
+
+
+def probe_tools(cfg: LLMConfig) -> bool:
+    """§2d 第 2 步：返回回复里有没有 PROBE_TOOL 的 tool_call。请求本身失败抛 LLMError（调用方决定怎么记）。"""
+    from langchain_core.messages import HumanMessage
+
+    tool = {"type": "function", "function": {
+        "name": PROBE_TOOL, "description": "连接测试用的工具，调用即可",
+        "parameters": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}}}
+    model = build_chat_model(_short(cfg), sdk_retries=0, max_tokens=PROBE_MAX_TOKENS)
+    try:
+        msg = model.bind_tools([tool], tool_choice=PROBE_TOOL).invoke([HumanMessage(content=PROBE_MESSAGE)])
+    except Exception as e:  # noqa: BLE001
+        raise _wrap_error(e, "工具调用测试") from e
+    return any((tc or {}).get("name") == PROBE_TOOL for tc in getattr(msg, "tool_calls", None) or [])
+
+
+MODELS_TIMEOUT = 10.0
+
+
+def list_models(cfg: LLMConfig, timeout: float | None = None) -> list[str]:
+    """读服务商的模型列表：OpenAI 兼容口 GET {base_url}/models，Anthropic GET /v1/models。不重试，超时 timeout 秒。
+    失败抛 LLMError。Azure 列的是部署而不是模型，不支持（调用方退回预设）。"""
+    key = cfg.api_key or "missing-api-key"
+    timeout = MODELS_TIMEOUT if timeout is None else timeout
+    try:
+        if cfg.protocol == "anthropic":
+            import anthropic
+            cl = anthropic.Anthropic(api_key=key, base_url=cfg.base_url or None, timeout=timeout, max_retries=0)
+            ids = [m.id for m in cl.models.list(limit=1000)]
+        elif cfg.protocol == "azure":
+            raise ValueError("Azure 按部署调用，不支持列出模型")
+        else:
+            import openai
+            cl = openai.OpenAI(api_key=key, base_url=cfg.base_url, timeout=timeout, max_retries=0)
+            ids = [m.id for m in cl.models.list()]
+    except Exception as e:  # noqa: BLE001
+        raise _wrap_error(e, "获取模型列表") from e
+    return sorted({str(i) for i in ids if i})
 
 
 class LLMClient:
@@ -359,7 +545,7 @@ class LLMClient:
             attempts += 1
             try:
                 msg = self.model.invoke(prompt)
-                bad = api_error_text(getattr(msg, "content", None))
+                bad = api_error_text(message_text(msg))
                 if bad is not None:
                     self.tracker.add_message(msg, input_chars=text_chars(prompt))
                     raise GatewayErrorContent(bad)
@@ -382,12 +568,12 @@ class LLMClient:
             return msg
 
     def invoke(self, prompt) -> str:
-        return self.invoke_message(prompt).content
+        return message_text(self.invoke_message(prompt))
 
     def invoke_checked(self, prompt) -> tuple[str, bool]:
         """返回 (文本, 是否被输出长度上限截断)（V2d §3）。"""
         msg = self.invoke_message(prompt)
-        return msg.content, is_truncated(msg)
+        return message_text(msg), is_truncated(msg)
 
 
 _FENCE_RE = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\n(.*?)(?:\n[ \t]*```|\Z)", re.S | re.I)

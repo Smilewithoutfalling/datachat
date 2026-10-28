@@ -28,6 +28,16 @@
     DELETE /settings/api-key
     POST   /settings/test                用已保存的设置发一次最小请求（阶段 5 收尾 C）：200 {"ok": true, "latency_ms", "model"}
                                          或 {"ok": false, "llm_kind", "message", "latency_ms"}；同时只许一个，第二个 409
+    阶段 6.5（多服务商，docs/roadmap/phase65-models.md）：/settings、/settings/api-key、/settings/test 保留一个版本，
+    作用于当前生效的连接；没有任何连接时作用于「环境变量」虚拟连接（行为同阶段 6.5 之前）。
+    GET    /providers                    服务商预设（app/core/providers.json）
+    GET    /connections                  {"active", "items"}；没有连接时 items 只有只读的「环境变量」（id=env）
+    POST   /connections  PUT/DELETE /connections/{id}
+    PUT/DELETE /connections/{id}/api-key Key 存钥匙串 ACCOUNT=conn:<id>，只回 {needed, configured}
+    POST   /connections/{id}/activate
+    POST   /connections/{id}/test        两步：连接 + 工具调用；结果存进 probe；和 /settings/test 同一把锁（409）
+    GET    /connections/{id}/models      服务商的模型列表（10 秒超时）；失败时返回预设模型 + reason
+    见 app/server/connections.py 与 docs/sidecar-contract.md。
 
 安全（docs/THREAT_MODEL.md）：只监听 127.0.0.1；TrustedHost 只认 localhost / 127.0.0.1（挡 DNS rebinding）；
 每次启动随机 token（挡本机网页对 localhost 的跨站请求）；不开 CORS，阶段 6 外壳确定后只放行外壳的源。
@@ -57,6 +67,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.core.errors import user_error
 from app.core.text import BIDI_CONTROLS as _BIDI_CONTROLS, CONTROL_CHARS as _CONTROL_CHARS
 from app.core.events import CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE
+from app.server import connections as conns
 from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback, Message, Setting, make_sessionmaker, now
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
@@ -158,6 +169,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             m.status, m.content = "interrupted", INTERRUPTED_MESSAGE
             logger.warning("后端重启，消息 %s 的分析中断，标成 interrupted", m.id)
         db.commit()
+    conns.migrate_legacy(Session)     # 阶段 6.5 §4：旧设置 → 连接，只跑一次
 
     app = FastAPI(title="datachat", version="0.4")
     cancels: dict[str, threading.Event] = {}     # 正在分析的助手消息 id → 取消信号（只在本进程内有意义）
@@ -285,15 +297,14 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         return out
 
     def llm_config():
+        """生效连接的配置（阶段 6.5）；没有任何连接时是环境变量 DEEPSEEK_* + 旧 settings 覆盖（同阶段 6.5 之前）。"""
         with Session() as db:
-            st = {r.key: r.value for r in db.scalars(select(Setting))}
-        over = {k: v for k, v in st.items() if k in SETTING_KEYS and v}
-        if "timeout" in over:
-            try:
-                over["timeout"] = float(over["timeout"])
-            except ValueError:
-                over.pop("timeout")          # 库里的坏值不让分析整个起不来，退回环境变量 / 默认
-        return LLMConfig.from_env(**over)
+            return conns.active_config(db)[0]
+
+    def llm_config_meta():
+        with Session() as db:
+            cfg, who = conns.active_config(db)
+        return cfg, {"connection_id": who["id"], "connection_name": who["name"], "model": cfg.model}
 
     def preview_cell(v, stats):
         """预览单元格：缺失 → None；其余转字符串，去掉方向控制符（只影响显示，模型拿到的仍是原数据），
@@ -467,10 +478,11 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         msg_id = a.id
 
         kwargs = dict(agent=agent, trace_id=msg_id, log=False, **(analyze_kwargs or {}))
+        cfg, meta = llm_config_meta()     # 阶段 6.5：每条分析消息记下当时的连接名和模型（result.meta）
         if chat_model_factory is not None:
             kwargs["chat_model"] = chat_model_factory()
         else:
-            kwargs["llm_config"] = llm_config()
+            kwargs["llm_config"] = cfg
         if history:
             kwargs["history"] = history
 
@@ -496,6 +508,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                         d = ev.to_dict()
                         if ev.type == "done":
                             done_seen = True
+                            d["data"]["result"]["meta"] = meta
                             r = ev.result
                             if r.error_kind == "cancelled":
                                 status, content = "cancelled", CANCELLED_MESSAGE
@@ -569,60 +582,90 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
 
     # sources（阶段 6 收尾，S 10-27）：桌面端不读仓库里的 .env，没在设置页填时会回退到默认的 api.deepseek.com，
     # 用户看不出"现在用的是哪一份"。每项标出当前生效值来自 设置页 / 环境变量 / 默认值。
-    SETTING_ENV = {"model": "DEEPSEEK_MODEL", "base_url": "DEEPSEEK_BASE_URL", "timeout": "DATACHAT_LLM_TIMEOUT"}
-
     @app.get("/settings", dependencies=[Depends(auth)])
     def get_settings(db=Depends(db_dep)):
+        """阶段 6.5：有生效连接时 model / base_url 来自连接（sources 写 connection），超时仍是全局设置；
+        没有连接时同阶段 6.5 之前（settings | env | default）。connection 给出生效连接的 id 和名字。"""
         st = {r.key: r.value for r in db.scalars(select(Setting))}
-        cfg = llm_config()
+        cfg, who = conns.active_config(db)
         over = {k for k, v in st.items() if k in SETTING_KEYS and v}
         if "timeout" in over:
             try:
                 float(st["timeout"])
             except ValueError:
                 over.discard("timeout")      # 同 llm_config：坏值不生效
-        sources = {k: "settings" if k in over else "env" if os.getenv(SETTING_ENV[k]) else "default"
+        sources = {k: "settings" if k in over else "env" if conns.legacy_env_source(k) else "default"
                    for k in SETTING_KEYS}
+        if who["id"] != conns.ENV_ID:
+            sources["model"] = sources["base_url"] = "connection"
+            return {"model": cfg.model, "base_url": cfg.base_url, "timeout": cfg.timeout, "sources": sources,
+                    "connection": who}
         return {"model": st.get("model") or cfg.model, "base_url": st.get("base_url") or cfg.base_url,
-                "timeout": cfg.timeout, "sources": sources}
+                "timeout": cfg.timeout, "sources": sources, "connection": who}
 
     @app.put("/settings", dependencies=[Depends(auth)])
     def put_settings(body: SettingsIn, db=Depends(db_dep)):
-        for k, v in body.model_dump(exclude_none=True).items():
-            v = str(v).strip()               # 空串 = 清除，回到环境变量 / 默认
-            row = db.get(Setting, k)
-            if row is None:
-                db.add(Setting(key=k, value=v))
-            else:
-                row.value = v
+        """旧接口保留一个版本：有生效连接时 model / base_url 写到那个连接上（timeout 照旧是全局设置）；
+        没有连接时同阶段 6.5 之前，写 settings 行（空串 = 清除，回到环境变量 / 默认）。"""
+        vals = body.model_dump(exclude_none=True)
+        row = conns.active_row(db)
+        if row is not None:
+            if vals.get("base_url") is not None:
+                url = str(vals.pop("base_url")).strip()
+                row.base_url = conns.base_url_for(conns.provider_or_400(row.provider), url)
+                row.probe = None
+            if vals.get("model") is not None:
+                m = str(vals.pop("model")).strip()
+                if not m:
+                    raise HTTPException(400, "模型名不能为空")
+                row.model = m
+            row.updated_at = now()
+        for k, v in vals.items():
+            conns.put_setting(db, k, str(v).strip())
         db.commit()
         return get_settings(db)
 
-    @app.get("/settings/api-key", dependencies=[Depends(auth)])
-    def get_api_key_status():
+    def legacy_key_status(db) -> dict:
+        row = conns.active_row(db)
+        if row is not None:
+            on = conns.conn_key(row) is not None
+            return {"configured": on or not conns.needs_key(row.provider), "source": "keyring" if on else None}
         _, src = keystore.resolve_api_key()
         return {"configured": src is not None, "source": src}
 
+    @app.get("/settings/api-key", dependencies=[Depends(auth)])
+    def get_api_key_status(db=Depends(db_dep)):
+        return legacy_key_status(db)
+
     @app.put("/settings/api-key", dependencies=[Depends(auth)])
-    def put_api_key(body: ApiKeyIn):
+    def put_api_key(body: ApiKeyIn, db=Depends(db_dep)):
+        row = conns.active_row(db)
         try:
-            keystore.set_api_key(body.api_key)
+            if row is not None:
+                keystore.set_api_key(body.api_key, keystore.conn_account(row.id))
+            else:
+                keystore.set_api_key(body.api_key)
         except keystore.KeyStoreError as e:
             raise HTTPException(400, str(e)) from None
-        return get_api_key_status()
+        return legacy_key_status(db)
 
     @app.delete("/settings/api-key", dependencies=[Depends(auth)])
-    def delete_api_key():
+    def delete_api_key(db=Depends(db_dep)):
+        row = conns.active_row(db)
         try:
-            keystore.delete_api_key()
+            if row is not None:
+                keystore.delete_api_key(keystore.conn_account(row.id))
+            else:
+                keystore.delete_api_key()
         except keystore.KeyStoreError as e:
             raise HTTPException(400, str(e)) from None
-        return get_api_key_status()
+        return legacy_key_status(db)
 
-    # 设置页「测试连接」（phase5「阶段 5 收尾」C）：用**已保存**的设置（llm_config：库里的 model / base_url / timeout，
-    # Key 走 resolve_api_key）发一次最小请求，不重试，超时 min(timeout, 15)。没 Key 不发请求，直接 no_key。
+    # 设置页「测试连接」（phase5「阶段 5 收尾」C）：用**已保存**的设置（llm_config：生效连接；没有连接时是库里的
+    # model / base_url / timeout + resolve_api_key）发一次最小请求，不重试，超时 min(timeout, 15)。没 Key 不发请求，直接 no_key。
     # message 走 T11 user_error（同 llm 错误卡的文案，不带上游原文以外的东西，Key 打码）；不落库、不写 events。
-    # 同一时间只允许一个测试在跑：第二个 409（非阻塞抢锁）。
+    # 同一时间只允许一个测试在跑：第二个 409（非阻塞抢锁）。阶段 6.5 的 /connections/{id}/test 共用这把锁。
+    # 旧接口保留一个版本（两步测试见 /connections/{id}/test）。
     test_lock = threading.Lock()
 
     @app.post("/settings/test", dependencies=[Depends(auth)])
@@ -646,6 +689,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             return {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000), "model": cfg.model}
         finally:
             test_lock.release()
+
+    conns.register(app, Session, auth, db_dep, test_lock)
 
     # ------------------------------------------------------------------ 前端静态文件（不要 token）
     # 边界：只有 / 和 /assets/* 免 token。页面和 JS 不含机密；token 只经 URL fragment（不发给服务器、
