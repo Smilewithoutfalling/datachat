@@ -29,6 +29,15 @@
 - 兼容：旧的 `GET/PUT /settings`、`PUT/DELETE /settings/api-key`、`POST /settings/test` 保留一个版本，作用于当前生效的连接；没有任何连接时，作用于 `DEEPSEEK_*` 环境变量那个只读虚拟连接。
 - 启动时执行一次旧设置迁移（规则见方案 §4）。
 
+## 记忆与保留（阶段 6.6）
+
+方案见 docs/roadmap/memory-system-spec.md（M0、§3.7、§14.3）。
+
+- `DELETE /messages/{id}`：删除一轮（助手消息和紧挨在它前面的那条用户消息），事件和反馈级联删除，图表 PNG 一并删除。成功返回 204；传入用户消息返回 400；找不到返回 404；同一会话还有正在分析的消息时返回 409。
+- `DELETE /sessions/{id}`、`DELETE /datasets/{id}`：现在会连带删除这些会话产出的图表 PNG。
+- `GET /settings` 新增 `memory: {mode, setting, env}`：`mode` 是实际生效值，`env` 非空表示被环境变量 `DATACHAT_MEMORY` 覆盖。`PUT /settings` 接受 `memory_mode: "off" | "state"`，默认 `off`。
+- 数据库空间回收：新库使用 `auto_vacuum=INCREMENTAL`；旧库只在启动时、开始监听之前，并且空闲页超过 25% 时转换一次；`POST /shutdown` 只执行有上限的 `incremental_vacuum`。
+
 ## 端口独占（不要改）
 
 - sidecar 只监听 127.0.0.1，bind 前不设任何 `SO_*` 选项。

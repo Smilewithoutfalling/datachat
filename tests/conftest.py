@@ -25,6 +25,12 @@ def chart_path(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _memory_env_off(monkeypatch):
+    """阶段 6.6：记忆开关的环境变量覆盖一律先清掉，需要 state 的测试自己 setenv（不受开发机环境影响）。"""
+    monkeypatch.delenv("DATACHAT_MEMORY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_outputs(tmp_path, monkeypatch):
     """测试产生的图表与运行记录写到临时目录，不污染仓库的 outputs/。"""
     from app.tools import persist

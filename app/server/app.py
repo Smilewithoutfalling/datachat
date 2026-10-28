@@ -16,6 +16,7 @@
     POST   /sessions/{id}/messages       {"content"} → text/event-stream，逐条转发 analyze_stream 事件
     GET    /charts/{name}                图表 png
     POST   /messages/{id}/cancel         停止正在分析的消息：CAS running→cancelled（已结束 409），置位取消信号（阶段 5 F2）
+    DELETE /messages/{id}                 删一轮（助手消息 + 前一条用户消息）、级联事件 / 反馈、删图（阶段 6.6 M0，204；用户消息 400；分析中 409）
     PUT    /messages/{id}/feedback       {"rating": "up"|"down"|null, "note"?}（只限已结束的助手消息）
     GET    /  、/assets/*                前端（ui/web 构建产物）。不要 token——页面本身不含机密，token 由
                                          URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
@@ -58,7 +59,7 @@ import time
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
@@ -115,6 +116,7 @@ class SettingsIn(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     base_url: Optional[str] = Field(None, max_length=500)
     timeout: Optional[float] = Field(None, ge=TIMEOUT_RANGE[0], le=TIMEOUT_RANGE[1])
+    memory_mode: Optional[Literal["off", "state"]] = None    # 阶段 6.6：会话记忆（实验），默认 off
 
 
 class FeedbackIn(BaseModel):
@@ -159,8 +161,9 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     home = os.path.abspath(home or default_home())
     for d in ("datasets", "charts"):
         os.makedirs(os.path.join(home, d), exist_ok=True)
-    persist.CHART_DIR = os.path.join(home, "charts")
+    persist.CHART_DIR = chart_dir = os.path.join(home, "charts")
     Session = make_sessionmaker(os.path.join(home, "datachat.db"))
+    from app.server import retention
     token = token or secrets.token_urlsafe(32)
 
     # 上次进程被杀时还在跑的消息，标成 interrupted（不是 cancelled：用户没点过停止）
@@ -287,6 +290,22 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         return {"id": s.id, "dataset_id": s.dataset_id, "agent": s.agent, "title": s.title,
                 "created_at": s.created_at, "updated_at": s.updated_at}
 
+    def turn_snapshots(messages):
+        """阶段 6.6 state 模式的历史：全部轮次（含失败 / 取消 / 中断，M5），每对 (user, 紧跟的 assistant) 一个快照。
+        正在跑的（running）不算：它就是本轮。"""
+        from app.memory.snapshots import from_row
+        out = []
+        for q, a in zip(messages, messages[1:]):
+            if q.role == "user" and a.role == "assistant" and a.status != "running":
+                r = None
+                if a.result_json:
+                    try:
+                        r = json.loads(a.result_json)
+                    except ValueError:
+                        r = None
+                out.append(from_row(q.content, q.created_at, a.status, a.content, r))
+        return out
+
     def turn_history(messages):
         """ReAct 多轮上下文从 messages 表重建（重启不丢）：只取成功的轮次（user + 紧跟的 ok 助手消息）；
         失败 / 取消的轮次不进上下文——用户通常会换个说法重问。"""
@@ -345,6 +364,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         fn = app.state.request_shutdown
         if fn is None:
             raise HTTPException(503, "shutdown not available")
+        retention.incremental_vacuum(Session.kw["bind"])     # 阶段 6.6 M0：有上限的回收，不跑全量 VACUUM
         fn()
         return {"ok": True}
 
@@ -423,9 +443,13 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     @app.delete("/datasets/{dataset_id}", dependencies=[Depends(auth)])
     def delete_dataset(dataset_id: str, db=Depends(db_dep)):
         ds = get_or_404(db, Dataset, dataset_id)
+        pngs = []
+        for s in db.scalars(select(ChatSession).where(ChatSession.dataset_id == dataset_id)):
+            pngs += retention.message_chart_files(s.messages, chart_dir)
         db.delete(ds)
         db.commit()
         shutil.rmtree(os.path.join(home, "datasets", dataset_id), ignore_errors=True)
+        retention.remove_files(pngs)
         return {"ok": True}
 
     @app.post("/sessions", dependencies=[Depends(auth)])
@@ -456,9 +480,37 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
 
     @app.delete("/sessions/{session_id}", dependencies=[Depends(auth)])
     def delete_session(session_id: str, db=Depends(db_dep)):
-        db.delete(get_or_404(db, ChatSession, session_id))
+        s = get_or_404(db, ChatSession, session_id)
+        pngs = retention.message_chart_files(s.messages, chart_dir)    # 阶段 6.6 M0：先收集，删库后删文件
+        db.delete(s)
         db.commit()
+        retention.remove_files(pngs)
         return {"ok": True}
+
+    @app.delete("/messages/{message_id}", dependencies=[Depends(auth)], status_code=204)
+    def delete_message(message_id: str, db=Depends(db_dep)):
+        """阶段 6.6 M0：删一轮（助手消息 + 紧挨着的前一条用户消息），事件 / 反馈级联，图表文件一并删。
+        只接受助手消息（传用户消息会把一问一答拆成两半）；会话里有正在分析的轮次 → 409。"""
+        m = get_or_404(db, Message, message_id)
+        if m.role != "assistant":
+            raise HTTPException(400, "只能按助手消息删除一轮问答")
+        if db.scalar(select(Message).where(Message.session_id == m.session_id, Message.status == "running")):
+            raise HTTPException(409, "这个会话还有一条消息在分析中")
+        # 与 turn_history 同一个顺序（relationship 的 order_by=created_at，同毫秒时靠插入顺序）；
+        # 不能再按 id 排：问与答常在同一毫秒落库，按随机 id 排会把答排到问前面（§1.4 第 3 条）
+        msgs = list(m.session.messages)
+        i = next(k for k, x in enumerate(msgs) if x.id == m.id)
+        pair = [m] + ([msgs[i - 1]] if i > 0 and msgs[i - 1].role == "user" else [])
+        pngs = retention.message_chart_files(pair, chart_dir)
+        for x in pair:
+            db.delete(x)
+        db.commit()
+        retention.remove_files(pngs)
+        db.expire_all()
+        roles = [x.role for x in db.get(ChatSession, m.session_id).messages]
+        if any(a == b for a, b in zip(roles, roles[1:])):      # §1.4 第 3 条：删完复核一问一答仍相邻
+            logger.warning("会话 %s 删除消息后出现相邻同角色消息：%s", m.session_id, roles)
+        return Response(status_code=204)
 
     @app.post("/sessions/{session_id}/messages", dependencies=[Depends(auth)])
     def post_message(session_id: str, body: MessageIn, db=Depends(db_dep)):
@@ -467,7 +519,13 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(409, "这个会话还有一条消息在分析中")
         target = dataset_target(get_or_404(db, Dataset, s.dataset_id))
         agent = s.agent
-        history = turn_history(s.messages) if agent == "react" else None
+        from app.memory.config import SETTING_KEY, resolve_memory_mode
+        row = db.get(Setting, SETTING_KEY)
+        mem_setting = row.value if row else None
+        if resolve_memory_mode(mem_setting) == "state":
+            history = turn_snapshots(s.messages)          # 阶段 6.6：两种 agent 都带（workflow 只用来折叠工作状态）
+        else:
+            history = turn_history(s.messages) if agent == "react" else None
         q = Message(session_id=session_id, role="user", content=body.content, created_at=now())
         a = Message(session_id=session_id, role="assistant", status="running", created_at=now())
         db.add_all([q, a])
@@ -477,7 +535,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         db.commit()
         msg_id = a.id
 
-        kwargs = dict(agent=agent, trace_id=msg_id, log=False, **(analyze_kwargs or {}))
+        kwargs = dict(agent=agent, trace_id=msg_id, log=False, memory_mode=mem_setting, **(analyze_kwargs or {}))
         cfg, meta = llm_config_meta()     # 阶段 6.5：每条分析消息记下当时的连接名和模型（result.meta）
         if chat_model_factory is not None:
             kwargs["chat_model"] = chat_model_factory()
@@ -596,12 +654,15 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 over.discard("timeout")      # 同 llm_config：坏值不生效
         sources = {k: "settings" if k in over else "env" if conns.legacy_env_source(k) else "default"
                    for k in SETTING_KEYS}
+        from app.memory.config import SETTING_KEY, env_override, normalize, resolve_memory_mode
+        memory = {"mode": resolve_memory_mode(st.get(SETTING_KEY)), "setting": normalize(st.get(SETTING_KEY)) or "off",
+                  "env": env_override()}        # 阶段 6.6：mode 是实际生效值；env 非空时设置页提示被环境变量覆盖
         if who["id"] != conns.ENV_ID:
             sources["model"] = sources["base_url"] = "connection"
             return {"model": cfg.model, "base_url": cfg.base_url, "timeout": cfg.timeout, "sources": sources,
-                    "connection": who}
+                    "connection": who, "memory": memory}
         return {"model": st.get("model") or cfg.model, "base_url": st.get("base_url") or cfg.base_url,
-                "timeout": cfg.timeout, "sources": sources, "connection": who}
+                "timeout": cfg.timeout, "sources": sources, "connection": who, "memory": memory}
 
     @app.put("/settings", dependencies=[Depends(auth)])
     def put_settings(body: SettingsIn, db=Depends(db_dep)):

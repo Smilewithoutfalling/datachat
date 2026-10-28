@@ -2559,3 +2559,16 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 
 1. EV-C3：`stability` 块 + `--repeat` 的 flip_rate，把上面这个 2.3% 量化成区间。
 2. `emp_022` 的拒答契约（"说了没有这个字段，就不能接着推测"）需要单独看是否要加提示。
+
+## [78] 2026-10-28 · 记忆批 1：M0 保留删除 + 开关 + M12 预算 + M5 失败轮 + M1 工作状态 + M3 快照 · commit 3bad865
+
+- 新包 app/memory/：config（resolve_memory_mode：env → settings → off；full 批 1 解析为 state）、budget、working_state、snapshots、context。
+- off（默认）：送进模型的消息与 3ce6b77 逐字节一致，tests/test_memory_p8.py 用 3ce6b77 上算出的三个哈希钉住（react 单轮 / react 带历史 / workflow）。
+- state：历史渲染成数据块放进 system，ReAct 消息里不再回灌；失败 / 取消 / 中断轮只写「问 + 状态」，不写错误原文；工作状态由各轮成功代码按 AST 折叠（分组、筛选、时间范围、上一张图），workflow 只给 planner 状态块。预算：历史 ≤6000 token、投影超阈值收紧到 4000，状态 ≤500；被裁时 memory_trimmed 有记录并给 warning。
+- §1.4 第 1 条：有历史时 B69/B70 不触发，这个语义从「history 非空」改成 followup（本轮之前有轮次），state 下历史不走消息也照样成立。
+- result_json 新增 memory_mode、history_tokens、memory_trimmed、rewrite（恒为 None）、result_digest。
+- M0：DELETE /messages/{id}（成对删除；用户消息 400、分析中 409）；删会话 / 数据集时连带删图（归属从 result_json 与 exec 事件里找，只认 chart_*.png 并落在图表目录）。新库 auto_vacuum=INCREMENTAL（必须在切 WAL 之前设，否则库头已写死为 NONE，实测踩到）；旧库在监听前、空闲页 >25% 时才转换；/shutdown 只跑 incremental_vacuum(2000)。
+- 设置页加「会话记忆（实验）」二选一；GET /settings 增加 memory: {mode, setting, env}。
+- 偏离写进 spec §3.8：模块放 app/memory/；不建 session_state 表（状态是历史的纯函数）；不改图表命名；DATACHAT_HISTORY 推迟。
+- 删单条时发现：问与答常在同一毫秒落库，按 (created_at, id) 排序会把答排到问前面，所以删除路径沿用 relationship 的顺序（test_delete_message_keeps_history_alternating）。
+- 闸门（沙箱 aarch64，最后一次改动之后）：pytest 1039 passed；vitest 888 passed；lint、tsc、build、gen_ui_types --check、gen_eval_data --check 全过；e2e --grep-invert 视觉 41 passed。旧库启动时转换的耗时还没有在大库上实测，上限暂定 512 MB。

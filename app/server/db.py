@@ -140,8 +140,17 @@ def make_sessionmaker(db_path: str):
     def _pragmas(dbapi_conn, _):
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
+        # 阶段 6.6 M0：必须在 journal_mode=WAL 之前——切 WAL 会写库头，之后新库的 auto_vacuum 就定成 NONE 了。
+        # 对已有表的旧库这句是空操作（要配合一次 VACUUM 才生效，见 retention.prepare_auto_vacuum）。
+        cur.execute("PRAGMA auto_vacuum=INCREMENTAL")
         cur.execute("PRAGMA journal_mode=WAL")
         cur.close()
 
+    # 阶段 6.6 M0：旧库（auto_vacuum=NONE）按空闲页比例在这里转换一次——此时还没开始监听，没有并发写。
+    # 结果记在 engine.info["auto_vacuum"]，测试与日志用。
+    from app.server.retention import prepare_auto_vacuum
+    with engine.connect() as c:
+        engine.info = getattr(engine, "info", {})
+        engine.info["auto_vacuum"] = prepare_auto_vacuum(c.connection.driver_connection, db_path)
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)

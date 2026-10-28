@@ -9,6 +9,7 @@ class AgentState(TypedDict, total=False):
     data_access: str     # 代码里怎么拿数据（单表 df / 多表 dfs，阶段 3.5）
     data_access_review: str  # 同上，reviewer prompt 的措辞
     field_notes: str     # 数据字典检索到的字段说明（已格式化，独立于 question，B04）
+    memory_state: str    # 阶段 6.6 M1：会话工作状态块（已带数据标记），只给 planner；off 时没有这个键
     plan: str            # Planner 产出的分析步骤
     code: str            # CodeGen / Reviewer 产出的 pandas 代码
     result: Any          # Executor 得到的结构化结果（DataFrame/Series/标量，不截断，B07）
