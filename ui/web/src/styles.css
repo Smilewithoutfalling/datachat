@@ -558,3 +558,31 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .settings .test-fail { margin: 0; overflow-wrap: anywhere; flex-direction: column; align-items: flex-start; gap: 2px; }
 .settings .test-fail-title, .settings .test-fail-hint { margin: 0; }
 .settings .test-fail-title { font-weight: 700; }
+
+/* 阶段 6.5 §5：模型连接卡片列表。只用已有变量；不加阴影（V2a 视觉口径）。 */
+.settings .conn-section { display: flex; flex-direction: column; gap: 10px; }
+.settings .conn-section .sec-head .aside { margin-left: 0; }
+.settings .conn-section .sec-head .pill-outline { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.settings .conn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.settings .conn-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; background: #fff; display: flex; flex-direction: column; gap: 10px; }
+.settings .conn-card.active { border-color: var(--accent); background: var(--accent-bg); }
+.settings .conn-card.editing { padding: 0; border: none; background: none; }
+.settings .conn-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.settings .conn-avatar { flex: none; width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-muted); border: 1px solid var(--line); font-size: calc(12 * var(--px)); font-weight: 700; color: #333336; }
+.settings .conn-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.settings .conn-name { font-size: calc(12.5 * var(--px)); font-weight: 700; overflow-wrap: anywhere; }
+.settings .conn-sub { font-size: calc(10.5 * var(--px)); color: #6B6B70; overflow-wrap: anywhere; }
+.settings .conn-probe { flex: none; font-size: calc(10.5 * var(--px)); color: #A0A0A5; }
+.settings .conn-probe.ok { color: #1E8E3E; }
+.settings .conn-probe.bad { color: #B3121B; }
+.settings .test-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; font-size: calc(11 * var(--px)); }
+.settings .test-label { color: #6B6B70; padding-top: 2px; }
+.settings .conn-form .inline select { width: 100%; }
+.settings .conn-form .key-field { flex: 1; }
+.settings .conn-advanced { display: flex; flex-direction: column; gap: 8px; font-size: calc(11 * var(--px)); color: #333336; }
+.settings .conn-advanced summary { cursor: pointer; color: var(--accent); }
+.settings .conn-advanced[open] { gap: 8px; }
+.settings .check { display: flex; align-items: center; gap: 6px; font-size: calc(11 * var(--px)); }
+.settings .check input { height: auto; }
+select:disabled option, option:disabled { color: #A0A0A5; }

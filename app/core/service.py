@@ -21,7 +21,7 @@ from collections import defaultdict
 from functools import lru_cache
 
 from app.core.llm import (api_error_text, BudgetExceeded, LLMClient, LLMConfig, LLMError,
-                          UsageCallbackHandler, UsageTracker, build_chat_model, classify_error, is_truncated,
+                          UsageCallbackHandler, UsageTracker, build_chat_model, classify_error, is_truncated, message_text,
                           token_budget)
 from app.core.errors import NO_EXEC_MESSAGE, NO_KEY_MESSAGE, user_error
 from app.core.events import CANCELLED_MESSAGE, Emitter, Event
@@ -366,7 +366,7 @@ def _react_invoke(graph, question, config, em, sink, attempt, out, history=None)
                 if isinstance(m, AIMessage) and m.tool_calls:
                     for tc in m.tool_calls:
                         yield em.code((tc.get("args") or {}).get("code", ""), source="tool_call",
-                                      attempt=attempt, thought=str(m.content or ""))
+                                      attempt=attempt, thought=message_text(m))
                 elif isinstance(m, ToolMessage):
                     execs = sink.get("execs", [])
                     e = execs[n_tool] if n_tool < len(execs) else {}
@@ -385,7 +385,7 @@ def _final_text(messages):
     from langchain_core.messages import AIMessage
     for m in reversed(messages):
         if isinstance(m, AIMessage) and not m.tool_calls:
-            return str(m.content or "")
+            return message_text(m)
         if isinstance(m, AIMessage):
             return ""
     return ""
@@ -461,7 +461,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     for m in messages[start:]:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
-                res.steps.append(Step("tool_call", content=str(m.content or ""),
+                res.steps.append(Step("tool_call", content=message_text(m),
                                       code=(tc.get("args") or {}).get("code", "")))
         elif isinstance(m, ToolMessage):
             e = execs[obs_i] if obs_i < len(execs) else {}
@@ -471,8 +471,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
             res.steps.append(Step("observation", content=str(m.content)[:2000],
                                   error=e.get("error"), duration_s=e.get("duration_s")))
         elif isinstance(m, AIMessage):
-            res.steps.append(Step("answer", content=str(m.content)))
-            res.answer = str(m.content)
+            res.steps.append(Step("answer", content=message_text(m)))
+            res.answer = message_text(m)
             answer_truncated = is_truncated(m)
     bad = api_error_text(res.answer)
     if bad is not None:

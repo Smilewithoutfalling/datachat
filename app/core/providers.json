@@ -1,0 +1,113 @@
+{
+  "_comment": "阶段 6.5 服务商预设（只放数据）。默认 Base URL 与模型名的官方出处见 docs/providers-sources.md；改这里要同步改那张表。quirks 只写确有其事的怪癖，默认全关（app/core/llm.py QUIRKS）。",
+  "protocols": ["openai_chat", "openai_responses", "azure", "anthropic"],
+  "custom_protocols": ["openai_chat", "openai_responses", "anthropic"],
+  "groups": ["cn", "global", "local", "custom"],
+  "providers": [
+    {
+      "id": "deepseek", "name": "DeepSeek", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://api.deepseek.com", "needs_key": true, "key_url": "https://platform.deepseek.com/api_keys",
+      "models": ["deepseek-flash", "deepseek-v4-pro"], "quirks": {"reasoning_replay": true}
+    },
+    {
+      "id": "bailian", "name": "阿里云百炼", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "needs_key": true,
+      "key_url": "https://bailian.console.aliyun.com/model/settings/api-key",
+      "models": ["qwen3.8-max", "qwen3.7-plus"], "quirks": {"thinking_param": "enable_thinking"}
+    },
+    {
+      "id": "volcengine", "name": "火山方舟（豆包）", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3", "needs_key": true,
+      "key_url": "https://console.volcengine.com/ark/region:ark+cn-beijing/apikey",
+      "models": ["doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915"], "quirks": {"thinking_param": "thinking"}
+    },
+    {
+      "id": "moonshot", "name": "Moonshot（Kimi）", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://api.moonshot.cn/v1", "needs_key": true, "key_url": "https://platform.kimi.com/console/api-keys",
+      "models": ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"], "quirks": {"reasoning_replay": true}
+    },
+    {
+      "id": "zhipu", "name": "智谱", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4", "needs_key": true,
+      "key_url": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+      "models": ["glm-5.3", "glm-5.3-flash"], "quirks": {"thinking_param": "thinking"}
+    },
+    {
+      "id": "siliconflow", "name": "硅基流动", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://api.siliconflow.cn/v1", "needs_key": true, "key_url": "https://cloud.siliconflow.cn/account/ak",
+      "models": ["Pro/deepseek-ai/DeepSeek-R1"], "quirks": {}
+    },
+    {
+      "id": "minimax", "name": "MiniMax", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://api.minimax.cn/v1", "needs_key": true,
+      "key_url": "https://platform.minimax.cn/user-center/basic-information/interface-key",
+      "models": ["MiniMax-M3", "MiniMax-M3.1-Flash"], "quirks": {"reasoning_replay": true}
+    },
+    {
+      "id": "hunyuan", "name": "腾讯混元", "group": "cn", "protocol": "openai_chat",
+      "base_url": "https://api.hunyuan.cloud.tencent.com/v1", "needs_key": true,
+      "key_url": "https://console.cloud.tencent.com/hunyuan/start",
+      "models": ["hunyuan-turbos-latest"], "quirks": {}
+    },
+    {
+      "id": "openai", "name": "OpenAI", "group": "global", "protocol": "openai_responses",
+      "base_url": "https://api.openai.com/v1", "needs_key": true, "key_url": "https://platform.openai.com/api-keys",
+      "models": ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"], "quirks": {}
+    },
+    {
+      "id": "anthropic", "name": "Anthropic", "group": "global", "protocol": "anthropic",
+      "base_url": "https://api.anthropic.com", "needs_key": true, "key_url": "https://platform.claude.com/settings/keys",
+      "models": ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"], "quirks": {}
+    },
+    {
+      "id": "gemini", "name": "Google Gemini", "group": "global", "protocol": "openai_chat",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "needs_key": true,
+      "key_url": "https://aistudio.google.com/apikey", "models": ["gemini-3.8-flash"], "quirks": {}
+    },
+    {
+      "id": "azure", "name": "Azure OpenAI", "group": "global", "protocol": "azure",
+      "base_url": "", "needs_key": true, "key_url": "https://portal.azure.com/",
+      "models": [], "quirks": {}
+    },
+    {
+      "id": "openrouter", "name": "OpenRouter", "group": "global", "protocol": "openai_chat",
+      "base_url": "https://openrouter.ai/api/v1", "needs_key": true, "key_url": "https://openrouter.ai/settings/keys",
+      "models": ["~openai/gpt-sol-latest"], "quirks": {}
+    },
+    {
+      "id": "groq", "name": "Groq", "group": "global", "protocol": "openai_chat",
+      "base_url": "https://api.groq.com/openai/v1", "needs_key": true, "key_url": "https://console.groq.com/keys",
+      "models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"], "quirks": {}
+    },
+    {
+      "id": "mistral", "name": "Mistral", "group": "global", "protocol": "openai_chat",
+      "base_url": "https://api.mistral.ai/v1", "needs_key": true, "key_url": "https://console.mistral.ai/api-keys",
+      "models": ["mistral-large-4", "mistral-small-2603"], "quirks": {}
+    },
+    {
+      "id": "xai", "name": "xAI（Grok）", "group": "global", "protocol": "openai_chat",
+      "base_url": "https://api.x.ai/v1", "needs_key": true, "key_url": "https://console.x.ai/team/default/api-keys",
+      "models": ["grok-4.7"], "quirks": {}
+    },
+    {
+      "id": "ollama", "name": "Ollama", "group": "local", "protocol": "openai_chat",
+      "base_url": "http://localhost:11434/v1", "needs_key": false, "key_url": null,
+      "models": [], "quirks": {}
+    },
+    {
+      "id": "lmstudio", "name": "LM Studio", "group": "local", "protocol": "openai_chat",
+      "base_url": "http://localhost:1234/v1", "needs_key": false, "key_url": null,
+      "models": [], "quirks": {}
+    },
+    {
+      "id": "newapi", "name": "NewAPI / OneAPI", "group": "local", "protocol": "openai_chat",
+      "base_url": "http://localhost:3000/v1", "needs_key": true, "key_url": null,
+      "models": [], "quirks": {}
+    },
+    {
+      "id": "custom", "name": "自定义", "group": "custom", "protocol": "openai_chat",
+      "base_url": "", "needs_key": true, "key_url": null,
+      "models": [], "quirks": {}
+    }
+  ]
+}

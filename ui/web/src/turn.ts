@@ -182,6 +182,13 @@ export function turnTokens(t: Turn): { n: number; estimated: boolean } | null {
   return { n, estimated: u.estimated === true };
 }
 
+/** 阶段 6.5：done 里 result.meta 记着这一轮用的连接名和模型；旧消息、取消 / 中断（没有 result）时 null。 */
+export function turnMeta(t: Turn): { connection_name: string; model: string } | null {
+  const m = (t.result as { meta?: unknown } | null | undefined)?.meta as { connection_name?: unknown; model?: unknown } | undefined;
+  if (!m || typeof m.connection_name !== "string" || typeof m.model !== "string") return null;
+  return { connection_name: m.connection_name, model: m.model };
+}
+
 /** 整轮耗时（秒）：done 里的 timings.total；没有就用首末事件的 ts 差。 */
 export function totalSeconds(t: Turn): number | null {
   const tm = t.result?.timings as { total?: unknown } | undefined;

@@ -3,7 +3,7 @@
 // 终止原因只按 status / error_kind / llm_kind 分支（turn.ts 的 outcome），不对文案做匹配。所有用户数据按文本渲染（T9）。
 import { type ReactNode, useEffect, useState } from "react";
 import { type ChartSpec, EChart } from "../charts/EChart";
-import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn, turnTokens } from "../turn";
+import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn, turnMeta, turnTokens } from "../turn";
 import { IconAlert, IconChevronDown, IconChevronUp, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
 import { llmErrorText } from "./llmErrorText";
 import { Markdown } from "./Markdown";
@@ -132,6 +132,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         : "";
   const hasCode = turn.events.some((e) => e.type === "code");
   const tokens = o.kind === "running" ? null : turnTokens(turn);
+  const meta = turnMeta(turn);
 
   return (
     <div className="acard turn" data-status={turn.status}>
@@ -139,7 +140,8 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         <span className="avatar"><IconSpark size={13} /></span>
         <span className="acard-name">datachat</span>
         <span className={`badge ${badge.cls}`} data-testid="turn-badge">{badge.icon}{badge.text}</span>
-        <span className="acard-time">
+        {/* 阶段 6.5：这一轮用的连接和模型。只放 title（悬停可见）和「查看过程」里，不改卡头宽度（视觉基线 25 屏不动） */}
+        <span className="acard-time" title={meta ? `连接：${meta.connection_name} · 模型：${meta.model}` : undefined}>
           {time}
           {tokens ? (
             <span
@@ -156,6 +158,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
       {list.length ? <StepBar list={list} open={open} onToggle={() => setOpen(!open)} canOpen={turn.events.length > 0} /> : null}
       {open ? (
         <div className="process" data-testid="process">
+          {meta ? <p className="hint" data-testid="turn-meta">连接：{meta.connection_name} · 模型：<span className="mono">{meta.model}</span></p> : null}
           {turn.events.map((ev) => <EventView key={ev.seq} ev={ev} />)}
         </div>
       ) : null}

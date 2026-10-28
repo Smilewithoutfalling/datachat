@@ -72,7 +72,7 @@ def _invoke_with_retry(model, messages, config, llm_config, tracker, sleep):
 def _needs_nudge(messages, nudge: str) -> bool:
     """最后一条是不带工具调用的结论，本轮（最后一条真实用户消息之后）没执行过工具、没提醒过，
     结论也不是契约拒答 / 网关错误内容 / 步数占位（这几种另有处理：B40、B62、B39）。"""
-    from app.core.llm import api_error_text
+    from app.core.llm import api_error_text, message_text
     from app.core.result import refusal_from_answer
     if not messages or not isinstance(messages[-1], AIMessage) or messages[-1].tool_calls:
         return False
@@ -85,7 +85,7 @@ def _needs_nudge(messages, nudge: str) -> bool:
         return False
     if any(isinstance(m, HumanMessage) and m.content == nudge for m in turn):
         return False
-    final = str(messages[-1].content or "")
+    final = message_text(messages[-1])
     if refusal_from_answer(final) is not None or api_error_text(final) is not None:
         return False
     return not final.strip().startswith("Sorry, need more steps")

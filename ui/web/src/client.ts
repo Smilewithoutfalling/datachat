@@ -3,7 +3,10 @@ import type { Api } from "./api";
 import { dataUrlBytes } from "./charts/pngSaver";
 import { parseSse } from "./sse";
 import type { Ev } from "./turn";
-import type { Agent, Dataset, DatasetDetail, KeyStatus, Rating, Session, SessionDetail, Settings, SettingsTest } from "./types";
+import type {
+  Agent, Catalog, Connection, ConnectionIn, Connections, ConnectionTest, ConnKey, Dataset, DatasetDetail, KeyStatus, ModelList,
+  Rating, Session, SessionDetail, Settings, SettingsTest,
+} from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
   method,
@@ -74,6 +77,20 @@ export function client(api: Api) {
     deleteKey: () => api.json<KeyStatus>("/settings/api-key", { method: "DELETE" }),
     /** 测试连接：测的是已保存的配置；同时只许一个，第二个 409。 */
     testSettings: () => api.json<SettingsTest>("/settings/test", { method: "POST" }),
+    // 阶段 6.5：模型连接。Key 只写不读（PUT / DELETE），响应里只有 {needed, configured}
+    providers: () => api.json<Catalog>("/providers"),
+    connections: () => api.json<Connections>("/connections"),
+    createConnection: (b: ConnectionIn) => api.json<Connection>("/connections", jsonBody("POST", b)),
+    updateConnection: (id: string, b: Partial<ConnectionIn>) =>
+      api.json<Connection>(`/connections/${encodeURIComponent(id)}`, jsonBody("PUT", b)),
+    deleteConnection: (id: string) => api.json<Connections>(`/connections/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    setConnectionKey: (id: string, api_key: string) =>
+      api.json<ConnKey>(`/connections/${encodeURIComponent(id)}/api-key`, jsonBody("PUT", { api_key })),
+    deleteConnectionKey: (id: string) => api.json<ConnKey>(`/connections/${encodeURIComponent(id)}/api-key`, { method: "DELETE" }),
+    activateConnection: (id: string) => api.json<Connections>(`/connections/${encodeURIComponent(id)}/activate`, { method: "POST" }),
+    /** 两步测试（连接 + 工具调用），测的是已保存的配置；和 testSettings 共用一把锁，第二个 409。 */
+    testConnection: (id: string) => api.json<ConnectionTest>(`/connections/${encodeURIComponent(id)}/test`, { method: "POST" }),
+    connectionModels: (id: string) => api.json<ModelList>(`/connections/${encodeURIComponent(id)}/models`),
     /** 桌面模式导出 PNG（阶段 6 收尾）：后端写进「下载」文件夹，返回完整路径。浏览器模式后端 404，前端也不会调用。 */
     savePng: async (dataUrl: string, filename: string) =>
       (await api.json<{ path: string }>(`/exports/png?filename=${encodeURIComponent(filename)}`, {

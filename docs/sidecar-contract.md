@@ -16,6 +16,19 @@
 - 前端地址是 `http://127.0.0.1:<port>/#token=<token>`。token 放在 fragment 里，不发给服务器，也不进访问日志。其余 API 都用 `Authorization: Bearer <token>`。
 - 参考实现：`packaging/smoke_sidecar.py`。
 
+## 模型连接接口（阶段 6.5）
+
+都要 Bearer。任何响应都不含 Key，只有 `key: {needed, configured}`。方案见 docs/roadmap/phase65-models.md。
+
+- `GET /providers`：服务商预设（app/core/providers.json）和协议列表。
+- `GET /connections`、`POST /connections`、`PUT /connections/{id}`、`DELETE /connections/{id}`：连接的增删改查。删除时一并删掉钥匙串里的 `conn:<id>`；删除生效连接后，最早建的连接接替。
+- `PUT /connections/{id}/api-key`、`DELETE /connections/{id}/api-key`：Key 存进系统钥匙串，service `datachat`，account `conn:<id>`。
+- `POST /connections/{id}/activate`：设为生效连接。第一个建的连接自动生效。
+- `POST /connections/{id}/test`：两步测试（连接 + 工具调用探测），结果存进连接的 `probe`。和 `/settings/test` 共用一把锁。
+- `GET /connections/{id}/models`：读服务商的 `/models`，超时 10 秒；失败或 Azure 时返回预设模型，并给出原因（`source: "preset"`）。
+- 兼容：旧的 `GET/PUT /settings`、`PUT/DELETE /settings/api-key`、`POST /settings/test` 保留一个版本，作用于当前生效的连接；没有任何连接时，作用于 `DEEPSEEK_*` 环境变量那个只读虚拟连接。
+- 启动时执行一次旧设置迁移（规则见方案 §4）。
+
 ## 端口独占（不要改）
 
 - sidecar 只监听 127.0.0.1，bind 前不设任何 `SO_*` 选项。

@@ -26,6 +26,22 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
   const [confirm, setConfirm] = useState(false);
   const [typed, setTyped] = useState("");
   const have = detail !== null;
+  // 阶段 6.5 §2d：生效连接测出「不支持工具调用」（probe.tools === false）时，「边想边做」（ReAct）置灰，悬停说明原因。
+  // 没测过（probe 为 null）或没测出来（tools 为 null）的不拦。读不到连接（旧后端）也不拦。
+  const [reactBlock, setReactBlock] = useState("");
+  useEffect(() => {
+    let live = true;
+    c.connections()
+      .then((l) => {
+        const a = l.items.find((x) => x.active);
+        if (live && a?.probe && a.probe.tools === false)
+          setReactBlock(`当前连接「${a.name}」的模型 ${a.probe.model} 测试时没有调用工具，「边想边做」需要工具调用。换一个支持工具调用的模型或连接，重新测试后再用。`);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [c]);
 
   useEffect(() => {
     if (have) return;
@@ -65,14 +81,14 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
             {!allFailed ? (
               <>
                 {/* 验收 P1-12：「工作流」是内部叫法。新会话用哪种分析方式，按用户能理解的差别来写 */}
-                <label className="pill" title="标准：先列计划再写代码，稳；边想边做：每步看结果再决定下一步，适合探索">
+                <label className="pill" title={reactBlock || "标准：先列计划再写代码，稳；边想边做：每步看结果再决定下一步，适合探索"}>
                   模式
-                  <select aria-label="分析模式" value={agent} onChange={(e) => setAgent(e.target.value as Agent)}>
+                  <select aria-label="分析模式" value={reactBlock ? "workflow" : agent} onChange={(e) => setAgent(e.target.value as Agent)}>
                     <option value="workflow">标准</option>
-                    <option value="react">边想边做</option>
+                    <option value="react" disabled={!!reactBlock} title={reactBlock || undefined}>边想边做{reactBlock ? "（不可用）" : ""}</option>
                   </select>
                 </label>
-                <button type="button" className="pill-outline" onClick={() => onNewSession(id, agent)}>
+                <button type="button" className="pill-outline" onClick={() => onNewSession(id, reactBlock ? "workflow" : agent)}>
                   <IconPlus size={12} />新建会话
                 </button>
               </>

@@ -107,10 +107,30 @@ class Feedback(Base):
 
 
 class Setting(Base):
-    """非机密设置（模型名、base_url 等）。API Key 不在这里，在系统钥匙串（app/core/keystore.py）。"""
+    """非机密设置（模型名、base_url 等）。API Key 不在这里，在系统钥匙串（app/core/keystore.py）。
+    阶段 6.5 起另有 active_connection（生效连接 id）、connections_migrated（§4 迁移只跑一次的标记）、
+    env_probe（没有连接时「环境变量」虚拟连接的最近一次测试）。"""
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class Connection(Base):
+    """模型连接（阶段 6.5 §3）：用户命名，同一服务商可以建多个；同一时间只有一个生效（settings.active_connection）。
+    Key 不在这里，在系统钥匙串 ACCOUNT=conn:<id>（app/core/keystore.py conn_account）。新表：create_all 自动建，旧表不动。
+    extra：JSON，Azure 的 deployment / api_version、怪癖覆盖 quirks、thinking 开关。
+    probe：JSON，最近一次测试 {model, connect, tools, checked_at}；model 和当前 model 不同就算没测过。"""
+    __tablename__ = "connections"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    protocol: Mapped[str] = mapped_column(String(32))
+    base_url: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(200), default="")
+    extra: Mapped[str] = mapped_column(Text, default="{}")
+    probe: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    updated_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
 def make_sessionmaker(db_path: str):

@@ -2299,10 +2299,45 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - plan.md 阶段 7 的交付物和验收按上面改写。
 - 待 S 定：§1 的 5 条（模型 / 网关、每轮预算、出题分工、judge 模型、数据许可）。
 
-## [72] 2026-10-27 · 阶段 6.5 方案：多服务商模型接入 · commit <待提交>
+## [72] 2026-10-27 · 阶段 6.5 方案：多服务商模型接入 · commit 839d3d1（PR #84）
 
 新文件 docs/roadmap/phase65-models.md。起因：S 10-27 要求模型接入要尽量兼容市面上所有接口，参考 LangBot。
 - 调研了 LangBot、LobeChat、Cherry Studio、Cline、Pydantic AI、any-llm、Open WebUI、Aider、PandasAI 九个项目。共同的结构都是三层：协议（不超过 5 种）、服务商预设（是数据，不是代码）、模型怪癖和能力。LangBot 的 44 个预设里有 31 个是 OpenAI 兼容接口；LobeChat 的 88 个服务商里有 69 个走兼容工厂。
 - 不用 LiteLLM：沙箱实测 litellm 1.106.4 安装后占 152 MB，还会带上 boto3/botocore（28 MB）和 tokenizers（11 MB）；sidecar 工件现在是 85.7 MB。
 - S 10-27 定：每个服务商各存一个 Key，并且可以建多个用户自己命名的连接（同一个服务商可以有多份）；要做「获取模型列表」；真连接只实测 S 那一个连接；迁移后的连接默认名「我的连接」。
 - plan.md 在阶段 6 和 7 之间插入 6.5 一行。
+
+## [73] 2026-10-28 · 阶段 6.5 实现：多服务商模型接入 · commit <待提交>
+
+按 docs/roadmap/phase65-models.md 实现。
+- **协议**：app/core/llm.py 的 build_chat_model 按协议分发，共 4 种：openai_chat、openai_responses（`use_responses_api`）、azure、anthropic（`ChatAnthropic`）。重试、classify_error、UsageTracker 四种协议共用。classify_error 能识别 anthropic SDK 的异常，529 归为 server。新增 message_text，用来读内容块列表，service.py 和 react_agent.py 都改用它。
+- **怪癖**：no_stream_options、no_array_content、reasoning_replay 三个用 ChatOpenAI 的子类实现；thinking_param 走 extra_body。每个怪癖各有一条单测。
+- **预设**：app/core/providers.json 共 20 家，外加「自定义」。出处和核实情况见新文件 docs/providers-sources.md。除 fake 外都没有实测。
+- **连接**：新表 connections；Key 存在钥匙串里，ACCOUNT=conn:<id>，接口一律不返回 Key。接口包括 /providers、/connections* 全套（见 sidecar-contract.md）、两步测试（连接 + 工具调用探测，结果存进 probe），以及 /models（10 秒超时，失败时退回预设）。旧的 /settings* 保留一个版本，作用于当前生效的连接。启动时迁移旧设置一次：api.deepseek.com 归为 DeepSeek，其余归为「自定义」，名字叫「我的连接」。分析结果的 meta 里记 connection_name 和 model。
+- **前端**：设置页改成连接卡片 + ConnectionForm + TestResult。D2 引导变成新建第一个连接。生效连接的 probe.tools===false 时，「边想边做」置灰。
+- **依赖**：langchain-anthropic==1.7.5、anthropic==1.17.0、docstring-parser==0.18.0，沙箱实测装上后共 14.8 MB（方案估的是约 28 MB）。sidecar 打包后增加多少要等 CI。packaging/build_sidecar.py 用 --add-data 把 providers.json 打进包。
+
+**偏离方案**
+1. **Azure 改走 v1 路径**：直接用 ChatOpenAI，地址是 `{资源}/openai/v1`，model 填部署名，不再需要 api-version，表单也去掉了「API 版本」。依据是 learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle（2026-05-13 更新）。方案原写 AzureChatOpenAI 加 dated api-version。
+2. schema 校验用 pydantic 写，没用 jsonschema。jsonschema 只是 altair 顺带装进来的，不在 requirements-dev 里，CI 上没有。
+3. 一个连接都没有时，旧的 PUT /settings 写到环境变量那个虚拟连接上。现有十几个 e2e 靠它选场景。
+4. 迁移时不读环境变量里的 DEEPSEEK_API_KEY。环境变量不是存储，每次启动都还在。
+5. 第一个连接自动设为生效；删掉生效连接时，最早建的那个接替。
+6. 「测试」按钮移到了卡片上，测的是已保存的配置。因此删掉了旧 vitest 里「先保存再测试」和「auth 失败时焦点移到 Key 输入框」两条。
+7. meta 只放在卡头的 title 和「查看过程」里，卡头宽度不变，所以 f4-visual 的 08/11/24/25 不受影响。方案里说的「设置页那张视觉基线」其实不存在。
+8. Responses 协议 ping 时用 max_tokens=16，这是 OpenAI 的下限。
+9. 预设修正：Moonshot 加上 reasoning_replay（官方文档要求多轮时原样回传 reasoning_content）；Groq 把 llama-3.3-70b-versatile（现在只对 Enterprise 开放）换成 openai/gpt-oss-20b；Mistral 改成文档里能查到的 mistral-large-4 和 mistral-small-2603。
+
+**实测**（最后一次改动之后重跑，沙箱 aarch64）
+
+| 闸门 | 结果 | 耗时 |
+|---|---|---|
+| pytest 全量 | 985 passed | 684 s |
+| vitest | 886 passed / 26 files | 287 s |
+| lint、tsc、frontend build | 通过 | build 13 s |
+| Playwright e2e（`--grep-invert 视觉`） | 41 passed | 251 s |
+| git diff --check | 通过 | — |
+
+- e2e 第一次跑出 1 条红，修的是测试本身，产品没问题。f4-connections 里有两处：`getByLabel("模型")` 会同时匹配到「推理模型」开关，改成 exact；Playwright 的 toBeDisabled 对 `<option>` 判成 enabled，但 aria 快照里是 [disabled]，所以改为断言 disabled 属性。
+- 沙箱环境：chromium 缺 libatk，运行 `playwright install-deps` 后正常。
+- 没实测：方案 §6 第 4 条（闸门回归）和第 5 条（S 那一个真连接）由 S 来跑；sidecar 体积增量要看 CI。
