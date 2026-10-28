@@ -20,6 +20,7 @@
 | 5 前端 | 2–3 周 | 第一件事（M13，从阶段 4 顺延，含后端三步）：图表库定为 ECharts；定 option 格式与白名单、写 builder `chart(kind, df, x=, y=, series=, title=)`；worker 产出 chart_option（与 result 脱钩，B44）；接口加 chart_option；改绘图提示词并重跑闸门。之后：React + Vite + TS：数据集面板、对话流（展示计划、代码、执行步骤）、图表、可展开的代码、👍👎 反馈、Key 设置页，分步与验收见 docs/roadmap/phase5-frontend.md（F0–F5） | 不碰命令行就能完整用一遍 | — |
 | 6 桌面打包 | 1–2 周 | Tauri 2 外壳（前提见上：前端只走 HTTP）+ PyInstaller 后端 sidecar；Windows 安装包；自动更新；首次启动引导填 Key；依赖许可证审计；pyarrow 已随 Streamlit 一起去掉（DEVLOG [67]） | 在一台干净的 Windows 上一键安装，可用；对外分发前代码签名，显示已验证的发布者（2024 年起任何证书都不能让 SmartScreen 立刻不拦，见 phase6-desktop.md §6，M19）；方案见 docs/roadmap/phase6-desktop.md；对外分发前满足 THREAT_MODEL.md 的 (b) 条件 | — |
 | 6.5 模型接入 | 1 周 | 连接（用户命名，可多个）× 服务商预设（约 20 家）× 4 种协议（OpenAI Chat / OpenAI Responses / Azure / Anthropic）；每个连接一个 Key（存在系统钥匙串）；获取模型列表；测试连接时探测工具调用，不支持就把 ReAct 置灰；旧设置自动迁移。方案见 docs/roadmap/phase65-models.md | 见 phase65-models.md §6 | — |
+| 6.6 记忆系统 | 批 1 约 4.5 天 | 先做批 1：保留与删除（删会话连带删图、删单条消息）、开关（settings 表，默认 off；off 时 prompt 逐字节不变）、按 token 的记忆预算、失败轮进历史、代码维护的工作状态、结构化回合快照。之后与评测侧合跑 history on/off 消融，看基线再定改写 / 口径库 / 压缩 / 门槛。方案见 docs/roadmap/memory-system.md 与 memory-system-spec.md（§14 是与评测 agent 的分工） | 见 memory-system-spec.md §5 批 1 DoD | — |
 | 7 准确率 | 2–4 周 | 先做评测：留出集 H1（约 40 题，含陷阱和画图题）、过程验证器、pass^k；再做改进：列画像、结果合理性校验、枚举值召回；DuckDB / YAML 语义层视 H1 失败分布而定；反馈沉淀推迟。方案见 docs/roadmap/phase7-accuracy.md | 在留出集 H1 上：先测基线，再由 S 定目标「比基线高 X 个百分点」（M20）；闸门 25 题和自造集只作回归（2026-10-27 改：闸门已接近满分，而且已经被逐题分析过） | B05 B09 |
 | 8 Web 上线（后续） | 另定 | PostgreSQL、登录、任务队列、Docker/E2B 沙箱、Langfuse、服务器部署与 ICP 备案 | 另定 | 多租户 |
 

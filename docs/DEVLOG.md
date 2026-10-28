@@ -2307,7 +2307,7 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - S 10-27 定：每个服务商各存一个 Key，并且可以建多个用户自己命名的连接（同一个服务商可以有多份）；要做「获取模型列表」；真连接只实测 S 那一个连接；迁移后的连接默认名「我的连接」。
 - plan.md 在阶段 6 和 7 之间插入 6.5 一行。
 
-## [73] 2026-10-28 · 阶段 6.5 实现：多服务商模型接入 · commit <待提交>
+## [73] 2026-10-28 · 阶段 6.5 实现：多服务商模型接入 · commit a4d1a2d（PR #85）
 
 按 docs/roadmap/phase65-models.md 实现。
 - **协议**：app/core/llm.py 的 build_chat_model 按协议分发，共 4 种：openai_chat、openai_responses（`use_responses_api`）、azure、anthropic（`ChatAnthropic`）。重试、classify_error、UsageTracker 四种协议共用。classify_error 能识别 anthropic SDK 的异常，529 归为 server。新增 message_text，用来读内容块列表，service.py 和 react_agent.py 都改用它。
@@ -2341,3 +2341,25 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
 - e2e 第一次跑出 1 条红，修的是测试本身，产品没问题。f4-connections 里有两处：`getByLabel("模型")` 会同时匹配到「推理模型」开关，改成 exact；Playwright 的 toBeDisabled 对 `<option>` 判成 enabled，但 aria 快照里是 [disabled]，所以改为断言 disabled 属性。
 - 沙箱环境：chromium 缺 libatk，运行 `playwright install-deps` 后正常。
 - 没实测：方案 §6 第 4 条（闸门回归）和第 5 条（S 那一个真连接）由 S 来跑；sidecar 体积增量要看 CI。
+
+## [待编号] 2026-10-28 · 记忆系统方案（阶段 6.6） · commit <待提交>
+
+新文件 docs/roadmap/memory-system.md 和 docs/roadmap/memory-system-spec.md。前者是分析（12 个洞 D1–D12、竞品对比、取舍），后者是实现规格（M0–M12）。两份原稿来自 S，入库前我对照 a4d1a2d 核了一遍，并做了以下修订：
+- **行号重锚**：原稿基于 906d98f。6.5 之后 app.py 的行号下移了约 11–45 行；llm.py 下移 9 行，over_budget 从 172 到 198；db.py 的外键 pragma 从 119 到 139。service.py、react_agent.py、result.py 没有变化。新行号逐处核对过，都指向正确的那一行。
+- **开关**：原稿只用环境变量 DATACHAT_MEMORY，但桌面版不读 .env（README.md:63），产品里永远打不开。改为存进 settings 表的 memory_mode，设置页加一个三选一；环境变量只留给测试和评测时覆盖。默认 off；off 时 prompt 与改动前逐字节一致，有测试钉住。
+- **m10**：原稿说口径库能「修好 m10」。但 m10 是缺成本字段、必须拒答的题（scripts/gate/questions.py:76-77、verify_gate.py:156），拿来验收口径库是错的。改为：m10 不动；口径题放进 cases_memory.py；另加一条反向回归，口径里用到的字段在表里不存在时，仍然拒答。
+- **VACUUM**：原稿放在 POST /shutdown，但壳的退出宽限只有 3 秒（sidecar.rs:17），会被强杀；放到后台线程又会和 WAL 写入抢排他锁。改为：新库设 auto_vacuum=INCREMENTAL，退出时只跑有上限的 incremental_vacuum；旧库在开始监听之前按 freelist 比例转换一次。
+- **M3**：沙箱每轮都会重建 df，快照里也不放代码，所以做不到「不再重算 / exec 从 2 次降到 1 次」。目标改为「追问时知道上一轮做了什么」。取代码的工具另记为 M3b，等消融结果再定。重复计算率只报告，不设门槛。
+- **流程**：仓库里没有 AGENTS.md，「先开 Issue」作废，按 HANDOVER §3 方案先行。原稿是一张卡一个 PR，改成一批一个 PR。命令统一写成 python（conda dc / venv），不再用 .venv/Scripts。
+- **与阶段 7 对齐**：M2 对应 A5，M9 对应 A6。M2 做不做跟随 A5 的条件，M9 跟随 A6 推迟。闸门里人工判对的题不进产品记忆。
+- **批次重排**：
+  - 批 1：M0、开关、M12、M5、M1、M3，再加上评测要的接口字段。
+  - 批 2：评测侧的多轮 runner，以及 history on/off 消融。
+  - 批 3：看基线再定。
+- **新增 §14：与评测 agent 的分工**：
+  - 文件归属：service.py、react_agent.py、planner.py 归记忆独占；case_model.py 和多轮 schema 归评测。
+  - result_json 新字段写死为四个：memory_mode、history_tokens、memory_trimmed、rewrite。
+  - 指纹时序：从 M1 起，凡是改 prompt 的合并，都要先等指纹 v1 baseline 打好 tag。指纹按渲染后的 prompt 计算，并带上 memory_mode。
+  - DEVLOG 条目在合并前写 [待编号]。
+- plan.md 在 6.5 和 7 之间插入 6.6 一行。
+- 本次只改文档，没跑闸门。eval-system*.md 和 four-axes-mapping.md 由评测 agent 另行提交，不在本 PR 里。
