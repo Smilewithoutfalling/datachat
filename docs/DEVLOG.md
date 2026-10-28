@@ -2363,3 +2363,196 @@ S 10-26 定：只在本机自用，D0 的建议全部采纳；D3~D5 推迟到对
   - DEVLOG 条目在合并前写 [待编号]。
 - plan.md 在 6.5 和 7 之间插入 6.6 一行。
 - 本次只改文档，没跑闸门。eval-system*.md 和 four-axes-mapping.md 由评测 agent 另行提交，不在本 PR 里。
+
+## [待编号] 2026-10-28 · 评测批 0：用例治理 + 统计 + 多轮执行器 · commit <待提交>
+
+按 docs/roadmap/eval-system-spec.md 的 EV-A1 / EV-A2 / EV-C2 三张卡实现，基线 3ce6b77。
+
+**完成（对照卡片）**
+
+| 卡片 | 改动 | 证据 |
+|---|---|---|
+| EV-C2 | 新 `app/eval/stats.py`：`wilson` / `mcnemar_exact` / `mde_flips` / `bootstrap_mean_ci` / `percentile`，外加 `pass_at_1` / `pass_pow_k` / `flip_rate`。不引 scipy | `tests/test_stats.py` 21 passed。Wilson(23,25)=0.7503/0.9778、McNemar(12,4)=5034/65536=0.0768 都先手算再写死进断言 |
+| EV-A1 | `case_model.py` 加 8 个字段；新 `app/eval/validate.py`；`cases.py` 末尾接校验（失败即 raise）；`report.py` 的 `EVALSET_FILES` 手写清单改成 glob；新 `scripts/holdout/README.md` | `tests/test_eval_cases.py` 156 passed（7:46）。7 条新测试逐条对应 5 条硬约束 + 枚举 + 指纹覆盖 |
+| EV-A2 | `runner.py` 抽出 `_run_one`，多轮逐轮累积 `history`；行加 `turn_status` / `turn_answers`；多轮 tokens 与耗时按轮求和。闸门 `run_gate.py` 加 `--repeat`，主行恒为第 1 次 | `tests/test_eval_runner.py` 14 passed；`tests/test_gate.py` 79 passed（含 2 条 repeat） |
+
+**指纹的一次性变化**（spec EV-A1 预告过，记下来备查）
+
+- `evalset.sha256`：`8f0e9a4a0f09` → `478204bf6a7f`。原因是 `case_model.py` 多了 8 个字段、`cases.py` 末尾接了校验。**这是预期代价**：从这一版起，旧报告与新报告按 `comparable` 判必然不可比。
+- `affects_results_sha256`：`6b325a6d647d`（A 组 41 个文件 / B 组 14 个）。
+- `app/eval/stats.py` 与 `app/eval/validate.py` 都归 **A 组**，理由写在 `fingerprint.py` 的注释里：validate 决定哪些用例能进评测（放宽一条等于换题集），stats 产出报告里的区间与稳定性数字（改它就是改读数）。这两个文件让 `test_real_repo_partition_covers_every_file` 先红了一次——那条断言按设计工作。
+
+**顺带修掉的隐患**
+
+1. `EVALSET_FILES` 是手写四项白名单，**加 `cases_memory.py` / `cases_negative.py` 时指纹不会变**，两批会被判可比且报告完全正常。改成 `glob(app/eval/cases*.py)`，并加 `test_every_case_module_is_fingerprinted` 钉住。
+2. 指纹分区表同样有"漏一个用例模块"的风险，改成 `_AFFECTS_RESULTS_PREFIXES = ("app/eval/cases",)`，新加用例文件不必回来改表。
+3. 多轮只记最后一轮 tokens 会低估成本，改成各轮求和（`_merge_usage`）。
+
+**当前已知问题**
+
+| 编号 | 严重度 | 位置 | 描述 | 计划 |
+|---|---|---|---|---|
+| E01 | P0 | 环境 | conda `dc` 的激活脚本把 `SSL_CERT_FILE` 设成 `D:/Anaconda3/envs/dc/ssl/cacert.pem`（少一层 `Library`），文件不存在 → `httpx` 建 SSL 上下文直接 `FileNotFoundError`。跑任何真模型前必须 `export SSL_CERT_FILE=D:/Anaconda3/envs/dc/Library/ssl/cacert.pem` | 属于本机环境，不进仓库；CI 上不受影响 |
+| E02 | P0 | 环境 | `DEEPSEEK_BASE_URL` 指向 `grg-aikits-test.grgbanking.com`（公司内网），公网 DNS 返回 NXDOMAIN，本机无 VPN 网卡 → 真模型 baseline 当前跑不了 | 等 H 接入内网后跑 `eval-v0` |
+| E03 | P1 | `runner.py` | 多轮题还没有：`cases_memory.py` 归记忆系统那条线（M11 会把 8 条补到 15 条），本批只做执行器 | EV-B5 |
+| E04 | P1 | `stats.py` | 已实现但报告还没用它算区间：`report.py` 目前仍只出点估计 | EV-C3 |
+
+**指标快照**
+
+- 评测集：130 题不变（本批不增题），`evalset 478204bf6a7f`
+- `pytest tests/test_eval_cases.py`：156 passed / 466.53s
+- `pytest tests/test_gate.py tests/test_eval_runner.py tests/test_stats.py`：114 passed / 100.44s
+- `pytest tests/test_fingerprint.py`：20 passed
+- 真模型：**未跑**（E02）
+
+**下一步**
+
+1. 等 H 接入内网 → `run_eval.py --agent react` 130 题 → 打 `eval-v0` tag。
+2. EV-C3：`stability` 块 + 缓存检测（`pass^k` 只在 `valid=true` 时写）。
+3. EV-B5 的 8 条多轮题由记忆那条线补，本批的 `_run_one` / `turn_status` 已就绪。
+
+## [待编号] 2026-10-28 · 评测基线 eval-v0：真模型首次跑通 · commit 691187c
+
+内网接入后跑通全量 130 题并打 `eval-v0` tag。**这是评测体系第一次在真模型上完整跑完。**
+
+**结果**（`outputs/eval_react_20261028_135836.json`）
+
+| 项 | 值 |
+|---|---|
+| 正确 | 125/130（96.15%） |
+| 执行成功 | 130/130（100%） |
+| 初始报错 / 修复率 | 1 次 / 100% |
+| 平均耗时 | 7.54 秒/题（全程 992 秒） |
+| 平均 token | 6055 /题 |
+| 判对层级 | strict 79 / relaxed 34 / scaled 1 / refusal 7 / alt:strict 3 / extras 1 |
+
+分类：聚合 36/36、相关 22/22、过滤 26/27、时序 27/28、拒答 7/9、歧义 7/8。
+
+**`EXIT=1` 不是崩溃。** `run_eval.py:126` 是 `sys.exit(0 if all_correct else 1)`，凡有题没全对就返回 1，给 CI 判红用。别把它当运行失败读。
+
+**5 道错题分三类，性质完全不同**
+
+| 题 | 表面 | 实际 | 归属 |
+|---|---|---|---|
+| inv_020 | 期望 3/4/5 → 34/21/5；实际 '3月'/'4月'/'5月' → 34/21/5 | 数值全对，判分器不认中文月份 | 尺子 |
+| ord_012 | `actual=None`，答案文字 61853.06 = 期望值 | 最后一轮代码只有 print，**没有 `result =`** | 模型未按契约产出 |
+| ord_030 | 期望 75.46；模型给 70.85% / 75.77% | 模型**没去重**（gold 的 `_D` 含 `drop_duplicates('order_id')`） | 模型真错 |
+| emp_022 | 期望拒答，模型给了"画像式归因" | 答案里明说"没有离职原因字段"，但仍给推测结论 | 契约执行 |
+| inv_021 | 期望拒答，模型答 K100 | 明说"没有价格字段"，用累计销量当代理 | 契约执行 |
+
+**inv_020 的硬证据**（同一组数值，只换标签写法）：
+
+```
+_month_key('3月')            = None        # 只有 _MONTH_RE = ^\d{4}-\d{2}$ 一种写法被认
+_period_part('3月', 3)       = None
+results_equal(Series([34,21,5], index=['3月','4月','5月']), Series([34,21,5], index=[3,4,5])) = False
+results_equal(Series([34,21,5], index=['2024-03','2024-04','2024-05']), 同上)                  = True
+```
+
+同一个答案，写成 `2024-03` 判对，写成 `3月` 判错。修法是在 `_period_part` 的字符串分支补 `^\d{1,2}\s*月(份)?$`，属于补遗漏写法而非放宽标准。**但改 comparator 会改 `code_sha12`，`eval-v0` 立刻失效** —— 所以和记忆系统一起放进 `eval-v1` 那一轮重跑，不单独改。
+
+**另外挖到一个产品 bug（不是评测问题）**
+
+`ord_006` 判对（strict），但 `chart()` 记了一次内部错误：
+
+```
+chart('bar', s, x=s.index, y='pay_amount', ...)
+→ TypeError: unhashable type: 'Index'
+```
+
+根因在 `app/tools/charts.py:161` 的 `_col()`：`if name not in df.columns` 对 `pd.Index` 这类不可哈希对象直接抛 `TypeError`，绕过了 `ChartError` 分支，于是被 `ChartSlot.__call__` 归进 `self.internal`（"我们的 bug"）而不是 `self.errors`（模型用法问题）。两个后果：
+
+1. **模型拿不到可读提示**，不知道自己图画失败了 —— ord_006 的答案里照样写"图表：柱状图展示了七个城市…"，而实际没出图。用户看到的是"说得像有图，其实没图"。
+2. **告警噪声**：`chart_smoke` 的规则是"内部错误必须为 0"，这类模型用法错误混进来会淹没真 bug。
+
+修法：`_col()` 先判 `hashable`，不可哈希就抛 `ChartError`（带"x 要传列名，Series 出图请传 df=s 让索引自动成为 x"的提示）。
+
+**顺带确认的两件事**
+
+- `chart_smoke`：出图率 49 题通过、`chart_option` 41/42（唯一失败就是 ord_006）、`has_chart` 3/3。
+- `ord_012` 归因为"没写 `result =`"这一点值得单独看：模型有能力答对（答案数字精确等于 gold），但把结论留在了 prose 里。`nudge_no_exec` 只提醒"没执行代码"，不提醒"执行了但没产出 result"。这是 ReAct 契约的一个空档。
+
+**下一步**
+
+1. `inv_020` 的中文月份写法 + `ord_006` 的 `_col` 可哈希判定，一起进 `eval-v1` 那一轮（两者都改 `code_sha12`）。
+2. `ord_030` / `emp_022` / `inv_021` 是模型行为，不改判分器；`ord_030` 的"同一张表一题去重一题没去重"对记忆系统是个有意义的观察点。
+
+## [待编号] 2026-10-28 · 修掉基线暴露的两个 bug，重跑并重指 eval-v0 · commit 4d3ab5e
+
+上一节记的两个 bug 在本轮修掉，全量重跑后 `eval-v0` 重指到 `4d3ab5e`。
+**结论先说：125/130 → 129/130，但只有 1 题是修复带来的，另外 3 题是同配置下重跑的行为差异。**
+
+**修复 1：判分器不认中文月份（规则 22）**
+
+`_MONTH_RE` 只认 `^\d{4}-\d{2}$`，`_period_part` 走月份号的路径因此认不出 `'3月'`。
+inv_020 的数值 34/21/5 全对，只因索引写成 `'3月'` 被判 False。改动：
+
+```
+_CN_MONTH_RE = ^(?:(\d{4})\s*年\s*)?(1[0-2]|0?[1-9])\s*月(?:份)?$
+```
+
+- `_period_part` 认裸月份 `3月` / `03月` / `3月份`
+- `_month_key` 认 `2024年3月`（有年份才算得出 `YYYY-MM`，裸月份算不出，不硬凑）
+- 月份号限定 1–12，`13月` 不认
+
+补的是"同一件事的另一种写法"，不是放宽：数值写错仍判错、月份错位仍判错，测试逐条钉住。
+**注意** `results_equal('3月', 3)` 在改动前就是 True（规则 20 的文本取数），缺陷只在
+Series 索引这条路（`_month_numbers`）——这一点写进测试注释，免得后来人读错归因。
+
+**修复 2：chart 的 x 传不可哈希对象被记成 internal**
+
+`_col()` 的 `name not in df.columns` 对 `pd.Index` / `ndarray` 直接抛 `TypeError`，绕过
+`ChartError`，被 `ChartSlot` 归进 `internal`（"我们的 bug"）。改成先判 `Hashable`，
+不可哈希抛 `ChartError` 并给出可照做的提示。重跑后 `chart_internal_errors` 为 **0**
+（上一版有 1 条 `unhashable type: 'Index'`）。
+
+**重跑结果**
+
+| 项 | 旧（691187c） | 新（4d3ab5e） |
+|---|---|---|
+| 正确 | 125/130（96.15%） | **129/130（99.23%）** |
+| 执行成功 | 130/130 | 130/130 |
+| 平均耗时 | 7.54 s/题 | 6.59 s/题 |
+| 平均 token | 6055 | 5629 |
+| 判对层级 | strict 79 / relaxed 34 / scaled 1 / refusal 7 / alt 3 / extras 1 | strict 81 / relaxed 33 / scaled 2 / refusal 8 / alt 3 / extras 2 |
+| chart_option | 41/42（ord_006，内部错误） | 43/44（ts_010，模型漏传 kind） |
+
+**只有 inv_020 归因于修复**。其余三题（ord_012 补上了 `result =`、ord_030 这次做了去重、
+inv_021 这次按契约拒答）都是同配置重跑的差异：temperature=0 也不保证网关侧逐字可复现。
+
+**这是本轮最重要的观察**：同一份 prompt、同一组题，两次跑出来 **3/130 = 2.3% 的判定翻转**
+（另有 3 题 match 层级漂移：ts_013 relaxed→strict、emp_013 relaxed→strict、emp_006 strict→extras）。
+含义有两条：
+
+1. **不能把两次单跑的差当成提升**。129−125=4 里只有 1 是真变化，剩下 3 是噪声。要报"涨了
+   多少"必须 `--repeat`，用 `flip_rate`/`pass^k` 给出区间，而不是拿两个点估计相减。
+2. `stats.py` 里的 `flip_rate` 和 EV-C3 的 `stability` 块不是锦上添花，是**读数的前提**。
+
+**顺带作废一条设计：渲染哈希不能当"等价可比"的豁免凭据**
+
+改动后 `rendered_set_sha12` 仍是 `6b23655c28a6`（逐题 system prompt 一个字节没变），
+`code_sha12` 从 `6b325a6d647d` 变成 `af3d486c2e1b`。按原来的 `comparable()`，这两批会被判
+`basis=rendered-equal` 的"等价可比"，那 +1 就被读成"代码变了但没影响"。
+
+根因是渲染串只覆盖 system prompt：模型在循环里看到的工具回传、评分规则（comparator）、
+循环控制（react_agent 的重试 / nudge）都不在里面。所以门禁项一个都不豁免，渲染串降级为
+诊断与稳定性证据。实测端到端：
+
+```
+与基准: ✗ 不可比   差异项: code_sha12
+comparable = {"comparable": false, "basis": "gate", "diffs": ["code_sha12"],
+              "rendered_equal": true,
+              "note": "逐题渲染串相同但代码不同，仍判不可比：渲染串只覆盖 system prompt，…"}
+```
+
+**仍然错的一题**：emp_022（员工离职原因）。模型先明说"数据里没有离职原因字段"，然后照样
+给了画像式归因。这是拒答契约的执行问题，不是判分器问题。
+
+**ts_010 的图表失败也是模型问题**：`chart(res, x=None, y='units')` 漏了第一个参数 `kind`，
+被 `_CHART_SIG.bind` 拦下记成 `ChartError`（分类正确，不再是 internal）。同一段代码后面用
+matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一条不过。
+
+**下一步**
+
+1. EV-C3：`stability` 块 + `--repeat` 的 flip_rate，把上面这个 2.3% 量化成区间。
+2. `emp_022` 的拒答契约（"说了没有这个字段，就不能接着推测"）需要单独看是否要加提示。

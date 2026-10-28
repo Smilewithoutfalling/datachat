@@ -41,6 +41,36 @@ def test_unclassified_file_raises(tmp_path, monkeypatch):
         fp.code_fingerprint()
 
 
+def test_memory_dir_is_gated_before_it_lands(tmp_path, monkeypatch):
+    """记忆模块（阶段 6.6）在落地前就登记成 A 组。
+
+    它决定 `memory_block` 的内容——context 拼块、working_state / snapshots 决定块里写什么、
+    budget 决定裁不裁、config 决定开不开。改任一文件都改模型输入，必须动门禁。
+
+    这条测试故意不依赖 `app/memory/` 真的存在（批 1 之前分支上没有这个目录）：
+    等目录出现再想起来登记，`_assert_partition` 会在 rebase 中途抛错，那时修的成本比现在高。
+    """
+    for rel in ("app/memory/__init__.py", "app/memory/config.py", "app/memory/context.py",
+                "app/memory/budget.py", "app/memory/working_state.py",
+                "app/memory/snapshots.py"):
+        assert fp._group(rel) == "A", rel
+
+    # 真的放进仓库时不能再被判成未归类
+    root = _make_repo(tmp_path, {"app/memory/config.py": "MODE = 'off'\n",
+                                 "app/eval/comparator.py": "x = 1\n"})
+    _point_at(monkeypatch, root)
+    f = fp.code_fingerprint()
+    assert f["files"]["app/memory/config.py"]["group"] == "A"
+
+
+def test_memory_adjacent_server_files_stay_b():
+    """`app/server/retention.py`（#90 新增）是落库与定期清理，评测不经它，前缀已覆盖成 B。
+
+    记忆写的话题容易让人顺手把它也拉进 A；它不影响任何一次 analyze() 的输入，别加例外。
+    """
+    assert fp._group("app/server/retention.py") == "B"
+
+
 # ---------------------------------------------------------------- 敏感度
 
 def test_scorer_change_moves_gate(tmp_path, monkeypatch):
@@ -157,11 +187,19 @@ def test_comparable_when_gate_equal():
     assert r == {"comparable": True, "basis": "gate", "diffs": []}
 
 
-def test_comparable_exempt_when_rendered_equal():
+def test_rendered_equal_does_not_rescue_code_change():
+    """渲染串相同不能豁免 code_sha12 的差异。
+
+    反例是 eval-v0 第一次重跑：comparator.py 补了中文月份的认法，130 题渲染串
+    （6b23655c28a6）逐字未变，分数 125→126。若按"渲染相同即可比"判，那 +1 会被
+    读成"代码变了但什么都没影响"，而实际是尺子修了一条。
+    """
     now = dict(BASE, code_sha12="zzz")
     r = fp.comparable(now, dict(BASE))
-    assert r["comparable"] is True and r["basis"] == "rendered-equal"
+    assert r["comparable"] is False and r["basis"] == "gate"
     assert r["diffs"] == ["code_sha12"]
+    assert r["rendered_equal"] is True          # 差异原因要写清，但不改变判定
+    assert "渲染串只覆盖 system prompt" in r["note"]
 
 
 def test_not_comparable_when_rendered_differs():

@@ -5,10 +5,12 @@ import pytest
 
 from app.core import LLMConfig
 from app.core.testing import oracle_model
+from app.eval.case_model import EvalCase
 from app.eval.cases import ALL_CASES, DATASETS
 from app.eval.comparator import is_refusal, results_equal
 from app.eval.report import EvalReport
 from app.eval.runner import EvalRunner, score
+from app.eval.validate import validate_cases
 from conftest import ROOT
 
 EVAL_DATA = os.path.join(ROOT, "data", "sample_eval.csv")
@@ -208,3 +210,59 @@ def test_git_sha_note_when_git_missing(monkeypatch):
     assert "DATACHAT_GIT" in (report.git_sha_note() or "")
     s = EvalReport([], meta={}).summary()
     assert "git_sha_note" in s
+
+
+# ---------------------------------------------------------------- EV-A1 用例治理
+
+def test_all_cases_valid():
+    assert validate_cases(ALL_CASES) == []
+
+
+def test_duplicate_id_rejected():
+    a = EvalCase(id="tmp_001", category="aggregation", question="q1", ground_truth="1")
+    b = EvalCase(id="tmp_001", category="aggregation", question="q2", ground_truth="2")
+    errs = validate_cases([a, b])
+    assert any("重复" in e for e in errs)
+
+
+def test_turns_last_must_equal_question():
+    ok = EvalCase(id="tmp_002", category="aggregation", question="第二个问题", ground_truth="1",
+                  turns=["第一个问题", "第二个问题"], expect_turns=["exec", "exec"])
+    assert validate_cases([ok]) == []
+    bad = EvalCase(id="tmp_003", category="aggregation", question="另一个说法", ground_truth="1",
+                   turns=["第一个问题", "第二个问题"], expect_turns=["exec", "exec"])
+    errs = validate_cases([bad])
+    assert any("turns[-1]" in e for e in errs)
+
+
+def test_expect_turns_length_must_match():
+    c = EvalCase(id="tmp_004", category="aggregation", question="q", ground_truth="1",
+                 turns=["a", "q"], expect_turns=["exec"])
+    assert any("len(expect_turns)" in e for e in validate_cases([c]))
+
+
+def test_unknown_variant_of_rejected():
+    c = EvalCase(id="tmp_005", category="aggregation", question="q", ground_truth="1",
+                 variant_of="agg_999")
+    assert any("variant_of" in e for e in validate_cases([c]))
+
+
+def test_gold_dataset_must_exist():
+    c = EvalCase(id="tmp_006", category="aggregation", question="q", ground_truth="1",
+                 gold_dataset="no/such.csv")
+    assert any("gold_dataset" in e for e in validate_cases([c]))
+
+
+def test_every_case_module_is_fingerprinted():
+    """新增 cases_*.py 必须自动进 evalset 指纹。
+
+    手写白名单漏过一次（comparator.py 不在里面，评分器改了指纹不动），这次用 glob 兜住：
+    谁加了 cases_memory.py 却不在覆盖里，这条直接红。
+    """
+    import glob
+    from app.eval.report import EVALSET_FILES
+    mods = sorted(os.path.basename(p)
+                  for p in glob.glob(os.path.join(ROOT, "app", "eval", "cases*.py")))
+    assert mods, "一个用例模块都没扫到，glob 写错了"
+    missing = [m for m in mods if f"app/eval/{m}" not in EVALSET_FILES]
+    assert not missing, f"这些模块没进指纹：{missing}"

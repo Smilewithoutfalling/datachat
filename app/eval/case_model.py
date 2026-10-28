@@ -20,3 +20,35 @@ class EvalCase:
     expect_refusal: bool = False
     # 歧义题：其他合理理解的标准答案，命中 ground_truth 或其中任一即对
     alt_ground_truths: list = field(default_factory=list)
+
+    # ---- 多轮（EV-A1）。全部带默认值，130 条旧用例不受影响 ----
+    turns: list[str] = field(default_factory=list)
+    # 按时间顺序的全部用户问题；空 = 单轮。
+    # 非空时 question 必须等于 turns[-1]，gold 只判最后一轮。
+    # 校验由 app/eval/validate.py 做，不在这里改写 question——静默改题面会让历史报告失真。
+
+    expect_turns: list[str] = field(default_factory=list)
+    # 每轮的期望，长度必须 == len(turns)：
+    #   "exec"            该轮必须执行代码（executed=True）
+    #   "refusal"         该轮必须按契约拒答（答案以「无法回答：」开头）
+    #   "inherit:<regex>" 该轮最终代码必须匹配 regex（约束继承/纠正的机器断言）
+    #   "any"             不约束，只记录
+
+    # ---- 负向题三分类（EV-B7）。为空且 expect_refusal=True 时等价于 "refusal" ----
+    expect_kind: str = ""          # "refusal" | "clarify" | "impossible" | ""
+
+    # ---- 脏数据/扰动题（EV-B6） ----
+    gold_dataset: str = ""
+    # gold 执行时用的数据文件；空 = 与 dataset 相同。
+    # agent 看脏表、gold 在干净表上算，这样"答错"才归因到数据处理而不是期望值本身。
+
+    variant_of: str = ""
+    variant_kind: str = ""
+    # 指向基线题 id + 变体类型
+
+    multi_table: bool = False
+    # 多表题标记；dataset 指向目录时也应为 True（冗余，但便于筛选）
+
+    gold_kind: str = ""
+    # "scalar" | "series" | "frame" | "text" | ""（空 = 不约束）
+    # 只用于报告分组与图表反算的前置判断，不参与判分

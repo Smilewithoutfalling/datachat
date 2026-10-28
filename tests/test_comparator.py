@@ -271,3 +271,45 @@ def test_rule20_sentence_string():
     assert results_equal("共 1,200 单", 1200)
     assert not results_equal("7.00% 或 7.5%", 7.0)
     assert not results_equal("已退款 84 / 去重订单 1200", 84)
+
+
+# ---- 规则 22（eval-v0 基线暴露）：中文月份写法
+def test_rule22_bare_chinese_month_index():
+    """inv_020 的现场：数值全对，只是索引写成 '3月' 而不是 3。
+
+    _MONTH_RE 只认 'YYYY-MM'，所以 34/21/5 这么一组完全正确的答案被判错。
+    补的是"同一件事的另一种写法"，不是放宽标准。
+    """
+    e = pd.Series([34, 21, 5], index=[3, 4, 5])
+    assert results_equal(pd.Series([34, 21, 5], index=["3月", "4月", "5月"]), e)
+    assert results_equal(pd.Series([34, 21, 5], index=["03月", "04月", "05月"]), e)
+    assert results_equal(pd.Series([34, 21, 5], index=["3月份", "4月份", "5月份"]), e)
+    # 数值错一位仍然判错：只改了标签的认法，没改数值的比较
+    assert not results_equal(pd.Series([34, 21, 6], index=["3月", "4月", "5月"]), e)
+    # 月份对不上就是错，不能因为"都是中文月份"就放过
+    assert not results_equal(pd.Series([34, 21, 5], index=["4月", "5月", "6月"]), e)
+
+
+def test_rule22_year_month_chinese():
+    """'2024年3月' 与 '2024-03' 是同一个月，两种写法都要认。"""
+    e = pd.Series([34, 21, 5], index=[3, 4, 5])
+    assert results_equal(pd.Series([34, 21, 5], index=["2024年3月", "2024年4月", "2024年5月"]), e)
+    assert results_equal(pd.Series([34, 21, 5], index=["2024年3月份", "2024年4月份", "2024年5月份"]), e)
+    assert results_equal("2024年3月", "2024-03")
+    assert results_equal(pd.Period("2024-03", freq="M"), "2024年3月")
+    assert not results_equal("2024年3月", "2024-04")
+
+
+def test_rule22_illegal_month_not_accepted():
+    """13 月不存在。正则不放宽到任意数字，否则 '13月' 会被当成月份号 13。
+
+    注意只断言"月份号解析"这一层：`results_equal('13月', 13)` 在改动前就是 True，
+    那是规则 20 的文本取数（句子里有 13），与本条无关，不要混在一起读。
+    """
+    from app.eval.comparator import _period_part
+    assert _period_part("13月", 12) is None
+    assert _period_part("月", 12) is None
+    e = pd.Series([34, 21, 5], index=[13, 14, 15])
+    assert not results_equal(pd.Series([34, 21, 5], index=["13月", "14月", "15月"]), e)
+    # 带别的量词不能被误认成月份
+    assert _period_part("3个月", 12) is None

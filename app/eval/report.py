@@ -122,8 +122,21 @@ def run_metadata(llm_config=None, data_path: str | None = None) -> dict:
     return meta
 
 
-EVALSET_FILES = ("app/eval/cases.py", "app/eval/cases_extra.py", "app/eval/case_model.py",
-                 "scripts/gen_eval_data.py")
+def evalset_files() -> tuple[str, ...]:
+    """进 evalset 指纹的"题面与数据来源"文件清单。
+
+    用例模块用 glob 扫，不手写：写死的清单漏过一次 comparator.py（评分器改了、
+    指纹不动，两批被判可比）。后面还要加 cases_memory.py（8 条多轮）和
+    cases_negative.py（负向题），任何一个漏在清单外，都是"加了题但指纹不变"——
+    报告看起来完全正常，这是最难发现的那类错。
+    """
+    import glob
+    modules = sorted(glob.glob(os.path.join(_REPO, "app", "eval", "cases*.py")))
+    return tuple(os.path.relpath(p, _REPO).replace(os.sep, "/") for p in modules) + (
+        "app/eval/case_model.py", "scripts/gen_eval_data.py")
+
+
+EVALSET_FILES = evalset_files()
 
 
 def evalset_fingerprint(datasets: dict | None = None) -> dict:
@@ -366,7 +379,26 @@ class EvalReport:
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
             "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
+            "memory": self.memory_block(),
             "chart_smoke": self.chart_smoke(),
+        }
+
+    def memory_block(self) -> dict:
+        """记忆（阶段 6.6）的自证：这一批实际生效的模式、历史体积、被预算裁过的用例数。
+
+        存在的理由只有一个：让"标称开了 state、实际跑的是 off"这种错配在报告里当场显形。
+        混了两种模式的批次不能当消融结果用（`uniform` 为 False 就是这种情况）。
+        """
+        modes = Counter(r.get("memory_mode") or "off" for r in self.results)
+        ht = [r.get("history_tokens") or 0 for r in self.results]
+        per_block = {k: sum(1 for r in self.results if k in (r.get("memory_trimmed") or []))
+                     for k in ("history", "state")}
+        return {
+            "modes": dict(modes),
+            "uniform": len(modes) <= 1,
+            "avg_history_tokens": round(sum(ht) / len(ht), 1) if ht else None,
+            "trimmed_cases": {k: v for k, v in per_block.items() if v},
+            "trimmed_any": sum(1 for r in self.results if r.get("memory_trimmed")),
         }
 
     def chart_smoke(self) -> dict:
@@ -398,6 +430,10 @@ class EvalReport:
                 "expected": str(r.get("expected"))[:500], "actual": str(r.get("actual"))[:500],
                 "answer": (r.get("answer") or "")[:2000],
                 "chart": r.get("chart_info"),
+                # 记忆（阶段 6.6）：每题实际生效模式与历史体积，消融对比时直接按这两列分组
+                "memory_mode": r.get("memory_mode"),
+                "history_tokens": r.get("history_tokens"),
+                "memory_trimmed": r.get("memory_trimmed"),
                 # 可还原的结构化结果：比较器改了之后可以用 run_eval.py --rescore 离线重新打分（B26）
                 "expected_obj": dump_obj(r.get("expected")),
                 "actual_obj": dump_obj(r.get("actual")) if r.get("executed") else None,
@@ -426,6 +462,12 @@ class EvalReport:
                 print(f"  与基准: ✓ 可比（{cmp_.get('basis')}）")
             else:
                 print(f"  与基准: ✗ 不可比   差异项: {', '.join(cmp_.get('diffs') or [])}")
+        mem = s.get("memory") or {}
+        if mem.get("modes"):
+            modes = " / ".join(f"{k}:{v}" for k, v in mem["modes"].items())
+            mix = "" if mem.get("uniform") else "  ⚠ 混了多种模式，不能当消融结果"
+            print(f"  记忆: {modes}   历史 {mem.get('avg_history_tokens')} tokens/题"
+                  f"   被裁 {mem.get('trimmed_any')} 题{mix}")
         print(f"  总用例: {self.total}")
         print("=" * 60)
 
