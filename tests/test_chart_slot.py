@@ -43,6 +43,28 @@ def test_builder_bug_is_not_chart_error(monkeypatch):
     assert c.errors == [] and len(c.internal) == 1                 # 我们的 bug 单列，不算模型的错
 
 
+def test_slot_unhashable_x_is_usage_error_not_internal():
+    """ord_006 的现场：chart('bar', s, x=s.index, y='pay_amount')。
+
+    _col() 里 `name not in df.columns` 对 pd.Index 抛 TypeError，会绕过 ChartError 被记进
+    internal（"我们的 bug"）。后果有两个：chart_smoke 的"内部错误必须为 0"被模型用法错误污染；
+    模型拿不到可读提示，答案里照样写"图表展示了七个城市"，实际一张图都没出。
+    """
+    s = pd.Series([10.0, 20.0, 30.0], index=["a", "b", "c"], name="pay_amount")
+    c = ChartSlot()
+    assert c("bar", s, x=s.index, y="pay_amount") is None
+    assert c.internal == []
+    assert len(c.errors) == 1 and "不是列名" in c.errors[0] and "reset_index" in c.errors[0]
+    # 省略 x 就能出图（Series 的索引自动成为横轴），所以提示里的建议是真的可用
+    ok = ChartSlot()
+    ok("bar", s, y="pay_amount")
+    assert len(ok.specs) == 1 and ok.errors == []
+    # ndarray 同样不可哈希，走同一条分支
+    c2 = ChartSlot()
+    c2("bar", DF, x=DF["r"].to_numpy(), y="u")
+    assert c2.internal == [] and len(c2.errors) == 1
+
+
 def test_slot_cap():
     c = ChartSlot()
     for _ in range(MAX_CHARTS + 2):

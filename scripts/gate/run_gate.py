@@ -126,7 +126,16 @@ def _case_row(q: dict, ans: dict, res, duration: float) -> dict:
     }
 
 
-def run(agent: str, use_dictionary: bool, only: list[str] | None):
+def _run_digest(row: dict) -> dict:
+    """repeat 的逐次摘要（EV-A2）。刻意不复制 result_text / code：25 题 × 5 次会把 JSON
+    撑到几十 MB，而判断"这一次为什么翻了"只需要 match、错误类型和答案开头。"""
+    d = {k: row.get(k) for k in ("executed", "match", "auto_correct", "error_kind",
+                                 "attempts", "duration_s", "tokens")}
+    d["answer"] = (row.get("answer") or "")[:300]
+    return d
+
+
+def run(agent: str, use_dictionary: bool, only: list[str] | None, repeat: int = 1):
     from dotenv import load_dotenv
     load_dotenv(os.path.join(ROOT, ".env"))
     from app.core.llm import LLMConfig
@@ -136,29 +145,38 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None):
 
     answers = json.load(open(ANSWERS, encoding="utf-8"))
     cfg = LLMConfig.from_env()
+    repeat = max(1, int(repeat or 1))
     rows = []
     for q in QUESTIONS:
         if only and q["id"] not in only:
             continue
         ans = answers["answers"][q["id"]]
-        t0 = time.perf_counter()
-        res = _analyze()(os.path.join(ROOT, q["dataset"]), q["question"], agent=agent, llm_config=cfg,
-                         use_dictionary=use_dictionary)
-        row = _case_row(q, ans, res, time.perf_counter() - t0)
+        runs = []
+        for k in range(repeat):
+            t0 = time.perf_counter()
+            res = _analyze()(os.path.join(ROOT, q["dataset"]), q["question"], agent=agent, llm_config=cfg,
+                             use_dictionary=use_dictionary)
+            runs.append(_case_row(q, ans, res, time.perf_counter() - t0))
+            if repeat > 1:
+                print(f"  {q['id']} run{k + 1}/{repeat} match={runs[-1]['match']}")
+        row = dict(runs[0])          # 主行恒为第 1 次：人工签字与历史报告都对着这一行
+        if repeat > 1:
+            row["runs"] = [_run_digest(r) for r in runs]
         rows.append(row)
         match = row["match"]
-        mark = "✓" if match else ("✗" if res.executed else "!")
-        print(f"{mark} {q['id']} {q['question'][:30]}  match={match}  {res.error_kind or ''}")
+        mark = "✓" if match else ("✗" if row["executed"] else "!")
+        print(f"{mark} {q['id']} {q['question'][:30]}  match={match}  {row['error_kind'] or ''}")
     out = {
         "time": datetime.now().isoformat(timespec="seconds"), "git_sha": (sha := git_sha()),
         **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),   # B67
         "agent": agent,
-        "use_dictionary": use_dictionary, **run_metadata(cfg),
+        "use_dictionary": use_dictionary, "repeat": repeat, **run_metadata(cfg),
         "questions_sha256": answers["questions_sha256"], "sources": answers["sources"],
         "n": len(rows), "execution_success": sum(r["executed"] for r in rows),
         "auto_correct": sum(r["auto_correct"] for r in rows),
         "unverified_numbers": sum(bool(r["unverified_numbers"]) for r in rows),
-        "note": "auto_correct 只是比较器参考；结论以人工 human_correct 为准（--verdict）。",
+        "note": "auto_correct 只是比较器参考；结论以人工 human_correct 为准（--verdict）。"
+                + ("repeat>1 时主行是第 1 次，逐次结果见每行 runs。" if repeat > 1 else ""),
         "chart_smoke": chart_summary(rows, [r["id"] for r in rows]),   # M13 图表两条，与准确率分开报
         "cases": rows,
     }
@@ -481,6 +499,8 @@ if __name__ == "__main__":
     ap.add_argument("--require-sha", action="store_true", help="--rerun 时 git_sha 带 ? 就拒绝")
     ap.add_argument("--profile", help="docs/gate/thresholds.json 里的门槛：phase35（阶段 3.5 原判）/ m13（阶段 5 回归）"
                                       " / m13r（m13 + 错题复跑）")
+    ap.add_argument("--repeat", type=int, default=1, metavar="N",
+                    help="每题跑 N 次，逐次结果写进 runs；主行恒为第 1 次（人工签字对着它）")
     a = ap.parse_args()
     if a.verdict or a.rerun:
         if not a.profile:
@@ -491,4 +511,4 @@ if __name__ == "__main__":
             v = verdict(a.verdict, a.profile)
         sys.exit(v.get("exit_code", EXIT_PASS))     # m13 / phase35 没有 exit_code：有意保持 0
     else:
-        run(a.agent, not a.no_dict, a.only)
+        run(a.agent, not a.no_dict, a.only, a.repeat)

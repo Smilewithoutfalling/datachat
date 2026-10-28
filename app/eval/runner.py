@@ -4,8 +4,12 @@
 - 走统一的 analyze()，两种 Agent 都能测（agent="workflow" | "react"）。
 - 直接用 analyze() 返回的结构化 result 打分，不再把最终代码重跑一遍（B07：消除双重执行）。
 - 每题记录耗时与 token；LLM/基础设施失败（error_kind="llm"）单独计数，不与"代码写错"混在一起。
+- 记忆（阶段 6.6）：抄录 `memory_mode` / `history_tokens` / `memory_trimmed`，让记忆消融的
+  报告能自证"这一轮确实开了记忆、历史确实被裁过"。用 getattr 兜底——批 1 合入之前
+  AnalysisResult 没有这三个字段，报告照跑，值恒为 off / 0 / []。
 """
 from app.core import analyze
+from app.core.result import refusal_from_answer
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, results_equal
@@ -20,6 +24,46 @@ def usage_fields(u) -> dict:
     return {"tokens_in": u.input_tokens if rep else None, "tokens_out": u.output_tokens if rep else None,
             "tokens_cache_read": u.cache_read_tokens, "tokens_reasoning": u.reasoning_tokens,
             "tokens_reported": u.reported, "tokens_estimated": u.estimated}
+
+
+def _refused(res) -> bool:
+    """这一轮是否按契约拒答。ReAct 没调工具、直接在结论里拒答时 result 是空的，要看 answer 首行。"""
+    if is_refusal(res.result):
+        return True
+    if res.executed:
+        return False
+    return is_refusal(refusal_from_answer(res.answer))
+
+
+def _merge_usage(usages: list):
+    """多轮时把各轮 TokenUsage 相加。
+
+    只取最后一轮会低估成本：多轮题的真实花费是各轮之和，而报告里的 tokens 是给人
+    判断"跑这一批要多少钱"用的，少算了就没人会去核对。
+    """
+    if not usages:
+        return None
+    if len(usages) == 1:
+        return usages[0]
+    from app.core.llm import TokenUsage
+    t = TokenUsage()
+    flags = [u.reported for u in usages]
+    t.reported = True if all(f is True for f in flags) else (None if all(f is None for f in flags) else False)
+    for u in usages:
+        t.calls += u.calls
+        t.input_tokens += u.input_tokens
+        t.output_tokens += u.output_tokens
+        t.total_tokens += u.total_tokens
+        t.estimated_tokens += u.estimated_tokens
+        t.retries = None if (t.retries is None or u.retries is None) else t.retries + u.retries
+        t.estimated = t.estimated or u.estimated
+        t.budget_hit = t.budget_hit or u.budget_hit
+        t.budget = max(t.budget, u.budget)
+    for name in ("cache_read_tokens", "reasoning_tokens"):
+        vals = [getattr(u, name) for u in usages]
+        setattr(t, name, None if any(v is None for v in vals) else sum(vals))
+    return t
+
 
 class EvalRunner:
     def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
@@ -69,6 +113,40 @@ class EvalRunner:
                 outs.append(r)
         return outs, first_err
 
+    def _run_one(self, case: EvalCase, question: str, history, chat_model):
+        """跑一轮。单轮传 history=None；多轮传已有的 [(问, 答), ...]。
+
+        单轮必须是 None 而不是 []：service.py 里 `nudge_no_exec = memory is None and not history`，
+        两者对 nudge 的取值虽然一样，但"有没有历史"这件事在别处（如日志、轨迹）是要区分的，
+        别让单轮看起来像"多轮的第一轮"。
+        """
+        return analyze(self.path_for(case), question, agent=self.agent, llm_config=self.llm_config,
+                       chat_model=chat_model, max_attempts=self.max_attempts,
+                       use_dictionary=self.use_dictionary, log=False, history=history)
+
+    @staticmethod
+    def _turn_status(res, expect: str) -> str:
+        """这一轮是否满足 expect_turns 的约束。值域："ok" / "fail:<期望>" / "error"。
+
+        error 优先于 fail：模型超时、限流时"没执行代码"不是模型的错，记成 fail 会把
+        基础设施问题算进能力问题——这正是 infra_error 从 initial_error 里拆出来的理由。
+        """
+        if res.error_kind in ("llm", "dataset"):
+            return "error"
+        if not expect or expect == "any":
+            return "ok"
+        if expect == "exec":
+            return "ok" if res.executed else "fail:exec"
+        if expect == "refusal":
+            return "ok" if _refused(res) else "fail:refusal"
+        if expect.startswith("inherit:"):
+            import re
+            try:
+                return "ok" if re.search(expect[len("inherit:"):], res.code or "") else "fail:inherit"
+            except re.error:
+                return "fail:inherit(bad-regex)"
+        return "ok"
+
     def run_single(self, case: EvalCase):
         """执行单条用例，返回结果 dict。
 
@@ -84,6 +162,10 @@ class EvalRunner:
             "initial_error": False, "infra_error": False, "error": None, "error_kind": None,
             "attempts": 0, "expected": None, "actual": None, "code": "", "answer": "",
             "chart": None, "duration_s": None, "tokens": None,
+            # 多轮（EV-A2）。单轮留空列表，不是 None——报告里的形状保持稳定
+            "turn_answers": [], "turn_status": [],
+            # 记忆（阶段 6.6）。记忆模块尚未合入时恒为 off / 0 / []，形状不随模块存不存在而变
+            "memory_mode": "off", "history_tokens": 0, "memory_trimmed": [],
         }
 
         # 1. ground truth
@@ -93,20 +175,49 @@ class EvalRunner:
             return out
         out["expected"] = expected_list[0]
 
-        # 2. 被测 Agent
+        # 2. 被测 Agent：多轮逐轮累积 history，打分只看最后一轮
         chat_model = self.model_factory(case) if self.model_factory else None
-        res = analyze(self.path_for(case), case.question, agent=self.agent, llm_config=self.llm_config,
-                      chat_model=chat_model, max_attempts=self.max_attempts,
-                      use_dictionary=self.use_dictionary, log=False)
+        multi = bool(case.turns)
+        turns = list(case.turns) if multi else [case.question]
+        history = [] if multi else None
+        turn_answers, turn_status, durations, usages = [], [], [], []
+        memory_by_turn = []      # [(mode, history_tokens, [trimmed...]), ...]
+        res = None
+        for i, q in enumerate(turns):
+            res = self._run_one(case, q, history, chat_model)
+            expect = case.expect_turns[i] if i < len(case.expect_turns) else ""
+            turn_status.append(self._turn_status(res, expect))
+            answer = res.answer or ""
+            turn_answers.append(answer)
+            if res.timings.get("total"):
+                durations.append(res.timings["total"])
+            usages.append(res.usage)
+            memory_by_turn.append((
+                getattr(res, "memory_mode", "off") or "off",
+                getattr(res, "history_tokens", 0) or 0,
+                list(getattr(res, "memory_trimmed", None) or []),
+            ))
+            if i < len(turns) - 1:
+                # 失败也要照实追加空串：换成占位文案会让下一轮以为上一轮真答了东西
+                history.append((q, answer))
+
+        merged = _merge_usage(usages)
         out.update({
             "attempts": res.attempts, "code": res.code, "answer": res.answer,
             "initial_error": res.initial_error is not None,
             "infra_error": res.error_kind in ("llm", "dataset"),
             "error": res.error, "error_kind": res.error_kind,
-            "chart": res.chart_path, "chart_info": chart_row(res), "duration_s": res.timings.get("total"),
-            "tokens": res.usage.total_tokens if res.usage.reported else None,
+            "chart": res.chart_path, "chart_info": chart_row(res), "duration_s": sum(durations) or None,
+            "tokens": merged.total_tokens if merged.reported else None,
             # V2d §1：拆分字段；旧报告只有 tokens（total），可比性只看它
-            **usage_fields(res.usage),
+            **usage_fields(merged),
+            "turn_answers": turn_answers if multi else [],
+            "turn_status": turn_status if multi else [],
+            # 记忆：模式取最后一轮（同一进程里不该变），历史体积取最后一轮（多轮里它最大），
+            # trimmed 取全轮并集（"这条用例被裁过没有"才是消融表要看的）
+            "memory_mode": memory_by_turn[-1][0] if memory_by_turn else "off",
+            "history_tokens": memory_by_turn[-1][1] if memory_by_turn else 0,
+            "memory_trimmed": sorted({b for _, _, t in memory_by_turn for b in t}),
         })
 
         # 3. 打分：直接用 analyze 的结构化结果

@@ -752,3 +752,55 @@ def test_m13_baseline_verdict_unchanged(tmp_path, name):
     v, old = {k: x for k, x in v.items() if k != "thresholds_sha256"}, {k: x for k, x in old.items()
                                                                          if k != "thresholds_sha256"}
     assert json.dumps(v, ensure_ascii=False, sort_keys=False) == json.dumps(old, ensure_ascii=False, sort_keys=False)
+
+
+# ------------------------------------------------------------------ EV-A2：闸门 --repeat
+def test_repeat_keeps_first_run_as_primary(monkeypatch, tmp_path):
+    """repeat>1 时主行必须是第 1 次。
+
+    人工签字和历史对比都对着这一行：如果主行取最后一次，同一份代码两次跑出来的
+    结论会不一样——而"结论不稳定"正是 repeat 要暴露的东西，不能被报告本身抹平。
+    """
+    from app.core.result import AnalysisResult
+
+    (tmp_path / "docs" / "eval").mkdir(parents=True)
+    monkeypatch.setattr(run_gate, "ROOT", str(tmp_path))
+    monkeypatch.syspath_prepend(GATE)          # run() 里是局部 import questions
+
+    def fake_analyze():
+        return lambda *a, **k: AnalysisResult(
+            agent="react", dataset="d", question="q", answer="a",
+            code="result = 1", executed=True, result=1)
+
+    monkeypatch.setattr(run_gate, "_analyze", fake_analyze)
+    seq = iter(["strict", None])               # 第 1 次对、第 2 次错
+    monkeypatch.setattr(run_gate, "auto_judge", lambda result, q, ans: next(seq))
+
+    path = run_gate.run("react", True, ["s01"], repeat=2)
+    data = json.load(open(path, encoding="utf-8"))
+    row = data["cases"][0]
+
+    assert data["repeat"] == 2
+    assert row["match"] == "strict" and row["auto_correct"] is True     # 主行 = 第 1 次
+    assert [r["match"] for r in row["runs"]] == ["strict", None]
+    assert "第 1 次" in data["note"]
+    # runs 不复制代码与结果预览，否则 25 题 × N 次会把 JSON 撑爆
+    assert "code" not in row["runs"][0] and "result_text" not in row["runs"][0]
+
+
+def test_repeat_1_has_no_runs_field(monkeypatch, tmp_path):
+    """默认 repeat=1 不写 runs：老报告的形状不变，读老报告的脚本不用改。"""
+    from app.core.result import AnalysisResult
+
+    (tmp_path / "docs" / "eval").mkdir(parents=True)
+    monkeypatch.setattr(run_gate, "ROOT", str(tmp_path))
+    monkeypatch.syspath_prepend(GATE)
+    monkeypatch.setattr(run_gate, "_analyze", lambda: (
+        lambda *a, **k: AnalysisResult(agent="react", dataset="d", question="q",
+                                       answer="a", code="result = 1", executed=True, result=1)))
+    monkeypatch.setattr(run_gate, "auto_judge", lambda result, q, ans: "strict")
+
+    path = run_gate.run("react", True, ["s01"])
+    data = json.load(open(path, encoding="utf-8"))
+    assert data["repeat"] == 1
+    assert "runs" not in data["cases"][0]

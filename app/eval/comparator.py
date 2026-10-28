@@ -62,6 +62,9 @@ import numpy as np
 import pandas as pd
 
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+# 规则 22：中文月份写法。'3月' / '3月份' / '03月'（裸月份），以及 '2024年3月' / '2024年3月份'。
+# 数值月份预期（expected=3）与 '2024年3月' 这类时间标签都要能对上；'13月' 这种非法月份不接受。
+_CN_MONTH_RE = re.compile(r"^(?:(\d{4})\s*年\s*)?(1[0-2]|0?[1-9])\s*月(?:份)?$")
 _QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
 _WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}(?:\s*[(（][^()（）]*[)）])?$", re.IGNORECASE)   # B51：可带 '(02-26)' 这类说明
 _CN_QUARTER_RE = re.compile(r"^(?:\d{4}\s*年?\s*)?第?\s*([一二三四1-4])\s*季度?$")
@@ -349,12 +352,15 @@ def _month_key(x):
             return s
         if re.match(r"^\d{4}-\d{2}-\d{2}", s):
             return s[:7]
+        m = _CN_MONTH_RE.match(s)          # 规则 22：'2024年3月' 与 '2024-03' 是同一个月
+        if m and m.group(1):
+            return f"{m.group(1)}-{int(m.group(2)):02d}"
     return None
 
 
 def _period_part(x, n: int):
     """期望是序号 n 时：x 能看作季度（Q2、2024Q2、季度 Period）且 1≤n≤4 → 返回季度号；
-    能看作月份（'2024-05'、Timestamp、月 Period）且 1≤n≤12 → 返回月份号；否则 None。"""
+    能看作月份（'2024-05'、'3月'、'2024年3月'、Timestamp、月 Period）且 1≤n≤12 → 返回月份号；否则 None。"""
     x = _py(x)
     if isinstance(x, pd.Period) and x.freqstr.upper().startswith("Q"):
         return x.quarter if 1 <= n <= 4 else None
@@ -367,6 +373,10 @@ def _period_part(x, n: int):
             g = m.group(1)
             return (_CN_NUM.get(g) or int(g)) if 1 <= n <= 4 else None
     if 1 <= n <= 12:
+        if isinstance(x, str):                             # 规则 22：裸月份 '3月' 没有年份，只有 _month_key 认不出
+            m = _CN_MONTH_RE.match(x.strip())
+            if m:
+                return int(m.group(2))
         mk = _month_key(x)
         if mk is not None:
             return int(mk[5:7])

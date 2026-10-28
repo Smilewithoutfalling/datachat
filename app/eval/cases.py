@@ -363,3 +363,11 @@ DATASETS = {
 from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
 
 ALL_CASES = SALES_CASES + EXTRA_CASES
+
+from app.eval.validate import validate_cases  # noqa: E402
+
+# 在模块级就校验，让"加了一条坏题"在 import 时爆炸，而不是等到跑完 130 题才发现。
+# 校验失败只报告、不改写任何字段——尤其不许把 question 自动改成 turns[-1]。
+_case_errors = validate_cases(ALL_CASES)
+if _case_errors:
+    raise ValueError("评测用例校验失败：\n" + "\n".join(_case_errors))

@@ -23,6 +23,7 @@ import json
 import math
 import copy
 import re
+from collections.abc import Hashable
 from datetime import date, datetime
 
 import numpy as np
@@ -159,6 +160,13 @@ def _as_frame(df):
 
 
 def _col(df: pd.DataFrame, name, what: str) -> pd.Series:
+    # 列名必须先可哈希才能查 df.columns：直接 `name not in df.columns` 遇到 pd.Index / ndarray 会抛
+    # TypeError，绕过 ChartError 被 ChartSlot 记成 internal（"我们的 bug"），模型还拿不到提示。
+    # 这是模型的用法问题（最常见是 chart('bar', s, x=s.index, ...)），要按用法问题报。
+    if not isinstance(name, Hashable):
+        hint = ("Series 出图省略 x 即可（索引会自动成为横轴），或先 reset_index() 再用列名"
+                if isinstance(name, (pd.Index, np.ndarray)) else "要传列名")
+        raise ChartError(f"{what}传的是 {type(name).__name__}，不是列名；{hint}")
     if name not in df.columns:
         # 列名来自用户数据，原样（仅清控制字符、限长）进消息；HTML 转义在渲染边界做（THREAT_MODEL §图表）
         cols = "、".join(_clean_str(c, NAME_MAX) for c in list(df.columns)[:20])

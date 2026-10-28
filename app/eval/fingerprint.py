@@ -17,9 +17,12 @@
    取的是 `build_react_agent(out_system=...)` 吐出的**实际字符串**，不是复刻拼接逻辑：
    复刻会漂移，而漂移的指纹比没有指纹更坏（它替你撒谎）。
 
-用途：A 组代码变了、但渲染串逐题完全相同时（改注释、改不影响输出的分支），允许把两批
-标成"等价可比"，不必为一个空改动重跑 baseline。这就是豁免通道——它的证据是"输入相同"
-本身，而不是"文件没变"。
+用途：诊断与稳定性证据，**不是豁免凭据**。eval-v0 的第一次重跑就证明了它不能当凭据：
+判分器改了中文月份的认法，130 题渲染串逐字未变，分数 125→126。如果允许"渲染串相同即
+可比"，那次重跑会被标成"等价可比"，+1 就成了"什么都没改却涨了"。
+渲染哈希只覆盖 system prompt，模型在循环里看到的工具回传、评分规则、循环控制都不在里面——
+它的证明力不足以支撑"输入等价"这个结论。所以门禁项一律不豁免，渲染串只用来解释差异、
+以及验证同一 commit 两次重跑的稳定性。
 
 workflow 路径不提供渲染指纹：codegen / reviewer 的 prompt 含上一步模型输出，不是事前可算的。
 `rendered_fingerprints(agent="workflow")` 显式返回 `supported=False`，不假装有。
@@ -41,11 +44,20 @@ _AFFECTS_RESULTS = (
     "app/core/",               # service 编排、result 格式化、llm 预算与错误分类
     "app/tools/",              # schema/dataset/dictionary/plotting = prompt 的全部来源；sandbox = 模型看到的结果
     "app/nodes/",              # workflow 的 4 个模板
-    "app/eval/cases.py",       # 题面
-    "app/eval/cases_extra.py",
+    # 记忆（阶段 6.6）：context 拼出 memory_block 直接插进 system，working_state / snapshots 决定块内容，
+    # budget 决定裁不裁、裁多少，config 决定开不开。四者任一改动都改模型输入。
+    # 整目录吞掉，连 __init__.py 也算 A——它做 re-export，且这里宁可误判不可比。
+    "app/memory/",
+    # app/eval/cases*.py 由下面的前缀规则接管（题面变 = 换了卷子）
     "app/eval/case_model.py",  # 用例字段（ordered / percent_equiv / expect_refusal）
     "app/eval/comparator.py",  # 打分规则：容差、match_kind、拒答判定
+    "app/eval/validate.py",    # 校验规则决定哪些用例能进评测；放宽一条等于换了题集
+    "app/eval/stats.py",       # 报告里的区间与稳定性数字（pass^k / flip_rate）由它算，改它就是改读数
 )
+
+# 用例模块按前缀吞掉：新加 cases_memory.py 时不必回来改这张表。
+# 漏一个用例文件的代价是"加了题但指纹不变"，比多认一个文件严重得多。
+_AFFECTS_RESULTS_PREFIXES = ("app/eval/cases",)
 
 # B 组：明确不影响分数。必须逐项写清理由，新增项请先想清楚再往里加。
 _EXEMPT = {
@@ -67,6 +79,9 @@ def _group(rel: str) -> str | None:
     """返回 'A' / 'B' / None（未归类）。A 优先：一个文件同时命中两组时算 A。"""
     for p in _AFFECTS_RESULTS:
         if rel == p or (p.endswith("/") and rel.startswith(p)):
+            return "A"
+    for p in _AFFECTS_RESULTS_PREFIXES:
+        if rel.startswith(p) and rel.endswith(".py"):
             return "A"
     if rel in _EXEMPT:
         return "B"
@@ -228,12 +243,12 @@ def rendered_fingerprints(cases=None, datasets=None, agent: str = "react",
 
 GATE_KEYS = ("agent", "memory_mode", "rewrite", "use_dictionary", "evalset_sha12", "code_sha12")
 
-# 只有代码指纹可以被渲染哈希豁免：它衡量的就是"代码变了，但模型收到的字符串没变"。
-# 其余门禁项都不能豁免——
-#   memory_mode / rewrite：改的是 messages 里的上下文，不进 system prompt，渲染哈希看不见；
-#   evalset：可能只改了某题的期望值或数据，题目文本没变，渲染哈希也看不见；
-#   agent：react 与 workflow 是两套系统，分数本来就不可比。
-_EXEMPTABLE = {"code_sha12"}
+# 曾经有过一条"渲染串相同就豁免 code_sha12"的通道，eval-v0 的第一次重跑证明它是错的：
+# 判分器认了中文月份（comparator.py 改了），130 题的渲染串逐字未变，分数从 125 变 126。
+# 若允许豁免，这次重跑会被判成"等价可比"，那 +1 就会被当成"什么都没改却涨了"。
+# 根因是渲染哈希的证明力被高估了：它只覆盖 system prompt，而模型在循环里看到的工具回传、
+# 评分规则、循环控制都不在它里面。所以门禁项一个都不豁免——宁可误判不可比（重跑一次），
+# 不可误判可比（拿两把尺子算趋势）。渲染串保留为诊断与稳定性证据，不再当豁免凭据。
 
 
 def _is_unknown(v) -> bool:
@@ -246,13 +261,15 @@ def comparable(now: dict, before: dict) -> dict:
     """比较两批的指纹，返回判定结果。
 
     now / before: {"agent","memory_mode","rewrite","use_dictionary","evalset_sha12",
-                   "code_sha12","rendered_set_sha12"（可选）}
+                   "code_sha12","rendered_set_sha12"（可选，只用于诊断）}
 
     判定：
     - 有取不到的项（None / "unknown"）→ 不可比（basis=unknown）
     - 门禁字段全等 → 可比（basis=gate）
-    - 只有 code_sha12 不等，且 rendered_set_sha12 全等 → 等价可比（basis=rendered-equal）
-    - 有不可豁免项不等，或渲染串不等 → 不可比，列出所有差异项
+    - 任一门禁字段不等 → 不可比（basis=gate），列出差异项
+
+    rendered_set_sha12 不参与判定，只在结论里带上 `rendered_equal`：
+    它相同而门禁不同，恰恰是最危险的情况——看着"输入没变"，其实尺子或循环变了。
     """
     missing = [k for k in GATE_KEYS if _is_unknown(now.get(k)) or _is_unknown(before.get(k))]
     diffs = [k for k in GATE_KEYS if now.get(k) != before.get(k)]
@@ -262,10 +279,10 @@ def comparable(now: dict, before: dict) -> dict:
                 "note": "有门禁项取不到值，无法判定可比"}
     if not diffs:
         return {"comparable": True, "basis": "gate", "diffs": []}
-    hard = [k for k in diffs if k not in _EXEMPTABLE]
     r_now, r_before = now.get("rendered_set_sha12"), before.get("rendered_set_sha12")
-    if not hard and r_now and r_before and r_now == r_before:
-        return {"comparable": True, "basis": "rendered-equal", "diffs": diffs,
-                "note": "代码指纹不同但逐题渲染串完全一致，输入等价"}
-    return {"comparable": False, "basis": "gate", "diffs": diffs,
-            "rendered_known": bool(r_now and r_before)}
+    out = {"comparable": False, "basis": "gate", "diffs": diffs,
+           "rendered_equal": bool(r_now and r_before and r_now == r_before)}
+    if out["rendered_equal"]:
+        out["note"] = ("逐题渲染串相同但代码不同，仍判不可比：渲染串只覆盖 system prompt，"
+                       "评分器、循环、工具回传都可能变了")
+    return out
