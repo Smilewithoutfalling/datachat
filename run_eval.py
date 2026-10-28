@@ -130,7 +130,8 @@ def _run_agent(agent, cases, args, llm_config, stamp):
         if args.repeat > 1 or args.agent == "both":
             print(f"\n======== {agent} 第 {k}/{args.repeat} 次 ========")
         results = runner.run_all(cases, verbose=True)
-        report = EvalReport(results, meta={**meta, "run": k, "repeat": args.repeat})
+        report = EvalReport(results, meta={**meta, "run": k, "repeat": args.repeat},
+                            datasets=runner.datasets)
         report.print_summary()
         report.print_details(verbose=args.verbose)
         if args.out and args.repeat == 1 and args.agent != "both":

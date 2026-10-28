@@ -243,11 +243,14 @@ def load_obj(d):
 
 
 class EvalReport:
-    def __init__(self, results: list, meta: dict | None = None):
-        """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果"""
+    def __init__(self, results: list, meta: dict | None = None, datasets: dict | None = None):
+        """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果；
+        datasets: 本轮实际用的数据表（runner.datasets），用于算渲染指纹；None 时用默认 DATASETS。"""
         self.results = results
         self.meta = meta or {}
+        self.datasets = datasets
         self.total = len(results)
+        self._fingerprint = None
         self.by_category = {}
         self.by_dataset = {}
         for r in results:
@@ -288,6 +291,30 @@ class EvalReport:
         vals = [r[key] for r in self._items(items) if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else None
 
+    def fingerprint(self) -> dict:
+        """本轮的可比性指纹（EV-A3），算一次缓存住——summary() 会被 to_json / print_summary 各调一次。
+
+        code_sha12：app/ 下"影响分数"的源码全量哈希，含 prompt 全部来源（react_agent 的内联
+        system、nodes/*、tools/{schema,dataset,dictionary,plotting}）和评分器 comparator.py。
+        evalset 指纹不含 comparator，所以单靠它判不出"尺子变了"。
+        rendered：每题 system prompt 的渲染指纹，用途是当 code_sha12 变了但逐题渲染串完全相同时
+        允许标"等价可比"，不必为空改动重跑 baseline。workflow 路径不提供（见 fingerprint.py）。
+        """
+        if self._fingerprint is None:
+            from app.eval.fingerprint import code_fingerprint, rendered_fingerprints
+            code = code_fingerprint()
+            agents = {r.get("agent", "workflow") for r in self.results}
+            agent = next(iter(agents)) if len(agents) == 1 else "mixed"
+            self._fingerprint = {
+                "code_sha12": code["affects_results_sha256"],
+                "code_all_sha12": code["sha256"],
+                "agent": agent,
+                "rendered": rendered_fingerprints(
+                    datasets=self.datasets, agent=agent,
+                    use_dictionary=self.meta.get("use_dictionary", True)),
+            }
+        return self._fingerprint
+
     def summary(self) -> dict:
         def block(items):
             return {
@@ -312,6 +339,7 @@ class EvalReport:
             **({"git_sha_note": git_sha_note()} if sha.endswith("?") or sha == "unknown" else {}),
             "agent": agents[0] if len(agents) == 1 else agents,
             "evalset": evalset_fingerprint(),
+            "fingerprint": self.fingerprint(),
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
