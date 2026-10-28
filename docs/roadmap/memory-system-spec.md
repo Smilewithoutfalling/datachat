@@ -345,6 +345,21 @@ def rewrite_enabled() -> bool: return os.getenv("DATACHAT_REWRITE", "0") == "1"
 
 ---
 
+## 3.8 批 1 落地时的偏离（2026-10-28，随实现 PR）
+
+| 规格原文 | 实际 | 理由 |
+|---|---|---|
+| 新模块放 `app/core/`（`memory_config.py`、`working_state.py`、`memory_budget.py`、`snapshots.py`） | 统一放 `app/memory/`：`config.py`、`budget.py`、`working_state.py`、`snapshots.py`、`context.py` | 评测 agent 的指纹按 `app.memory.config.resolve_memory_mode` 调用（PR #88）；记忆代码集中一个包，评测把 `app/memory/` 整个登记进 A 组 |
+| `session_state` 表存工作状态（§3.1） | 不建表：工作状态是历史的纯函数，每轮由快照里各轮成功代码折叠（`working_state.fold`） | 删一轮（M0 `DELETE /messages`）后状态自动跟着变，不会留下已删轮次的前提；也不用迁移。`compactions`、`dataset_notes` 两张表随 M4、M2 再建 |
+| 快照只放 `code_ref`（§3.3） | 快照对象带 `code` 字段（给 M1 折叠用），**渲染出来的块里没有代码** | 历史从 messages 表重建时代码就在 result_json 里，不必二次查询；`test_ok_turn_from_row_uses_result_json_fields` 钉住"代码不进块" |
+| `result_digest` 从 `res.result` 现算 | `AnalysisResult` 新增 `result_digest` 字段，分析结束时写进 result_json，下一轮快照直接读 | result_json 里只有截断的 result_text，没有原对象；见 §14.3 |
+| `new_chart_path(trace_id, n)` 改命名（M0） | 不改命名 | 归属已经能从 result_json 的 charts / chart_path 与 exec 事件的 chart 找全；改命名要动 `react_agent.py` 的工具体，增加指纹面 |
+| `DATACHAT_HISTORY=messages\|block` 做 A/B | 批 1 不做：state 一律 block | 先跑 off vs state 的消融；messages/block 的单独对比随批 3 |
+| `full` 档 | 解析为 `state`（`resolve_memory_mode` 返回实际生效值） | full 的其余几张卡没做；报成 full 会把 state 的结果记到 full 名下 |
+| warning 文案"已自动省略部分较早的对话与字段说明" | "上下文较长，已自动省略部分较早的对话。" | 批 1 只裁历史与状态，不裁字段说明，文案照实写 |
+| 超过 12 轮的固定窗口也算裁剪 | 不算：只有预算导致的丢轮记 `memory_trimmed=["history"]` 并给 warning | 不然第 13 轮起每轮都弹提示 |
+| `AnalysisResult` 加字段要跑 `gen_ui_types.py`（§14.3） | 不需要：生成的前端类型里没有 AnalysisResult（前端类型手写在 `turn.ts`），`--check` 照常通过 | 规格那句写错了 |
+
 ## 4 任务卡
 
 > 每张卡：**目标 / 现状 / 改动 / 接口 / 步骤 / 测试 / 验收 / 陷阱 / 依赖**。
@@ -1288,8 +1303,9 @@ DATACHAT_MEMORY=state python -m app.server --open
 | `history_tokens` | `int` | 按现有 `history_messages` 输出估算（`estimate_tokens`） | M12 | 本轮送进模型的历史块 token 估算值；`off` 下也记，作为基线 |
 | `memory_trimmed` | `list[str]` | `[]` | M12 | 本轮被裁剪的块名，取值 `history` / `notes` / `state` / `field_notes` |
 | `rewrite` | `dict \| None` | `None` | M7 | `{original, rewritten, changed, needs_clarify, tokens, ms}`；M7 未做时恒为 `None` |
+| `result_digest` | `str` | 有结果时照常写 | M3 | 结果的类型与形状，不含值（"Series(3) 索引=region"）；下一轮的快照读它（2026-10-28 批 1 新增，§3.8） |
 
-这些字段只进结果，不进 prompt，所以不影响 `off` 的逐字节一致。`AnalysisResult` 加字段会改前端生成类型，批 1 同时跑 `gen_ui_types.py`，`--check` 必须通过。`EVENT_TYPES` 不加新类型。
+这些字段只进结果，不进 prompt，所以不影响 `off` 的逐字节一致（`tests/test_memory_p8.py` 用 3ce6b77 上算出的哈希钉住）。前端类型不是生成的，`gen_ui_types.py --check` 不受影响（§3.8）。`EVENT_TYPES` 不加新类型。
 
 ### 14.4 指纹时序（硬约定）
 

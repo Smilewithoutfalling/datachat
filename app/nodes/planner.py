@@ -19,4 +19,6 @@ def plan(state, config=None):
         field_notes=state.get("field_notes") or "（无）",
         question=state["question"],
     )
+    if state.get("memory_state"):   # 阶段 6.6 M1：工作状态块（已带数据标记），插在表结构之后；没有时 prompt 不变
+        msg = msg.replace("\n\n相关字段说明（来自数据字典）：", f"\n\n{state['memory_state']}\n\n相关字段说明（来自数据字典）：", 1)
     return {"plan": llm.invoke(msg)}

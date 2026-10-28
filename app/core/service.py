@@ -60,6 +60,7 @@ def analyze(
     encoding: str | None = None,
     log: bool = False,
     trace_id: str | None = None,
+    memory_mode: str | None = None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -79,13 +80,16 @@ def analyze(
     encoding：显式指定 CSV 编码；None 时自动检测（失败会报错，不会静默乱码）。
     log：是否把本次记录追加到 outputs/runs.jsonl。
     trace_id：本次分析的追踪 id（以后由 API 传入消息 id）；None 时生成一个。
+    memory_mode：设置页的记忆模式（阶段 6.6，app/memory/config.py）。环境变量 DATACHAT_MEMORY 优先；都没有时 off。
+             off 时 prompt 与阶段 6.6 之前逐字节一致；state 时 history 可以是 (问题, 结论[, 代码]) 元组或
+             app.memory.snapshots.TurnSnapshot（含失败轮），渲染成数据块进 system，不再以消息回灌。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
                              max_attempts=max_attempts, exec_timeout=exec_timeout,
                              recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
-                             trace_id=trace_id):
+                             trace_id=trace_id, memory_mode=memory_mode):
         if ev.type == "done":
             res = ev.result
     return res
@@ -109,6 +113,7 @@ def analyze_stream(
     log: bool = False,
     trace_id: str | None = None,
     cancel=None,
+    memory_mode: str | None = None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -133,6 +138,9 @@ def analyze_stream(
         dataset = os.fspath(dataset)
     res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question, trace_id=trace_id)
     tracker = UsageTracker(budget=token_budget())
+    from app.memory.config import resolve_memory_mode
+    # 测试专用的 checkpointer 多轮（memory）不走记忆模块：它自己带着全部消息
+    res.memory_mode = "off" if memory is not None else resolve_memory_mode(memory_mode)
     logger.info("analyze start trace=%s agent=%s dataset=%s", trace_id, agent, res.dataset)
 
     def cancelled():
@@ -157,6 +165,9 @@ def analyze_stream(
         inner.close()              # 提前收尾或外层被关闭（客户端断开）时，停掉正在进行的图执行
         res.timings["total"] = round(time.perf_counter() - t0, 4)
         res.usage = tracker.snapshot()
+        if res.executed and res.result is not None:
+            from app.memory.snapshots import digest
+            res.result_digest = digest(res.result)
         if res.error_kind != "llm":   # 停止可能盖掉先前的 llm 错误：llm_kind 只跟随最终的 error_kind
             res.llm_kind = None
     if log:
@@ -203,17 +214,22 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
         return
 
     notes_text = format_notes(notes) if notes else ""
+    from app.memory import context as memctx
+    mc = memctx.build(res.memory_mode, history, token_budget=tracker.usage.budget,
+                      history_messages=history_messages)
+    res.history_tokens, res.memory_trimmed = mc.history_tokens, list(mc.trimmed)
+    res.warnings += mc.warnings
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
-                      dataset, max_attempts, exec_timeout)
+                      dataset, max_attempts, exec_timeout, mc.state_block)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-                   recursion_limit, exec_timeout, memory, thread_id, history)
+                   recursion_limit, exec_timeout, memory, thread_id, history, mc)
 
 
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
-                  max_attempts, exec_timeout):
+                  max_attempts, exec_timeout, state_block=""):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
@@ -223,6 +239,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         "field_notes": notes_text, "attempts": 0, "max_attempts": max_attempts,
         "exec_timeout": exec_timeout,
     }
+    if state_block:            # 阶段 6.6 M1：工作流只吃工作状态（planner），不吃历史
+        state["memory_state"] = state_block
     config = {
         "configurable": {"llm": client, "df": df},
         # 每轮 reviewer→executor 占 2 步，留足余量，避免 max_attempts 调大后撞上默认上限 25
@@ -342,7 +360,8 @@ def _head(text: str, n: int) -> str:
 def history_messages(history) -> list:
     """[(问题, 结论), ...] → 交替的 user / assistant 消息，只留最近 MAX_HISTORY_TURNS 轮，结论截断。"""
     out = []
-    for q, a in list(history or [])[-MAX_HISTORY_TURNS:]:
+    for h in list(history or [])[-MAX_HISTORY_TURNS:]:
+        q, a = h[0], h[1]            # 阶段 6.6：也接受 (问题, 结论, 代码)，代码只给 state 模式的工作状态用
         out += [("user", str(q)), ("assistant", _head(str(a), MAX_HISTORY_ANSWER_CHARS))]
     return out
 
@@ -392,7 +411,7 @@ def _final_text(messages):
 
 
 def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-               recursion_limit, exec_timeout, memory, thread_id, history=None):
+               recursion_limit, exec_timeout, memory, thread_id, history=None, mc=None):
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
 
@@ -406,17 +425,24 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         config["configurable"] = {"thread_id": thread_id or "default"}
 
     retries = 0 if memory is not None else REACT_GATEWAY_RETRIES
+    if mc is None:
+        from app.memory.context import off_context
+        mc = off_context(history, history_messages)
+    # followup：本轮之前有轮次（§1.4 第 1 条：有历史时追问可以只凭上下文作答，B69/B70 不按异常处理）。
+    # off 时就是 bool(history)；state 时历史在 system 的数据块里，消息里不再回灌（prompt_history=None）
+    followup = mc.followup
     for attempt in range(retries + 1):
         sink = {"execs": [], "charts": []}
         graph = build_react_agent(dataset, checkpointer=memory, sink=sink, model=model, df=df,
                                   field_notes=notes_text, exec_timeout=exec_timeout,
                                   llm_config=cfg, tracker=tracker,
-                                  nudge_no_exec=memory is None and not history)
+                                  nudge_no_exec=memory is None and not followup,
+                                  **({"memory_block": mc.system_block} if mc.system_block else {}))
         messages, rec_err = [], None
         res.error = res.error_kind = res.llm_kind = None
         out = {}
         try:
-            yield from _react_invoke(graph, question, config, em, sink, attempt, out, history)
+            yield from _react_invoke(graph, question, config, em, sink, attempt, out, mc.prompt_history)
             messages, rec_err = out["messages"], out["err"]
         except Exception as e:  # noqa: BLE001
             kind, _ = classify_error(e)
@@ -436,7 +462,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                 why = ("llm", user_error("upstream", api_error_text(final), trace_id=res.trace_id,
                                          question=question, prefix="重跑本轮：接口返回错误内容："))   # 非致命，界面不加种类前缀
             # 带 history 时追问可以只凭上下文作答（"解释一下上面的结果"），不按 B69 判为异常
-            elif not history and not sink["execs"] and refusal_from_answer(final) is None \
+            elif not followup and not sink["execs"] and refusal_from_answer(final) is None \
                     and not final.strip().startswith("Sorry, need more steps"):
                 logger.warning("react no-exec trace=%s answer=%r", res.trace_id, final[:500])
                 why = ("agent", user_error("text", f"重跑本轮：{NO_EXEC_MESSAGE}", trace_id=res.trace_id))
@@ -546,7 +572,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.code = execs[-1]["code"]
         if res.error is None:
             res.error, res.error_kind = execs[-1]["error"], "execution"
-    elif res.error is None and memory is None and not history:
+    elif res.error is None and memory is None and not followup:
         # B69：单轮分析里没有执行结果、也不是拒答，不能算成功（多轮追问可以只用文字回答，不在此列）
         logger.warning("react no-exec trace=%s answer=%r", res.trace_id, res.answer[:500])
         res.error = user_error("text", NO_EXEC_MESSAGE, trace_id=res.trace_id)

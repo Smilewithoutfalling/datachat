@@ -52,7 +52,11 @@ export type Settings = {
   timeout: number;
   sources?: { model: SettingSource; base_url: SettingSource; timeout: SettingSource };
   connection?: { id: string; name: string };
+  // 阶段 6.6：会话记忆（实验）。mode 是实际生效值；env 非空 = 被环境变量 DATACHAT_MEMORY 覆盖
+  memory?: { mode: MemoryMode; setting: MemoryMode; env: MemoryMode | null };
+  memory_mode?: MemoryMode; // 只写（PUT /settings）
 };
+export type MemoryMode = "off" | "state";
 
 // ---- 阶段 6.5：多服务商模型连接（app/server/connections.py、app/core/providers.json）
 export type Protocol = "openai_chat" | "openai_responses" | "azure" | "anthropic";

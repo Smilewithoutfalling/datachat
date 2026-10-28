@@ -148,7 +148,8 @@ def build_loop(model, tools, system: str, checkpointer=None, *, llm_config=None,
 def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20,
                       llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False,
-                      out_system: dict | None = None):
+                      out_system: dict | None = None,
+                      memory_block: str = ""):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -164,6 +165,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
           提醒次数记进 sink["nudges"]。多轮追问可以只凭上下文作答，不开。
     out_system: 可选 dict。构造完成后把最终的 system prompt 原串写进 out_system["system"]，
           供评测算渲染指纹（app/eval/fingerprint.py）。指纹必须拿真实字符串，不能复刻拼接逻辑。
+    memory_block: 阶段 6.6 记忆（app/memory/context.py）：工作状态块 + 历史块，已带数据标记；插在表结构之后、
+          字段说明之前。为空时 system 与阶段 6.6 之前逐字节一致（P8，tests/test_memory_p8.py 钉住）。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -224,7 +227,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
     system = (
         "你是一个数据分析智能体，可以调用工具在真实数据上执行 pandas 代码。\n\n"
         f"数据表结构：\n{schema}\n\n"
-        + (f"取数约定：{access_rule(df)}\n\n" if multi else "") +
+        + (f"取数约定：{access_rule(df)}\n\n" if multi else "")
+        + (f"{memory_block}\n\n" if memory_block else "") +
         f"与本轮问题相关的字段说明（来自数据字典）：\n{field_notes or '（无）'}\n\n"
         "工作方式：先想清分析思路，再用 run_python_on_data 执行代码来验证；"
         "若报错，读取错误信息、修正代码后重试，直到拿到正确结果。"

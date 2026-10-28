@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { type Client, errText } from "../client";
-import type { Catalog, Connection, ConnectionTest, KeyStatus, Settings, SettingSource } from "../types";
+import type { Catalog, Connection, ConnectionTest, KeyStatus, MemoryMode, Settings, SettingSource } from "../types";
 import { ConnectionForm } from "./ConnectionForm";
 import { ConfirmButton } from "./ConfirmButton";
 import { IconCheck, IconPlus, IconWarn } from "./icons";
@@ -24,6 +24,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
   const [items, setItems] = useState<Connection[] | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [timeout, setTimeoutText] = useState("");
+  const [memory, setMemory] = useState<MemoryMode>("off");
   const [edit, setEdit] = useState<Edit>(null);
   const [test, setTest] = useState<TestState | null>(null);
   const [msg, setMsg] = useState("");
@@ -49,6 +50,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
         const act = applyList(l.items);
         setSettings(s);
         setTimeoutText(String(s.timeout));
+        setMemory(s.memory?.setting ?? "off");
         // D2：没有任何能用的连接（只有环境变量且没 Key）→ 直接新建第一个连接
         if (act?.readonly && !act.key.configured) setEdit({ kind: "new" });
       })
@@ -66,6 +68,11 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
       return;
     }
     c.saveSettings({ timeout: t }).then((s) => (setSettings(s), setTimeoutText(String(s.timeout)), done("设置已保存。")), fail);
+  };
+
+  const saveMemory = (e: FormEvent) => {
+    e.preventDefault();
+    c.saveSettings({ memory_mode: memory }).then((s) => (setSettings(s), setMemory(s.memory?.setting ?? memory), done("设置已保存。")), fail);
   };
 
   const runTest = (id: string) => {
@@ -151,6 +158,26 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
             ) : null}
             <div className="form-actions">
               <button type="submit" className="primary">保存设置</button>
+            </div>
+          </form>
+
+          <form onSubmit={saveMemory} data-testid="memory-form">
+            <div className="sec-head"><h3>会话记忆（实验）</h3></div>
+            <label className="inline">
+              追问时带上的上下文
+              <span className="ctl">
+                <select aria-label="会话记忆" value={memory} onChange={(e) => setMemory(e.target.value as MemoryMode)}>
+                  <option value="off">关闭：只带最近几轮问答（默认）</option>
+                  <option value="state">开启：再带上分析前提和失败的轮次</option>
+                </select>
+              </span>
+            </label>
+            <p className="hint" data-testid="memory-hint">
+              开启后，追问时会附上此前各轮的问题、结论摘要、分组和筛选条件，被停止或失败的轮次也会带上。
+              {settings.memory?.env ? `当前被环境变量 DATACHAT_MEMORY=${settings.memory.env} 覆盖，这里的选择暂不生效。` : ""}
+            </p>
+            <div className="form-actions">
+              <button type="submit" className="primary">保存记忆设置</button>
             </div>
           </form>
         </section>
