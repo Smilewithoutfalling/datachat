@@ -1,0 +1,139 @@
+{
+ "file": "eval_mul_state_fix_20261029_run2.json",
+ "time": "2026-10-29T14:01:58",
+ "git_sha": "9d109bc-dirty",
+ "agent": "react",
+ "model": "Qwen3.5-397B-A17B",
+ "n": 13,
+ "correct": 10,
+ "correctness_rate": 76.92307692307693,
+ "execution_success_rate": 92.3076923076923,
+ "avg_duration_s": 10.235553846153845,
+ "avg_tokens": 11243.692307692309,
+ "memory_mode": "state",
+ "fingerprints": {
+  "code_sha12": "8399e5287468",
+  "code_all_sha12": "75dd2444a9cf",
+  "evalset_sha12": "122129ad186b",
+  "rendered_set_sha12": "42cc3caace7a"
+ },
+ "per_case": [
+  {
+   "id": "mul_001",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 6779,
+   "duration_s": 4.4468,
+   "attempts": 0
+  },
+  {
+   "id": "mul_002",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 9991,
+   "duration_s": 10.5044,
+   "attempts": 0
+  },
+  {
+   "id": "mul_003",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 6916,
+   "duration_s": 4.4399999999999995,
+   "attempts": 0
+  },
+  {
+   "id": "mul_004",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 7128,
+   "duration_s": 5.7311,
+   "attempts": 0
+  },
+  {
+   "id": "mul_005",
+   "category": "multi_turn",
+   "correct": false,
+   "match": null,
+   "tokens": 5316,
+   "duration_s": 3.6596,
+   "attempts": 0
+  },
+  {
+   "id": "mul_006",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 10687,
+   "duration_s": 9.9994,
+   "attempts": 0
+  },
+  {
+   "id": "mul_007",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 7127,
+   "duration_s": 6.4122,
+   "attempts": 0
+  },
+  {
+   "id": "mul_008",
+   "category": "multi_turn",
+   "correct": false,
+   "match": null,
+   "tokens": 7274,
+   "duration_s": 6.3393999999999995,
+   "attempts": 0
+  },
+  {
+   "id": "mul_009",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 12515,
+   "duration_s": 12.0771,
+   "attempts": 1
+  },
+  {
+   "id": "mul_010",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 36421,
+   "duration_s": 37.066900000000004,
+   "attempts": 0
+  },
+  {
+   "id": "mul_011",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 7989,
+   "duration_s": 7.478999999999999,
+   "attempts": 0
+  },
+  {
+   "id": "mul_012",
+   "category": "multi_turn",
+   "correct": false,
+   "match": null,
+   "tokens": 16876,
+   "duration_s": 17.6594,
+   "attempts": 0
+  },
+  {
+   "id": "mul_013",
+   "category": "multi_turn",
+   "correct": true,
+   "match": "strict",
+   "tokens": 11149,
+   "duration_s": 7.246899999999999,
+   "attempts": 0
+  }
+ ]
+}
