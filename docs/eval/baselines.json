@@ -1,0 +1,21 @@
+{
+  "_comment": "基线登记表。tag 指向的 commit 与跑报告的 commit 常常不同（报告要能对上 outputs 里的 git_sha），所以这里显式记 code_sha12 —— 台账按指纹认基线，不按 commit 认。新增基线时手写一行。",
+  "eval-v0": {
+    "commit": "fc1f823",
+    "run_commit": "4d3ab5e",
+    "code_sha12": "af3d486c2e1b",
+    "evalset_sha12": "478204bf6a7f",
+    "rendered_set_sha12": "6b23655c28a6",
+    "date": "2026-10-28",
+    "note": "首个冻结基线。报告跑在 4d3ab5e，tag 指向 fc1f823（#89 squash）；两者只差 app/memory/ 与测试，A 组指纹相同。"
+  },
+  "eval-v1": {
+    "commit": "de509a4",
+    "run_commit": "de509a4",
+    "code_sha12": "28d8b0d21488",
+    "evalset_sha12": "478204bf6a7f",
+    "rendered_set_sha12": "6b23655c28a6",
+    "date": "2026-10-29",
+    "note": "记忆批 1 合并后。三次重跑 129/128/129，翻转 2.05%。与 eval-v0 判不可比（code_sha12 不同），rendered 逐题相同。"
+  }
+}

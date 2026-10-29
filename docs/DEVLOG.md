@@ -2601,3 +2601,26 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - 测试 8 条（`tests/test_stability.py`）：126+4 主现场、口径防回归、passes=1 与 2 必须同 flip_rate、全错清单、全同→invalid、部分同仍 valid、tokens 缺失不算同、k<2 返回 None。
 - `--oracle --repeat` 是个坑，实测撞到：oracle 不调模型，`tokens` 是桩值（恒 30、`tokens_in=20`/`tokens_out=10`），于是 `identical_cases = n`，`pass^k` 被判 `valid=false`。这个结论是对的（oracle 下 stability 本来就没信息量），但报错文案只写了"响应被复用"，会让人以为模型被缓存。文案改成两种可能都写。顺带确认接线正确：oracle 36 题跑 2 次，`per_case` 累积、`stability` 计算、打印、写 `<tag>_summary.json` 全部走通。
 - 下一步：多轮用例（EV-B5 的 8 条 + 补到 10–15 条）落地后，`state` 模式才有可测负载；在那之前跑 `state` 等于空转（`state` 与 `off` 的 `system_block` 都是空串）。以及固定 10 题的 canary，用来探测指纹覆盖不到的模型权重漂移。
+
+## [81] 2026-10-29 · 评测台账：把每次跑的读数变成可复算的记录 · commit（待回填）
+
+**为什么要有这个东西**：`outputs/` 在 `.gitignore` 里。这一个月里跑过的数字（46%、70%、83.8%、96.2%、99.2%）只活在我脑子和聊天记录里，报告 JSON 一清就变成孤证 —— 既不能复算翻转率，也不能证明"这两次比的确实是同一批题"。台账要解决的是"读数不可追溯"，不是"再写一份 README"。
+
+**两层结构，各有各的理由**：
+
+- `docs/eval/LEDGER.md` — 人读。批次表 / 逐次明细 / 翻转题 / 单题调试，全部由脚本从报告推导。手写结论放在标记块里，重建时原样保留。
+- `docs/eval/runs/<stem>.json` — 机器可复算。只存 `id / correct / match / tokens / duration / attempts`，不存 `code` / `answer`（体积大且含模型原文）。5 份共 124 KB，够算 `pass^k` / `flip_rate`，也够在报告丢了之后重建判定序列。
+- 只给 `gated`（有 `code_sha12`）的落逐题。legacy 那批没指纹，存了也没法归因，只进表。
+
+**两个真踩到的坑，都写进测试了**：
+
+1. **结论区被自己截断**。第一版 HEADER 里写了「手写结论放在 `<!-- NOTES:BEGIN -->` 与 `<!-- NOTES:END -->` 之间」，于是提取时 `find` 抓到的是这句说明文字里的标记，结论区被写成 ` 与 ` 两个字符，**不报错**。改成 `rfind` + 从该处往后找 END。`test_notes_not_confused_by_marker_in_header` 直接构造这个污染场景。
+2. **单位不一致**。`stats.py` 的 `flip_rate` / `pass_pow_k` 返回小数，`run_eval` 的 `stability` 块也存小数，我第一版台账返回百分数（33.33 而非 0.3333）。两处算同一个数却给两种单位，早晚会有人乘两次 100。统一成小数，只在渲染层 `*100`。
+
+**写测试时自己算错一次，被实现纠正**：`[T,F,F]` 我当成"3 对全不同"算成 50%，实际是 `(T,F)(T,F)` 两对不同、`(F,F)` 相同 → 2/3。这条错算记录留在 `test_flip_rate_denominator_is_pairs_not_runs` 的 docstring 里 —— 分母是"题 × 成对组合"，不是"题 × 跑"，两个数在 2 题 3 跑时都等于 6，光看数字看不出区别。
+
+**台账跑出来的第一条实质发现**：`FROZEN.md` 第 2 条（"temperature 0 时网关对相同请求返回相同结果，`--repeat` 不独立、标准差恒为 0 是假象"）被 eval-v1 的三次重跑否掉了。130 题里 `(tokens, code)` 三次逐字相同的只有 15 题（11.5%），判定 4 题翻转，正确率 99.23/98.46/99.23。真要缓存应该是 130/130 逐字相同。这条反驳只有一次实测，且没查 B31 当时是哪个网关，所以在 `LEDGER.md` 里按"结论成立但支撑单薄"写，没有直接去改 `FROZEN.md`。
+
+- 指纹不变：本文件在仓库根目录，不在 `app/**/*.py` 扫描范围。实测 `code_sha12 = 27e735160da3`、`code_all = c472260fe39e`，与 #93 合并后一致。
+- 测试 13 条（`tests/test_ledger.py`）：结论区三种保留场景、污染标记、分类边界、批次合并与拆分、`git_sha` 尾 `?` 清理、flip 与 `_stability` 逐位一致、分母口径、单跑返回 None、全错清单。
+- 用法：跑完任何一次评测后执行 `python eval_ledger.py`；`--check` 只报是否需要重建（退出码 1 = 有差异），方便收尾时确认没漏记。
