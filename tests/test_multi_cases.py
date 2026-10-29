@@ -80,6 +80,69 @@ def test_oracle_runs_every_turn_of_a_multi_case():
     assert len(r["turn_answers"]) == 2
 
 
+def test_runner_passes_code_to_later_turns():
+    """回归：history 只传 (q, a) 时，state 模式的工作状态块恒为空。
+
+    `fold()` 只认 `snap.code` —— 没有代码就提取不出「筛选：dept == 研发」这类前提，
+    于是 state 只剩历史文本块。实测 mul_013 第 3 轮因此把「研发部」丢了，算成全公司 52.92%。
+    评测里跑 state 等于只跑了一半，这个断言是那条链路的门闩。
+    """
+    captured = []
+    case = next(c for c in MULTI if c.id == "mul_013")       # 3 轮，前两轮都执行代码
+
+    class Spy(EvalRunner):
+        def _run_one(self, case, question, history, chat_model):
+            captured.append(list(history or []))
+            return super()._run_one(case, question, history, chat_model)
+
+    runner = Spy(DATA, agent="react", model_factory=lambda c: oracle_model(c.ground_truth, "react"),
+                 llm_config=LLMConfig(api_key="t"))
+    runner.run_single(case)
+
+    assert captured[0] == []                                  # 第 1 轮没有历史
+    assert len(captured[1]) == 1 and len(captured[1][0]) == 3
+    assert captured[1][0][2], "第 2 轮的 history 没带代码，state 的工作状态块会恒为空"
+    assert captured[2][0][2] and captured[2][1][2]
+
+
+def test_runner_passes_empty_code_when_turn_not_executed():
+    """没执行的轮次必须传空代码。
+
+    `fold()` 把「有 code 的快照」当作可信前提；把失败轮次的代码喂进去，
+    下一轮就会基于一个从没成功过的筛选条件继续算 —— 错得很安静。
+    """
+    from types import SimpleNamespace
+
+    from app.core.llm import TokenUsage
+
+    captured = []
+    case = next(c for c in MULTI if c.id == "mul_013")
+
+    class Spy(EvalRunner):
+        def _run_one(self, case, question, history, chat_model):
+            captured.append(list(history or []))
+            return SimpleNamespace(
+                answer="a", code="result = 1", executed=False,   # 有代码但没执行成功
+                error=None, error_kind=None, initial_error=None, attempts=0,
+                expected=None, actual=None, result=None, chart_path=None,
+                charts=[], chart_calls=0, chart_errors=[], chart_internal_errors=[],
+                charts_discarded=0, timings={}, usage=TokenUsage(),
+                memory_mode="off", history_tokens=0, memory_trimmed=[])
+
+    runner = Spy(DATA, agent="react", llm_config=LLMConfig(api_key="t"))
+    runner.run_single(case)
+    assert captured[1][0][2] == ""
+
+
+def test_off_path_ignores_the_code_element():
+    """off 路径逐字节不变，这是「加代码不需要重跑 off 基线」的依据。
+
+    `history_messages` 只取 h[0] / h[1]；多出来的第 3 个元素只给 state 的工作状态用。
+    """
+    from app.core.service import history_messages
+    assert history_messages([("q1", "a1")]) == history_messages([("q1", "a1", "result = 1")])
+
+
 def test_single_turn_case_has_empty_turn_fields():
     """单轮题的 turn_* 保持空列表（不是 None）：报告里的形状不随题目类型变。"""
     case = next(c for c in ALL_CASES if not c.turns)

@@ -203,7 +203,13 @@ class EvalRunner:
             ))
             if i < len(turns) - 1:
                 # 失败也要照实追加空串：换成占位文案会让下一轮以为上一轮真答了东西
-                history.append((q, answer))
+                #
+                # 第 3 个元素是代码。service.history_messages 只取 h[0] / h[1]，所以 off 路径
+                # 逐字节不变；coerce 见到三元组才填 snap.code。不传的话 fold() 拿不到任何代码，
+                # 工作状态块恒为空 —— 评测里跑 state 等于只跑了一半（历史块有、状态块没有）。
+                # 按 executed 门控：fold() 把「有 code 的快照」当作可信前提，喂进失败轮次的
+                # 代码会给下一轮一个假前提。
+                history.append((q, answer, res.code if res.executed else ""))
 
         merged = _merge_usage(usages)
         out.update({

@@ -39,14 +39,15 @@ def test_multiturn_history_is_passed_incrementally(monkeypatch):
     def fake_analyze(path, question, **kw):
         # 必须存快照：history 是同一个列表被逐轮 append 的，存引用会让第 1 次也显示成满的
         seen.append((question, list(kw.get("history") or [])))
-        return _res(question)
+        return _res(question, code=f"result = '{question}'")
 
     monkeypatch.setattr(runner_mod, "analyze", fake_analyze)
     r = EvalRunner(agent="react").run_single(_multi())
 
     assert [q for q, _ in seen] == ["第一轮", "第二轮"]
     assert seen[0][1] == []                              # 多轮首轮：有 history 概念，但还没内容
-    assert seen[1][1] == [("第一轮", "答第一轮")]          # 第二轮能看到第一轮的问答
+    # 第三个元素是代码：state 模式靠它抽出「筛选 / 分组 / 时间范围」，不给就只剩历史文本块
+    assert seen[1][1] == [("第一轮", "答第一轮", "result = '第一轮'")]
     assert r["turn_answers"] == ["答第一轮", "答第二轮"]
     assert r["turn_status"] == ["ok", "ok"]
 
@@ -81,7 +82,9 @@ def test_turn_error_does_not_abort_final_turn(monkeypatch):
     r = EvalRunner(agent="react").run_single(case)
 
     assert len(calls) == 2
-    assert calls[1][1] == [("第一轮", "")]
+    # 第三个元素是代码；这一轮 LLM 失败（executed=False），代码位必须是空串——
+    # fold() 把「有 code 的快照」当可信前提，把失败轮的代码喂进去等于给下一轮一个假前提
+    assert calls[1][1] == [("第一轮", "", "")]
     assert r["turn_status"] == ["error", "ok"]
     assert r["executed"] is True and r["correct"] is True   # 最后一轮照常打分
     assert r["infra_error"] is False                       # 最终有答案，不算基础设施失败
