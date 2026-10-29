@@ -65,7 +65,7 @@ _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 # 规则 22：中文月份写法。'3月' / '3月份' / '03月'（裸月份），以及 '2024年3月' / '2024年3月份'。
 # 数值月份预期（expected=3）与 '2024年3月' 这类时间标签都要能对上；'13月' 这种非法月份不接受。
 _CN_MONTH_RE = re.compile(r"^(?:(\d{4})\s*年\s*)?(1[0-2]|0?[1-9])\s*月(?:份)?$")
-_QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
+_QUARTER_RE = re.compile(r"^(?:\d{4}\s*年?\s*)?Q([1-4])$", re.IGNORECASE)
 _WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}(?:\s*[(（][^()（）]*[)）])?$", re.IGNORECASE)   # B51：可带 '(02-26)' 这类说明
 # 规则 23：裸日期写法。'02-26' / '2/26' / '2024/02/26'。
 # 只用来判断"这组索引是不是日期"，不参与月份对齐——没能给出年份，`_month_key` 对它返 None 是对的。
@@ -220,6 +220,35 @@ def _extras_eq(a, e, tol, ordered) -> bool:
             and pd.api.types.is_numeric_dtype(a) and not isinstance(a.index, pd.MultiIndex):
         if (a.is_monotonic_decreasing or a.is_monotonic_increasing) and a.iloc[0] != a.iloc[1]:
             return _scalar_eq(_py(a.index[0]), e, tol)
+        return False
+    # a2) 期望标签，实际是排好序的表格：某一数值列单调、且首行标签正是期望值。
+    # ord_018 的现场：模型多给了 orders / refunded 两列，rate 列降序首行就是答案；
+    # 同一份答案少两列（只剩 Series）时 a) 认，多两列就判错——差别只在"裹了几层"，不在答案。
+    if _is_label_value(e) and isinstance(a, pd.DataFrame) and len(a) > 1 \
+            and not isinstance(a.index, pd.MultiIndex):
+        for col in a.columns:
+            s = a[col]
+            if not pd.api.types.is_numeric_dtype(s) or len(s) < 2:
+                continue
+            if not (s.is_monotonic_decreasing or s.is_monotonic_increasing):
+                continue
+            if s.iloc[0] == s.iloc[1]:
+                continue
+            if _scalar_eq(_py(a.index[0]), e, tol):
+                return True
+        # 标签在列里而不是 index：ord_018 的 run1 就是这种形态（RangeIndex + category 列），
+        # 同一份答案换个 index 写法就判错，差的不是答案。
+        label_cols = [c for c in a.columns if not pd.api.types.is_numeric_dtype(a[c])]
+        num_cols = [c for c in a.columns if pd.api.types.is_numeric_dtype(a[c])]
+        for lc in label_cols:
+            if not _scalar_eq(_py(a[lc].iloc[0]), e, tol):
+                continue
+            for nc in num_cols:
+                s = a[nc]
+                if len(s) < 2 or s.iloc[0] == s.iloc[1]:
+                    continue
+                if s.is_monotonic_decreasing or s.is_monotonic_increasing:
+                    return True
         return False
     # c) 一句话字符串
     if isinstance(a, str) and _is_num(e):

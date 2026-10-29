@@ -78,12 +78,14 @@ def main():
     parser.add_argument("--out", default=None, help="JSON 报告路径（默认 outputs/eval_<agent>_<时间>.json）")
     parser.add_argument("--repeat", type=int, default=1, help="同一配置连跑几次（默认 1）")
     parser.add_argument("--rescore", default=None, metavar="REPORT", help="离线重新打分一份已有报告，不调用模型")
+    parser.add_argument("--write", action="store_true",
+                        help="配合 --rescore：把新判定写回报告（不改模型输出，另记 rescored 与 run_code_sha12）")
     parser.add_argument("--baseline", default=None, metavar="REPORT",
                         help="基准报告的 JSON 路径：填 comparable，判定两批分数能不能直接比（EV-A3）")
     args = parser.parse_args()
 
     if args.rescore:
-        _rescore(args.rescore, args.data)
+        _rescore(args.rescore, args.data, args.write)
         return
 
     baseline_fp = None
@@ -302,8 +304,8 @@ def _print_repeat(runs, meta, path, per_case=None):
     print(f"汇总已保存：{path}")
 
 
-def _rescore(path, data):
-    from app.eval.rescore import rescore
+def _rescore(path, data, write=False):
+    from app.eval.rescore import apply_rescore, rescore
     r = rescore(path, data)
     print(f"重新打分：{r['correct']}/{r['n']} = {r['correctness_rate']:.1f}%   （{path}）")
     for cat, b in r["by_category"].items():
@@ -317,6 +319,9 @@ def _rescore(path, data):
         print(f"  需人工抽审（判对但不是 strict）{len(r['needs_audit'])} 题：{' '.join(r['needs_audit'])}")
     if r["evalset_report"] and r["evalset_report"] != r["evalset_now"]:
         print(f"  ⚠ 评测集指纹变了（报告 {r['evalset_report']} → 现在 {r['evalset_now']}），与原报告不完全可比")
+    if write:
+        w = apply_rescore(path, r)
+        print(f"  已写回：{w['path']}  判分指纹 {w['scorer_sha12']}（跑时 {w['run_code_sha12']}）")
 
 
 if __name__ == "__main__":

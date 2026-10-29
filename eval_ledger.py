@@ -334,8 +334,11 @@ def render(records, batches, notes, now, baselines=None):
         L.append("")
         for b in any_flip:
             f = b["flip"]
-            L.append("- `%s` %d 题 %d 跑：pass^%d = %.2f%%，翻转 %.2f%%，翻转题 %s"
-                     % (b["code_sha12"], f["n"], f["runs"], f["runs"], f["pass_pow_k"] * 100,
+            # agent 与 mode 必须进标题：同指纹、同题数的两批（workflow/react 各 143 题）
+            # 会并列出现，只写题数分不清哪行是哪批。
+            L.append("- `%s` %s / %d 题 / %s / %d 跑：pass^%d = %.2f%%，翻转 %.2f%%，翻转题 %s"
+                     % (b["code_sha12"], b["agent"], f["n"], b["memory_mode"] or "—", f["runs"],
+                        f["runs"], f["pass_pow_k"] * 100,
                         f["flip_rate"] * 100, ", ".join("`%s`" % i for i in f["flipped"])))
             if f["all_wrong"]:
                 L.append("  - 全程错：%s" % ", ".join("`%s`" % i for i in f["all_wrong"]))

@@ -374,3 +374,54 @@ def test_rule23_non_date_labels_stay_non_time():
     # 越界的"月-日"不是日期：13-01 / 02-32
     assert not _is_time_index(pd.Index(["13-01", "13-02"]))
     assert not _is_time_index(pd.Index(["02-32", "02-33"]))
+
+
+def test_rule18_quarter_label_with_year_word():
+    """'2024年Q1' 与季度序号 1 是同一个季度。
+
+    现场是 ord_022：三次运行数值逐个相同，只有 run3 把索引写成 '2024年Q1'，
+    旧正则 `^(?:\\d{4})?\\s*Q([1-4])$` 不认中间那个「年」字，整段对齐没进去。
+    """
+    e = pd.Series([377358.66, 473495.5], index=[1, 2])
+    assert results_equal(pd.Series([377358.66, 473495.5], index=["2024年Q1", "2024年Q2"]), e)
+    assert results_equal(pd.Series([377358.66, 473495.5], index=["2024 Q1", "2024 Q2"]), e)
+    # 数值对不上仍然判错，只放宽标签写法
+    assert not results_equal(pd.Series([377358.66, 1.0], index=["2024年Q1", "2024年Q2"]), e)
+    # 季度换了也不认
+    assert not results_equal(pd.Series([377358.66, 473495.5], index=["2024年Q1", "2024年Q3"]), e)
+
+
+def test_extras_frame_one_sorted_column_answers_the_question():
+    """答案裹在多列表格里：某一数值列单调、首行标签就是期望值。
+
+    现场是 ord_018：同一份 groupby 结果，少给两列（只剩 rate 的 Series）判对，
+    多给 orders / refunded 就判错——差别只在裹了几层，不在答案。
+    """
+    e = "美妆"
+    wide = pd.DataFrame({"orders": [202, 302, 234, 316, 146],
+                         "refunded": [21, 22, 16, 18, 7],
+                         "rate": [10.40, 7.28, 6.84, 5.70, 4.79]},
+                        index=["美妆", "食品", "家居", "服饰", "数码"])
+    assert results_equal(wide, e)
+    # 标签在列里、index 是 RangeIndex 的形态（同一次运行就是这种）
+    by_col = wide.reset_index().rename(columns={"index": "category"})
+    assert results_equal(by_col, e)
+    # 首行不是期望值：不认
+    assert not results_equal(wide.sort_values("rate"), e)
+    # 数值列不单调：不认（说明没按这一列排序，首行不构成答案）
+    noise = wide.copy()
+    noise["rate"] = [1.0, 9.0, 2.0, 8.0, 3.0]
+    noise["orders"] = [5, 1, 4, 2, 3]
+    noise["refunded"] = [3, 1, 5, 2, 4]
+    assert not results_equal(noise, e)
+
+
+def test_extras_frame_does_not_swallow_grouped_tables():
+    """规则 10 的老边界：分组汇总表碰巧含期望值不算对。
+
+    新增的表格分支只在「首行标签 == 期望值」时成立，整张表里某处出现期望值不算。
+    """
+    e = "美妆"
+    tbl = pd.DataFrame({"rate": [7.28, 6.84, 5.70, 4.79, 10.40]},
+                       index=["食品", "家居", "服饰", "数码", "美妆"])
+    assert not results_equal(tbl, e)          # 首行是食品，美妆在最末行
