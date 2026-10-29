@@ -17,5 +17,15 @@
     "rendered_set_sha12": "6b23655c28a6",
     "date": "2026-10-29",
     "note": "记忆批 1 合并后。三次重跑 129/128/129，翻转 2.05%。与 eval-v0 判不可比（code_sha12 不同），rendered 逐题相同。"
+  },
+  "eval-v2": {
+    "commit": "见 tag eval-v2",
+    "run_commit": "4f19a36",
+    "code_sha12": "89d28c86ca74",
+    "run_code_sha12": "8399e5287468",
+    "evalset_sha12": "122129ad186b",
+    "rendered_set_sha12": "42cc3caace7a",
+    "date": "2026-10-29",
+    "note": "143 题目（130 单轮 + 13 多轮）上的首个基线，react / off / 3 跑：134 / 135 / 133 = 93.7% ± 0.8pp，pass^3 90.2%，翻转 4.20%。多轮单独看 46.2 / 38.5 / 46.2（43.6%）。与 eval-v1 一律不可比——题集从 130 变 143，evalset 指纹随之改变，这是加题的必然代价，不是回归。code_sha12 与 run_code_sha12 不同：模型跑在 8399e5287468 上，报告被 --rescore 写回过，判分器改了两条规则（ord_018 表格内嵌答案、ord_022 '2024年Q1' 认成季度序号），写回前是 133/135/132。workflow 同批三跑 132/129/130 = 91.1% 只作对照，不是基线：workflow 在 off 模式下根本不消费 history（app/server/app.py 里 agent != react 时传 None），多轮题在它上面测的是评测器自己造出来的配置。"
   }
 }

@@ -2688,3 +2688,66 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - 指纹：`code_sha12` `a38fdc8dc578` → `8399e5287468`（runner.py 进 A、内容也改了），`code_all` `f2b6912b6647` → `75dd2444a9cf`。A 49 / B 14 / 共 63 文件。
 - 测试 +3（`tests/test_multi_cases.py`）：第 2 轮 history 带代码、未执行轮次传空串、`off` 忽略第三个元素。指纹 +2（`tests/test_fingerprint.py`）：runner 在 A 组、改 runner 一个字符要动门禁哈希。`pytest tests/test_multi_cases.py` 14 passed，`tests/test_fingerprint.py` 24 passed。
 - 下一步：`eval-v2` 要在 143 题上重跑一次 `off` 基线（现在没有 143 题上的基线，之后任何改动都没法比）；然后才是 canary 探权重漂移；`mul_012` 题面口径、`avg_history_tokens` 漏算 state_block 这两条记进台账缺口。
+
+## [84] 2026-10-29 · `eval-v2`：143 题基线固定，先踩了一个 agent 的坑 · commit（待回填）
+
+143 题（130 单轮 + 13 多轮）× `react` × `off` × 3 跑，55 分钟。三次 134 / 135 / 133 = **93.7% ± 0.8pp**，
+`pass^3` **90.2%**，逐题翻转 **4.20%**。拆开：单轮 128/130/127（98.7%），多轮 6/5/6（43.6%）。
+
+**第一趟跑错了 agent，这件事本身比数字重要。**
+
+`run_eval.py` 的 `--agent` 默认值是 `workflow`，而仓库里所有历史基线都是 `react`。第一次没写
+`--agent`，143 题跑出来 92.3%，看着"和 eval-v1 的 99% 差得有点多但还行"。拆开一看多轮只有 **2/13（15.4%）**，
+而同样代码下单独跑 13 题是 41%。差 26pp 不是噪声。
+
+查到根上是两件事：
+
+- `_run_workflow(...)` 的函数签名里**没有 `history`**，只有 `state_block`；
+- `app/server/app.py:526` 也明写着 `history = turn_history(s.messages) if agent == "react" else None`
+  ——产品里 workflow 就是不做 off 模式的多轮对话，只有 `state` 模式才给它折叠后的工作状态。
+
+**所以"workflow + off + 多轮"是评测器自己造出来的配置。** runner 不区分 agent 一律传 `history`，
+workflow 收下就扔，不报错、不警告，跑出一个看起来合规的 15.4%。这条留在台账"已知缺口"里了，
+默认值没动——那是评测入口的行为变化，要先单独说清楚再改。
+
+对照批（workflow / 3 跑 132/129/130 = 91.1%）没删，因为它照出一个容易读错的点：
+**workflow 和 react 的 `pass^3` 都是 90.21%（129/143），但错法完全不同**——workflow 是"稳定错 10 题、
+只翻 4 题"，react 是"稳定错 5 题、另翻 9 题"。同一个 `pass^3` 掩盖两种失败形态，只看它一个数
+会得出"两个 agent 一样稳"的错误结论。
+
+**判分器又抓出两处，都在"同一个答案的另一种写法"上。**
+
+9 题翻转里 2 题是尺子的问题：
+
+- `ord_022`：run3 的数值与 run1 逐个相同，只是索引写成 `2024年Q1`。`_QUARTER_RE` 是
+  `^(?:\d{4})?\s*Q([1-4])$`，不认中间那个「年」字，整段季度对齐从没进去过。
+- `ord_018`：run1/run2 是**同一份 groupby 结果**，run2 只剩 `rate` 一列（判对），run1 多给
+  `orders`/`refunded` 两列（判错）。差别只在裹了几层，不在答案。
+
+两处都只放宽"写法"，数值比较一个字节没动。`_QUARTER_RE` 加 `年?`；`_extras_eq` 加一条表格分支：
+某一数值列单调、且首行标签正是期望值 → 判对。首行不是期望值、或没有数值列单调时仍判错，
+"整张表里某处出现期望值"不算（规则 10 的老边界用测试钉住）。
+
+**顺带给 `--rescore` 补了写回。** 之前它只打印"重算后 133 题、变了哪几题"，报告文件不动，
+于是台账读的还是旧判定，改完判分器台账和报告就对不上。现在 `--rescore --write` 会更新
+`correct` / `match` 和所有计数，但**不碰 `code` / `answer` / `actual`**（那三条是证据），
+并记两块元信息：
+
+- `run_code_sha12`：模型跑在哪份代码上。判分器在 A 组指纹里，改它 `code_sha12` 就变；
+  不把这两者分开，之后看到一份报告就没法回答"这是哪套被测系统跑出来的"。
+- `rescored`：判分用的指纹 + 变化清单 + 时间。
+
+写完回放验证：**只有 ord_018（run1）和 ord_022（run3）两处变化，其余 141 题逐个不变**，
+run2 一处没变。写回前是 133/135/132，写回后 134/135/133。
+
+**这次没有改 `--agent` 默认值，也没有扩多轮题。** 基线先固定，之后每一次改动都跟
+`eval-v2`（`code_sha12 = 89d28c86ca74`、`evalset = 122129ad186b`）这一行比。
+
+- 指纹：`code_sha12` `8399e5287468` → `89d28c86ca74`（comparator 在 A 组），`code_all` 不变。
+- 测试：`tests/test_comparator.py` +3（季度带「年」、表格内嵌答案、表格不吞整表）、
+  新建 `tests/test_rescore.py` 4 条（判定与计数、跑时指纹留存、重复写回不覆盖、不碰证据字段）。
+  相关六文件 109 passed，`test_eval_runner` 17 passed，`test_eval_cases` 169 passed。
+- 台账：`eval_ledger.py` 的翻转清单补了 agent 与 mode——同指纹同题数的 workflow/react 两批
+  并列时，只写题数分不清哪行是哪批。
+- 下一步：多轮题扩到 30 条以上（13 题的 MDE 是 6:0，现在最多 5:0，正确率的结论还不够硬）；
+  然后 canary 10 题探模型权重漂移。
