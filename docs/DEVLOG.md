@@ -2574,3 +2574,14 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - 闸门（沙箱 aarch64，最后一次改动之后）：pytest 1039 passed；vitest 888 passed；lint、tsc、build、gen_ui_types --check、gen_eval_data --check 全过；e2e --grep-invert 视觉 41 passed。旧库启动时转换的耗时还没有在大库上实测，上限暂定 512 MB。
 - Windows 上的 `time.tzset()` 不存在，CI 的 windows-latest 两个 Python 版本都挂在 AttributeError。改成 `_local_ts` / `render_turn` / `render_block` 接可选 `tz`，默认 `None` 仍是系统本地时区（生产路径逐字不变），测试显式传 UTC+8；没加 skip —— 本机开发就在 Windows 上，skip 等于这条覆盖永久消失。之后本机 82 passed（快照 / 记忆四件套 / 指纹 / 执行器），CI 9/9 success。
 - 合并路径：本分支 rebase 到含 #88/#89 的 master 后 squash 成 048c268。`code_sha12` 变为 `28d8b0d21488`（A 组 47，新增 `app/memory/` 6 个文件），`rendered_set_sha12` 仍是 `6b23655c28a6` —— off 模式下送进模型的 system 一个字节没变，但 `comparable()` 按门禁判「与 eval-v0 不可比」。要批 1 的分数只能重跑，不走渲染串豁免。
+
+## [79] 2026-10-29 · 判分器认裸日期索引（MM-DD）· commit 636b648（PR #93）
+
+- eval-v1 的三次重跑里 inv_016 三跑两对一错。错的那次不是模型答错：14 个周的销量逐个相同、顺序也相同，只有索引写法从周结束日 `2024-03-03` 变成周起始日 `02-26` —— 同一周的两种端点说法。
+- 根因 `_is_time_index`：它靠 `_month_key` 判断，而 `_month_key` 只认 `YYYY-MM` / `YYYY-MM-DD` / 中文月份，裸 `02-26`（无年份）返回 `None` → 整组被判"非时间索引" → `_series_eq` 里"两边都是时间索引"那一整段被跳过，连它末尾那句按位置比数值的兜底也一起跳了，落到 `_month_numbers` / `_quarter_numbers` 全失败。
+- 这是实现遗漏不是设计分歧：那段注释本来就写着"周/日频等无法按月对齐时，按位置比较数值"，周频本来就不可能从 `02-26` 恢复出年份。补的只是"这组标签是不是日期"的认法，对齐规则与数值比较一个字节没动。
+- 代价写清楚：放行的是按位置比数值，所以"数值全对但标签错位"会判对。不是新开的口子 —— 原来的周频兜底就有这性质，现在只是让它对裸月日生效；`2024-01` 这种能被 `_month_key` 认出的索引照旧走明确的月份对齐，不受影响。
+- **验证用 `--rescore`，不调模型**：三份 eval-v1 报告重新打分，唯一变化是 run3 的 inv_016 `false → true`，其余 129 题判定逐个不变。正确数 129/128/129 → **129/128/130**，均值 98.97% → 99.23%，翻转 4 → 3 题，pass^3 126 → 127。此前记的"130/130、翻转率降到 2.31%"是推演，**这次是实测**。
+- **这条改动推翻了旧规矩"判分器缺口必须攒到 eval-v2"**：旧规矩的成本假设是"改判分器就要重跑 50 分钟 baseline"，`--rescore` 把它证伪了。以后判分器缺口可以随时修，只要 ① baseline 已用 tag 冻结、不改历史数字；② 用 rescore 证明"只动了预期的那几题"。
+- 测试 4 条（`tests/test_comparator.py`）：14 周真实数据主现场（`MM-DD` / `MM/DD` / `YYYY/MM/DD` 三种写法）、数值错一位仍判错、顺序颠倒仍判错（按位置比不是集合比）、非日期标签仍不是时间索引（含 `13-01` / `02-32` 越界与混入一个非日期）。`pytest tests/test_comparator.py` 41 passed。
+- 指纹：`code_sha12` `28d8b0d21488` → `27e735160da3`，`code_all` `2b7870add492` → `c472260fe39e`。与 eval-v1 判不可比是预期的：判分器就是尺子，换了尺子不能拿旧读数当趋势。
