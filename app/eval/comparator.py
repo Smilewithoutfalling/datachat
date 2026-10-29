@@ -67,6 +67,12 @@ _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 _CN_MONTH_RE = re.compile(r"^(?:(\d{4})\s*年\s*)?(1[0-2]|0?[1-9])\s*月(?:份)?$")
 _QUARTER_RE = re.compile(r"^(?:\d{4})?\s*Q([1-4])$", re.IGNORECASE)
 _WEEK_RE = re.compile(r"^\d{4}-?W\d{1,2}(?:\s*[(（][^()（）]*[)）])?$", re.IGNORECASE)   # B51：可带 '(02-26)' 这类说明
+# 规则 23：裸日期写法。'02-26' / '2/26' / '2024/02/26'。
+# 只用来判断"这组索引是不是日期"，不参与月份对齐——没能给出年份，`_month_key` 对它返 None 是对的。
+# 月限 1-12、日限 1-31，不做月长/闰年校验：'02-31' 会被当日期，但它改变不了判定结果
+# （按位置比数值，还是要逐位相等），而引入日历校验只会让这里多一个能错的地方。
+_MONTH_DAY_RE = re.compile(r"^(?:1[0-2]|0?[1-9])[-/](?:0?[1-9]|[12]\d|3[01])$")
+_FULL_DATE_RE = re.compile(r"^\d{4}[-/](?:1[0-2]|0?[1-9])[-/](?:0?[1-9]|[12]\d|3[01])$")
 _CN_QUARTER_RE = re.compile(r"^(?:\d{4}\s*年?\s*)?第?\s*([一二三四1-4])\s*季度?$")
 _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4}
 _MARGIN_LABELS = {"总计", "合计", "总和", "汇总", "all", "total", "sum"}
@@ -614,8 +620,17 @@ def _is_time_index(idx) -> bool:
     if isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex)):
         return True
     try:
-        return len(idx) > 0 and (all(_month_key(x) is not None for x in idx)
-                                 or all(isinstance(x, str) and _WEEK_RE.match(x.strip()) for x in idx))
+        if len(idx) == 0:
+            return False
+        if all(_month_key(x) is not None for x in idx):
+            return True
+        if all(isinstance(x, str) and _WEEK_RE.match(x.strip()) for x in idx):
+            return True
+        # 规则 23：裸日期。inv_016 的现场是周起始日写成 '02-26'，期望写周结束日 '2024-03-03'，
+        # 数值 14 个逐位相同却判错——因为这一组的 _month_key 全为 None，整段"两边都是时间索引"
+        # （含它末尾的按位置比较）从没进去过。这里只补"是不是日期"的认法，不改对齐规则。
+        return all(isinstance(x, str) and (_MONTH_DAY_RE.match(x.strip())
+                                           or _FULL_DATE_RE.match(x.strip())) for x in idx)
     except Exception:
         return False
 
