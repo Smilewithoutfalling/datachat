@@ -57,6 +57,8 @@ def _report(n=130, code_sha12=None, cases=None, **kw):
     }
     if code_sha12:
         d["fingerprints"] = {"code_sha12": code_sha12, "evalset_sha12": "evalset123"}
+        if kw.get("memory_mode"):
+            d["fingerprints"]["memory_mode"] = kw["memory_mode"]
     return d
 
 
@@ -86,6 +88,30 @@ def test_different_code_sha_stay_separate():
     recs = [L.normalize("a.json", _report(code_sha12="aaaaaaaaaaaa", time="2026-10-29T09:00:00")),
             L.normalize("b.json", _report(code_sha12="bbbbbbbbbbbb", time="2026-10-29T10:00:00"))]
     assert len(L.build_batches(recs)) == 2
+
+
+def test_batches_split_by_memory_mode():
+    """off 与 state 是两种配置，不能混在同一批里算均值。
+
+    2026-10-29 多轮首测：同一 `code_sha12` 下 off 均值 41.0%、state 均值 82.1%，
+    混算出来是 60.3%——那个数既不是 off 也不是 state，谁也代表不了。
+    """
+    recs = [L.normalize("a.json", _report(code_sha12="deadbeef1234", memory_mode="off",
+                                         time="2026-10-29T09:00:00")),
+            L.normalize("b.json", _report(code_sha12="deadbeef1234", memory_mode="state",
+                                         time="2026-10-29T10:00:00"))]
+    batches = L.build_batches(recs)
+    assert len(batches) == 2
+    assert {b["memory_mode"] for b in batches} == {"off", "state"}
+
+
+def test_same_mode_still_merges():
+    """加了 mode 维度不能把同模式的多跑拆散——否则算不出均值与翻转率。"""
+    recs = [L.normalize("a.json", _report(code_sha12="deadbeef1234", memory_mode="state",
+                                         time="2026-10-29T09:00:00")),
+            L.normalize("b.json", _report(code_sha12="deadbeef1234", memory_mode="state",
+                                         time="2026-10-29T10:00:00"))]
+    assert len(L.build_batches(recs)) == 1
 
 
 def test_git_sha_trailing_question_mark_stripped():

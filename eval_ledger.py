@@ -173,7 +173,12 @@ def flip_stats(records):
 
 
 def batch_key(r):
-    return (r["agent"], r["n"], r["code_sha12"] or "legacy")
+    """分批键 = (agent, 题数, code_sha12, 记忆模式)。
+
+    记忆模式必须进键：`off` 与 `state` 是两种配置，混在一批里算均值会得到一个
+    谁也不代表的数（2026-10-29 首测时 off 41% 与 state 82% 被平均成 60%）。
+    """
+    return (r["agent"], r["n"], r["code_sha12"] or "legacy", r["memory_mode"] or "—")
 
 
 def load_baselines():
@@ -191,7 +196,7 @@ def build_batches(records):
             continue
         groups.setdefault(batch_key(r), []).append(r)
     batches = []
-    for (agent, n, code), rs in groups.items():
+    for (agent, n, code, mode), rs in groups.items():
         rs.sort(key=lambda x: x["time"] or "")
         rates = [x["rate"] for x in rs if x["rate"] is not None]
         # 同批次里 evalset 理论上是同一个；真有多个就全列出来，别挑一个显示。
@@ -199,6 +204,7 @@ def build_batches(records):
         batches.append({
             "agent": agent,
             "n": n,
+            "memory_mode": mode,
             "code_sha12": None if code == "legacy" else code,
             "evalset_sha12": ", ".join(evalsets) if evalsets else None,
             "kind": rs[0]["kind"],
@@ -275,8 +281,8 @@ def render(records, batches, notes, now, baselines=None):
     # --- 批次表
     L.append("## 批次")
     L.append("")
-    L.append("| 批次 | 时间 | agent | 题数 | 运行 | 正确率 | 均值 | 逐题翻转 | 翻转题 | code_sha12 | 基线 | evalset |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| 批次 | 时间 | agent | 题数 | mode | 运行 | 正确率 | 均值 | 逐题翻转 | 翻转题 | code_sha12 | 基线 | evalset |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for b in batches:
         rates = [x["rate"] for x in b["records"] if x["rate"] is not None]
         run_desc = ("单跑" if len(b["records"]) == 1
@@ -290,8 +296,9 @@ def render(records, batches, notes, now, baselines=None):
             flip_cell, flip_n = "—", "—"
         label = ("`%s`" % b["code_sha12"]) if b["code_sha12"] else "legacy"
         base = baselines.get(b["code_sha12"])
-        L.append("| %s / %d 题 | %s | %s | %d | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-            b["agent"], b["n"], (b["first"] or "?")[:10], b["agent"], b["n"], run_desc,
+        L.append("| %s / %d 题 | %s | %s | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            b["agent"], b["n"], (b["first"] or "?")[:10], b["agent"], b["n"],
+            b["memory_mode"] or "—", run_desc,
             fmt(rates[-1] if len(rates) == 1 else None, "%.1f") if len(rates) == 1 else "—",
             fmt(b["mean"], "%.1f"), flip_cell, flip_n, label,
             ("**%s**" % base[0]) if base else "—",
