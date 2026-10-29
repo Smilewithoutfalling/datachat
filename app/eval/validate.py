@@ -76,6 +76,11 @@ def validate_cases(cases: list) -> list[str]:
         elif c.expect_turns:
             errors.append(f"{c.id}: expect_turns 只在多轮题上有效（turns 为空）")
 
+        # 2b. no_history_truth 是"最后一轮当单轮题"的对照，单轮题没有"最后一轮"可言。
+        #     写错地方时不会有人报错，只会静默变成一段没人读的代码。
+        if c.no_history_truth and not c.turns:
+            errors.append(f"{c.id}: no_history_truth 只在多轮题上有效（turns 为空）")
+
         # 3. 数据集：名字必须已知，或是一个存在的绝对路径
         for field_name in ("dataset", "gold_dataset"):
             value = getattr(c, field_name)

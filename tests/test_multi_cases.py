@@ -216,3 +216,78 @@ def test_turn_fields_land_in_json(tmp_path):
     assert row["turn_status"] == ["ok", "ok"]
     assert row["turn_answers"] == ["第一轮答案", "第二轮答案"]
     assert d["multi_turn"]["cases"] == 1
+
+
+# ---------------------------------------------------------------- 这条题到底测不测记忆
+
+# 没有 no_history_truth 的题必须在这儿登记理由。不是"懒得写"，是这些题测的是别的性质：
+# 指代对象是上一轮算出的实体（脱离历史没有"最直白的答案"），或者反过来测「该丢的约束要丢掉」。
+_NOT_ABOUT_REMEMBERING = {
+    "mul_003": "「那 S02 呢」没有指代对象，脱离历史无法定义任何理解",
+    "mul_004": "纠正轮自己说了西南；gold 与无历史答案相同，本题测的是不要拖着已被推翻的华南",
+    "mul_005": "纠正轮自己说了市场部；同上，测的是不要拖着研发部",
+    "mul_007": "「最高和最低」指上一轮那组地区，脱离历史没有可比的集合",
+    "mul_008": "「它」指上一轮的 K100",
+    "mul_011": "末轮自带全部口径（含去重），本身就是单轮题；本题测拒答会不会污染下一轮",
+    "mul_016": "「这 3 个地区」是上一轮算出的名单",
+    "mul_025": "本题测跨表**不该**继承；无历史答案与 gold 相同，写了会得到「相等即报错」",
+    "mul_026": "「那个部门」是上一轮的 argmax 结果",
+    "mul_027": "「这个门店」是上一轮的 argmax 结果",
+    "mul_029": "两轮都该拒答，没有「算出一个数」的对照",
+    "mul_032": "「它」指上一轮的 K200，占比分母也来自当轮上下文",
+}
+
+
+def test_multi_case_count_reaches_the_planned_scale():
+    """13 题时 off 对 state 的正确率是 5:0（p=0.0625），差一个不一致对才显著。
+    扩到 30 条以上是为了有更多机会挤出不一致对，并把正确率区间从 ±13pp 收到 ±8pp。
+
+    注意：**题量不改变 McNemar 的判据**，那个检验只看不一致对的数量（6 对 p=0.031）。
+    这条断言守的是样本量，不是显著性。
+    """
+    assert len(MULTI) >= 30, f"多轮只有 {len(MULTI)} 条"
+
+
+def test_every_multi_case_declares_whether_it_measures_memory():
+    """每条多轮题要么有 no_history_truth，要么在豁免表里登记理由。
+
+    没有这道闸，"最后一轮不能单独作答"就只是 cases_multi 模块文档里的一句话，
+    随手加一条"这些记录里卖得最好的产品是哪个"就会被当成测记忆的题——而实测
+    mul_014 初稿的冠军产品在全表和不看华南两种口径下都是 A，这道题一分记忆都测不出来。
+    """
+    missing = [c.id for c in MULTI if not c.no_history_truth and c.id not in _NOT_ABOUT_REMEMBERING]
+    assert not missing, f"这些多轮题既没有 no_history_truth 也没登记豁免理由：{missing}"
+    stale = [cid for cid in _NOT_ABOUT_REMEMBERING if cid not in {c.id for c in MULTI}]
+    assert not stale, f"豁免表里有不存在的题号：{stale}"
+    both = [c.id for c in MULTI if c.no_history_truth and c.id in _NOT_ABOUT_REMEMBERING]
+    assert not both, f"这些题既写了 no_history_truth 又在豁免表里，二选一：{both}"
+
+
+def test_no_history_truth_actually_differs_from_gold():
+    """把最后一轮当独立单轮题时算出的数，必须与 gold 不同。
+
+    相同意味着：一个完全不带历史、只按最后一句话老老实实算的模型也能判对，
+    这道题对"记忆有没有生效"零信息量。这条是机械验证，不靠读题面判断。
+    """
+    from app.eval.cases import DATASETS
+    from app.eval.comparator import results_equal
+    from app.tools.csv_io import read_csv
+    from app.tools.sandbox import run_trusted
+
+    frames = {}
+    bad = []
+    for c in MULTI:
+        if not c.no_history_truth:
+            continue
+        path = DATASETS[c.dataset]
+        if path not in frames:
+            frames[path] = read_csv(path)
+        gold, gerr = run_trusted(c.ground_truth, frames[path].copy())
+        naive, nerr = run_trusted(c.no_history_truth, frames[path].copy())
+        if gerr:
+            bad.append(f"{c.id}: ground_truth 执行失败 {gerr.strip().splitlines()[-1][:80]}")
+        elif nerr:
+            bad.append(f"{c.id}: no_history_truth 执行失败 {nerr.strip().splitlines()[-1][:80]}")
+        elif results_equal(naive, gold):
+            bad.append(f"{c.id}: 无历史答案与 gold 相同（{gold!r}），这道题测不出记忆")
+    assert not bad, "\n".join(bad)

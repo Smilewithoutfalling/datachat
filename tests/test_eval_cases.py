@@ -23,7 +23,7 @@ def test_case_count_and_ids_unique():
     assert len(set(ids)) == len(ids)
     single = [c for c in ALL_CASES if not c.turns]
     multi = [c for c in ALL_CASES if c.turns]
-    assert (len(single), len(multi)) == (130, 13), "单轮 130 + 多轮 13"
+    assert (len(single), len(multi)) == (130, 33), "单轮 130 + 多轮 33"
     by = {}
     for c in single:
         by[c.dataset] = by.get(c.dataset, 0) + 1
@@ -33,7 +33,18 @@ def test_case_count_and_ids_unique():
 def test_case_flags_consistent():
     for c in ALL_CASES:
         assert c.dataset in DATASETS, c.id
-        assert c.expect_refusal == (c.category == "refusal"), c.id
+        # 原来的写法是一行等价：expect_refusal == (category == "refusal")。那条不变式
+        # 立在只有单轮拒答题的时候；mul_029（两轮都该拒答）加进来之后它挡住了合法用例——
+        # 多轮必须 category="multi_turn"，而 gold 一旦是「无法回答：…」又必须标 expect_refusal，
+        # 否则 test_ground_truth_executes 会把"普通题给出了拒答字符串"当错误。
+        # 拆成三条等价且更紧的规则，而不是简单地把那一行删掉。
+        if c.category == "refusal":
+            assert c.expect_refusal, c.id
+        if c.expect_refusal:
+            assert c.category in ("refusal", "multi_turn"), c.id
+        if c.expect_refusal and c.category == "multi_turn":
+            # gold 只判最后一轮，所以"整条题期望拒答"等价于"末轮该拒答"
+            assert c.expect_turns and c.expect_turns[-1] == "refusal", c.id
         assert bool(c.alt_ground_truths) <= (c.category == "ambiguity"), c.id
         if c.category == "ambiguity":
             assert c.alt_ground_truths, c.id
@@ -271,3 +282,15 @@ def test_every_case_module_is_fingerprinted():
     assert mods, "一个用例模块都没扫到，glob 写错了"
     missing = [m for m in mods if f"app/eval/{m}" not in EVALSET_FILES]
     assert not missing, f"这些模块没进指纹：{missing}"
+
+
+def test_no_history_truth_rejected_on_single_turn_case():
+    """no_history_truth 写在单轮题上要被挡住。
+
+    这个字段的语义是"把最后一轮当单轮题算出来的答案"，单轮题没有"最后一轮"这回事。
+    写错位置不会让任何东西报错，只会静默变成一段没人读的代码——规则 6（枚举写错会
+    静默失效）的同类问题，所以在校验层挡掉。
+    """
+    c = EvalCase(id="tmp_007", category="aggregation", question="q", ground_truth="1",
+                 no_history_truth="result = 0")
+    assert any("no_history_truth" in e for e in validate_cases([c]))
