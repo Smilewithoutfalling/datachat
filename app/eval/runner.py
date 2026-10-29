@@ -176,7 +176,6 @@ class EvalRunner:
         out["expected"] = expected_list[0]
 
         # 2. 被测 Agent：多轮逐轮累积 history，打分只看最后一轮
-        chat_model = self.model_factory(case) if self.model_factory else None
         multi = bool(case.turns)
         turns = list(case.turns) if multi else [case.question]
         history = [] if multi else None
@@ -184,6 +183,11 @@ class EvalRunner:
         memory_by_turn = []      # [(mode, history_tokens, [trimmed...]), ...]
         res = None
         for i, q in enumerate(turns):
+            # 每轮新建 chat_model，不在循环外建一次。注入的模型是"一轮 = 一个会话"的
+            # 前提：oracle 桩靠 self.state["n"] 计数（第 1 次发工具调用、第 2 次给结论），
+            # 共享一个实例会让第 2 轮起直接吐结论文本、不再执行代码，多轮题全部 executed=False。
+            # 真实路径下 model_factory 是 None，这行恒为 None，不产生任何行为差异。
+            chat_model = self.model_factory(case) if self.model_factory else None
             res = self._run_one(case, q, history, chat_model)
             expect = case.expect_turns[i] if i < len(case.expect_turns) else ""
             turn_status.append(self._turn_status(res, expect))

@@ -18,7 +18,10 @@ import re
 # 那个分支在评测集里恒不命中，是死条件。
 ID_RE = re.compile(r"^[a-z]{2,6}_\d{3}$")
 
-CATEGORIES = {"aggregation", "filtering", "correlation", "timeseries", "refusal", "ambiguity"}
+CATEGORIES = {"aggregation", "filtering", "correlation", "timeseries", "refusal", "ambiguity",
+              # 多轮单独成类，不混进上面 6 类：混进去之后"聚合 36 题 35 对"里就掺了多轮题，
+              # 既看不出多轮本身的表现，也没法--filter category=multi_turn 单独跑消融
+              "multi_turn"}
 
 EXPECT_TURN_KINDS = {"exec", "refusal", "any"}
 EXPECT_TURN_PREFIX = "inherit:"

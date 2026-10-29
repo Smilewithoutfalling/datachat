@@ -39,7 +39,7 @@ from app.eval.report import EvalReport, datasets_metadata, git_sha, run_metadata
 
 _CAT_ALIAS = {
     "agg": "aggregation", "filt": "filtering", "corr": "correlation", "ts": "timeseries",
-    "ref": "refusal", "amb": "ambiguity",
+    "ref": "refusal", "amb": "ambiguity", "mul": "multi_turn",
 }
 
 

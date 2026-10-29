@@ -17,10 +17,15 @@ EVAL_DATA = os.path.join(ROOT, "data", "sample_eval.csv")
 
 
 def test_case_count_and_ids_unique():
+    """题数写死是有意的：加题会让 evalset 指纹变、历史数字失去可比性，
+    必须在这一行显式改一次，不能靠"自动适应"悄悄滑过去。"""
     ids = [c.id for c in ALL_CASES]
-    assert len(ids) == 130 and len(set(ids)) == 130
+    assert len(set(ids)) == len(ids)
+    single = [c for c in ALL_CASES if not c.turns]
+    multi = [c for c in ALL_CASES if c.turns]
+    assert (len(single), len(multi)) == (130, 13), "单轮 130 + 多轮 13"
     by = {}
-    for c in ALL_CASES:
+    for c in single:
         by[c.dataset] = by.get(c.dataset, 0) + 1
     assert by == {"sales": 50, "orders": 30, "employees": 25, "inventory": 25}
 

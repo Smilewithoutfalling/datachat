@@ -349,6 +349,7 @@ CATEGORY_MAP = {
     "timeseries": "时序",
     "refusal": "应拒答",
     "ambiguity": "歧义",
+    "multi_turn": "多轮",
 }
 
 _DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
@@ -361,8 +362,9 @@ DATASETS = {
 }
 
 from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
+from app.eval.cases_multi import MULTI_CASES  # noqa: E402
 
-ALL_CASES = SALES_CASES + EXTRA_CASES
+ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES
 
 from app.eval.validate import validate_cases  # noqa: E402
 

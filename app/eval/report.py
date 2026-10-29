@@ -380,7 +380,46 @@ class EvalReport:
             "by_category": {k: block(v) for k, v in self.by_category.items()},
             "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
             "memory": self.memory_block(),
+            "multi_turn": self.multi_turn_block(),
             "chart_smoke": self.chart_smoke(),
+        }
+
+    def multi_turn_block(self) -> dict | None:
+        """多轮用例的逐轮约束满足情况。
+
+        `expect_turns` 的判定在 runner 里已经算出来了（`turn_status`），但不进报告就等于
+        没测：只看最终正确率的话，"第 2 轮没把筛选条件带下来"和"第 2 轮算错了"是同一个数，
+        而这两件事的修法完全不同（前者是记忆/上下文，后者是分析能力）。
+
+        分母只算**受约束**的轮次（`any` 排除），因为纯指令轮本来就不该执行代码，
+        把它算进"执行成功率"会把模型逼成"每句话都要跑代码"。
+        """
+        ms = [r for r in self.results if getattr(r["case"], "turns", None)]
+        if not ms:
+            return None
+        checked, failed = Counter(), Counter()
+        fails = []
+        for r in ms:
+            c = r["case"]
+            statuses = r.get("turn_status") or []
+            for i, expect in enumerate(c.expect_turns):
+                if expect == "any":
+                    continue
+                kind = expect.split(":")[0]
+                checked[kind] += 1
+                st = statuses[i] if i < len(statuses) else ""
+                if st != "ok":
+                    failed[kind] += 1
+                    fails.append({"id": c.id, "turn": i + 1, "expect": expect, "status": st})
+        total = sum(checked.values())
+        return {
+            "cases": len(ms),
+            "turns": sum(len(r["case"].turns) for r in ms),
+            "checked": total,
+            "failed": sum(failed.values()),
+            "rate": (total - sum(failed.values())) / total * 100 if total else None,
+            "by_kind": {k: {"checked": checked[k], "failed": failed[k]} for k in sorted(checked)},
+            "fails": fails,
         }
 
     def memory_block(self) -> dict:
@@ -434,6 +473,11 @@ class EvalReport:
                 "memory_mode": r.get("memory_mode"),
                 "history_tokens": r.get("history_tokens"),
                 "memory_trimmed": r.get("memory_trimmed"),
+                # 多轮（EV-A2）：题面全貌 + 逐轮答案 + 逐轮约束判定。
+                # 只存 question（= last turn）的话，事后看不出这题到底问了几轮什么。
+                "turns": list(c.turns) if c.turns else [],
+                "turn_answers": [a[:800] for a in (r.get("turn_answers") or [])],
+                "turn_status": r.get("turn_status") or [],
                 # 可还原的结构化结果：比较器改了之后可以用 run_eval.py --rescore 离线重新打分（B26）
                 "expected_obj": dump_obj(r.get("expected")),
                 "actual_obj": dump_obj(r.get("actual")) if r.get("executed") else None,
@@ -468,6 +512,11 @@ class EvalReport:
             mix = "" if mem.get("uniform") else "  ⚠ 混了多种模式，不能当消融结果"
             print(f"  记忆: {modes}   历史 {mem.get('avg_history_tokens')} tokens/题"
                   f"   被裁 {mem.get('trimmed_any')} 题{mix}")
+        mt = s.get("multi_turn") or {}
+        if mt.get("cases"):
+            by = "  ".join(f"{k}:{v['failed']}/{v['checked']}" for k, v in mt["by_kind"].items())
+            print(f"  多轮: {mt['cases']} 题 {mt['turns']} 轮   约束满足 {self._pct(mt['rate'])}"
+                  f"  ({mt['checked'] - mt['failed']}/{mt['checked']})   按类型 {by}")
         print(f"  总用例: {self.total}")
         print("=" * 60)
 

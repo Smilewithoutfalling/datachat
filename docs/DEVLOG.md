@@ -2624,3 +2624,26 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - 指纹不变：本文件在仓库根目录，不在 `app/**/*.py` 扫描范围。实测 `code_sha12 = 27e735160da3`、`code_all = c472260fe39e`，与 #93 合并后一致。
 - 测试 13 条（`tests/test_ledger.py`）：结论区三种保留场景、污染标记、分类边界、批次合并与拆分、`git_sha` 尾 `?` 清理、flip 与 `_stability` 逐位一致、分母口径、单跑返回 None、全错清单。
 - 用法：跑完任何一次评测后执行 `python eval_ledger.py`；`--check` 只报是否需要重建（退出码 1 = 有差异），方便收尾时确认没漏记。
+
+## [82] 2026-10-29 · 多轮用例 13 条：让 `state` 模式第一次有负载（EV-A1/A2）· commit（待回填）
+
+**这是整条链路唯一的硬阻塞。** `state` 把历史渲染成「工作状态块 + 数据块」，`off` 把原始 (q, a) 当消息回灌；单轮题两者都是空历史，`system_block` 都是空串，跑 `state` 等于空转。框架早就写好了（`turns` / `expect_turns` / `inherit:<regex>` / `runner` 的逐轮累积 / `validate` 的 6 条校验），缺的只是用例。
+
+**设计原则：最后一句必须不能单独作答。** 判据是"把 `turns[-1]` 单独发给 agent，它无法确定要算什么"。所以题面大量用「这些记录」「那 S02 呢」「按职级拆开看呢」——单轮题不敢这么写（那是 B32 那种歧义），多轮题必须这么写，否则测的是"连续两个单轮"。13 条覆盖 6 类依赖：约束继承（mul_001–003）、纠正覆盖（004–006）、指代消解（007–008）、分组粒度继承（009）、四轮约束叠加（010）、拒答后恢复（011）、时间范围继承（012）、三级依赖（013）。
+
+`ground_truth` 只算最后一轮且必须独立完整：gold 执行时没有前面几轮的结果，写「在上一步基础上再……」会跑不出来。
+
+**踩到的两个真 bug**：
+
+1. **oracle 桩的"一轮 = 一个模型实例"前提被违反**。`chat_model` 建在轮次循环外，而 `oracle_model` 的 react 分支靠 `state["n"]` 计数（第 1 次发工具调用、第 2 次给结论）。共享一个实例 → 第 2 轮起直接吐文本、不再执行代码 → **13 条多轮题全部 `executed=False`，0/13**。修法是把 `model_factory(case)` 挪进循环。真实路径下 `model_factory` 是 `None`，这行恒为 `None`，零行为差异。
+2. **逐轮约束算了但没落盘**。`runner._turn_status` 算出 `turn_status`，`report.to_json` 却不写 `turn_status` / `turn_answers` / `turns`——等于没测。只看最终正确率的话，"第 2 轮没把筛选带下来"和"第 2 轮算错了"是同一个数，而这两件事的修法完全不同。补了三个字段 + `multi_turn` 汇总块（`checked` 只算受约束的轮次，`any` 排除；失败带轮次号）。
+
+**多轮单独成类**（`category="multi_turn"`，`CATEGORY_MAP` 加「多轮」）。混进 aggregation 的话分类表就读不出多轮表现，也没法 `--filter category=mul` 单独跑消融。代价是所有按类报表的分母变一次——这是加题本来就躲不掉的。
+
+**实测（`--oracle --category mul`，不调模型）**：13/13 全对、执行成功率 100%、29 轮里 26 轮受约束、约束满足 25/26。唯一失败是 `mul_011` 第 1 轮的 `refusal`——oracle 桩只会吐 gold 代码，不会拒答，这是桩的固有限制，不是用例问题。顺带改掉一处自己挖的坑：`mul_004` / `mul_005` 第 1 轮原本写 `inherit:华南` / `inherit:研发`，那是在测"题面关键词有没有出现在代码里"（第 1 轮答得对不对根本不判分），而且必然被 oracle 打脸，改成 `exec`。
+
+**指纹**：`code_sha12` `27e735160da3` → `a38fdc8dc578`（A 47→48，`cases_multi.py` 进 A 组），`code_all` `c472260fe39e` → `f2b6912b6647`，`evalset` 因题数 130→143 而变。**`eval-v1` 从此不可比**，这是加题的必然代价，不是事故。
+
+- 测试 11 条（`tests/test_multi_cases.py`）：多轮题存在且 ≥2 轮、`question == turns[-1]`、单独成类、最后一轮不重复第一轮、**oracle 每轮都执行**（真跑执行器，mock 掉就复现不出实例复用这个 bug）、单轮 turn_* 保持空列表、`any` 不进分母、失败带轮次号、无多轮返回 None、`turn_status` 比 `expect_turns` 短时算失败、逐轮字段真的进 JSON。
+- `tests/test_eval_cases.py::test_case_count_and_ids_unique` 从"130"改成"(单轮 130, 多轮 13)"。写死是有意的：加题会让 evalset 变、历史数字失去可比性，必须显式改一次。
+- **环境**：真实模型跑不了。`grg-aikits-test.grgbanking.com` 在公网 DNS 里是 `Non-existent domain`（腾讯 119.29.29.29 直接回 NXDOMAIN），今早能跑是因为当时解析得到。`state` vs `off` 的真实对比等网关恢复——这才是这批用例存在的目的，现在只完成了"接线正确"。
