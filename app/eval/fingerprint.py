@@ -53,6 +53,13 @@ _AFFECTS_RESULTS = (
     "app/eval/comparator.py",  # 打分规则：容差、match_kind、拒答判定
     "app/eval/validate.py",    # 校验规则决定哪些用例能进评测；放宽一条等于换了题集
     "app/eval/stats.py",       # 报告里的区间与稳定性数字（pass^k / flip_rate）由它算，改它就是改读数
+    # 执行器：决定"把什么当作历史喂给下一轮"。原来记在 B（理由写"不属于被测系统"），
+    # 2026-10-29 被两次实测证伪：
+    #   ① chat_model 建在轮次循环外 → 第 2 轮起不执行代码 → 13 条多轮题全部 executed=False；
+    #   ② history 只传 (q, a) 不传 code → fold() 提不出筛选条件 → state_block 恒为空，
+    #      评测里跑 state 只跑了一半，mul_013 因此把「研发部」丢成「全公司」。
+    # 它改的是模型输入本身，不是读数方式，必须进 A。
+    "app/eval/runner.py",
 )
 
 # 用例模块按前缀吞掉：新加 cases_memory.py 时不必回来改这张表。
@@ -64,7 +71,6 @@ _EXEMPT = {
     "app/__init__.py": "包标记，无逻辑",
     "app/eval/__init__.py": "包标记，无逻辑",
     "app/eval/report.py": "只产出报告 JSON，不回灌模型",
-    "app/eval/runner.py": "评测执行器，不属于被测系统",
     "app/eval/rescore.py": "离线重打分工具",
     "app/eval/chart_smoke.py": "图表统计，只看已产出的图",
     "app/eval/fingerprint.py": "本文件",

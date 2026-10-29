@@ -71,6 +71,29 @@ def test_memory_adjacent_server_files_stay_b():
     assert fp._group("app/server/retention.py") == "B"
 
 
+def test_eval_runner_is_gated():
+    """执行器在 A 组。它决定「把什么当作历史喂给下一轮」，改它就是改模型输入。
+
+    原来记在 B，理由写「评测执行器，不属于被测系统」。2026-10-29 被两次实测证伪：
+    ① `chat_model` 建在轮次循环外 → 第 2 轮起不执行代码 → 13 条多轮题全部 executed=False；
+    ② `history` 只传 (q, a) 不传 code → `fold()` 提不出筛选条件 → `state_block` 恒为空，
+       评测里跑 state 只跑了一半，mul_013 因此把「研发部」丢成「全公司」。
+    两次改动都只动 runner.py 一行，都直接改了读数。
+    """
+    assert fp._group("app/eval/runner.py") == "A"
+
+
+def test_runner_change_moves_gate(tmp_path, monkeypatch):
+    """runner.py 改一个字符就要动门禁哈希——这是上一条的落地验证。"""
+    base = {"app/eval/runner.py": "X = 1\n", "app/eval/report.py": "r = 1\n"}
+    root = _make_repo(tmp_path, base)
+    _point_at(monkeypatch, root)
+    before = fp.code_fingerprint()["affects_results_sha256"]
+    _make_repo(tmp_path, {**base, "app/eval/runner.py": "X = 2\n"})
+    _point_at(monkeypatch, root)
+    assert fp.code_fingerprint()["affects_results_sha256"] != before
+
+
 # ---------------------------------------------------------------- 敏感度
 
 def test_scorer_change_moves_gate(tmp_path, monkeypatch):
