@@ -313,3 +313,64 @@ def test_rule22_illegal_month_not_accepted():
     assert not results_equal(pd.Series([34, 21, 5], index=["13月", "14月", "15月"]), e)
     # 带别的量词不能被误认成月份
     assert _period_part("3个月", 12) is None
+
+
+# ---- 规则 23（eval-v1 基线暴露）：日期索引写成 'MM-DD'
+_WEEKS_END = ["2024-03-03", "2024-03-10", "2024-03-17", "2024-03-24", "2024-03-31",
+              "2024-04-07", "2024-04-14", "2024-04-21", "2024-04-28", "2024-05-05",
+              "2024-05-12", "2024-05-19", "2024-05-26", "2024-06-02"]
+_WEEKS_START = ["02-26", "03-04", "03-11", "03-18", "03-25",
+                "04-01", "04-08", "04-15", "04-22", "04-29",
+                "05-06", "05-13", "05-20", "05-27"]
+_WEEK_VALS = [1070, 2258, 2108, 2086, 2205, 2275, 2127, 2222, 2215, 2994, 2343, 2257, 2213, 1483]
+
+
+def test_rule23_month_day_index_is_time_index():
+    """inv_016 的现场：按自然周汇总，14 个数值逐个相同，只有索引写法不同。
+
+    期望给周结束日 '2024-03-03'（W-SUN），模型给周起始日 '02-26'（周一）——
+    同一周的两种端点说法。数值序列逐位相同，判成错是冤枉。
+
+    根因在 `_is_time_index`：它靠 `_month_key` 判断，而 `_month_key` 只认
+    'YYYY-MM' / 'YYYY-MM-DD' / 中文月份，'02-26' 一律 None，于是整组索引被判"非时间索引"，
+    `_series_eq` 跳过"两边都是时间索引"那一整段——连它末尾的按位置比较也一起跳过了，
+    落到 `_month_numbers` / `_quarter_numbers` 也全失败。
+
+    这属于实现遗漏而非设计分歧：那段注释本来就写着"周/日频等无法按月对齐时，按位置比较数值"，
+    只是裸 'MM-DD' 进不了这个分支。
+
+    代价要说清楚：放行的是"按位置比数值"，所以"数值全对但标签错位"也会判对。
+    这不是新开的口子——周频从来恢复不出年份，原来的 fallback 就有这个性质，现在只是
+    让它对裸月日生效。标签错位的月份数据不会因此被放过：'2024-01' 这类能被 `_month_key`
+    认出的索引照旧走明确的月份对齐。
+    """
+    e = pd.Series(_WEEK_VALS, index=_WEEKS_END)
+    assert results_equal(pd.Series(_WEEK_VALS, index=_WEEKS_START), e)
+    # 'MM/DD'、'YYYY/MM/DD' 是同一天的不同写法，一并认
+    assert results_equal(pd.Series(_WEEK_VALS, index=[s.replace("-", "/") for s in _WEEKS_START]), e)
+    assert results_equal(pd.Series(_WEEK_VALS, index=["2024/" + s for s in _WEEKS_START]), e)
+
+
+def test_rule23_wrong_value_still_fails():
+    """只改了标签认法，数值比较一个字节没动。"""
+    e = pd.Series(_WEEK_VALS, index=_WEEKS_END)
+    bad = list(_WEEK_VALS)
+    bad[3] += 1
+    assert not results_equal(pd.Series(bad, index=_WEEKS_START), e)
+
+
+def test_rule23_reordered_still_fails():
+    """按位置比要求同位置数值相等，不是"集合相同"。顺序颠倒必须判错。"""
+    e = pd.Series(_WEEK_VALS, index=_WEEKS_END)
+    assert not results_equal(pd.Series(_WEEK_VALS[::-1], index=_WEEKS_START[::-1]), e)
+
+
+def test_rule23_non_date_labels_stay_non_time():
+    """不能因为放宽就把任意字符串索引当成时间。'A1'/'B2' 这种必须仍是非时间索引。"""
+    from app.eval.comparator import _is_time_index
+    assert not _is_time_index(pd.Index(["A1", "B2"]))
+    assert not _is_time_index(pd.Index(["02-26", "B2"]))     # 混进一个非日期，整组不认
+    assert _is_time_index(pd.Index(_WEEKS_START))
+    # 越界的"月-日"不是日期：13-01 / 02-32
+    assert not _is_time_index(pd.Index(["13-01", "13-02"]))
+    assert not _is_time_index(pd.Index(["02-32", "02-33"]))
