@@ -2585,3 +2585,19 @@ matplotlib 出了图，所以出图率仍通过，只有 `chart_option` 这一�
 - **这条改动推翻了旧规矩"判分器缺口必须攒到 eval-v2"**：旧规矩的成本假设是"改判分器就要重跑 50 分钟 baseline"，`--rescore` 把它证伪了。以后判分器缺口可以随时修，只要 ① baseline 已用 tag 冻结、不改历史数字；② 用 rescore 证明"只动了预期的那几题"。
 - 测试 4 条（`tests/test_comparator.py`）：14 周真实数据主现场（`MM-DD` / `MM/DD` / `YYYY/MM/DD` 三种写法）、数值错一位仍判错、顺序颠倒仍判错（按位置比不是集合比）、非日期标签仍不是时间索引（含 `13-01` / `02-32` 越界与混入一个非日期）。`pytest tests/test_comparator.py` 41 passed。
 - 指纹：`code_sha12` `28d8b0d21488` → `27e735160da3`，`code_all` `2b7870add492` → `c472260fe39e`。与 eval-v1 判不可比是预期的：判分器就是尺子，换了尺子不能拿旧读数当趋势。
+
+## [80] 2026-10-29 · EV-C3 稳定性块：`--repeat` 直接出 pass^k / flip_rate · commit（squash 后回填）
+
+- `run_eval.py:_stability(per_case, k)`：k 次运行的三个读数一次算齐，写进 `<tag>_summary.json` 的 `stability` 块并在控制台打印。
+  - `pass_pow_k` = k 次全对的题占比。稳定正确的下界，必然 ≤ 任何单跑的正确率。
+  - `any_correct` = 至少对过一次的题占比。用来确认没有"永远做不对"的题。
+  - `flip_rate` = 任取一题、再任取两次运行，判定不一致的概率。全库口径是 `sum(单题 flip_rate)/题数`。
+- **两个"翻转率"不能混。** eval-v1 的三份报告：`flip_rate = 2.05%`，而"翻转题数/题数" = 4/130 = `3.08%`。前者分母是（题, 跑对），后者分母是题。两个数量级接近，光看打印值发现不了区别——`test_flip_rate_is_not_flipped_count_over_n` 专门钉这一条。
+- 逐题结果只能在这一层留：`runs` 里原本只有汇总数字（正确率 / 耗时 / token），算 `pass^k` 要的是"同一题在第 1..k 次分别对没对"。所以 `_run_agent` 里加 `per_case`，按题累积 `passes` 与 `(tokens, code)` 签名。
+- 缓存检测取保守判据：`identical_cases` 统计 k 次 `(tokens, code)` 逐字相同的题数，**只有全部题都相同**才 `valid=false`、不写 `pass^k` 的结论。不用比例做门禁 —— temp=0 时部分题本来就确定，>80% 就判 invalid 会把"模型很稳"误判成"命中缓存"，这两件事在温度 0 下本来就分不开。实测 eval-v1：130 题里 15 题全同（11.5%），`valid=true`。
+- `stats.pass_at_1` 不复用。它名字带 `at_1`，实现却是"至少对一次"（`k` 只做参数校验、不参与计算），语义与名字不符。直接在 `_stability` 里算 `any_correct` 并写明原因，免得读数的人按名字理解。
+- 实测（把 eval-v1 的三份报告喂给 `_stability`，与之前离线手算逐位相同）：`pass^3` 96.9%（126/130）、至少对一次 100%、`flip_rate` 2.05%、翻转 4 题（ord_004 / ord_030 / inv_016 / inv_021）、k 跑全错 0 题。
+- 指纹不变：`run_eval.py` 不在 A 组扫描范围（只扫 `app/**/*.py`），`stats.py` 一个字节没改（EV-C2 已备齐 `pass_pow_k` / `flip_rate`）。合并时 `code_sha12` 以当时 master 为准 —— #93 已把它从 `28d8b0d21488` 改成 `27e735160da3`，本批不叠加。
+- 测试 8 条（`tests/test_stability.py`）：126+4 主现场、口径防回归、passes=1 与 2 必须同 flip_rate、全错清单、全同→invalid、部分同仍 valid、tokens 缺失不算同、k<2 返回 None。
+- `--oracle --repeat` 是个坑，实测撞到：oracle 不调模型，`tokens` 是桩值（恒 30、`tokens_in=20`/`tokens_out=10`），于是 `identical_cases = n`，`pass^k` 被判 `valid=false`。这个结论是对的（oracle 下 stability 本来就没信息量），但报错文案只写了"响应被复用"，会让人以为模型被缓存。文案改成两种可能都写。顺带确认接线正确：oracle 36 题跑 2 次，`per_case` 累积、`stability` 计算、打印、写 `<tag>_summary.json` 全部走通。
+- 下一步：多轮用例（EV-B5 的 8 条 + 补到 10–15 条）落地后，`state` 模式才有可测负载；在那之前跑 `state` 等于空转（`state` 与 `off` 的 `system_block` 都是空串）。以及固定 10 题的 canary，用来探测指纹覆盖不到的模型权重漂移。

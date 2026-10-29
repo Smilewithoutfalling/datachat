@@ -141,6 +141,9 @@ def _run_agent(agent, cases, args, llm_config, stamp):
                  "filter": {"dataset": args.dataset, "category": args.category, "case": args.case}})
     tag = f"eval_{agent}{'_oracle' if args.oracle else ''}{'' if not args.no_dict else '_nodict'}_{stamp}"
     runs, all_correct = [], True
+    # EV-C3：逐题跨轮的判定与签名。`runs` 里只有汇总数字，算不了 pass^k / flip_rate——
+    # 那需要"同一题在第 1..k 次分别对没对"，必须在这层把逐题结果留下。
+    per_case = {}
     for k in range(1, args.repeat + 1):
         if args.repeat > 1 or args.agent == "both":
             print(f"\n======== {agent} 第 {k}/{args.repeat} 次 ========")
@@ -162,9 +165,14 @@ def _run_agent(agent, cases, args, llm_config, stamp):
         runs.append({"run": k, "file": out, "overall": s["overall"],
                      "by_category": {c: b["correctness_rate"] for c, b in s["by_category"].items()},
                      "by_dataset": {c: b["correctness_rate"] for c, b in s["by_dataset"].items()}})
+        for r in results:
+            rec = per_case.setdefault(r["case"].id, {"passes": [], "sig": []})
+            rec["passes"].append(bool(r["correct"]))
+            rec["sig"].append((r.get("tokens"), r.get("code")))
         all_correct = all_correct and all(r["correct"] for r in results)
     if args.repeat > 1:
-        _print_repeat(runs, meta, os.path.join(os.path.dirname(runs[0]["file"]) or ".", f"{tag}_summary.json"))
+        _print_repeat(runs, meta, os.path.join(os.path.dirname(runs[0]["file"]) or ".", f"{tag}_summary.json"),
+                      per_case)
     return all_correct, runs
 
 
@@ -209,7 +217,54 @@ def _print_compare(compare, path):
     print(f"对比已保存：{path}")
 
 
-def _print_repeat(runs, meta, path):
+def _stability(per_case: dict, k: int) -> dict:
+    """EV-C3：k 次运行的稳定性。这是读数的前提，不是装饰。
+
+    三个数字分工不同，不能互相替代：
+      - `pass_pow_k`：k 次全对的题占比。稳定正确的下界，必然 ≤ 任何单跑的正确率。
+      - `any_correct`：至少对过一次的题占比。用来确认没有"永远做不对"的题。
+      - `flip_rate`：任取一题、再任取两次运行，判定不一致的概率。两个单跑相减时的噪声
+        量级就是它——eval-v0 那次 129 对 125，4 题差里 3 题是噪声、1 题是真变化。
+
+    `flip_rate` 的全库口径是 sum(单题 flip_rate)/题数，即"随机抽一道题、随机抽两跑"。
+    不要拿"翻转题数/题数"顶替：那个数回答的是"有多少题不稳"，分母是题，不是(题, 跑对)。
+    本仓库 130 题 3 跑时两个数分别是 2.05% 与 3.08%，量级接近但含义不同。
+
+    复用 `stats.pass_pow_k` / `stats.flip_rate`，不复用 `stats.pass_at_1`：后者虽然名字
+    带 at_1，实现却是"至少对一次"（忽略 k），语义与名字不符，直接用会让读数的人误解。
+    """
+    from app.eval import stats
+    ids = list(per_case)
+    n = len(ids)
+    if n == 0 or k < 2:
+        return None
+    passes = [sum(per_case[i]["passes"]) for i in ids]
+    flipped = [i for i in ids if 0 < sum(per_case[i]["passes"]) < k]
+    always_wrong = [i for i in ids if sum(per_case[i]["passes"]) == 0]
+    flip = sum(stats.flip_rate(p, k) for p in passes) / n
+    # 缓存嫌疑：k 次跑出来的 (tokens, code) 逐字相同。temp=0 时部分题本来就确定，所以
+    # 只有"全部题都相同"才当异常——那说明多半是同一份响应被复用，pass^k 没有信息量。
+    identical = sum(1 for i in ids
+                    if len(set(per_case[i]["sig"])) == 1 and per_case[i]["sig"][0][0] is not None)
+    valid = identical < n
+    return {
+        "k": k,
+        "n_cases": n,
+        "pass_pow_k": stats.pass_pow_k(passes, k),
+        "any_correct": sum(1 for p in passes if p >= 1) / n,
+        "flip_rate": flip,
+        "flipped": {"count": len(flipped), "ids": flipped},
+        "always_wrong": always_wrong,
+        "identical_cases": identical,
+        "valid": valid,
+        "invalid_reason": None if valid else (
+            f"{n} 题在 {k} 次运行里的 (tokens, code) 全部逐字相同：可能是同一份响应被复用，"
+            "也可能是 --oracle 自检（那模式下 tokens 是桩值，恒为同一个数）。"
+            "两种情况下 pass^k 都没有信息量"),
+    }
+
+
+def _print_repeat(runs, meta, path, per_case=None):
     import json
     import statistics as st
     rates = [r["overall"]["correctness_rate"] for r in runs]
@@ -222,10 +277,28 @@ def _print_repeat(runs, meta, path):
           f"  标准差 {agg['stdev']:.1f}pp")
     for r in runs:
         print(f"    run{r['run']}: {r['overall']['correctness_rate']:.1f}%  {r['file']}")
+    stab = _stability(per_case, len(runs)) if per_case else None
+    if stab:
+        k, n = stab["k"], stab["n_cases"]
+        print("-" * 60)
+        print(f"  稳定性（k={k}，{n} 题）")
+        print(f"    pass^{k} {stab['pass_pow_k'] * 100:.1f}%"
+              f"（{round(stab['pass_pow_k'] * n)}/{n} 全对）"
+              f"   至少对一次 {stab['any_correct'] * 100:.1f}%")
+        print(f"    翻转 {stab['flipped']['count']} 题，flip_rate {stab['flip_rate'] * 100:.2f}%"
+              f"（任取两跑判定不一致的概率）")
+        if stab["flipped"]["ids"]:
+            print(f"      {' '.join(stab['flipped']['ids'])}")
+        print(f"    {k} 跑全错 {len(stab['always_wrong'])} 题"
+              + (f"：{' '.join(stab['always_wrong'])}" if stab["always_wrong"] else ""))
+        if not stab["valid"]:
+            print(f"    ⚠ pass^{k} 不可用：{stab['invalid_reason']}")
     print("=" * 60)
+    payload = {**meta, "git_sha": git_sha(), "aggregate": agg, "runs": runs}
+    if stab:
+        payload["stability"] = stab
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({**meta, "git_sha": git_sha(), "aggregate": agg, "runs": runs}, f,
-                  ensure_ascii=False, indent=2, default=str)
+        json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
     print(f"汇总已保存：{path}")
 
 
