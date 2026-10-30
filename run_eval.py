@@ -57,11 +57,19 @@ def _select_cases(category: str = None, case_id: str = None, dataset: str = None
             sys.exit(1)
         cases = [c for c in cases if c.dataset == dataset]
     if category:
-        key = _CAT_ALIAS.get(category, category)
-        if key not in CATEGORY_MAP:
-            print(f"未知分类: {category}，可选: {' / '.join(_CAT_ALIAS)}")
-            sys.exit(1)
-        cases = [c for c in cases if c.category == key]
+        # 支持逗号分隔（--category agg,filt），因为「除某一类之外」没法用单值表达。
+        # 每个 token 都走同一套别名，写错任何一个都整体报错，不做静默丢弃。
+        keys = []
+        for token in (t.strip() for t in category.split(",")):
+            if not token:
+                continue
+            key = _CAT_ALIAS.get(token, token)
+            if key not in CATEGORY_MAP:
+                print(f"未知分类: {token}，可选: {' / '.join(_CAT_ALIAS)}")
+                sys.exit(1)
+            keys.append(key)
+        if keys:
+            cases = [c for c in cases if c.category in keys]
     return cases
 
 
