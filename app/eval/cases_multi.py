@@ -156,8 +156,8 @@ MULTI_CASES = [
     EvalCase(id="mul_012", category="multi_turn", dataset="orders", gold_kind="series",
              ordered=True, percent_equiv=True,
              turns=["只看 2024 年 3 月的订单，重复录入的只算一次。",
-                    "这些订单里各品类的占比是多少？用百分数表示，保留两位小数，按占比从高到低排。"],
-             question="这些订单里各品类的占比是多少？用百分数表示，保留两位小数，按占比从高到低排。",
+                    "这些订单里各品类的订单笔数占比是多少？用百分数表示，保留两位小数，按占比从高到低排。"],
+             question="这些订单里各品类的订单笔数占比是多少？用百分数表示，保留两位小数，按占比从高到低排。",
              ground_truth=_D + "m = d[d['order_date'].str[:7] == '2024-03']; "
                                "result = (m['category'].value_counts(normalize=True) * 100).round(2)",
              no_history_truth="result = (df['category'].value_counts(normalize=True) * 100).round(2)",
@@ -207,8 +207,8 @@ MULTI_CASES = [
              expect_turns=["exec", "inherit:华南"]),
     EvalCase(id="mul_015", category="multi_turn", dataset="orders", gold_kind="scalar",
              turns=["去掉已取消的订单，重复录入的只算一次。这部分订单分布在哪些城市？",
-                    "这些城市里，订单金额最低的那个一共多少笔？"],
-             question="这些城市里，订单金额最低的那个一共多少笔？",
+                    "这些城市里，订单总金额最低的那个一共多少笔？"],
+             question="这些城市里，订单总金额最低的那个一共多少笔？",
              ground_truth=_D + "d = d[d['status'] != '已取消']; "
                                "lo = d.groupby('city')['pay_amount'].sum().idxmin(); "
                                "result = int((d['city'] == lo).sum())",
