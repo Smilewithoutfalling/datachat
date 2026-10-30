@@ -133,7 +133,7 @@ def evalset_files() -> tuple[str, ...]:
     import glob
     modules = sorted(glob.glob(os.path.join(_REPO, "app", "eval", "cases*.py")))
     return tuple(os.path.relpath(p, _REPO).replace(os.sep, "/") for p in modules) + (
-        "app/eval/case_model.py", "scripts/gen_eval_data.py")
+        "app/eval/case_model.py", "scripts/gen_eval_data.py", "scripts/gen_biz_data.py")
 
 
 EVALSET_FILES = evalset_files()
@@ -145,10 +145,17 @@ def evalset_fingerprint(datasets: dict | None = None) -> dict:
     if datasets is None:
         from app.eval.cases import DATASETS
         datasets = DATASETS
+    from app.tools.dataset import is_dict_file
     from app.tools.dictionary import dict_path_for
     files = [os.path.join(_REPO, f) for f in EVALSET_FILES]
     for path in datasets.values():
-        files += [path, dict_path_for(path)]
+        # 多表数据集是一个目录，直接 open 会 PermissionError；展开成逐表文件（含各自字典）。
+        tables = _dataset_files(path, is_dict_file)
+        if tables is None:
+            files += [path, dict_path_for(path)]
+        else:
+            for f in tables:
+                files += [f, dict_path_for(f)]
     h, parts = hashlib.sha256(), {}
     for f in sorted(set(files)):
         if not os.path.exists(f):
@@ -162,17 +169,52 @@ def evalset_fingerprint(datasets: dict | None = None) -> dict:
 
 
 def datasets_metadata(datasets: dict) -> dict:
-    """阶段 3：每张数据表的指纹，以及旁边有没有数据字典（B38：sample_eval 以前没有字典，"有/无字典"两组其实一样）。"""
+    """每张数据表的指纹，以及旁边有没有数据字典（B38：sample_eval 以前没有字典，"有/无字典"两组其实一样）。
+
+    多表数据集（目录 / 路径列表）没有单一文件可哈希，改成把「表名 + 表内容」按序拼进一个
+    sha256，并逐表列出字典有无。字段 `tables` / `dictionary_files` 只在多表时出现，
+    单表报告的形状不变——报告是要被人和脚本同时读的，加字段可以，改旧字段不行。
+    """
+    from app.tools.dataset import is_dict_file
     from app.tools.dictionary import dict_path_for
     out = {}
-    for name, path in datasets.items():
-        if not os.path.exists(path):
+    for name, dataset in datasets.items():
+        files = _dataset_files(dataset, is_dict_file)
+        if files is None:
+            if not os.path.exists(dataset):
+                continue
+            d = dict_path_for(dataset)
+            out[name] = {"path": os.path.relpath(dataset, _REPO).replace(os.sep, "/"),
+                         "sha256": hashlib.sha256(open(dataset, "rb").read()).hexdigest()[:12],
+                         "dictionary_file": os.path.exists(d)}   # 文件是否存在；本次是否使用看顶层 use_dictionary
             continue
-        d = dict_path_for(path)
-        out[name] = {"path": os.path.relpath(path, _REPO).replace(os.sep, "/"),
-                     "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()[:12],
-                     "dictionary_file": os.path.exists(d)}   # 文件是否存在；本次是否使用看顶层 use_dictionary
+        h = hashlib.sha256()
+        tables, with_dict = [], []
+        for f in files:
+            if not os.path.exists(f):
+                continue
+            tname = os.path.splitext(os.path.basename(f))[0]
+            h.update(tname.encode() + b"\0" + open(f, "rb").read().replace(b"\r\n", b"\n") + b"\0")
+            tables.append(tname)
+            if os.path.exists(dict_path_for(f)):
+                with_dict.append(tname)
+        if not tables:
+            continue
+        base = os.path.commonpath([os.path.dirname(f) for f in files]) if len(files) > 1 else os.path.dirname(files[0])
+        out[name] = {"path": os.path.relpath(base, _REPO).replace(os.sep, "/"),
+                     "sha256": h.hexdigest()[:12], "tables": tables,
+                     "dictionary_file": bool(with_dict), "dictionary_files": with_dict}
     return out
+
+
+def _dataset_files(dataset, is_dict_file):
+    """多表返回 CSV 路径列表；单表（或不是多表）返回 None。"""
+    if isinstance(dataset, (list, tuple)):
+        return [os.fspath(p) for p in dataset]
+    if isinstance(dataset, (str, os.PathLike)) and os.path.isdir(dataset):
+        return sorted(os.path.join(dataset, f) for f in os.listdir(dataset)
+                      if f.lower().endswith(".csv") and not is_dict_file(f))
+    return None
 
 
 # ---------------------------------------------------------------- 结果对象的可还原存储

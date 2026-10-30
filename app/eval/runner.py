@@ -13,7 +13,7 @@ from app.core.result import refusal_from_answer
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, results_equal
-from app.tools.csv_io import read_csv
+from app.tools.dataset import copy_data, load_data
 from app.tools.sandbox import run_trusted
 
 
@@ -89,8 +89,15 @@ class EvalRunner:
         return self.datasets[case.dataset]
 
     def frame(self, name: str = "sales"):
+        """单表返回 DataFrame，多表（目录 / 路径列表）返回 {表名: DataFrame}。
+
+        走 load_data 而不是 read_csv：`analyze()` 早就支持多表（代码里用 df['表名']），
+        但评测这一侧一直只 read_csv，所以 130 道题全是单表——多表能力从没被测过。
+        缓存的是原始数据，调用方要改必须先 copy（见 _run_code），多道题共用一份。
+        """
         if name not in self._frames:
-            self._frames[name] = read_csv(self.datasets[name])
+            data, _ = load_data(self.datasets[name])
+            self._frames[name] = data
         return self._frames[name]
 
     @property
@@ -99,7 +106,7 @@ class EvalRunner:
 
     def _run_code(self, code: str, dataset: str = "sales"):
         """执行标准答案（可信代码，本进程执行，不走子进程沙箱），返回 (result, error)。"""
-        result, error = run_trusted(code, self.frame(dataset).copy())
+        result, error = run_trusted(code, copy_data(self.frame(dataset)))
         return result, error or None
 
     def expected_all(self, case: EvalCase):

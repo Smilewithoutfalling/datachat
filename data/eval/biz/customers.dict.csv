@@ -1,0 +1,5 @@
+field,description
+customer_id,客户编号，对应 orders 表；部分带前导空格，join 前需 strip
+city,所在城市；部分为空表示未填写
+member_level,会员等级，取值有 Gold、Silver、Basic；部分写成小写
+register_channel,注册渠道，取值有 APP、小程序、网页

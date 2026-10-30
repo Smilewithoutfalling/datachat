@@ -23,11 +23,11 @@ def test_case_count_and_ids_unique():
     assert len(set(ids)) == len(ids)
     single = [c for c in ALL_CASES if not c.turns]
     multi = [c for c in ALL_CASES if c.turns]
-    assert (len(single), len(multi)) == (130, 33), "单轮 130 + 多轮 33"
+    assert (len(single), len(multi)) == (150, 33), "单轮 150（含 biz 20）+ 多轮 33"
     by = {}
     for c in single:
         by[c.dataset] = by.get(c.dataset, 0) + 1
-    assert by == {"sales": 50, "orders": 30, "employees": 25, "inventory": 25}
+    assert by == {"sales": 50, "orders": 30, "employees": 25, "inventory": 25, "biz": 20}
 
 
 def test_case_flags_consistent():

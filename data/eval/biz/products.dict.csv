@@ -1,0 +1,6 @@
+field,description
+sku,商品编码，大写形式 K-1001；表中有 2 行整行重复
+product_name,商品名称，部分带尾部空格
+category,商品品类，取值有数码、服饰、家居、食品、美妆；部分带尾部空格
+list_price,商品标价（元）
+cost,商品成本（元）

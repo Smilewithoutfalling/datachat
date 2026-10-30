@@ -359,12 +359,15 @@ DATASETS = {
     "orders": os.path.join(_DATA, "eval", "orders.csv"),
     "employees": os.path.join(_DATA, "eval", "employees.csv"),
     "inventory": os.path.join(_DATA, "eval", "inventory.csv"),
+    # 多表：目录下每张 *.csv 是一张表，代码里用 dfs['表名']（见 app/tools/dataset.py）
+    "biz": os.path.join(_DATA, "eval", "biz"),
 }
 
 from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
 from app.eval.cases_multi import MULTI_CASES  # noqa: E402
+from app.eval.cases_biz import BIZ_CASES  # noqa: E402
 
-ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES
+ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES + BIZ_CASES
 
 from app.eval.validate import validate_cases  # noqa: E402
 

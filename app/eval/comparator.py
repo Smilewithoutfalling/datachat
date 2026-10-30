@@ -800,6 +800,14 @@ def _vs_series(a, e: pd.Series, tol, ordered) -> bool:
     for c in _label_value_series(a, len(e)):
         if _series_eq(c, e, tol, ordered):
             return True
+    # 规则 8b：标签在 index 里、答案被包进一张多列的表。
+    # biz_013 的现场：期望是 index=sku 的销售额 Series，模型返回 index=sku 的表，
+    # 多给了商品名称和品类两列。答案那一列逐项相等，差别只在"裹了几层"。
+    # 只认 index 完全一致且某一数值列与期望整体相等，不做模糊匹配。
+    if isinstance(a, pd.DataFrame) and a.index.equals(e.index):
+        for col in a.columns:
+            if pd.api.types.is_numeric_dtype(a[col]) and _series_eq(a[col], e, tol, ordered):
+                return True
     # 规则 4：两级 MultiIndex Series vs 透视宽表
     if isinstance(e.index, pd.MultiIndex) and e.index.nlevels == 2:
         wide = e.unstack()

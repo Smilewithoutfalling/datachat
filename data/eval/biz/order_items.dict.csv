@@ -1,0 +1,5 @@
+field,description
+order_id,订单号，对应 orders 表；一单可能有 1 至 3 行
+sku,商品编码，对应 products 表；部分写成小写，join 前需统一大写
+qty,购买件数
+unit_price,成交单价（元）；部分带千分位逗号或人民币符号，需清洗成数值

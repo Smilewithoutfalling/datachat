@@ -1,0 +1,6 @@
+field,description
+refund_id,退款单号
+order_id,对应订单号；既有已退款订单的退款，也有少量已完成订单的售后补偿退款
+refund_date,退款日期
+refund_amount,退款金额（元），不超过该订单的明细合计；部分带千分位或人民币符号
+reason,退款原因，取值有质量问题、尺寸不符、物流延误、七天无理由、拍错
