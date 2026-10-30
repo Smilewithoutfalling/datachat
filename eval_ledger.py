@@ -373,6 +373,11 @@ def render(records, batches, notes, now, baselines=None):
     L.append("")
     L.append("> 正确率列：单跑写实际值；多跑的走均值列，避免把最后一跑当成结论。")
     L.append("")
+    L.append("> **同一个题集名的连续多行，先看 `evalset` 列再读正确率。** `evalset_sha12` 一变，")
+    L.append("> 说明题面或数据被改过（改题面也算），后面的读数与前一行不可比，不能连成能力曲线。")
+    L.append("> 典型陷阱：多表 20 题批 60→80→80→90→92.5，看着像模型在进步，实际是题面漏写的口径")
+    L.append("> 一条条补上去的过程，见 `docs/eval/MULTITABLE.md`。")
+    L.append("")
 
     # --- 逐次明细
     L.append("## 逐次明细")
