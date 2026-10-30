@@ -74,6 +74,10 @@ _EXEMPT = {
     "app/eval/rescore.py": "离线重打分工具",
     "app/eval/chart_smoke.py": "图表统计，只看已产出的图",
     "app/eval/fingerprint.py": "本文件",
+    # canary 只是十条题的 id 列表 + 题面哈希，不参与判分、不进模型输入。
+    # 它决定"跑哪十条"，与 run_eval.py 的 --case 同级；那类选题目前不在扫描范围内（缺口 4）。
+    # 改这个列表 = 换了探针本身，由 canary_fingerprint() 单独记录，不混进 code_sha12。
+    "app/eval/canary.py": "探针清单，不改输入也不改判分；自身哈希另记",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

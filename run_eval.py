@@ -43,14 +43,28 @@ _CAT_ALIAS = {
 }
 
 
-def _select_cases(category: str = None, case_id: str = None, dataset: str = None):
+def _select_cases(category: str = None, case_id: str = None, dataset: str = None,
+                  canary: bool = False):
     cases = ALL_CASES
-    if case_id:
-        cases = [c for c in cases if c.id == case_id]
-        if not cases:
-            print(f"未找到用例: {case_id}")
+    if canary or case_id:
+        if canary:
+            # canary 走清单常量，不让人手打十个 id：手打的清单会漏、会改、会顺序不同，
+            # 而探针一旦换了题，前后两次读数就不再是同一件事。
+            from app.eval.canary import canary_cases
+            return canary_cases(cases)
+        # 支持逗号分隔（--case ord_004,ord_013），跑固定的题组用。
+        # 与 --category 同一套规矩：写错任何一个 id 就整体报错退出，不做静默丢弃——
+        # 少跑了题而没人发现，比跑失败更坏，它会悄悄把一批读数变成另一批题的平均。
+        wanted = [t.strip() for t in case_id.split(",") if t.strip()]
+        by_id = {c.id: c for c in cases}
+        missing = [w for w in wanted if w not in by_id]
+        if missing:
+            print(f"未找到用例: {', '.join(missing)}")
             sys.exit(1)
-        return cases
+        # 按题集原顺序返回，不按命令行书写顺序：同一组题必须总是同一跑序，
+        # 否则两次运行的题序不同，缓存命中与上下文都跟着变，读数就不再可比。
+        picked = {w for w in wanted}
+        return [c for c in cases if c.id in picked]
     if dataset and dataset != "all":
         if dataset not in DATASETS:
             print(f"未知数据表: {dataset}，可选: {' / '.join(DATASETS)} / all")
@@ -77,7 +91,9 @@ def main():
     parser = argparse.ArgumentParser(description="DataChat 评测")
     parser.add_argument("--category", "-c", default=None, help="分类: agg/filt/corr/ts/refusal/ambiguity")
     parser.add_argument("--dataset", "-d", default="all", help="数据表: sales/orders/employees/inventory/all（默认 all）")
-    parser.add_argument("--case", default=None, help="单条用例ID，如 agg_001")
+    parser.add_argument("--case", default=None, help="用例ID，可逗号分隔，如 agg_001 或 ord_004,ord_013")
+    parser.add_argument("--canary", action="store_true",
+                        help="跑 canary 十条（app/eval/canary.py 的固定清单），用来探模型权重漂移")
     parser.add_argument("--data", default=None, help="替换 sales 表的数据文件（默认 data/sample_eval.csv）")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出（含code和result）")
     parser.add_argument("--agent", choices=["workflow", "react", "both"], default="workflow", help="被测 Agent")
@@ -113,10 +129,19 @@ def main():
         print(f"数据文件不存在: {args.data}")
         sys.exit(1)
 
+    if args.canary and args.case:
+        # 两个都给的话，谁也说不清这次跑的到底是哪批题。直接拒，不猜。
+        print("--canary 与 --case 只能给一个")
+        sys.exit(1)
+
     ensure_dirs()
-    cases = _select_cases(args.category, args.case, args.dataset)
+    cases = _select_cases(args.category, args.case, args.dataset, args.canary)
     tables = sorted({c.dataset for c in cases})
     print(f"📋 加载 {len(cases)} 条测试用例，数据表: {', '.join(tables)}\n")
+    if args.canary:
+        from app.eval.canary import canary_fingerprint
+        print(f"🔬 canary 模式：固定十条探针，canary_sha12 = {canary_fingerprint(cases)}")
+        print("   它只回答一件事：代码没动、题没动，读数变了 = 模型权重换了。\n")
 
     llm_config = None if args.oracle else LLMConfig.from_env()
     if args.oracle:
@@ -149,7 +174,14 @@ def _run_agent(agent, cases, args, llm_config, stamp):
                  "use_dictionary": not args.no_dict,
                  "datasets": datasets_metadata({k: v for k, v in runner.datasets.items() if k in used}),
                  "filter": {"dataset": args.dataset, "category": args.category, "case": args.case}})
-    tag = f"eval_{agent}{'_oracle' if args.oracle else ''}{'' if not args.no_dict else '_nodict'}_{stamp}"
+    if args.canary:
+        # 台账靠这个字段把探针读数从全量趋势里摘出去（n=10 恰好不被 DEBUG_N 的
+        # `n < 10` 判成 debug，不显式标就会混进批次表）。
+        from app.eval.canary import canary_fingerprint
+        meta["canary"] = True
+        meta["canary_sha12"] = canary_fingerprint(cases)
+    tag = (f"eval_{agent}{'_oracle' if args.oracle else ''}"
+           f"{'_canary' if args.canary else ''}{'' if not args.no_dict else '_nodict'}_{stamp}")
     runs, all_correct = [], True
     # EV-C3：逐题跨轮的判定与签名。`runs` 里只有汇总数字，算不了 pass^k / flip_rate——
     # 那需要"同一题在第 1..k 次分别对没对"，必须在这层把逐题结果留下。

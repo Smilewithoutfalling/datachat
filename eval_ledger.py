@@ -93,7 +93,18 @@ def normalize(path, data):
     cases = data.get("cases") or []
     n = overall.get("n") or len(cases)
     sha = (data.get("git_sha") or "unknown").rstrip("?")
-    kind = "debug" if n < DEBUG_N else ("gated" if fps.get("code_sha12") else "legacy")
+    # oracle 与 canary 都不能进趋势批次：
+    #   oracle —— 模型输出就是标准答案，那几个数字不代表能力，只证明流水线通；
+    #   canary —— 十条探针，读数只用来比"模型权重变没变"，混进全量趋势会污染均值。
+    #          特别注意 n=10 刚好卡在 `n < DEBUG_N` 的边界外，不显式判就会溜进批次表。
+    if data.get("oracle"):
+        kind = "oracle"
+    elif data.get("canary"):
+        kind = "canary"
+    elif n < DEBUG_N:
+        kind = "debug"
+    else:
+        kind = "gated" if fps.get("code_sha12") else "legacy"
     return {
         "file": os.path.basename(path),
         "time": data.get("time"),
@@ -113,6 +124,7 @@ def normalize(path, data):
         "code_all_sha12": fps.get("code_all_sha12"),
         "evalset_sha12": fps.get("evalset_sha12") or (data.get("evalset") or {}).get("sha256"),
         "rendered_set_sha12": fps.get("rendered_set_sha12"),
+        "canary_sha12": data.get("canary_sha12"),
         "comparable": data.get("comparable"),
         "kind": kind,
         "per_case": [
@@ -192,7 +204,8 @@ def load_baselines():
 def build_batches(records):
     groups = {}
     for r in records:
-        if r["kind"] == "debug":
+        # canary / oracle 各有各的表，不能混进来算均值（见 normalize 里的理由）
+        if r["kind"] in ("debug", "oracle", "canary"):
             continue
         groups.setdefault(batch_key(r), []).append(r)
     batches = []
@@ -241,8 +254,62 @@ HEADER = """# 评测台账
   差异里混着"代码变了"和"模型抖了"，分不开。
 - **`legacy`（无指纹）只能看趋势不能当基线**。那是 2026-10 上旬的探索，指纹体系还没建。
 - **`n < 10` 是单题调试**，不进表。
+- **oracle 与 canary 各自成表**。oracle 拿标准答案冒充模型输出，只证明流水线与判分口径通，
+  不代表任何能力；canary 是十道固定探针题，只用来探模型权重漂移。两者的正确率都**不**混进
+  全量趋势的均值——十条敏感题的平均值跟 163 题的平均值不是一回事。
 - **`flip` 只对同 `code_sha12` 的多次运行有意义**。跨批次算"翻转"等于把代码差异算进噪声。
 """
+
+
+def render_canary(records):
+    """canary 段：十条固定探针看模型权重有没有动。
+
+    单独成表是因为它的读数**不能**和全量趋势混着算：十条是挑出来的敏感题，正确率
+    天生和 163 题的平均值不是一回事。它唯一的价值是"同题、同码、同尺子，读数变了"。
+    """
+    can = [x for x in records if x["kind"] == "canary"]
+    if not can:
+        return []
+    L = ["## canary（固定十条探针，只探模型权重漂移）", ""]
+    L.append("判读：`canary_sha12` 与 `code_sha12` 都相同，读数变了才能归到模型侧；"
+             "任一指纹不同，只能重立基准，不算漂移。")
+    L.append("")
+    L.append("| 首次 | 跑数 | agent | 正确率 | 逐题翻转 | canary_sha12 | code_sha12 |")
+    L.append("|---|---|---|---|---|---|---|")
+    groups = {}
+    for r in can:
+        groups.setdefault((r["canary_sha12"], r["agent"], r["code_sha12"]), []).append(r)
+    for _key, rs in sorted(groups.items(), key=lambda kv: (kv[1][0]["time"] or "")):
+        rs.sort(key=lambda x: x["time"] or "")
+        rates = [x["rate"] for x in rs if x["rate"] is not None]
+        per = {}
+        for x in rs:
+            for c in x["per_case"]:
+                per.setdefault(c["id"], []).append(1 if c["correct"] else 0)
+        flipped = sorted(i for i, v in per.items() if len(set(v)) > 1)
+        L.append("| %s | %d | %s | %s | %s | `%s` | %s |" % (
+            (rs[0]["time"] or "?")[:19].replace("T", " "), len(rs), rs[0]["agent"] or "?",
+            fmt(sum(rates) / len(rates), "%.0f%%") if rates else "—",
+            ", ".join("`%s`" % i for i in flipped) if flipped else "0（一致）",
+            rs[0]["canary_sha12"] or "—",
+            ("`%s`" % rs[0]["code_sha12"]) if rs[0]["code_sha12"] else "legacy"))
+    L.append("")
+    return L
+
+
+def render_oracle(records):
+    """oracle 段：模型输出 = 标准答案，只证明流水线与判分口径通，不代表任何能力。"""
+    orc = [x for x in records if x["kind"] == "oracle"]
+    if not orc:
+        return []
+    L = ["## oracle 自检（假模型输出标准答案，不代表准确率）", ""]
+    L.append("| 时间 | 文件 | 题数 | 通过率 |")
+    L.append("|---|---|---|---|")
+    for r in sorted(orc, key=lambda x: x["time"] or ""):
+        L.append("| %s | `%s` | %d | %s |" % (
+            (r["time"] or "?")[:19].replace("T", " "), r["file"], r["n"], fmt(r["rate"], "%.0f%%")))
+    L.append("")
+    return L
 
 
 def render_notes(old_md):
@@ -343,6 +410,10 @@ def render(records, batches, notes, now, baselines=None):
             if f["all_wrong"]:
                 L.append("  - 全程错：%s" % ", ".join("`%s`" % i for i in f["all_wrong"]))
         L.append("")
+
+    # --- canary / oracle：各自成表，不进趋势
+    L.extend(render_canary(records))
+    L.extend(render_oracle(records))
 
     # --- 调试 / 单题
     dbg = [x for x in records if x["kind"] == "debug"]
