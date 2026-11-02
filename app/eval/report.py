@@ -17,12 +17,30 @@ from collections import Counter
 from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
+from app.eval.provenance import refusal_shape
 
 
 # V2d §1：每题 token 拆分（runner.usage_fields 产出）；旧报告没有这些键
 USAGE_KEYS = ("tokens_in", "tokens_out", "tokens_cache_read", "tokens_reasoning", "tokens_reported",
               "tokens_estimated")
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _refusal_shapes(items) -> dict:
+    """应拒答题的回答形态分布（缺口 14a）。**只统计，不判分。**
+
+    为什么放在报告层而不是 runner：`app/eval/runner.py` 在 A 组指纹里，为了让一个纯记录
+    字段多跑一行，会把 `code_sha12` 改掉，6 个基线全部失配。`report.py` 是 B 组（只产出
+    报告、不回灌模型），`provenance.py` 也是 B 组——放这里等于零代价。
+    """
+    got = Counter()
+    for r in items:
+        if not getattr(r.get("case"), "expect_refusal", False):
+            continue
+        s = refusal_shape(r.get("answer"))
+        if s:
+            got[s] += 1
+    return dict(got)
 
 
 _WIN_GIT = (r"C:\Program Files\Git\cmd\git.exe", r"C:\Program Files (x86)\Git\cmd\git.exe")
@@ -427,6 +445,9 @@ class EvalReport:
                 # 判错已经体现在正确率里，这里只留 id 供人复核。
                 "refusal_leaks": [{"id": r.get("id"), "why": r.get("refusal_leak_why")}
                                   for r in items if r.get("refusal_leak")],
+                # 缺口 14a：应拒答题的**回答形态**分布（clean / semantic_no_prefix / infer / empty）。
+                # 与 refusal_leaks 正交：前者是"有没有按格式拒"，后者是"拒了之后有没有偷偷答"。
+                "refusal_shapes": _refusal_shapes(items),
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         evalset = evalset_fingerprint()
@@ -543,6 +564,10 @@ class EvalReport:
                 # 缺口 14b：应拒答题的越界标记（非拒答题恒为 None）
                 "refusal_leak": r.get("refusal_leak"),
                 "refusal_leak_why": r.get("refusal_leak_why"),
+                # 缺口 14a：应拒答题的回答形态（非拒答题恒为 None）。读的是 answer 本身，
+                # 所以只依赖报告层——runner 不动，`code_sha12` 不变。
+                "refusal_shape": (refusal_shape(r.get("answer"))
+                                  if getattr(c, "expect_refusal", False) else None),
                 # 多轮（EV-A2）：题面全貌 + 逐轮答案 + 逐轮约束判定。
                 # 只存 question（= last turn）的话，事后看不出这题到底问了几轮什么。
                 "turns": list(c.turns) if c.turns else [],

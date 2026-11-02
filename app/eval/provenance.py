@@ -31,8 +31,9 @@
 - `"unparsed"`    —— 代码有语法错
 """
 import ast
+import re
 
-__all__ = ["result_origin", "result_missing", "describe"]
+__all__ = ["result_origin", "result_missing", "describe", "refusal_shape"]
 
 _BRANCHY = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith, ast.IfExp)
 _BRANCHY = _BRANCHY + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
@@ -254,3 +255,56 @@ def describe(code: str, executed: bool, result) -> dict:
         return {"result_origin": None, "result_missing": missing}
     return {"result_origin": result_origin(code),
             "result_missing": result_missing(code, executed, result)}
+
+
+# ------------------------------------------------------------------ 拒答形态（缺口 14a）
+
+# `app/` 里有 6 处 prompt 要求「结论第一行必须以 `无法回答：` 开头」
+# （service.py:348、codegen.py:26、reviewer.py:29、react_agent.py:38/39/245/246）。
+# 模型不照做时判错是对的——那是模型没守契约，不是判分器不宽容。缺口 14a 的结论就是这个，
+# 但它当时只有肉眼观察，没有可数的字段。这里补的就是那个字段。
+#
+# **只记录，不进判分，也不进 `score_detail`。** 它和 `refusal_leak`（缺口 14b）正交：
+#   `clean` + `leak=False`  → 理想
+#   `clean` + `leak=True`   → 交了标准拒答，后面又偷偷把题答了（14b 判错）
+#   `semantic_no_prefix`    → 意思到了，形状没到（14a 判错）
+#   `infer`                 → 没拒答，直接推断
+# 两个字段一起看，才分得清「不肯拒」和「拒了但没按格式拒」。
+
+_PREFIX = "无法回答"
+# 语义拒答的标志：说明某个字段/信息不存在。全部取自 30 个真实回答的措辞，不是凭空写的。
+_REFUSE_HINTS = (
+    re.compile(r"没有.{0,16}字段"),
+    re.compile(r"(不含|不包含|缺少|缺乏).{0,16}字段"),
+    re.compile(r"没有.{0,12}(记录|数据|信息)"),
+    re.compile(r"无法(计算|给出|确定|得知|统计|判断)"),
+    re.compile(r"数据(表|中|里).{0,8}(只有|仅有|只包含|仅包含)"),
+)
+
+
+def refusal_shape(answer: str | None) -> str | None:
+    """应拒答题的回答形态。**只记录，不参与判分。**
+
+    值域：
+    - `"clean"`              —— 首个非空行以「无法回答」开头（契约要求的形状）
+    - `"semantic_no_prefix"` —— 没那四个字，但正文说明了字段缺失 / 无法计算
+    - `"infer"`              —— 既没前缀也没拒答语义，等于把题答了
+    - `"empty"`              —— 回答为空（不猜它是哪一种）
+    - `None`                 —— 非拒答题，或调用方没给 answer
+
+    **只判「首行」是不是那个前缀**，不判整段。emp_022 run1 首行是标准拒答、后面跟了
+    一段推断分析——形态仍是 `clean`，越界由 `refusal_leak` 管。两个字段各管一件事，
+    混在一起就又变成"一个字段两个含义"。
+    """
+    if answer is None:
+        return None
+    text = str(answer).strip()
+    if not text:
+        return "empty"
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if first.startswith(_PREFIX):
+        return "clean"
+    head = text[:600]          # 只看开头一段：拒答理由都在前面，翻全文容易撞上后面的分析
+    if any(p.search(head) for p in _REFUSE_HINTS):
+        return "semantic_no_prefix"
+    return "infer"

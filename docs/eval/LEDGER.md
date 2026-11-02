@@ -442,8 +442,26 @@ eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题�
     `app/` 里有 6 处 prompt 明确要求「结论第一行必须以 `无法回答：` 开头」
     （`service.py:348`、`codegen.py:26`、`reviewer.py:29`、`react_agent.py:38/39/245/246`）。
     模型还是写成了自然语言叙述，这是模型行为问题，不是判分器不宽容。
-    想做的话只能加**记录**：`refusal_shape = clean / semantic_no_prefix / infer`，
-    不进判分。
+    **2026-11-02 已落地为记录字段**（不改判定）：`refusal_shape` ∈
+    `clean` / `semantic_no_prefix` / `infer` / `empty`，由 `provenance.refusal_shape()`
+    只看**首个非空行**判，在 `report.py` 里现算。
+
+    拿 33 条真实拒答回答（9 道单轮 × 3 + `mul_029` × 6）跑出来：
+
+    | `refusal_shape` | 条数 | 是谁 |
+    |---|---|---|
+    | `clean` | **31** | 9 道题全部 + `mul_029` 全部 + `emp_022` run1 |
+    | `semantic_no_prefix` | **2** | `emp_022` run2 / run3 |
+    | `infer` | 0 | — |
+    | `empty` | 0 | — |
+
+    所以「模型普遍不守契约」这个说法不成立：**除 `emp_022` 外的 9 道题（8 道单轮 + `mul_029`）
+    共 30 次回答，30 次全部是 `clean`**；只有 `emp_022` 这一道题的三跑各走各的（run1 守形状但越界 → 14b 判错；run2/3 不守形状但语义拒了 → 14a 判错）。
+    同一道题三种失败形态，指向的是**题本身留了绕路空间**，不是模型的格式习惯坏了。
+    这也解释了为什么它在 canary 第一版就被踢出清单（当时理由是「有绕路空间」）。
+
+    与 `refusal_leaks` 正交：`clean` + `leak=True` 是"交了标准拒答再偷偷答"，
+    `semantic_no_prefix` 是"拒了但没按格式拒"。两个字段一起看才分得清。
 
     **14b（run1 判对但 answer 越界）—— 真盲区，且报告在撒谎。~~已关闭（2026-11-02）~~，H 拍板「算越界」。**
     run1 的 `result` 是标准拒答格式（骗过判分器判对），但 `answer` 后面跟了一整段

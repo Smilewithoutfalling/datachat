@@ -10,7 +10,7 @@
 """
 import pytest
 
-from app.eval.provenance import describe, result_missing, result_origin
+from app.eval.provenance import describe, refusal_shape, result_missing, result_origin
 
 # 真实样本：outputs/eval_react_20261030_150739_run1.json / run2.json
 BIZ_020 = """
@@ -135,3 +135,75 @@ def test_describe_shape_is_stable():
     got = describe(ORD_004_OK, executed=True, result=832.54)
     assert got == {"result_origin": "computed", "result_missing": None}
     assert describe("", executed=True, result=None) == {"result_origin": None, "result_missing": "no_assign"}
+
+
+# ---------------------------------------------------------------- 拒答形态（缺口 14a）
+
+# 真实样本：outputs/eval_v5_single_run1.json 的 emp_022。
+# 首行是标准拒答，后面跟了一整段"离职特征分析"——形态仍是 clean，越界由 refusal_leak 管。
+EMP_022_RUN1 = """无法回答：数据中没有记录离职原因（如离职类型/原因调查字段），只能看到离职日期，无法确定员工离职的主要原因。
+
+**说明（可作为线索的离职特征分析，非"原因"结论）**
+
+数据共 240 人，其中 37 人已离职，总体离职率 15.4%；绩效 C 的离职率 22.4%。"""
+
+# 真实样本：outputs/eval_v5_single_run2.json 的 emp_022。
+# 意思到了（说了字段不存在），但首行是"结论（含口径说明）"，没有那四个字。
+EMP_022_RUN2 = """**结论（含口径说明）**
+
+数据中**没有"离职原因/离职类型"字段**，因此无法给出员工自述的官方离职原因；只能从现有字段推断离职的高风险特征。"""
+
+# 真实样本：outputs/eval_v5_single_run1.json 的 ord_024。
+ORD_024 = "无法回答：数据中没有成本字段，无法计算毛利率。"
+
+
+def test_refusal_shape_clean_needs_prefix_on_first_line():
+    assert refusal_shape(ORD_024) == "clean"
+    assert refusal_shape("  无法回答：没有这个字段  ") == "clean"
+    # 空行不算"第一行"：模型常在前面留一个换行
+    assert refusal_shape("\n\n无法回答：没有该字段。") == "clean"
+
+
+def test_refusal_shape_only_reads_first_line():
+    """`clean` 判的是"有没有按格式拒"，不是"有没有乱答"。
+
+    emp_022 run1 首行标准拒答、正文给了 20 多个百分比，14b 判它越界（`refusal_leak`）。
+    形态字段若在这里判成 `infer`，两个字段就变成同一个意思了。
+    """
+    assert refusal_shape(EMP_022_RUN1) == "clean"
+
+
+def test_refusal_shape_semantic_without_prefix():
+    """说了"字段不存在"，但没用规定前缀 —— 缺口 14a 说的就是这一类。"""
+    assert refusal_shape(EMP_022_RUN2) == "semantic_no_prefix"
+    assert refusal_shape("数据表中只有库存和销量字段，无法计算销售额。") == "semantic_no_prefix"
+    assert refusal_shape("该表缺少成本列，无法给出毛利率。") == "semantic_no_prefix"
+
+
+def test_refusal_shape_infer_and_empty():
+    """既没前缀也没拒答语义 = 把题答了；空回答不猜它属于哪一种。"""
+    assert refusal_shape("数码品类中销售额最高的是数码商品11，金额 138322.36 元。") == "infer"
+    assert refusal_shape("") == "empty"
+    assert refusal_shape("   \n  ") == "empty"
+    assert refusal_shape(None) is None
+
+
+def test_refusal_shape_never_raises_on_weird_input():
+    assert refusal_shape(12345) == "infer"      # 非字符串也要有答案，不抛
+
+
+def test_refusal_shape_does_not_touch_code_fingerprint():
+    """形态字段必须留在 B 组文件里 —— 这条是被自己踩出来的。
+
+    第一版把它写进 `runner.py`（out 字典加一个键 + return 前算一次），
+    `affects_results_sha256` 从 `ac1ebcd66c5a` 变成 `da0af7c3efce`：一行纯记录代码
+    让 6 个基线全部失配。挪到报告层现算之后回到 `ac1ebcd66c5a`。
+
+    断言守的是分组：`runner.py` 在 A 组（决定喂给模型什么），`report.py` / `provenance.py`
+    在 B 组（只产出报告）。记录字段只能待在 B 组。
+    """
+    from app.eval.fingerprint import code_fingerprint
+    files = code_fingerprint()["files"]
+    assert files["app/eval/runner.py"]["group"] == "A"
+    for f in ("app/eval/report.py", "app/eval/provenance.py"):
+        assert files[f]["group"] == "B", f

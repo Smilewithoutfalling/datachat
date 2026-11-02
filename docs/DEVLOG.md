@@ -3851,3 +3851,63 @@ M07 那样指向已删文件的。结论：**没有第二处失效引用**，但
 `failure_class` 分布，再决定列画像做哪几项，可能只需要「空格 + 大小写塌缩」两条。
 
 详细数据写进 `docs/roadmap/phase7-accuracy.md` 的「A1 实测」一节，**没有改一行实现代码**。
+
+## [102] 2026-11-02 · 缺口 14a 落地为一个记录字段，以及一次「差点自己踩自己」的分组事故
+
+### 缺口 14a 要的是什么
+
+`emp_022`（问「离职的主要原因」，数据里只有 `leave_date`）三跑三种形态：
+run1 首行标准拒答但正文给了 20 多个百分比（14b 已判错）；run2 写成「**结论（含口径说明）**」
+开头的自然叙述；run3 写成「**说明：数据中没有"离职原因"字段**」。后两跑判错，理由是没守
+「结论第一行必须以 `无法回答：` 开头」这条 6 处 prompt 都写了的契约。
+
+缺口的原话是「想做的话只能加记录」，于是加了个 `refusal_shape`，值域
+`clean / semantic_no_prefix / infer / empty`。**只判首个非空行**，不看整段——
+`clean` 判的是"有没有按格式拒"，"拒完又偷偷答"由 `refusal_leak` 管，两个字段正交。
+
+### 33 条真实回答的分布
+
+数据源：v5 的 9 份报告（单轮 3 跑 + 多轮 off 3 跑 + 多轮 state 3 跑），
+拒答题共 10 道（9 道单轮 + `mul_029`）。
+
+| `refusal_shape` | 条数 | 是谁 |
+|---|---|---|
+| `clean` | 31 | 9 道题全部 + `mul_029` 全部 + `emp_022` run1 |
+| `semantic_no_prefix` | 2 | `emp_022` run2 / run3 |
+| `infer` | 0 | — |
+| `empty` | 0 | — |
+
+除 `emp_022` 外的 9 道题共 30 次回答，**30 次全是 `clean`**。所以这不是模型的格式习惯
+问题，是那一道题留了绕路空间：同一道题三种失败形态（守形状但越界 / 不守形状但语义拒），
+指向题本身。这和它当年在 canary 第一版被踢出清单的理由（「有绕路空间」）是同一件事。
+
+### 差点自己踩自己：第一版写在 runner 里，指纹当场变了
+
+最直接的写法是让 `runner` 把 `refusal_shape` 算进 result 字典——`answer` 就在手边。
+写完一测指纹：
+
+```
+A 组  da0af7c3efce   ← 改之前是 ac1ebcd66c5a
+```
+
+`app/eval/runner.py` 在 `_AFFECTS_RESULTS` 里（它决定喂给模型什么，也决定 history 怎么传），
+**一行纯记录代码让 6 个基线全部失配**。这正是半小时前写进 `phase7-accuracy.md` 的那条
+判据，转头就撞上来了。
+
+改法：`refusal_shape()` 留在 `provenance.py`（B 组），计算挪到 `report.py` 的 `to_json` /
+`summary` 里现算——`answer` 在 result dict 里有，不需要 runner 参与。
+改完 A 组回到 `ac1ebcd66c5a`，与 HEAD 一致，零失配。
+
+补了一条断言 `test_refusal_shape_does_not_touch_code_fingerprint` 守分组：
+`runner.py` 必须是 A、`report.py` / `provenance.py` 必须是 B。谁把记录逻辑挪回去，它就红。
+
+### 落点与验证
+
+- `app/eval/provenance.py`：`refusal_shape()` + 5 条正则（全部取自 30 个真实回答的措辞）。
+- `app/eval/report.py`：`_refusal_shapes(items)` 汇总 + 逐题字段现算。
+- `tests/test_provenance.py`：+6 条，含真实样本 `EMP_022_RUN1`（`clean` 而不是 `infer`，
+  这条最容易被写成"看到百分比就算越界"）。
+- 端到端：`--oracle --case ord_024` 跑通，报告里 `refusal_shapes={'infer': 1}`
+  （oracle 的假 answer 是「（oracle）结论见结果。」，既无前缀也无拒答语义，分类正确），
+  `code_sha12` 仍为 `ac1ebcd66c5a`。
+- 相关测试 6 个文件 174 条全过（新增 6 条）。
