@@ -1,14 +1,18 @@
-"""扫描评测报告里的答案来源归因，把"要人看的清单"打出来。
+"""扫描评测报告里的答案来源归因，打印一份提交形态清单。
 
 用法：
-    python scripts/provenance_report.py outputs/eval_v4_mul_state_run*.json
+    python scripts/provenance_report.py outputs/eval_v5_single_run*.json
     python scripts/provenance_report.py outputs/eval_react_*.json --only literal
     python scripts/provenance_report.py outputs/xxx.json --only missing
 
-为什么要有这个脚本：缺口 12 想防"模型没算就编答案"，但**没有可靠的自动判据**。
-150 题三跑实测 481 份代码里 40 份的 `result` 是字面量，其中 **38 份判对** ——
-`result = 2537.39`、`result = 850854.16` 都是模型算完再写死。任何"字面量即错"的规则
-都会误杀它们。所以只能：机器把清单缩到几十条，人五分鐘看完。
+**定位已降级（2026-11-02）：不再是每批必跑的人工兜底。** 原本想用它防"模型没算就编答案"
+（缺口 12），但那个缺口已关闭 —— 481 份代码里 40 份 `result` 是字面量，**37 份判对**；
+`result = 2537.39`、`result = 850854.16` 都是模型算完再写死，被怀疑的 `biz_020` 经真实数据
+复现是漏了 `sku` 大小写统一（算错），不是编造。清单里判错的那些，判分器本来就已经判错，
+人看不出新东西。
+
+现在只在"想查某批模型是算完写死、还是直接交变量"时使用 —— 比如评估提示词改动有没有让模型
+变懒。**别把它当成正确率的补充指标。**
 
 老报告没有 `result_origin` 字段（该字段 2026-11-02 才加），这里现场用
 `app.eval.provenance` 从 `code` 重算，所以历史报告也能扫。
