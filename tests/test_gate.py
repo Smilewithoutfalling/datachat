@@ -142,6 +142,46 @@ def test_verdict_rules(tmp_path):
     assert v["single_verdict"].startswith("路线重估") and "中间区间" in v["distribution_verdict"]
 
 
+def _infra_report(tmp_path, infra_ids, name="infra.json"):
+    """15 单 + 10 多，固定 5 道判错（s13/s14/s15 记 5 类，m09/m10 记 6 类），infra_ids 标成基础设施故障。"""
+    rows = [{"id": f"s{i:02d}", "group": "single", "executed": True, "human_correct": i <= 12,
+             "failure_class": None if i <= 12 else 5} for i in range(1, 16)]
+    rows += [{"id": f"m{i:02d}", "group": "multi", "executed": True, "human_correct": i <= 8,
+              "failure_class": None if i <= 8 else 6} for i in range(1, 11)]
+    for r in rows:
+        r["infra"] = r["id"] in infra_ids
+    p = tmp_path / name
+    p.write_text(json.dumps({"agent": "react", "cases": rows}, ensure_ascii=False), encoding="utf-8")
+    return str(p)
+
+
+def test_infra_rows_excluded_from_distribution(tmp_path):
+    """infra=true 不进失败数与分布，但仍记 human_correct=false、仍算进准确率分母（JUDGE-GUIDE §6）。"""
+    v = run_gate.verdict(_infra_report(tmp_path, {"s14"}), "phase35")
+    assert v["single"] == "12/15" and v["multi"] == "8/10"        # 分母不变：这题仍然不可用
+    assert v["failures"] == 4 and v["infra"] == ["s14"]           # 5 个 false 里剔掉 1 个
+    assert v["failure_distribution"] == {"5": 2, "6": 2}
+    assert "只记录分布" in v["distribution_verdict"]               # 4 < 5，不触发分布规则
+    v = run_gate.verdict(_infra_report(tmp_path, set(), "no_infra.json"), "phase35")
+    assert v["failures"] == 5 and v["infra"] == []
+    assert "集中：第 5 类占 3/5" in v["distribution_verdict"]       # 不标 infra 时 5 题才触发
+
+
+def test_infra_must_be_bool_and_not_correct(tmp_path):
+    """infra 只能是 true/false/null；且 infra=true 不能同时判对（否则"不计失败"会掩盖真错）。"""
+    base = [{"id": f"s{i:02d}", "group": "single", "executed": True, "human_correct": True,
+             "failure_class": None} for i in range(1, 16)]
+    base += [{"id": f"m{i:02d}", "group": "multi", "executed": True, "human_correct": True,
+              "failure_class": None} for i in range(1, 11)]
+    for name, infra, ok in (("conflict", True, True), ("not_bool", "yes", True)):
+        rows = [dict(r) for r in base]
+        rows[0].update(human_correct=ok, infra=infra, failure_class=None if ok else 2)
+        p = tmp_path / f"{name}.json"
+        p.write_text(json.dumps({"cases": rows}), encoding="utf-8")
+        with pytest.raises(SystemExit):
+            run_gate.verdict(str(p), "phase35")
+
+
 def _labeled_report(tmp_path, agent, wrong, name="r.json"):
     rows = [{"id": f"s{i:02d}", "group": "single", "executed": True} for i in range(1, 16)]
     rows += [{"id": f"m{i:02d}", "group": "multi", "executed": True} for i in range(1, 11)]

@@ -3551,3 +3551,68 @@ H 2026-11-02 定：闸门取**交付形态**标准，不取「数值对不对」
 
 不改任何 JSON、不重跑 `--verdict`（判定没变，`verdict` 段仍准确）、不改判定逻辑。
 
+---
+
+## [97] 2026-11-02 · infra 通道补上（人工标记，不是 error_kind）+ 两份老报告补 labeled_by
+
+commit（待回填）
+
+### 一、原来的规则是死条文
+
+`JUDGE-GUIDE` §1 C 写着 `error_kind` 有 `infra` 这个取值，§6 写「`error_kind=infra` 不计入失败分布」。
+查 `app/` 全仓：实际产生的只有 `llm` / `agent` / `execution` / `dataset` / `cancelled`，
+**`"infra"` 一次都没出现过**。而 §6 举的例子 react `s15`（网关把错误体当回答），
+`error_kind` 是 `null`（B62）。→ 按 `error_kind` 自动判是永远不触发的死代码。
+
+改成人工标记：每行新增 `infra: true | false | null`，由判定人填。
+
+### 二、语义
+
+- `infra=true` 表示「这题确实失败，但不是模型推理失败」。
+- 仍记 `human_correct=false`，**仍算进准确率分母**（题不可用这件事没变）。
+- 不进 `failures` 与 `failure_distribution`；`verdict.infra` 列出被剔除的题，方便对账。
+- 与 `human_correct=true` 互斥（否则「不计失败」会掩盖真错）；非 bool 直接 `_fail`。
+- **只在 phase35 生效**。回归门槛（m13 / m13r）不用它 —— 那边有复跑机制甄别无效观测，
+  两套机制混用会互相打架。
+
+### 三、s15 没有标 infra
+
+10-12 的判定写的是「非稳定复现；正式结果仍记错」，是**明确决定计入失败**。把它标成 infra 会推翻
+那个决定，而且会让 react 失败 5→4、再次跨过 `dist_min_failures=5`、P0 名单消失 ——
+和刚否掉的 s04 翻案是同一个后果。机制做好、s15 留空，等 H 单独拍。
+
+### 四、labeled_by 与重渲染
+
+两份报告补 `labeled_by = "AI 预标注（锐）→ Hark 复核 → S 终审采用（2026-10-12）"`，
+重跑 `--verdict --profile phase35`，`labels_final` 从「键不存在」变成 `true`。
+
+数字零变化（react 12/15 + 8/10、失败 5；workflow 11/15 + 10/10、失败 4）。
+新增键：`infra: []`、`profile`、`thresholds`、`thresholds_sha256`、`labeled_by`、`labels_final`。
+`thresholds_sha256 = 7ba4b9a81f49` 是**今天**的 thresholds.json 指纹（10-12 时还没有 m13r），
+phase35 那一段本身没变，所以数字可复现；这一点已写进两份报告的 `note`。
+
+### 五、测试
+
+`tests/test_gate.py` +2：
+
+- `test_infra_rows_excluded_from_distribution`：5 道错里标 1 道 infra → failures 4、分布去掉那一类、
+  不触发分布规则；对照组不标 → failures 5、`集中：第 5 类占 3/5`。
+- `test_infra_must_be_bool_and_not_correct`：`infra=true` + 判对、`infra="yes"` 都 `_fail`。
+
+### 六、实现时踩的坑（测试抓到了）
+
+第一版把 `"infra": infra` 写进 `verdict()` 的**公共** `out`，于是 m13 回归分支也多出一个
+`infra: []` 键 —— `test_m13_baseline_verdict_unchanged` 拿 10-14 两份参照基线重跑并逐字节比对，
+当场 2 条红。文档写的是「只在 phase35 生效」，代码没跟上。
+
+改法：键与 `fails` 的过滤都 gate 在 `prof["kind"] == "phase35"` 上。回归门槛不认 `infra`
+不只是"用不上"——如果认了，就等于允许用「这不是模型错」减少失败数而不动 `allowed_fail`，
+正是 m13 预登记要防的事。回归有 m13r 复跑，两套机制不混用。
+
+### 没做
+
+- **不翻 s15**（见 §3）：机制留空，等单独拍。
+- 不改 `error_kind` 的产生逻辑：`infra` 从来不是运行时能判出来的东西（s15 的 `error_kind` 是 null），
+  这不是漏实现，是本来就该由人填。
+- 不动 10-14 四份参照基线：它们没有 `infra` 键，`verdict` 也不需要重渲染。
+

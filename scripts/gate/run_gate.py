@@ -6,6 +6,8 @@
      以及留空的人工字段 human_correct / failure_class / reason / guessing。
 2) 人工判定：打开 JSON 逐题填 human_correct（true/false）、判错时 failure_class（1–6，见 questions.py）、
    一句 reason；读代码觉得"它在乱猜"的题把 guessing 设为 true。只问"这个答案我会不会拿去用"。
+   确属基础设施/管线故障（不是模型推理失败）的题填 infra: true —— 仍记 human_correct=false（算进准确率
+   分母），但不进失败数与 failure_distribution。infra 只在 phase35 生效；回归门槛不用它，靠 m13r 复跑甄别。
 3) 出结论：python scripts/gate/run_gate.py --verdict docs/eval/gate_<日期>_<agent>.json --profile m13
    加 --profile phase35|m13 → 按 docs/gate/thresholds.json 里该 profile 的门槛写回 verdict 段（含门槛原文与文件哈希）。
 
@@ -123,6 +125,7 @@ def _case_row(q: dict, ans: dict, res, duration: float) -> dict:
         "warnings": res.warnings, "unverified_numbers": res.unverified_numbers,
         "chart": chart_row(res),
         "human_correct": None, "failure_class": None, "reason": "", "guessing": None,
+        "infra": None,
     }
 
 
@@ -195,6 +198,13 @@ def _check_labels(rows: list[dict]):
     todo = [r["id"] for r in rows if r.get("human_correct") is None]
     if todo:
         _fail(f"还有 {len(todo)} 题没填 human_correct：{todo}")
+    bad_infra = [r["id"] for r in rows
+                 if r.get("infra") is not None and not isinstance(r.get("infra"), bool)]
+    if bad_infra:
+        _fail(f"infra 只能填 true / false / null：{bad_infra}")
+    both = [r["id"] for r in rows if r.get("infra") and r.get("human_correct")]
+    if both:
+        _fail(f"infra=true 表示这一题不计入模型失败，不能同时判对：{both}")
     bad_class = [r["id"] for r in rows if not r["human_correct"] and r.get("failure_class") not in range(1, 7)]
     if bad_class:
         _fail(f"判错的题必须填 failure_class（1–6）：{bad_class}")
@@ -220,12 +230,20 @@ def verdict(path: str, profile: str) -> dict:
 
     s_ok, s_n = group("single")
     m_ok, m_n = group("multi")
-    fails = [r["failure_class"] for r in rows if not r["human_correct"]]
+    # infra=true：这一题确实是失败（human_correct 仍为 false，也算进准确率分母），
+    # 但不是模型推理失败 —— 不进失败数与分布（JUDGE-GUIDE §6 的规则，原先只写在文档里没实现）。
+    # **只在 phase35 生效**：回归门槛不认这个字段，否则等于允许用「这不是模型错」减失败数而
+    # 不动 allowed_fail —— 那正是 m13 预登记要防的事。回归要靠 m13r 复跑甄别。
+    infra = [r["id"] for r in rows if r.get("infra")] if prof["kind"] == "phase35" else []
+    skip = set(infra)
+    fails = [r["failure_class"] for r in rows if not r["human_correct"] and r["id"] not in skip]
     dist = Counter(fails)
     out = {"single": f"{s_ok}/{s_n}", "multi": f"{m_ok}/{m_n}", "failures": len(fails),
            "failure_distribution": {str(k): v for k, v in sorted(dist.items())},
            "execution_success": f"{sum(r['executed'] for r in rows)}/{len(rows)}",
            "guessing": f"{sum(bool(r.get('guessing')) for r in rows)}/{len(rows)}"}
+    if prof["kind"] == "phase35":
+        out["infra"] = infra                    # 键也只在这个 profile 里写，回归报告保持原样
     out.update({"profile": profile, "thresholds": prof, "thresholds_sha256": th_sha,
                 "labeled_by": data.get("labeled_by", "")})
     # 显式写 True/False（[30]）：只写 False 的写法让"已终审"没法用这个字段表达，
@@ -247,6 +265,8 @@ def verdict(path: str, profile: str) -> dict:
     data["verdict"] = out
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, ensure_ascii=False, indent=1, default=str)
+    if infra:
+        print(f"注意：{len(infra)} 题标了 infra，不计入失败分布：{infra}")
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return out
 

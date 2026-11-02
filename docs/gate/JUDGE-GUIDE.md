@@ -44,7 +44,7 @@
 | 变量 | 是什么 | 怎么用 | 陷阱 |
 |---|---|---|---|
 | `executed` | 是否跑成功 | 决定走哪条分支 | — |
-| `error_kind` | `agent`（撞步数上限）/ `infra` / 其他 | `infra` 别算模型错 | react s15 是网关异常，不是推理失败 |
+| `error_kind` | 实际只有 `llm` / `agent` / `execution` / `dataset` / `cancelled`（**`infra` 从未被产生过**） | 决定是推理失败还是别的原因；基础设施故障靠 D 组的 `infra` 人工标记 | react s15 是网关异常、`error_kind=null`（B62），不是推理失败 |
 | `error` | 错误文本 | 看具体原因 | — |
 | `auto_correct` | 比较器判定 | **不是判据**，只用来找「该看哪里」 | 双向失准 |
 | `match` | 比较器用了哪条规则 | `strict` 最可信；其余 = **放宽了口径** | 放宽判对的题必须人工复核 |
@@ -64,6 +64,7 @@
 | `failure_class` | 1–6（判错时**必填**） | 见 §4 |
 | `reason` | 一句话 | 写清「对/错在哪」，口径命中 alt 要写 |
 | `guessing` | `true` / `false` | 你觉得模型在蒙（仅主观，只标你有把握的） |
+| `infra` | `true` / `false` / 不填 | 这题是基础设施/管线故障，不是模型推理失败。**只在 phase35 生效**：不进 `failures` 与 `failure_distribution`，但仍记 `human_correct=false`、仍算进准确率分母。与 `human_correct=true` 互斥 |
 
 ---
 
@@ -146,7 +147,8 @@ Step 4  只有 false 时才做：定 failure_class（1–6）
 
 - **`git_sha = ebc4e7b?`** —— 带问号 = `git` 命令找到了仓库但取值失败（B53 同类）。**这份报告的证据链缺一个可校验的 commit 锚点**，判定结论无法钉到具体代码版本。
 - **`questions_sha256 = 75a559642e4e`** 只有 12 位、且**不覆盖 `cases.py` 题面代码**（M04）。改题面后旧报告不可比。
-- **判定人是 AI 预标注**（见报告 `annotator` 字段）。你终审后，报告必须如实标注判定人；**别把「AI 预标注」写成「人工判定」**。
+- **判定人**：`annotator` 记录「AI 预标注（锐）→ Hark 复核 → S 终审采用（2026-10-12）」；`labeled_by` 由 `--verdict` 读成 `labels_final=true`。别把「AI 预标注」写成「人工判定」。
+- **`error_kind` 从来没有 `infra` 这个值**（实际只有 `llm` / `agent` / `execution` / `dataset` / `cancelled`）。所以「基础设施故障不计入失败」只能人工标 `infra: true`，`run_gate.py` 2026-11-02 才支持。老报告里 `infra` 全为空 —— 包括 s15。
 
 ---
 
