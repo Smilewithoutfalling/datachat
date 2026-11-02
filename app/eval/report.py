@@ -317,16 +317,21 @@ def load_obj(d):
 
 class EvalReport:
     def __init__(self, results: list, meta: dict | None = None, datasets: dict | None = None,
-                 baseline: dict | None = None):
+                 baseline: dict | None = None, rendered_cases: list | None = None):
         """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果；
         datasets: 本轮实际用的数据表（runner.datasets），用于算渲染指纹；None 时用默认 DATASETS。
         baseline: 基准报告的 fingerprints 块（run_eval.py --baseline）。None = 没给基准，
         summary() 里 comparable 为 null；给了但读不到指纹时传 {}，判定结果是"不可比"。
+        rendered_cases: 算渲染指纹时用哪些题。**默认 None = 不传，行为与以前逐字节相同**
+        （rendered_fingerprints 内部回落到 ALL_CASES）。只有数据集不是标准 DATASETS 的调用方
+        （留出集）才需要传——它回落到 ALL_CASES 时会去查 datasets['orders']，在自定义数据集上
+        直接 KeyError。看见这个参数不要顺手删：它在默认路径上什么都不做。
         """
         self.results = results
         self.meta = meta or {}
         self.datasets = datasets
         self.baseline = baseline
+        self.rendered_cases = rendered_cases
         self.total = len(results)
         self._fingerprint = None
         self.by_category = {}
@@ -396,6 +401,7 @@ class EvalReport:
             agents = {r.get("agent", "workflow") for r in self.results}
             agent = next(iter(agents)) if len(agents) == 1 else "mixed"
             rendered = rendered_fingerprints(
+                cases=self.rendered_cases,
                 datasets=self.datasets, agent=agent,
                 use_dictionary=self.meta.get("use_dictionary", True))
             self._fingerprint = {

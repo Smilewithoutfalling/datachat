@@ -3969,3 +3969,66 @@ A 组  da0af7c3efce   ← 改之前是 ac1ebcd66c5a
 真要走 E0，得下载 zip 看包内说明、或在浏览器里人工确认并记下核对日期 + 页面 URL
 （`docs/gate/README.md` 现有的记录方式连日期和 URL 都没有，只写了「CC BY 4.0」——
 这条格式本身也该补）。
+
+## [104] 2026-11-02 · 留出集有了能跑多表的入口，以及路上撞到的两个既有缺陷
+
+### 为什么要有这个脚本
+
+`scripts/holdout/README.md` 原本的判断是「`--data` 已经支持换数据表，缺的只是数据本身」。
+[103] 核完发现这句话只对单表成立：`--data` 的 help 写的就是「替换 sales 表」（`run_eval.py:97`），
+消费点只做 `self.datasets["sales"] = df_path`（`runner.py:77-78`）。H1 要 12 道多表题，
+没有入口。
+
+写了 `scripts/holdout/run_holdout.py`（约 360 行，含 docstring）。它复用 `EvalRunner` 的
+`datasets` 参数（`runner.py:72`，整表替换的能力**早就有**，只是没人从 CLI 用过），
+题库里 `dataset` 存逻辑名、`datasets` 段映射到相对路径。不做选样、不做阈值、不做 verdict ——
+判定单位是人工逐题判定，不是预登记门槛。
+
+### 缺陷一：`runner.py:79` 是死赋值，但会 KeyError
+
+```python
+self.df_path = self.datasets["sales"]
+```
+
+`self.df_path` **全仓库没有任何地方读**（grep 过，其余 `df_path` 出现在 `service.py` /
+`executor.py` / `react_agent.py` 里，都是不相干的局部变量）。但这行要求 `datasets` 必须含
+`"sales"` 键，自定义数据集直接崩。
+
+`runner.py` 在 A 组指纹里 —— 改一个字符 `code_sha12` 就变，6 个基线全部失配。所以只能在调用侧
+补一个占位键（`_pad_sales()`），占位值取第一个真实数据集。丑，但代价是零；这是 A 组文件的
+固有约束，不是设计选择。
+
+### 缺陷二：渲染指纹不传 cases，回落 ALL_CASES
+
+`EvalReport.fingerprint()` 调 `rendered_fingerprints(datasets=self.datasets, ...)`，
+**没传 `cases`**。函数内部于是 `cases = cases if cases is not None else ALL_CASES`，
+按 130 题逐题渲染 —— 那 130 题的 `dataset` 是 `orders`/`employees`/…，在留出集的数据集里
+不存在，`render_system` 的 `path = datasets[name]`（`fingerprint.py:289`）当场 KeyError。
+
+这个缺陷在标准跑批里看不出来，因为 `datasets` 就是全量 `DATASETS`，什么名字都查得到。
+它只在换数据集的调用方暴露 —— 也就是只有留出集会踩。
+
+修法：`EvalReport.__init__` 加 `rendered_cases=None`，`fingerprint()` 里原样透传。
+**默认 None 时行为与以前逐字节相同**（回落到 ALL_CASES 的老路），所以历史报告的
+`rendered_set_sha12` 一个不变。这不是洁癖：那个字段虽然不是门禁键，但它是「code_sha12 变了
+而渲染串相同 → 等价可比」这条诊断线的依据，全线变化等于把线剪断（同缺口 15 的教训）。
+
+`report.py` 在 B 组，改它不动 `code_sha12`。
+
+### 验证
+
+- **端到端 oracle**：临时题库 3 题（多表 2 + 单表 1），走真实 `analyze()` 链路，3/3 通过。
+  报告里 `holdout` 段含 `questions_sha256` / `frozen_at` / `n`，
+  `rendered.per_case` 只有这 3 题（不是 130），人工字段 `human_correct` 等五项全为空。
+- **A 组指纹未变**：`ac1ebcd66c5a`，与 HEAD 一致，6 个基线一个不动。
+- **测试**：新增 `tests/test_holdout.py` 21 条；相关七个文件 196 条全过。
+- **变异验证**：删掉 `cases=self.rendered_cases` → `test_report_forwards_given_cases` 变红
+  （1 failed / 20 passed），还原后全绿。那条护栏不是摆设。
+- `test_eval_runner_really_needs_sales_key` 把缺陷一的前提钉死：不补占位键就 KeyError，
+  补丁被后人删掉时这条会红。
+
+### 一条设计取舍
+
+冻结校验里「`answers.json` 没有 `questions_sha256`」是**警告放行**，不是报错。首次建库时
+还没有哈希，拦住会逼人先跑一遍算哈希工具才能试跑；而每次跑都打一行警告，足够防住"忘了"。
+反过来，哈希**对不上**是硬失败 —— 那是题面被改过，带着旧答案跑会把判错的记成模型错。
