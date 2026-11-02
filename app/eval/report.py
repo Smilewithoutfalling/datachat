@@ -410,6 +410,10 @@ class EvalReport:
                 # **不进任何正确率**，只看"这批有多少条要人审"。
                 "result_origins": dict(Counter(r.get("result_origin") for r in items)),
                 "result_missing": dict(Counter(r.get("result_missing") for r in items if r.get("result_missing"))),
+                # 缺口 14b：应拒答题里"result 拒答了、answer 还是把问题答了"的清单。
+                # 判错已经体现在正确率里，这里只留 id 供人复核。
+                "refusal_leaks": [{"id": r.get("id"), "why": r.get("refusal_leak_why")}
+                                  for r in items if r.get("refusal_leak")],
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         evalset = evalset_fingerprint()
@@ -523,6 +527,9 @@ class EvalReport:
                 # 老报告没有这两个键，读的时候按 None 处理即可，不需要兼容层。
                 "result_origin": r.get("result_origin"),
                 "result_missing": r.get("result_missing"),
+                # 缺口 14b：应拒答题的越界标记（非拒答题恒为 None）
+                "refusal_leak": r.get("refusal_leak"),
+                "refusal_leak_why": r.get("refusal_leak_why"),
                 # 多轮（EV-A2）：题面全貌 + 逐轮答案 + 逐轮约束判定。
                 # 只存 question（= last turn）的话，事后看不出这题到底问了几轮什么。
                 "turns": list(c.turns) if c.turns else [],
@@ -587,6 +594,12 @@ class EvalReport:
                   if k and str(k).startswith("literal"))
         if lit:
             print(f"  result 是字面量: {lit} 条  — 只记录形态，不算错（要人看的小清单）")
+        # 缺口 14b：拒答越界（result 拒答了、answer 还是把问题答了）—— 这个是真判错
+        leaks = o.get("refusal_leaks") or []
+        if leaks:
+            print(f"  拒答越界（result 拒答但 answer 仍作答）: {len(leaks)} 条 —— 已判错")
+            for it in leaks:
+                print(f"      🚫 {it['id']}: {it.get('why') or ''}")
         if o["avg_duration_s"] is not None:
             print(f"  平均耗时: {o['avg_duration_s']:.2f} 秒/题")
         tok = o["avg_tokens"]
@@ -631,6 +644,9 @@ class EvalReport:
             # 缺口 11：代码跑通了但没有可判分的 result —— 这不是"算错"，必须看得见
             if r.get("executed") and r.get("result_missing"):
                 print(f"      📭 没交卷[{r['result_missing']}]：判分取不到 result，按契约算错但数可能对")
+            # 缺口 14b：result 按契约拒答了，但 answer 还是把问题答了
+            if r.get("refusal_leak"):
+                print(f"      🚫 拒答越界[{r['refusal_leak']}]：{r.get('refusal_leak_why') or ''}")
             if r.get("executed") and not r.get("correct") and verbose:
                 print(f"      📝 期望: {str(r.get('expected'))[:80]}")
                 print(f"      🔧 实际: {str(r.get('actual'))[:80]}")

@@ -12,7 +12,7 @@ from app.core import analyze
 from app.core.result import refusal_from_answer
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
-from app.eval.comparator import is_refusal, match_kind, results_equal
+from app.eval.comparator import is_refusal, match_kind, refusal_leak, results_equal
 from app.eval.provenance import describe as describe_provenance
 from app.tools.dataset import copy_data, load_data
 from app.tools.sandbox import run_trusted
@@ -166,6 +166,7 @@ class EvalRunner:
         attempts / expected / actual / code / answer / chart / duration_s / tokens
         result_origin       — 缺口 12：答案值来自运行时计算（computed）还是字面量（literal_*）
         result_missing      — 缺口 11：executed=True 却没有 result 时，没交卷的具体原因
+        refusal_leak        — 缺口 14b：应拒答题 result 拒答了、answer 却仍给了量化分析（越界）
         """
         out = {
             "case": case, "agent": self.agent, "executed": False, "correct": False,
@@ -176,6 +177,8 @@ class EvalRunner:
             "turn_answers": [], "turn_status": [],
             # 记忆（阶段 6.6）。记忆模块尚未合入时恒为 off / 0 / []，形状不随模块存不存在而变
             "memory_mode": "off", "history_tokens": 0, "memory_trimmed": [],
+            # 缺口 14b：拒答越界。所有题都有这两个键（非拒答题恒为 None / ""），形状稳定
+            "refusal_leak": None, "refusal_leak_why": "",
         }
 
         # 1. ground truth
@@ -249,6 +252,14 @@ class EvalRunner:
             out["actual"] = res.result
             out["match"] = score_detail(res.result, case, expected_list)
             out["correct"] = out["match"] is not None
+            if out["correct"] and case.expect_refusal:
+                # 缺口 14b：result 是按契约拒答，但 answer 仍把问题答了 —— 用户看到的是推断
+                # 结论，报告却记"正确拒答"，等于报告在撒谎。判错，并清掉 match
+                # （match 的语义是"靠哪一层判对"，判错就没有层级可言）。
+                leak, why = refusal_leak(res.answer)
+                out["refusal_leak"], out["refusal_leak_why"] = leak, why
+                if leak:
+                    out["correct"], out["match"] = False, None
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):

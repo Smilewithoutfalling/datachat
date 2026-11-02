@@ -14,6 +14,7 @@ from app.eval.cases import ALL_CASES
 from app.eval.report import load_obj
 from app.eval.report import evalset_fingerprint
 from app.eval.runner import EvalRunner, score_detail
+from app.eval.comparator import refusal_leak
 
 
 def rescore(report_path: str, data_path: str | None = None) -> dict:
@@ -31,10 +32,14 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             expected_list, err = runner.expected_all(case)
             kind = score_detail(refusal, case, expected_list) if err is None else None
             ok = kind is not None
+            leak, why = refusal_leak(row.get("answer")) if (ok and case.expect_refusal) else (None, "")
+            if leak:
+                ok, kind = False, None            # 缺口 14b：拒答越界，见 comparator 规则 24
             if ok != row.get("correct"):
                 changed.append({"id": row["id"], "before": row.get("correct"), "after": ok})
             rows.append({"id": row["id"], "category": row["category"],
-                         "dataset": row.get("dataset"), "correct": ok, "match": kind})
+                         "dataset": row.get("dataset"), "correct": ok, "match": kind,
+                         "refusal_leak": leak, "refusal_leak_why": why})
             continue
         if case is None or not row.get("executed"):
             rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"), "correct": False})
@@ -52,10 +57,14 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             continue
         kind = score_detail(actual, case, expected_list) if err is None else None
         ok = kind is not None
+        leak, why = refusal_leak(row.get("answer")) if (ok and case.expect_refusal) else (None, "")
+        if leak:
+            ok, kind = False, None                # 缺口 14b：拒答越界，见 comparator 规则 24
         if ok != row.get("correct"):
             changed.append({"id": row["id"], "before": row.get("correct"), "after": ok})
         rows.append({"id": row["id"], "category": row["category"], "dataset": row.get("dataset"),
-                     "correct": ok, "match": kind})
+                     "correct": ok, "match": kind,
+                     "refusal_leak": leak, "refusal_leak_why": why})
     by_cat = {}
     for r in rows:
         b = by_cat.setdefault(r["category"], [0, 0])
@@ -76,6 +85,9 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             "needs_audit": [r["id"] for r in rows if r["correct"] and r.get("match") not in ("strict", "rounded", "refusal", "alt:strict", "alt:rounded")],
             "evalset_now": evalset_fingerprint()["sha256"],
             "evalset_report": (data.get("evalset") or {}).get("sha256"),
+            # 缺口 14b：这份报告里有多少应拒答题是"result 拒答了、answer 还是把问题答了"
+            "refusal_leaks": [{"id": r["id"], "why": r.get("refusal_leak_why")}
+                              for r in rows if r.get("refusal_leak")],
             "changed": changed, "skipped_no_obj": skipped, "infra_errors": infra,  # 无结构化结果或还原失败的题，沿用原判定
             "rows": rows}
 
@@ -102,6 +114,9 @@ def apply_rescore(report_path: str, result: dict) -> dict:
             continue
         row["correct"] = bool(r["correct"])
         row["match"] = r.get("match")
+        # 缺口 14b：越界标记要跟着判定一起写回，否则报告里"为什么判错"又看不见了
+        row["refusal_leak"] = r.get("refusal_leak")
+        row["refusal_leak_why"] = r.get("refusal_leak_why") or ""
 
     overall = data.setdefault("overall", {})
     n_ok = sum(1 for r in data["cases"] if r.get("correct"))
@@ -111,6 +126,9 @@ def apply_rescore(report_path: str, result: dict) -> dict:
     overall["correctness_rate"] = n_ok / n * 100 if n else None
     overall["conditional_correctness_rate"] = n_ok / executed * 100 if executed else None
     overall["match_kinds"] = dict(Counter(r.get("match") or "?" for r in data["cases"] if r.get("correct")))
+    # 缺口 14b：越界清单也要跟着逐题判定一起重算，否则报告顶层还留着旧尺子的结论
+    overall["refusal_leaks"] = [{"id": row.get("id"), "why": row.get("refusal_leak_why") or ""}
+                                for row in data["cases"] if row.get("refusal_leak")]
     for key, field in (("by_category", "category"), ("by_dataset", "dataset")):
         bucket = data.get(key) or {}
         tot = {}

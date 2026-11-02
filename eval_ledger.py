@@ -159,6 +159,10 @@ def normalize(path, data):
                 "tokens": c.get("tokens"),
                 "duration_s": c.get("duration_s"),
                 "attempts": c.get("attempts"),
+                # 缺口 14b：**只在越界时出现**。183 道题里只有 emp_022 会带这个键，
+                # 恒写 null 会让 53 份归档每份多出几十行纯噪音（实测 6190 行 diff）。
+                # 读取方一律用 .get()，键不存在与 null 等价。
+                **({"refusal_leak": c["refusal_leak"]} if c.get("refusal_leak") else {}),
             }
             for c in cases
         ],

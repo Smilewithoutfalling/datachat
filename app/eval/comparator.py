@@ -54,6 +54,10 @@
      b) 期望是标签列表（按顺序的 Top-N）、实际是以这些标签为索引的 Series（值是销售额、订单数等）→ 索引按顺序相同即对；
      c) pandas 的 ExtensionArray / Index（如 .unique() 返回的 ArrowStringArray）按 list 处理。
 阶段 3：应拒答题由 is_refusal() 判定（"无法回答：<原因>"，原因至少 2 个字），不经过上面的规则。
+缺口 14b（2026-11-02 H 拍板）：应拒答题的越界检查，见 refusal_leak()。
+ 24. result 是合法拒答、但 answer 仍给出了针对该问题的量化分析 → 判错。
+     判据只有一条：answer 里出现 ≥2 个百分比。干净拒答实测 30 次回答，百分比全为 0；
+     越界的那 3 次是 20/23/22 个。**不用比较词判错**（"最高/低于"在合法拒答里也有）。
 """
 import math
 import re
@@ -973,3 +977,38 @@ def _frame_eq(a: pd.DataFrame, e: pd.DataFrame, tol, ordered) -> bool:
         key = lambda r: tuple(_label(v) if not _is_num(v) else f"{float(v):.6g}" for v in r)  # noqa: E731
         ra, re_ = sorted(ra, key=key), sorted(re_, key=key)
     return all(all(_scalar_eq(x, y, tol) for x, y in zip(r1, r2)) for r1, r2 in zip(ra, re_))
+
+
+# ------------------------------------------------------------------ 规则 24（缺口 14b）
+# 判错的阈值。1 个百分比可能只是顺带交代（"该字段 100% 缺失"），2 个起步才是在做分布分析。
+REFUSAL_LEAK_MIN_PCT = 2
+
+
+def refusal_leak(answer) -> tuple[str | None, str]:
+    """规则 24：result 拒答了、answer 却把问题答了 —— 这是越界，判错。
+
+    现场（emp_022，2026-10-30 三跑）：题问"员工离职的主要原因"，数据里只有 leave_date。
+    三份回答都先声明"没有离职原因字段"，然后给了 673–892 字的推断，里面 20+ 个百分比
+    （"绩效 C 22.4%，高于 A 的 14.7%"）。而报告只查 result，于是 run1 记成"正确拒答" ——
+    用户看到的是推断结论，报告显示这题做对了。H 2026-11-02 拍板：算越界。
+
+    边界三条，都从实测反推：
+
+    - **只认百分比，且 ≥2 个。** 干净拒答长什么样是实测的：另外 9 道应拒答题共 30 次回答
+      （单轮 8 道 × 3 + 多轮 mul_029 × 6），全是"字段清单 + 无法计算 + 建议补数据"，
+      百分比个数 30 次全是 0；emp_022 是 20/23/22。
+      门槛取 2 不放 1：一个百分比可能只是顺带交代（"该字段 100% 缺失"），两个起步才是在做分布。
+    - **不用比较词判错。** "最高/低于/多于"在合法拒答里也出现 —— inv_021 的干净回答里就有
+      "可按 sold 汇总给出销量最高的 SKU"。这类词只说明在谈论排序，不说明给了排序结果。
+    - **不做"是否切题"的语义判断。** 那要模型，判分器不能依赖模型。宁可漏判也不误杀：
+      漏判的代价是一条错误的"正确拒答"留在报告里（可见、可复核），误杀的代价是逼模型连
+      "为什么答不了"都不敢解释。
+
+    返回 (kind, why)。kind 为 None 表示没越界，why 留空供报告渲染。
+    """
+    if not isinstance(answer, str) or not answer.strip():
+        return None, ""
+    hits = _PCT_TOKEN_RE.findall(answer)
+    if len(hits) < REFUSAL_LEAK_MIN_PCT:
+        return None, ""
+    return "quantified", f"拒答后仍有 {len(hits)} 个百分比（首个 {hits[0]}%），answer {len(answer)} 字"
