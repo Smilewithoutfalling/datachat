@@ -20,3 +20,7 @@ data/gate/
 # 阶段 4 sidecar 打包产物
 dist/
 build/
+
+# 留出集（H1）：题面与数据都不进 git（scripts/holdout/README.md 规则 1）
+# .holdout_path 是一行本机绝对路径 —— 不进版本库，否则等于把题库位置公开在一个会被 fork 的仓库里
+.holdout_path
