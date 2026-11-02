@@ -218,6 +218,37 @@ def test_code_sha_override_is_documented():
         assert len(sha) == 12 and all(c in "0123456789abcdef" for c in sha), sha
 
 
+def test_baselines_record_entry_sha12():
+    """每个基线都要记入口脚本指纹（缺口 4），否则「换没换 run_eval.py」这个问题
+    只能在单份报告里查，基线之间对不出来。
+
+    值允许是 12 位 hex 或 hex 列表——`eval-v3` 由两批组成，两批的入口不同（见 entry_note）。
+    **取不到时也必须是 None 而不是缺键**：缺键等于没人想过这件事，而 None 是"查了，没有"。
+    """
+    d = json.load(open(L.BASELINES, encoding="utf-8"))
+    tags = [k for k in d if k != "_comment"]
+    assert tags, "基线表是空的"
+    for tag in tags:
+        cfg = d[tag]
+        assert "entry_sha12" in cfg, "%s 没记入口指纹" % tag
+        v = cfg["entry_sha12"]
+        for x in (v if isinstance(v, list) else [v]):
+            assert x is None or (len(x) == 12 and all(c in "0123456789abcdef" for c in x)), (tag, x)
+        assert cfg.get("entry_note"), "%s 补了 entry_sha12 就要写清取自哪个 commit" % tag
+
+
+def test_normalize_carries_entry_sha12():
+    """台账要能读出批次的入口指纹；老报告没有这个字段时记 None，不能编一个值。
+
+    实际用途：`eval-v0` 与 `eval-v1` 的 run_eval.py 同为 09cae34d18c1，
+    所以 99.2% → 99.0% 那 0.2pp 不可能来自入口脚本——这类结论要有字段才能下。
+    """
+    assert L.normalize("a.json", _report(n=130, code_sha12="deadbeef1234"))["entry_sha12"] is None
+    d = _report(n=130, code_sha12="deadbeef1234")
+    d["fingerprints"]["entry_sha12"] = "0c813c8fb952"
+    assert L.normalize("b.json", d)["entry_sha12"] == "0c813c8fb952"
+
+
 def test_check_ignores_generation_stamp():
     """`--check` 必须忽略「生成时间」行，否则每次渲染都不同、检查永远报 1。
 

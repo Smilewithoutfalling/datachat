@@ -1,9 +1,11 @@
 {
-  "_comment": "基线登记表。tag 指向的 commit 与跑报告的 commit 常常不同（报告要能对上 outputs 里的 git_sha），所以这里显式记 code_sha12 —— 台账按指纹认基线，不按 commit 认。新增基线时手写一行。 「n」是这份基线覆盖的题数（列表 = 由多批组成）；台账只在指纹和题数都对上时才标基线名，否则同指纹的零散批（如多表 20 题的重复跑）会被一起标成基线。",
+  "_comment": "基线登记表。tag 指向的 commit 与跑报告的 commit 常常不同（报告要能对上 outputs 里的 git_sha），所以这里显式记 code_sha12 —— 台账按指纹认基线，不按 commit 认。新增基线时手写一行。 「n」是这份基线覆盖的题数（列表 = 由多批组成）；台账只在指纹和题数都对上时才标基线名，否则同指纹的零散批（如多表 20 题的重复跑）会被一起标成基线。 「entry_sha12」= run_eval.py 的 sha12（缺口 4）。它不进 GATE_KEYS，只用来回答「两批分数差是不是因为换了入口脚本」。值为列表时表示该基线由入口不同的多批组成，具体见 entry_note。取不到时记 null 并写明原因，不猜。",
   "eval-v0": {
     "commit": "fc1f823",
     "run_commit": "4d3ab5e",
     "code_sha12": "af3d486c2e1b",
+    "entry_sha12": "09cae34d18c1",
+    "entry_note": "run_eval.py 取 4d3ab5e。与 eval-v1 逐字节相同：v0→v1 那 0.2pp 与入口脚本无关。",
     "n": 130,
     "evalset_sha12": "478204bf6a7f",
     "rendered_set_sha12": "6b23655c28a6",
@@ -14,6 +16,8 @@
     "commit": "de509a4",
     "run_commit": "de509a4",
     "code_sha12": "28d8b0d21488",
+    "entry_sha12": "09cae34d18c1",
+    "entry_note": "run_eval.py 取 de509a4，与 eval-v0 的 4d3ab5e 版本同为 09cae34d18c1。",
     "n": 130,
     "evalset_sha12": "478204bf6a7f",
     "rendered_set_sha12": "6b23655c28a6",
@@ -24,6 +28,8 @@
     "commit": "见 tag eval-v2",
     "run_commit": "4f19a36",
     "code_sha12": "89d28c86ca74",
+    "entry_sha12": "cd01ca888cbe",
+    "entry_note": "run_eval.py 取 4f19a36。与 v1 不同：143 题那批开始就要按题数/分类选题。",
     "n": 143,
     "run_code_sha12": "8399e5287468",
     "evalset_sha12": "122129ad186b",
@@ -35,6 +41,11 @@
     "commit": "见 tag eval-v3",
     "run_commit": "多轮批跑在 145a3f5；单轮批跑在 145a3f5 + 未提交的 run_eval.py（给 --category 加逗号分隔）。run_eval.py 不在 A 组指纹内，两批 code_sha12 相同。",
     "code_sha12": "7562832e9e11",
+    "entry_sha12": [
+      "500b80853504",
+      "2252573d89f6"
+    ],
+    "entry_note": "两批两个版本：多轮批跑在 145a3f5（500b80853504）；单轮批跑在 145a3f5 + 未提交的 `--category` 逗号分隔改动，该改动后来提交为 63a4b6b（2252573d89f6）。两版 diff 只有 `_select_cases` 的分类解析（13+/5-），不改判定也不改 prompt，所以 v3 内部两批判定层仍可比；但『同一个 code_sha12 名下混了两版入口』这件事本身要记下来。",
     "n": [
       33,
       130
@@ -49,6 +60,8 @@
     "commit": "见 tag eval-v4",
     "run_commit": "c53874f-dirty（跑批期间 app/ 有未提交改动：新增 app/eval/provenance.py 与报告字段）",
     "code_sha12": "d617102729fa",
+    "entry_sha12": "28d4cb820020",
+    "entry_note": "run_commit 记的是 c53874f-dirty，但 c53874f 没改 run_eval.py（10-30 16:34 那次是 docs），该文件的最后改动是 564f0f4（10-30 12:56，canary 十条探针），早于 15:07 开跑。dirty 的部分按 baseline 的 note 只有 app/ 下的 provenance 与报告字段。",
     "n": [
       33,
       150
@@ -63,6 +76,8 @@
     "commit": "见 tag eval-v5",
     "run_commit": "c53874f-dirty —— 模型跑在 eval-v4 那批（10-30 单轮 / 11-02 state），本次没有任何重跑",
     "code_sha12": "295a4d474097",
+    "entry_sha12": "28d4cb820020",
+    "entry_note": "与 eval-v4 同一批模型输出（只换尺子重判），入口脚本同 28d4cb820020。",
     "n": [
       150,
       33

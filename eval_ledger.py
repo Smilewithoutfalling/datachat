@@ -148,6 +148,10 @@ def normalize(path, data):
         "memory_mode": fps.get("memory_mode") or data.get("memory_mode"),
         "code_sha12": code_sha,
         "code_all_sha12": fps.get("code_all_sha12"),
+        # 入口脚本（run_eval.py）的 sha12，2026-11-02 起报告里才有（缺口 4）。
+        # **不进 _batch_key，也不判可比性**：它只回答「两批分数差是不是因为换了入口脚本」。
+        # 历史报告没有这个字段（那时还没这功能），一律 None，不是"入口没变"。
+        "entry_sha12": fps.get("entry_sha12"),
         "evalset_sha12": fps.get("evalset_sha12") or (data.get("evalset") or {}).get("sha256"),
         "rendered_set_sha12": fps.get("rendered_set_sha12"),
         "canary_sha12": data.get("canary_sha12"),

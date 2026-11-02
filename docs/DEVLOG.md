@@ -3752,3 +3752,51 @@ M07 那样指向已删文件的。结论：**没有第二处失效引用**，但
 
 要修得先让 `--check` 只校验入库范围（`docs/eval/` + `docs/eval/runs/`），
 那是改台账语义，不是加一行 yml。先记在这里。
+
+## [100] 2026-11-02 · 缺口 4 第二步：基线的入口指纹补齐，v3 内部两版入口是既成事实
+
+### 为什么做这一步
+
+缺口 4 上一轮只做到「报告里记 `entry_sha12`」，理由是「加进 `GATE_KEYS` 会让历史报告全判
+不可比，得先把 `baselines.json` 每个基线补上对应 commit 的入口哈希，那是单独一步」。
+这一步就是那个「单独一步」。它不改任何行为，只是让「两批分数差是不是因为换了 `run_eval.py`」
+这个问题可以从**基线之间**回答，而不是只能翻单份报告。
+
+### 实测（从 git 逐个 commit 取 `run_eval.py` 算 sha256 前 12 位）
+
+| 基线 | run_commit | `entry_sha12` |
+|---|---|---|
+| `eval-v0` | `4d3ab5e` | `09cae34d18c1` |
+| `eval-v1` | `de509a4` | `09cae34d18c1` |
+| `eval-v2` | `4f19a36` | `cd01ca888cbe` |
+| `eval-v3` | `145a3f5`（两批） | `500b80853504` + `2252573d89f6` |
+| `eval-v4` / `v5` | `c53874f-dirty` | `28d4cb820020` |
+| HEAD | — | `10f0b79e5a6f` |
+
+### 三条结论
+
+1. **v0 → v1 那 0.2pp 与入口无关。** 两者同为 `09cae34d18c1`，99.2% → 99.0% 只能归到模型
+   抖动或 B 组改动。原先写的是"落在噪声里"，现在是有字段的结论。
+2. **`eval-v3` 内部混了两版入口。** 多轮批跑在 `145a3f5`（`500b80853504`），单轮批跑在
+   `145a3f5` + 未提交的 `--category` 逗号分隔改动（后来提交为 `63a4b6b`，`2252573d89f6`）。
+   同一个 `code_sha12` 名下两版入口，缺口 4 从"理论风险"变成"已经发生"。
+   **两批仍可比**：`git diff 145a3f5 63a4b6b -- run_eval.py` 是 13+/5-，只动 `_select_cases`
+   的分类解析，不改判定、不改 prompt。这条不能写成"应该没影响"——要给出 diff 范围。
+3. **v4/v5 的 `28d4cb820020` 是确定的。** `c53874f` 本身没改 `run_eval.py`（10-30 16:34 那次是
+   docs），该文件最后的改动是 `564f0f4`（10-30 12:56，canary 探针），早于 15:07 开跑。
+   dirty 的部分按 baseline 的 note 只有 `app/` 下的 provenance 与报告字段。
+
+### 为什么仍不进 `GATE_KEYS`
+
+91 份历史报告的 `fingerprints` 里没有这个键（那时代码没这功能），加进去 `comparable()` 一律
+判 `unknown`，全部失配。收益是"入口变了自动判不可比"，代价是这 91 份报告全部作废；
+而现在用 `entry_sha12` 字段人工对账能拿到同样的信息，代价为零。真要进门禁，等下一次全量
+重建基线时顺手做——那时历史报告本来就要重跑。
+
+### 落点
+
+- `docs/eval/baselines.json`：6 个基线加 `entry_sha12` / `entry_note`，`_comment` 补字段说明。
+- `eval_ledger.py`：`normalize()` 读 `entry_sha12`，**不进 `_batch_key`、不判可比性**。
+- `tests/test_ledger.py`：`test_baselines_record_entry_sha12`（缺键/形状/必须有 note）、
+  `test_normalize_carries_entry_sha12`（老报告记 None，不编值）。22 条全过。
+- `eval_ledger.py --check`：**零差异**（只加记录字段，渲染不变，91 份 / 26 个批次照旧）。
