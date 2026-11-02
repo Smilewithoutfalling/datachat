@@ -32,13 +32,13 @@
 | M03 | P0 | `.env`、`app/core/llm.py` | Key 明文落盘；keyring 排在阶段 4 | 分发型桌面产品，用户 Key 明文躺在安装目录 → 一次文件读取疏漏即泄露 |
 | M04 | P1 | `app/eval/` | 数据集无版本冻结；B47 改题后"与之前基线不完全可比" | 无法做能力回归：改一次 prompt 就没有可比数字 |
 | M05 | P1 | 评测方法 | 全部 baseline 是 n=1；B31 网关对 temperature 0 缓存 → `--repeat` 不独立，标准差=0 是假象 | 不能对外声称任何准确率数字 |
-| M06 | P1 | `app/tools/sandbox.py:96` | `cmd = [sys.executable, ...]`，PyInstaller 下 `sys.executable` 是应用本身（B35 已登记未解决） | 桌面产品能否启动的地基，零验证 |
+| M06 | ~~P1~~ **已修** | `app/tools/sandbox.py:48` | ~~`cmd = [sys.executable, ...]`，PyInstaller 下 `sys.executable` 是应用本身（B35 已登记未解决）~~ → **B35 已修**：`worker_cmd()` 按 `sys.frozen` 分派，打包态走 `<exe> --sandbox-worker <dir>`，由 `app/sidecar.py` 接。2026-11-02 补两条单测钉住两个分支（变异验证：删掉 frozen 分支 → 测试红） | ~~零验证~~ → 构造层已有单测；但**打包 smoke 仍不走 sandbox**（`packaging/smoke_sidecar.py` 不碰它），真实打包环境下的端到端仍未验 |
 | M07 | P1 | `ui/chat_app.py:38`（**该文件已于 `c668ff4` 删除**，F5 去 Streamlit；会话记忆现状见 `app/memory/`，2026-11-02 注） | 会话记忆是进程内 `MemorySaver`（B18） | 重开会话历史全丢——"能不能用"的门槛，不是"好不好用" |
 | M08 | P1 | `app/tools/persist.py:27` | `open(RUNS_LOG, "a")` 无锁追加；无结构化日志、无 trace id、无按会话成本聚合 | 并发写会交错；产品出问题无法定位；企业用户无法审计 |
 | M09 | P1 | `app/core/service.py:31` | `analyze()` 只在内部 `stream()`，对外整体返回 `AnalysisResult`，无任务句柄 | 阶段 4 的 SSE"逐步推送"必须回头改内核——阶段 1/4 之间的隐藏返工 |
 | M10 | P1 | `app/core/service.py` | `analyze(dataset, question)` 是**单文件单表**；字典靠"同名 .dict.csv" | 真实业务是订单+用户+商品多表 join，当前架构不表达多表关系 |
 | M11 | P2 | `.gitignore` | 缺 `.venv/`、`.pytest_cache/`（工作区实测 `?? .venv/`） | 一次 `git add -A` 提交上千文件；venv 绑定 `D:\Anaconda3\envs\aiFace`，换机即废 |
-| M12 | P2 | `docs/DEVLOG.md` | [8] commit 仍写 `<待提交>`；[7][8] 引用的 `docs/eval/phase3{,b}/` 在 master 上不存在（实际是 `docs/eval/eval_*.json` 平铺） | 证据进主干修了一半，引用与实物对不上，链条末端断 |
+| M12 | ~~P2~~ **已修** | `docs/DEVLOG.md` | ~~[8] commit 仍写 `<待提交>`；[7][8] 引用的 `docs/eval/phase3{,b}/` 在 master 上不存在（实际是 `docs/eval/eval_*.json` 平铺）~~ → B57 已处置：`docs/eval/phase3/`、`phase3b/`、`phase3c/` 三个目录都已在 master 且有内容，[8] 的 commit 补为 `16d51c3（PR #8）`。2026-11-02 又补：`[94]` 的 `<待提交>` 回填为 `7b24d4f（PR #95）` | ~~证据进主干修了一半，引用与实物对不上，链条末端断~~ → 抽查的引用均可追 |
 | M13 | P2 | `app/tools/plotting.py` | 只产出 png；前端是否要 ECharts 重绘未定 | 前端工作量 ±100% 的变量 |
 | M14 | P2 | 全仓库 | 全用 `print`，无日志框架（B17 残留项）；CI 有了，日志没有 | 产品运维盲区 |
 

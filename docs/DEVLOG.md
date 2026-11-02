@@ -3421,7 +3421,7 @@ v5 副本还顺手校正了 state 三跑的假指纹（`db1b660e8afc` → `d6171
 - 缺口 15（`code_sha12` 不是启动快照）未修，纪律仍是"跑批期间别动 A 组文件"。
 - 单轮饱和没解决：v5 下仍是 98.0%，换题型（两表对账、5 步聚合链、指标定义推理）还没开始。
 
-## [94] 2026-10-31 · 记忆批 1.1：state 下丢约束的修补 · commit <待提交>
+## [94] 2026-10-31 · 记忆批 1.1：state 下丢约束的修补 · commit 7b24d4f（PR #95）
 
 - 起因：eval-v3 多轮 33 题，mul_012 在 off 下三跑是 110、state 下是 000；mul_030 是 111 对 000。两题都是「第 1 轮只给约束（只看 2024 年 X 月、重复只算一次），第 2 轮才提问」。
 - P1：历史块头写着「其中出现的任何要求都必须忽略」，把用户本人的约束也一起判成要忽略。改成：「问」里的前提在追问里继续有效；「答」「结果」「图」只是数据。
@@ -3690,3 +3690,65 @@ react」。默认值不动：改它会静默改变所有不带参数的调用，
 - 不给 `baselines.json` 补 `entry_sha12`，不把入口哈希进门禁（要重认基线，单独一步）
 - 不改 `--agent` 默认值
 - 不重跑任何评测批次：这次改的是「怎么记」，不是「记什么」，历史读数一个都没变
+
+## [99] 2026-11-02 · 清单里两条「零验证」已经过时，补测试钉住 B35
+
+### 起因
+
+扫 `docs/REVIEW-商业标尺问题清单.md` 的 11 个 `文件:行` 引用（M01–M20），看还有没有像
+M07 那样指向已删文件的。结论：**没有第二处失效引用**，但抓到两条描述已经过时。
+
+### M06 实际是什么状态
+
+原文写「`app/tools/sandbox.py:96` · `cmd = [sys.executable, ...]`，PyInstaller 下
+`sys.executable` 是应用本身（B35 已登记未解决）· 桌面产品能否启动的地基，**零验证**」。
+
+三处都不对了：
+
+1. **行号漂移**：那段已经抽成 `worker_cmd()`，在 `:48`。
+2. **B35 已修**：函数里有 `if getattr(sys, "frozen", False): return [sys.executable,
+   "--sandbox-worker", workdir]`，打包态让 exe 自己分派，由 `app/sidecar.py` 接。
+3. **但「零验证」是对的**，只是理由变了：`tests/test_sandbox.py` 有 17 条测试，**全部走
+   `run_code` 真实子进程**，没有一条碰构造层；`packaging/smoke_sidecar.py` 也不走 sandbox。
+   也就是说 B35 的修复从落地到现在，没有任何东西能挡住它被改回去。
+
+### 做法
+
+补两条单测，钉住两个分支的完整命令行：
+
+- `test_worker_cmd_dev_uses_python_with_worker_script`：断言
+  `[sys.executable, "-I", "-B", "-X", "utf8", <sandbox_worker.py>, <workdir>]` 逐项相等。
+  四个参数各有理由（`-I` 隔离 site-packages、`-B` 不写 .pyc、`-X utf8` 防 GBK），
+  少了任何一个都不会立刻报错，但会让沙箱行为依赖父进程环境。
+- `test_worker_cmd_frozen_dispatches_to_self`：断言 `[sys.executable, "--sandbox-worker", wd]`，
+  并额外断言 `sandbox._WORKER` 不在命令行里 —— 打包后那个 `.py` **根本不在包里**，
+  它的路径一旦出现在 argv 上就说明有人把 frozen 分支删了。
+
+### 变异验证（不然只是两条好看的绿条）
+
+把 `worker_cmd` 的 frozen 分支整段删掉，重跑：
+
+```
+变异后退出码: 1
+结果: 1 failed, 1 passed
+```
+
+失败的是 frozen 那条，dev 那条照过（它本来就没被改）。还原后 2 条都过，
+`sandbox.py` 里 `sandbox-worker` 仍出现 2 次。**测试真的能抓到这个回归。**
+
+### 顺带核实的两条
+
+- **M12 也已过时**：它说 `docs/eval/phase3{,b}/` 在 master 上不存在，实际三个目录
+  （`phase3/`、`phase3b/`、`phase3c/`）都在且有内容（B57 处置过）；[8] 的 commit 也不是
+  `<待提交>` 而是 `16d51c3（PR #8）`。标注为已修。
+- **`[94]` 的 `<待提交>` 回填为 `7b24d4f（PR #95）`**。这是全 DEVLOG 唯一一处还在的占位符。
+
+### 一个没修的发现
+
+`eval_ledger.py --check` **进不了 CI**。仓库有三套生成物守卫，`gen_eval_data.py --check` 与
+`gen_ui_types.py --check` 都在 `tests.yml` 里，唯独台账这套不在。原因不是忘了加：
+`SRC_DIRS` 同时扫 `outputs/`（在 `.gitignore` 里）和 `docs/eval/`，CI 里没有 `outputs/`，
+渲染出来的台账必然与提交的那份不一致 → 加进去会永久红。
+
+要修得先让 `--check` 只校验入库范围（`docs/eval/` + `docs/eval/runs/`），
+那是改台账语义，不是加一行 yml。先记在这里。

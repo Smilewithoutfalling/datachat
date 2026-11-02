@@ -1,8 +1,10 @@
 import os
+import sys
 
 import pandas as pd
 import pytest
 
+from app.tools import sandbox
 from app.tools.sandbox import run_code
 
 
@@ -146,3 +148,40 @@ def test_whitelisted_imports_and_np(sample_df, chart_path):
 def test_other_imports_blocked(sample_df, chart_path, mod):
     _, _, err = run_code(f"import {mod}\nresult = 1", sample_df, chart_path)
     assert err and "ImportError" in err and mod in err
+
+
+# ---------------------------------------------------------------- 子进程怎么起（B35 / M06）
+
+def test_worker_cmd_dev_uses_python_with_worker_script(monkeypatch):
+    """开发态：`python -I -B -X utf8 <sandbox_worker.py> <workdir>`。
+
+    四个参数各有理由，少一个都出事：`-I` 隔掉用户 site-packages 与 PYTHONPATH（否则
+    沙箱受父进程环境影响），`-B` 不写 .pyc（沙箱工作目录用完就删），`-X utf8` 防 Windows
+    子进程按 GBK 解中文路径。
+
+    这条测试之前**不存在**：`worker_cmd` 是 2026-10 为了修 B35 从内联 list 抽出来的，
+    抽出时没人给它写测试，17 条 sandbox 测试全都走 `run_code` 真实子进程，绕过了这个构造函数。
+    """
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    cmd = sandbox.worker_cmd("C:/wd")
+    assert cmd == [sys.executable, "-I", "-B", "-X", "utf8", sandbox._WORKER, "C:/wd"]
+    assert os.path.basename(cmd[5]) == "sandbox_worker.py"
+
+
+def test_worker_cmd_frozen_dispatches_to_self(monkeypatch):
+    """打包态（B35）：`sys.executable` 是应用本身，不是 python。
+
+    PyInstaller 把解释器和代码打进 exe，`sandbox_worker.py` 那个**源文件不在包里**，
+    `-I` / `-B` 这些解释器参数也没人认——照开发态那样拼，子进程会把 `-I` 当文件名启动失败。
+    正确做法是让 exe 自己分派：`<exe> --sandbox-worker <workdir>`，由 app/sidecar.py 接。
+
+    这条断言的意义在于：它是唯一能挡住「有人把 frozen 分支删掉、退回只用 sys.executable
+    当 python」的测试。打包 smoke（packaging/smoke_sidecar.py）不走 sandbox，CI 的
+    desktop / sidecar 两个 job 也测不到这里。
+    """
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    cmd = sandbox.worker_cmd("C:/wd")
+    assert cmd == [sys.executable, "--sandbox-worker", "C:/wd"]
+    # 打包后这个 .py 不在包里，它的路径绝不能出现在命令行上
+    assert sandbox._WORKER not in cmd
+    assert not {"-I", "-B", "-X"} & set(cmd)
