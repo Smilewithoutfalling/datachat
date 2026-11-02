@@ -213,15 +213,40 @@ def _is_label_value(v) -> bool:
     return isinstance(v, (pd.Timestamp, pd.Period)) or (isinstance(v, str) and not _is_num(v) and _pct(v) is None)
 
 
+def _extreme_positions(s: pd.Series):
+    """数值 Series 里「唯一最大值」「唯一最小值」各自的位置；并列的一方返回 None。
+
+    规则 20 a/a2 的锚点。**刻意不看单调性**：`groupby().size()` 不给排序时是
+    「标签字典序 + 值乱序」，`.sort_values()` 给的是同一份完整分布。用单调性识别
+    「这是一份排名」，等于把呈现顺序当成了答案本身（缺口 13，inv_007 三跑现场：
+    run1 不排序判错、run2 降序判对、run3 降序+reset_index 也判对，三份代码算的是同一个数）。
+
+    同时保留最小值：旧判据「首行标签 == 期望」在升序时认的是最小值（问「哪个最低」
+    的题就这么答）。只看最大值会让这类题从对变错，那是回归不是修复。
+
+    并列时拒绝是保守的：`idxmax` 在并列值上的结果依赖行序，本来就没有唯一答案。
+    """
+    try:
+        vals = pd.to_numeric(s, errors="coerce")
+    except (TypeError, ValueError):
+        return None, None
+    hi, lo = vals.max(), vals.min()
+    if hi is None or pd.isna(hi) or pd.isna(lo):
+        return None, None
+    seq = vals.tolist()
+    top = [i for i, v in enumerate(seq) if v == hi]
+    bot = [i for i, v in enumerate(seq) if v == lo]
+    return (top[0] if len(top) == 1 else None), (bot[0] if len(bot) == 1 else None)
+
+
 def _extras_eq(a, e, tol, ordered) -> bool:
     """规则 20：答案对、但外面裹了附加信息的形态。见模块说明。"""
-    # a) 期望标签，实际是排好序的数值 Series
+    # a) 期望标签，实际是完整的数值 Series（排不排序都算）
     if _is_label_value(e) and isinstance(a, pd.Series) and len(a) > 1 \
             and pd.api.types.is_numeric_dtype(a) and not isinstance(a.index, pd.MultiIndex):
-        if (a.is_monotonic_decreasing or a.is_monotonic_increasing) and a.iloc[0] != a.iloc[1]:
-            return _scalar_eq(_py(a.index[0]), e, tol)
-        return False
-    # a2) 期望标签，实际是排好序的表格：某一数值列单调、且首行标签正是期望值。
+        hi, lo = _extreme_positions(a)
+        return any(p is not None and _scalar_eq(_py(a.index[p]), e, tol) for p in (hi, lo))
+    # a2) 期望标签，实际是完整表格：某一数值列的唯一最大值所在行，标签正是期望值。
     # ord_018 的现场：模型多给了 orders / refunded 两列，rate 列降序首行就是答案；
     # 同一份答案少两列（只剩 Series）时 a) 认，多两列就判错——差别只在"裹了几层"，不在答案。
     if _is_label_value(e) and isinstance(a, pd.DataFrame) and len(a) > 1 \
@@ -230,24 +255,20 @@ def _extras_eq(a, e, tol, ordered) -> bool:
             s = a[col]
             if not pd.api.types.is_numeric_dtype(s) or len(s) < 2:
                 continue
-            if not (s.is_monotonic_decreasing or s.is_monotonic_increasing):
-                continue
-            if s.iloc[0] == s.iloc[1]:
-                continue
-            if _scalar_eq(_py(a.index[0]), e, tol):
+            hi, lo = _extreme_positions(s)
+            if any(p is not None and _scalar_eq(_py(a.index[p]), e, tol) for p in (hi, lo)):
                 return True
         # 标签在列里而不是 index：ord_018 的 run1 就是这种形态（RangeIndex + category 列），
         # 同一份答案换个 index 写法就判错，差的不是答案。
         label_cols = [c for c in a.columns if not pd.api.types.is_numeric_dtype(a[c])]
         num_cols = [c for c in a.columns if pd.api.types.is_numeric_dtype(a[c])]
         for lc in label_cols:
-            if not _scalar_eq(_py(a[lc].iloc[0]), e, tol):
-                continue
             for nc in num_cols:
                 s = a[nc]
-                if len(s) < 2 or s.iloc[0] == s.iloc[1]:
+                if len(s) < 2:
                     continue
-                if s.is_monotonic_decreasing or s.is_monotonic_increasing:
+                hi, lo = _extreme_positions(s)
+                if any(p is not None and _scalar_eq(_py(a[lc].iloc[p]), e, tol) for p in (hi, lo)):
                     return True
         return False
     # c) 一句话字符串

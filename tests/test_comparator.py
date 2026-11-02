@@ -224,7 +224,9 @@ def test_rule20_label_vs_sorted_series():
     assert results_equal(s, "杭州")
     assert results_equal(s.sort_values(), "武汉")                       # 升序时榜首是最小值
     assert not results_equal(s, "上海")
-    assert not results_equal(s.sort_index(), "杭州")                    # 没按值排序：看不出答案
+    # 原来断言「不认」、理由是「没按值排序看不出答案」。这正是缺口 13：sort_index 给的
+    # 是同一份完整分布，杭州仍然是那列的最大值，答案没变，变的只是行序。
+    assert results_equal(s.sort_index(), "杭州")
     assert not results_equal(pd.Series([5.0, 5.0, 1.0], index=["甲", "乙", "丙"]), "甲")   # 榜首并列
 
 
@@ -406,22 +408,59 @@ def test_extras_frame_one_sorted_column_answers_the_question():
     # 标签在列里、index 是 RangeIndex 的形态（同一次运行就是这种）
     by_col = wide.reset_index().rename(columns={"index": "category"})
     assert results_equal(by_col, e)
-    # 首行不是期望值：不认
-    assert not results_equal(wide.sort_values("rate"), e)
-    # 数值列不单调：不认（说明没按这一列排序，首行不构成答案）
-    noise = wide.copy()
-    noise["rate"] = [1.0, 9.0, 2.0, 8.0, 3.0]
-    noise["orders"] = [5, 1, 4, 2, 3]
-    noise["refunded"] = [3, 1, 5, 2, 4]
-    assert not results_equal(noise, e)
+    # 升序同样是这份答案。**这条原来断言的是「不认」，那是在把缺口 13 写进测试**：
+    # inv_007 三跑算的是同一个数，只有 run2/run3 写了 .sort_values()，run1 没写就判错。
+    # 用单调性当「这是排名」的身份证，等于把呈现顺序当成答案本身。
+    assert results_equal(wide.sort_values("rate"), e)
+    # 完全没有排序（groupby 的默认顺序）：仍然是同一份分布，认
+    assert results_equal(wide.sort_index(), e)
+    # 真正的边界：期望标签既不是最大值也不是最小值 —— 不管排不排序都不认
+    other = wide.copy()
+    other.loc["美妆", "rate"] = 6.0          # 落在 5.70 与 6.84 之间，两头都不是
+    other.loc["数码", "rate"] = 99.0
+    assert not results_equal(other, e)
+    assert not results_equal(other.sort_values("rate", ascending=False), e)
+    # 最大值并列：idxmax 本身就没有唯一答案，不认（比原来的「首行是极值」更严）
+    tie = wide.copy()
+    tie.loc["美妆", "rate"] = tie.loc["食品", "rate"] = 10.40
+    assert not results_equal(tie, e)
 
 
 def test_extras_frame_does_not_swallow_grouped_tables():
-    """规则 10 的老边界：分组汇总表碰巧含期望值不算对。
+    """规则 10 的边界：整张表里"某处出现期望标签"不算对，必须是该列极值那一行。
 
-    新增的表格分支只在「首行标签 == 期望值」时成立，整张表里某处出现期望值不算。
+    这条原来写的是「首行是食品、美妆在最末行，所以不认」—— 那张表里 rate 10.40 就是
+    最大值、美妆就是答案，判错属于缺口 13，不是边界。真正的边界是「最大值在别的标签
+    上，期望标签只是表里出现过」。
     """
     e = "美妆"
-    tbl = pd.DataFrame({"rate": [7.28, 6.84, 5.70, 4.79, 10.40]},
+    tbl = pd.DataFrame({"rate": [7.28, 6.84, 5.70, 9.10, 6.00]},
                        index=["食品", "家居", "服饰", "数码", "美妆"])
-    assert not results_equal(tbl, e)          # 首行是食品，美妆在最末行
+    assert not results_equal(tbl, e)          # 美妆在表里，但两头都不是（max 9.10 / min 5.70）
+    assert not results_equal(tbl.sort_values("rate", ascending=False), e)
+
+
+def test_extras_series_ordering_does_not_change_verdict():
+    """inv_007 三跑现场：同一个数，只因写不写 `.sort_values()` 判对判错。
+
+    gold 是 `value_counts().idxmax()` → 'S04'（缺货记录最多的门店）。三跑给的都是
+    完整分布，代码分别是：
+      run1  `groupby('store').size()`                          → 字典序，值乱 → 旧判据判错
+      run2  `.sort_values(ascending=False)`                    → 降序          → 旧判据判对
+      run3  `sort_values(...)` 后 `.reset_index()`             → 表            → 旧判据判对
+    同一份信息量，判定取决于呈现顺序。缺口 13。
+    """
+    e = "S04"
+    counts = {"S01": 9, "S02": 14, "S03": 8, "S04": 17, "S05": 12}
+    s = pd.Series(counts, name="缺货记录数")
+    assert results_equal(s, e)                                  # run1：不排序
+    assert results_equal(s.sort_values(ascending=False), e)     # run2：降序
+    assert results_equal(s.sort_values(ascending=True), e)      # 升序
+    # run3：重置 index，标签落进列里
+    assert results_equal(s.sort_values(ascending=False).reset_index(), e)
+    # 换一家门店当最大值、且 S04 落在中间，三种写法都不能认
+    wrong = s.copy()
+    wrong["S04"] = 10                        # 8 < 10 < 12 < 14 < 17，既非最大也非最小
+    assert not results_equal(wrong, e)
+    assert not results_equal(wrong.sort_values(ascending=False), e)
+    assert not results_equal(wrong.sort_values(ascending=False).reset_index(), e)
