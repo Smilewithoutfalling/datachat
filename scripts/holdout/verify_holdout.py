@@ -57,6 +57,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from app.tools.dataset import load_data  # noqa: E402
 
 AIR_INNER = "PRSA2017_Data_20130301-20170228.zip"
+RETAIL_SHEET = "Year 2010-2011"
+FOOD_PREFIX = "FoodData_Central_sr_legacy_food_csv_2018-04/"
 
 
 def sha256_of(obj) -> str:
@@ -111,6 +113,40 @@ def load_raw(bank: str, name: str):
             "评论": pd.read_csv(os.path.join(cache, "reviews.csv.gz"), low_memory=False),
             "社区": pd.read_csv(os.path.join(cache, "neighbourhoods.csv"), low_memory=False),
         }
+    if name == "retail":
+        # 单表：UCI 502 的第二张 sheet。**只取这张** —— 两张 sheet 在
+        # 2010-12-01~12-09 有 22,523 行重叠，拼起来会把同一笔交易算两遍。
+        #
+        # Invoice / StockCode 必须按 str 读：发票号有 'C' 前缀（取消单）、
+        # 商品编码有 'M'/'POST'/'BANK CHARGES' 这类非数字值。让 pandas 推断会得到
+        # object 里混 int，`.str.startswith` 在整数行上给 NaN，`~c` 直接抛错。
+        zpath = os.path.join(bank, "data", "_cache", "online_retail_ii.zip")
+        if not os.path.exists(zpath):
+            sys.exit(f"找不到原始数据 {zpath}（UCI 502 的原包，放进去即可）")
+        with zipfile.ZipFile(zpath) as z:
+            blob = z.read("online_retail_II.xlsx")
+        return pd.read_excel(
+            io.BytesIO(blob), sheet_name=RETAIL_SHEET,
+            dtype={"Invoice": str, "StockCode": str},
+        )
+
+    if name == "food":
+        # 多表：USDA FDC SR Legacy。表名用中文（与 agent 看到的一致），列名保留英文原文。
+        zpath = os.path.join(bank, "data", "_cache", "sr_legacy_food_csv_2018-04.zip")
+        if not os.path.exists(zpath):
+            sys.exit(f"找不到原始数据 {zpath}（FDC 的 SR Legacy 原包，放进去即可）")
+        with zipfile.ZipFile(zpath) as z:
+            def _r(n: str) -> pd.DataFrame:
+                return pd.read_csv(io.BytesIO(z.read(FOOD_PREFIX + n + ".csv")), low_memory=False)
+
+            return {
+                "食品": _r("food"),
+                "食品类别": _r("food_category"),
+                "营养素": _r("nutrient"),
+                "营养成分": _r("food_nutrient"),
+                "份量": _r("food_portion"),
+            }
+
     sys.exit(f"不认识的 dataset: {name}")
 
 

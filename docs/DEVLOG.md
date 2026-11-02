@@ -4387,3 +4387,100 @@ c03 最初写 `result = df['风向'].value_counts()`。脏化把 1822 条缺失�
 - 范围：B1 用户前提区（用户原话，带轮次，不受窗口和历史预算裁剪），B2 状态带出处轮次，B3 取原文工具 `get_turn(n)`（即 M3b）；M2 口径库这批不做，只先钉写入规则（explicit_user、supersedes、软遗忘）。
 - 偏离规格 §3.2：B1 不走 M6 确认，理由见 §2.2。S 已按建议定下 §8 三条：不走 M6 确认；B3 和 B1/B2 放同一个 PR，B3 放最后；前提区先不过滤问句。
 - B1–B3 的先后等 7b24d4f 上的多轮 state 重跑读数，按 §1.3 的决策表定。
+
+## [111] 2026-11-02 · 第二批 23 题验收：补 3 条 has_chart、1 处题面口径，加两个数据源分支
+
+第二批 23 题（零售 1 表 + 食品营养 5 表）由外部出题方交付，包在 `D:/tmp/holdout_b2.zip`。
+本文记的是**验收**，不是出题。结论：数据与答案全部可复现，但有两处必须改。
+
+### 独立复算：不复用对方的 code
+
+验收不能只跑对方的 `verify_holdout` —— 那等于"用同一份实现核对它自己"。所以另外写了一遍：
+从 `_cache` 里的原始包读，换写法（`Invoice.str[0] == "C"` 而不是 `startswith`、用 dict `map` 而不是
+三次 `merge`），逐题重算。
+
+23 题里 22 题数值一致。`h1_22` 对不上，见下。
+
+### 缺陷 1：`c06`–`c08` 没有 `has_chart`
+
+对方交付时写「oracle 报告这次没把 c06–c08 报成缺图，原因我没查」。原因很直白：
+
+    "c06" / "c07" / "c08" 三个 dict 里根本没有 has_chart 这个键
+
+`run_holdout.py:196` 是 `has_chart=q.get("has_chart", False)` —— 缺键默认 False，于是报告的
+`chart_smoke.has_chart = {"n": 0, "missing": [], "pass": true}`：**一道画图题都没登记**，
+`n=0` 自然 `missing=[]`、自然 `pass=true`。不是 oracle 的特性，是题面漏标。
+
+后果不是"报告少一行红字"：这三题的题面明写"画折线图/柱状图"，但评测里出不出图完全不检查，
+退化成了纯数列对比题。第一批的 `c01`–`c05` 五个都有这个键，对比一眼就看出来。
+
+补上之后 oracle 报告变成 `has_chart ✗ 缺 ['c01'…'c08']` 八题 —— 这才是真实状态
+（oracle 用标准答案当输出，标准答案只算数不画图）。
+
+### 缺陷 2：`h1_22` 的口径会分叉
+
+题面原文：「只看有客户编号的明细行，一共有多少个不同的客户？」答案 `4372`。
+
+- 全表口径：`df['Customer ID'].nunique()` = **4372**（`dropna=True` 跳过 135,080 条缺失）
+- 去掉取消单：`keep['Customer ID'].nunique()` = **4339**
+
+同一组 9 道单表题里，`h1_20`/`h1_21`/`h1_23`/`h1_24`/`h1_26` 五道都显式写了"去掉取消单"，唯独这道不写。
+读者按上下文推断会得 4339，判错；严格照字面读才得 4372。**两种读法都站得住，就是题面缺陷**，
+不是答案错。按 README 硬规则"答案必须唯一"，把口径写进题面：
+
+    只看有客户编号的明细行（包含取消单行），一共有多少个不同的客户？
+
+答案不变（仍是 4372），改的是"读者能不能猜到出题人问的是哪一遍"。
+
+### 两个新数据源的读取分支进了仓库
+
+`verify_holdout.load_raw()` 原来只认 `air` / `air_report` / `rental`，新数据源一律
+`sys.exit("不认识的 dataset")`。对方为绕开这点写了 `verify_new.py`（运行时替换 `load_raw`），
+但那是个**本地包装**：`REPO = '/workspace/work/datachat'` 硬编码，换台机器就跑不了，
+而且没有它这批题无法复验。所以两个分支直接进仓库 —— 读数据的代码，不含题面，与第一批
+`air_report` 同一个理由。
+
+两个非显然的点，都写进了注释和测试：
+
+- **`Invoice` / `StockCode` 必须 `dtype=str`**。发票号有 `C` 前缀（取消单）、商品编码有
+  `M` / `POST` / `BANK CHARGES`。让 pandas 推断会得到 object 里混 int，`.str.startswith`
+  在整数行上给 NaN，`~c` 直接抛 `TypeError`。
+- **只读 `Year 2010-2011` 这张 sheet**。两张 sheet 在 2010-12-01~12-09 有 22,523 行重叠，
+  拼起来同一笔交易算两遍。
+
+`tests/test_verify_holdout.py` 6 条，用**临时造的最小 xlsx/csv 包**（不碰题库里的 114 MB 真数据，
+CI 能跑）：str 保持、只读第二张、五表中文键名、缺包报路径、不认识的 dataset 仍硬退出。
+
+### 数据源许可（官方页面原文核过，不是转述）
+
+| 数据集 | 许可 | 出处原文 |
+|---|---|---|
+| UCI 502 Online Retail II | CC BY 4.0 | 数据集页 "This dataset is licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) license." |
+| USDA FDC SR Legacy | CC0 1.0 | 首页 Licensing 段 "USDA FoodData Central data are in the public domain and they are not copyrighted. They are published under CC0 1.0 Universal" |
+
+UCI 页面写 `# Instances 1,067,371` —— 那是**两张 sheet 合计**；本批只取第二张，541,910 行。
+这不是错，但 README 里要写明，否则别人会以为少了一半数据。
+
+### 顺手记一个分发问题
+
+`holdout_b2.zip` / `holdout_b2_data.zip` 里的中文文件名是 UTF-8 但没有设 zip 的
+`flag_bits & 0x800`，Windows 资源管理器双击解压会得到 `τ╜æσ║ùΣ║ñµÿô` 这种乱码目录。
+`zipfile.extractall()` 同样按 cp437 解码。本机是用 `name.encode('cp437').decode('utf-8')`
+手工还原后解压的。以后打包带中文名的 zip，要么设 flag，要么全用 ASCII 名。
+
+### 验收读数
+
+- 双表核对：**63/63**，其中 61 道有 `raw_code` 且在脏化表与原始表上各算一遍相等
+  （`h1_27` / `m19` 是拒答题，不给 raw_code，与第一批 `h1_06` / `m12` 一致）。
+- `run_holdout.py --oracle`：**63/63 = 100%**，执行成功率 100%，
+  分类 聚合 24 / 过滤 17 / 时序 11 / 关联 2 / 应拒答 4，
+  分表 air 25 / rental 14 / air_report 1 / retail 13 / food 10。
+- 前 40 题的 `questions` / `answers_spec` / `answers` 三份逐项未变（对方交付前后都用
+  `json` 深比较核过；仓库里 `holdout/questions.json` 仍是这 40 题）。
+- 冻结哈希：`913dd906bc1c`（对方交付）→ **`7a0275904f42`**（补 `has_chart` 3 处 + 改 `h1_22` 题面后重写）。
+  `answers.json` 已按新哈希重写，63/63 仍通过。
+
+### 一件需要说清的事
+
+这批 23 题的题面在验收过程中被完整看过了，所以它们**不是盲测题**。roadmap 里
+"S 出 ≥1/3 的题、不给实现方看"那条仍未满足 —— 现在 63 题全部、或由我出、或由我看过。
