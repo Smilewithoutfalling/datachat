@@ -4093,3 +4093,69 @@ UCI 501 Beijing Multi-Site Air Quality。下载 `air.zip`（8.0 MB，sha256[:12]
    `creativecommons.org/licenses/by/4.0/legalcode` 链接）；501 只核到 DOI `10.24432/C5RK5G`，
    而 DataCite 的 `rightsList` 是**空的** —— UCI 没把许可登记进 DOI 元数据。
    按 §1 第 5 条，这一条不过就不能开工跑模型。
+
+## [106] 2026-11-02 · 留出集全链路打通：数据 → 出题 → 双表核对答案 → 冻结 → oracle 6/6
+
+### 许可证：两个数据集都拿到硬证据了
+
+之前卡在「API 不返 license、页面是 SPA」。真因是我 grep 的模式写错了 —— 页面 HTML 有 157 KB，
+License 段就在里面（`<h1>License</h1>` + Creative Commons 署名段）。改用 WebFetch 直接读：
+
+- **UCI 501 Beijing Multi-Site Air Quality**：`# License` 段落明文
+  "This dataset is licensed under a [Creative Commons Attribution 4.0 International]
+  (https://creativecommons.org/licenses/by/4.0/legalcode) (CC BY 4.0) license."
+- **UCI 275 Bike Sharing**：同一段措辞、同一个 legalcode 链接。
+
+`phase7` §1 第 5 条（只用 CC BY / CC0 / 公有领域）对单表数据**满足**。
+
+顺带核实了一件事：501 的官方包（页面 Dataset Files 列表）确实包含 `data.csv`(36.9 KB) /
+`test.csv`(34.4 KB)，而这两个文件的内容是 AAPL 股票日线。**是 UCI 自己把无关文件混进了包**，
+不是我们下错。真数据在内层 `PRSA2017_Data_20130301-20170228.zip`。
+
+### 新增 `scripts/holdout/verify_holdout.py`：答案要算两遍
+
+`run_holdout.py` 执行 `EvalCase.ground_truth` 取值，而那段代码跑在**脏化表**上。
+如果标准答案只由脏化表自己算，万一脏化改了数值，题目和答案会一起错、错得自洽，跑多少遍
+都发现不了。所以 `answers_spec.json` 每题可以写两段代码：
+
+- `code` 在脏化表上跑（中文列名、`监测时间` 字符串）—— 这段进 `answers.json`，runner 用它
+- `raw_code` 在**原始数据**上跑（英文列名、`year/month/day/hour` 分列）—— 只用于核对
+
+两边算出的值必须相等，不等就拒绝写 `answers.json`。列名不同是刻意的：它逼你分别写一遍，
+而不是复制粘贴（复制粘贴就退化成"自己核对它自己"）。
+
+`verify_holdout.py` 与 `build_holdout_data.py` **不共用读原始数据的函数**，理由同上。
+
+### 6 道题（单表组第一批，样本）
+
+| 题 | 类型 | 答案 | 两表一致 |
+|---|---|---|---|
+| h1_01 | 聚合 | `79.79` | ✓ |
+| h1_02 | 过滤 | `9743` | ✓ |
+| h1_03 | 聚合（分组取最大） | `Dongsi` | ✓ |
+| h1_04 | 时序 | `('2013-03-01 00:00', '2017-02-28 23:00')` | ✓ |
+| h1_05 | 占比（缺失） | `2.08` | ✓ |
+| h1_06 | 应拒答 | 无法回答（没有疾病字段） | 无 raw_code |
+
+`questions_sha256 = 08d61d2f9b38…`，`frozen_at = 2026-11-02`。
+
+### 又踩了一个坑：`format='mixed'` 解析不了 `2013/3/1 0`
+
+`pd.to_datetime(df['监测时间'], format='mixed')` 直接抛 `DateParseError` —— 小时是单位数
+且没有冒号，mixed 模式认不出。必须写死 `format='%Y/%m/%d %H'`。
+
+这是**标准答案自己先栽了一次**，恰好说明 h1_04 该出：日期写成 `2013/3/1 0` 之后，
+(a) 字符串 min/max 给出 `2013/10/1 ~ 2017/2/9`（错的），(b) 连 `format='mixed'` 都解不了。
+模型要答对，这两关都得过。
+
+### 验收
+
+`run_holdout.py --oracle` 在 6 题上 **6/6 = 100%**，四类（聚合 2 / 过滤 2 / 时序 1 / 拒答 1）
+全通，报告 `holdout` 段与五项人工字段齐全。`result 是字面量: 1 条` 是 h1_06 的拒答文本，
+缺口 12 的 provenance 如实标记，符合预期。
+
+### 题库不进 git
+
+`questions.json` / `answers_spec.json` / `answers.json` / 数据全在题库目录
+（`scripts/holdout/README.md` 规则 1），仓库里只有通用脚本。所以本条目能公开写答案，
+但**题面与数据不会随仓库分发**。
