@@ -216,3 +216,16 @@ def test_code_sha_override_is_documented():
     for name, sha in L._CODE_SHA_OVERRIDE.items():
         assert name.startswith("eval_") and name.endswith(".json"), name
         assert len(sha) == 12 and all(c in "0123456789abcdef" for c in sha), sha
+
+
+def test_check_ignores_generation_stamp():
+    """`--check` 必须忽略「生成时间」行，否则每次渲染都不同、检查永远报 1。
+
+    实际踩到：改完代码跑 `eval_ledger.py --check`，退出码 1，以为台账真落后了，
+    重建一遍再看还是 1——那行带着渲染时刻，根本不可能相等。
+    """
+    a = "生成时间：2026-11-02 09:19 · 报告 82 份\n| 批次 | x |"
+    b = "生成时间：2026-11-02 10:30 · 报告 82 份\n| 批次 | x |"
+    assert L._strip_stamp(a) == L._strip_stamp(b)
+    assert "生成时间" not in L._strip_stamp(a)
+    assert L._strip_stamp(a) != L._strip_stamp("生成时间：x\n| 批次 | y |")

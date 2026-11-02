@@ -354,6 +354,14 @@ def render_oracle(records):
     return L
 
 
+def _strip_stamp(md: str) -> str:
+    """去掉「生成时间：…」那一行，用于 --check 的等价比较。
+
+    那行是渲染时刻，每次都不同。带它比，`--check` 永远返回 1，检查就废了。
+    """
+    return "\n".join(line for line in md.splitlines() if not line.startswith("生成时间："))
+
+
 def render_notes(old_md):
     """把上一版里的手写结论原样搬过来。
 
@@ -538,7 +546,9 @@ def main(argv=None):
     md = render(records, batches, notes, datetime.now().strftime("%Y-%m-%d %H:%M"),
                 load_baselines())
 
-    changed = (old != md)
+    # --check 要与「忽略生成时间」的版本比：那行每次都变，不然检查永远报"需要重建"，
+    # 等于没有检查。踩到的场景：改完代码跑 --check 看到退出码 1，以为台账真落后了。
+    changed = (_strip_stamp(old) != _strip_stamp(md))
     if args.check:
         print("台账%s" % ("需要重建" if changed else "已是最新"))
         print("报告 %d 份，进表批次 %d 个" % (len(records), len(batches)))
