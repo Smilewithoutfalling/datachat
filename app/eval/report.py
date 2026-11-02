@@ -406,6 +406,10 @@ class EvalReport:
                 "avg_tokens": self.avg("tokens", items),
                 # M02：判对的题各靠哪一层；非 strict 的都应人工抽审
                 "match_kinds": dict(Counter(r.get("match") for r in items if r.get("correct"))),
+                # 归因（缺口 11 / 12）：`result` 的来路分布、以及没交卷的原因分布。
+                # **不进任何正确率**，只看"这批有多少条要人审"。
+                "result_origins": dict(Counter(r.get("result_origin") for r in items)),
+                "result_missing": dict(Counter(r.get("result_missing") for r in items if r.get("result_missing"))),
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         evalset = evalset_fingerprint()
@@ -515,6 +519,10 @@ class EvalReport:
                 "memory_mode": r.get("memory_mode"),
                 "history_tokens": r.get("history_tokens"),
                 "memory_trimmed": r.get("memory_trimmed"),
+                # 归因（缺口 11 / 12）：答案值是不是算出来的、没交卷的具体原因。
+                # 老报告没有这两个键，读的时候按 None 处理即可，不需要兼容层。
+                "result_origin": r.get("result_origin"),
+                "result_missing": r.get("result_missing"),
                 # 多轮（EV-A2）：题面全貌 + 逐轮答案 + 逐轮约束判定。
                 # 只存 question（= last turn）的话，事后看不出这题到底问了几轮什么。
                 "turns": list(c.turns) if c.turns else [],
@@ -570,6 +578,15 @@ class EvalReport:
         print(f"  Reviewer 修复率:          {self._pct(o['reviewer_fix_rate'])}  "
               f"(初始报错 {o['initial_errors']} 条)")
         print(f"  基础设施失败（LLM 超时/限流/缺 Key 等）: {o['infra_errors']} 条")
+        # 归因（缺口 11 / 12）：只报"有多少条要人看"，不并进任何正确率
+        miss = {k: v for k, v in (o.get("result_missing") or {}).items() if k}
+        if miss:
+            detail = "  ".join(f"{k}:{v}" for k, v in sorted(miss.items()))
+            print(f"  没交卷（跑通了但 result 为空）: {sum(miss.values())} 条   {detail}")
+        lit = sum(v for k, v in (o.get("result_origins") or {}).items()
+                  if k and str(k).startswith("literal"))
+        if lit:
+            print(f"  result 是字面量: {lit} 条  — 只记录形态，不算错（要人看的小清单）")
         if o["avg_duration_s"] is not None:
             print(f"  平均耗时: {o['avg_duration_s']:.2f} 秒/题")
         tok = o["avg_tokens"]
@@ -611,9 +628,14 @@ class EvalReport:
             if not r.get("executed") and r.get("error"):
                 err_preview = r["error"].replace("\n", " ")[:120]
                 print(f"      ❌ 错误[{r.get('error_kind')}]: {err_preview}")
+            # 缺口 11：代码跑通了但没有可判分的 result —— 这不是"算错"，必须看得见
+            if r.get("executed") and r.get("result_missing"):
+                print(f"      📭 没交卷[{r['result_missing']}]：判分取不到 result，按契约算错但数可能对")
             if r.get("executed") and not r.get("correct") and verbose:
                 print(f"      📝 期望: {str(r.get('expected'))[:80]}")
                 print(f"      🔧 实际: {str(r.get('actual'))[:80]}")
+            if verbose and str(r.get("result_origin") or "").startswith("literal"):
+                print(f"      ✍️  result 是字面量（{r['result_origin']}），答案不是当场算出来的")
             if verbose and r.get("code"):
                 print(f"      💻 code: {r['code'][:150]}")
         print()

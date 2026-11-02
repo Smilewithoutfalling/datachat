@@ -78,6 +78,10 @@ _EXEMPT = {
     # 它决定"跑哪十条"，与 run_eval.py 的 --case 同级；那类选题目前不在扫描范围内（缺口 4）。
     # 改这个列表 = 换了探针本身，由 canary_fingerprint() 单独记录，不混进 code_sha12。
     "app/eval/canary.py": "探针清单，不改输入也不改判分；自身哈希另记",
+    # 缺口 11 / 12 的归因：`result` 是算出来的还是写死的、没交卷的具体原因。
+    # **只往报告里写两个字段，不参与 score_detail，也不进模型输入。** 改它不改任何一题的对错，
+    # 所以放 B；但读数的人要能看出"这批 literal 变多了"，那由报告里的分布字段自证。
+    "app/eval/provenance.py": "答案来源归因，只记录不判分，不进模型输入",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

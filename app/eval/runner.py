@@ -13,6 +13,7 @@ from app.core.result import refusal_from_answer
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, results_equal
+from app.eval.provenance import describe as describe_provenance
 from app.tools.dataset import copy_data, load_data
 from app.tools.sandbox import run_trusted
 
@@ -163,6 +164,8 @@ class EvalRunner:
         infra_error: bool   — 是否因 LLM/基础设施失败而没有答案（超时、限流、缺 Key 等）
         error / error_kind  — 最终错误
         attempts / expected / actual / code / answer / chart / duration_s / tokens
+        result_origin       — 缺口 12：答案值来自运行时计算（computed）还是字面量（literal_*）
+        result_missing      — 缺口 11：executed=True 却没有 result 时，没交卷的具体原因
         """
         out = {
             "case": case, "agent": self.agent, "executed": False, "correct": False,
@@ -235,6 +238,9 @@ class EvalRunner:
             "memory_mode": memory_by_turn[-1][0] if memory_by_turn else "off",
             "history_tokens": memory_by_turn[-1][1] if memory_by_turn else 0,
             "memory_trimmed": sorted({b for _, _, t in memory_by_turn for b in t}),
+            # 归因（缺口 11 / 12）：`result` 是算出来的还是写出来的 /
+            # 没交卷时到底是没赋、赋了空、还是分支没走到。**只记录，不参与判分。**
+            **describe_provenance(res.code or "", bool(res.executed), res.result),
         })
 
         # 3. 打分：直接用 analyze 的结构化结果
