@@ -1,0 +1,342 @@
+{
+  "version": 1,
+  "frozen_at": "2026-11-02",
+  "datasets": {
+    "air": "data/空气质量/空气质量.csv",
+    "air_report": "data/空气质量/空气质量_报表.csv",
+    "rental": "data/民宿"
+  },
+  "questions": [
+    {
+      "id": "h1_01",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "全表 PM2.5 的平均浓度是多少（微克/立方米）？保留两位小数。"
+    },
+    {
+      "id": "h1_02",
+      "group": "single",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "PM2.5 浓度超过 300 微克/立方米的记录有多少条？"
+    },
+    {
+      "id": "h1_03",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "text",
+      "ordered": false,
+      "question": "12 个监测站里，PM2.5 平均浓度最高的是哪个站？只给站名。"
+    },
+    {
+      "id": "h1_04",
+      "group": "single",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "text",
+      "question": "这份数据覆盖的时间范围是从哪一刻到哪一刻？给出起止时间，精确到小时。"
+    },
+    {
+      "id": "h1_05",
+      "group": "single",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "percent_equiv": true,
+      "question": "PM2.5 缺失的记录占全部记录的百分之几？保留两位小数。"
+    },
+    {
+      "id": "h1_06",
+      "group": "single",
+      "category": "refusal",
+      "dataset": "air",
+      "expect_refusal": true,
+      "gold_kind": "text",
+      "question": "各监测站周边居民的肺癌发病率分别是多少？"
+    },
+    {
+      "id": "m01",
+      "group": "multi",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "日历表覆盖了每套房源未来一年的可订状态。平均每套房源有多少天标记为可订？保留两位小数。"
+    },
+    {
+      "id": "m02",
+      "group": "multi",
+      "category": "filtering",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "在评论表里一条评论都没有的房源有多少套？"
+    },
+    {
+      "id": "m03",
+      "group": "multi",
+      "category": "timeseries",
+      "dataset": "rental",
+      "gold_kind": "text",
+      "question": "评论日期在 2023 年内的评论中，评论数最多的社区是哪个？只给社区名。"
+    },
+    {
+      "id": "m04",
+      "group": "multi",
+      "category": "ranking",
+      "dataset": "rental",
+      "gold_kind": "series",
+      "question": "按评论表里的实际评论条数排序，评论最多的 5 套房源分别属于哪个社区？按评论数从多到少给出社区名。",
+      "ordered": true
+    },
+    {
+      "id": "m05",
+      "group": "multi",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "text",
+      "question": "全部评论加起来，评论最多的房型是哪一个？只给房型名。"
+    },
+    {
+      "id": "m06",
+      "group": "multi",
+      "category": "filtering",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "可住人数在 4 人及以上的房源，平均每套有多少天标记为可订？保留两位小数。"
+    },
+    {
+      "id": "m07",
+      "group": "multi",
+      "category": "timeseries",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "评论表里的评论按年份统计，评论条数最多的年份是哪一年？给出四位年份。"
+    },
+    {
+      "id": "m08",
+      "group": "multi",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "名下房源数量最多的那位房东，他名下所有房源的评论数合计是多少？"
+    },
+    {
+      "id": "m09",
+      "group": "multi",
+      "category": "filtering",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "每晚价格缺失（空值或无法解析成金额）的房源，评论数合计是多少？"
+    },
+    {
+      "id": "m10",
+      "group": "multi",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "scalar",
+      "question": "整个日历表里，可订状态的记录占全部记录的百分之几？保留两位小数。"
+    },
+    {
+      "id": "m11",
+      "group": "multi",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "text",
+      "question": "在房源数不少于 20 套的社区中，平均评分最高的是哪个社区？只给社区名。"
+    },
+    {
+      "id": "m12",
+      "group": "multi",
+      "category": "refusal",
+      "dataset": "rental",
+      "gold_kind": "text",
+      "question": "这些房源过去一年的平均入住率是多少？",
+      "expect_refusal": true
+    },
+    {
+      "id": "h1_07",
+      "group": "single",
+      "category": "correlation",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "PM2.5 与 PM10 的皮尔逊相关系数是多少？保留三位小数。"
+    },
+    {
+      "id": "h1_08",
+      "group": "single",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "只看 1 月到 12 月都有完整记录的年份，PM2.5 年均浓度最高的是哪一年？给出四位年份。"
+    },
+    {
+      "id": "h1_09",
+      "group": "single",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "降水量大于 0 的记录，PM2.5 的平均浓度是多少？保留两位小数。"
+    },
+    {
+      "id": "h1_10",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "PM2.5 的中位数是多少？保留两位小数。"
+    },
+    {
+      "id": "h1_11",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "PM2.5 不超过 75 的记录，占 PM2.5 有数值的记录的比例是多少？按百分数给出，保留两位小数。"
+    },
+    {
+      "id": "h1_12",
+      "group": "single",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "把同一天所有站、所有小时的记录按天取 PM2.5 日均值，日均值超过 75 的天数占全部有数据天数的比例是多少？按百分数给出，保留两位小数。"
+    },
+    {
+      "id": "h1_13",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "text",
+      "question": "哪个风向的 PM2.5 平均浓度最高？只给风向。"
+    },
+    {
+      "id": "h1_14",
+      "group": "single",
+      "category": "correlation",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "气温与 PM2.5 的皮尔逊相关系数是多少？保留两位小数。"
+    },
+    {
+      "id": "h1_15",
+      "group": "single",
+      "category": "ranking",
+      "dataset": "air",
+      "gold_kind": "series",
+      "ordered": true,
+      "question": "按 PM2.5 年均浓度从低到高排序，最低的 3 个监测站依次是哪些？按从低到高的顺序给出站名。"
+    },
+    {
+      "id": "h1_16",
+      "group": "single",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "2016 年的 PM2.5 年均浓度比 2013 年下降了百分之几？保留两位小数。"
+    },
+    {
+      "id": "h1_17",
+      "group": "single",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "臭氧浓度超过 300 微克/立方米的记录有多少条？"
+    },
+    {
+      "id": "h1_18",
+      "group": "single",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "text",
+      "question": "2013 年到 2016 年，PM2.5 年均浓度下降幅度最大的监测站是哪个？只给站名。"
+    },
+    {
+      "id": "c01",
+      "group": "chart",
+      "category": "aggregation",
+      "dataset": "air",
+      "gold_kind": "series",
+      "has_chart": true,
+      "question": "各监测站 PM2.5 的平均浓度对比，画柱状图。"
+    },
+    {
+      "id": "c02",
+      "group": "chart",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "series",
+      "has_chart": true,
+      "question": "PM2.5 的月度平均浓度随月份怎么变化？画折线图。"
+    },
+    {
+      "id": "c03",
+      "group": "chart",
+      "category": "ranking",
+      "dataset": "air",
+      "gold_kind": "series",
+      "has_chart": true,
+      "question": "各风向出现的记录数从多到少排列（不含缺失记录），画柱状图。"
+    },
+    {
+      "id": "c04",
+      "group": "chart",
+      "category": "aggregation",
+      "dataset": "rental",
+      "gold_kind": "series",
+      "has_chart": true,
+      "question": "各社区的房源数量对比，画柱状图。"
+    },
+    {
+      "id": "c05",
+      "group": "chart",
+      "category": "timeseries",
+      "dataset": "rental",
+      "gold_kind": "series",
+      "has_chart": true,
+      "question": "2023 年各月的评论条数变化，画折线图。"
+    },
+    {
+      "id": "t01",
+      "group": "trap",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "这份数据里 PM2.5 缺失的记录有多少条？"
+    },
+    {
+      "id": "t02",
+      "group": "trap",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "text",
+      "question": "PM2.5 浓度最高的那条记录，出现在哪个监测站、哪个时刻？给出站名和时刻（精确到小时）。"
+    },
+    {
+      "id": "t03",
+      "group": "trap",
+      "category": "aggregation",
+      "dataset": "air_report",
+      "gold_kind": "scalar",
+      "question": "这是从报表系统导出的一份文件，PM2.5 的平均浓度是多少？保留两位小数。"
+    },
+    {
+      "id": "t04",
+      "group": "trap",
+      "category": "timeseries",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "这份数据覆盖了几个完整的自然年（该年 1 月 1 日到 12 月 31 日都有记录）？"
+    },
+    {
+      "id": "t05",
+      "group": "trap",
+      "category": "filtering",
+      "dataset": "air",
+      "gold_kind": "scalar",
+      "question": "PM2.5 和 PM10 同时缺失的记录有多少条？"
+    }
+  ]
+}

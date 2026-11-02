@@ -1,0 +1,233 @@
+{
+  "answers": {
+    "h1_01": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = round(float(v.mean()), 2)",
+      "raw_code": "result = round(float(df['PM2.5'].mean()), 2)",
+      "note": "均值默认跳过缺失；把'未登记'当 0 会算低"
+    },
+    "h1_02": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = int((v > 300).sum())",
+      "raw_code": "result = int((df['PM2.5'] > 300).sum())",
+      "note": "严格大于 300，缺失不计"
+    },
+    "h1_03": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = df.assign(_v=v).groupby('监测站')['_v'].mean().idxmax()",
+      "raw_code": "result = df.assign(_v=df['PM2.5']).groupby('station')['_v'].mean().idxmax()",
+      "note": "按站分组后取均值最大的站名"
+    },
+    "h1_04": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); result = (t.min().strftime('%Y-%m-%d %H:%M'), t.max().strftime('%Y-%m-%d %H:%M'))",
+      "raw_code": "t = pd.to_datetime(df[['year','month','day','hour']].rename(columns={'year':'year','month':'month','day':'day','hour':'hour'})); result = (t.min().strftime('%Y-%m-%d %H:%M'), t.max().strftime('%Y-%m-%d %H:%M'))",
+      "note": "Excel 风格串的字典序不是时间序，必须先 to_datetime"
+    },
+    "h1_05": {
+      "code": "result = round(100.0 * (df['PM2.5'] == '未登记').sum() / len(df), 2)",
+      "raw_code": "result = round(100.0 * df['PM2.5'].isna().sum() / len(df), 2)",
+      "note": "分母是全部记录，分子是 PM2.5 缺失"
+    },
+    "h1_06": {
+      "code": "result = '无法回答：数据中只有空气质量与气象指标，没有疾病发病率数据'",
+      "note": "应拒答：数据里没有任何疾病/健康字段"
+    },
+    "m01": {
+      "code": "c = dfs['可订日历']; result = round((c['可订'] == 't').sum() / c['房源编号'].nunique(), 2)",
+      "raw_code": "c = dfs['可订日历']; result = round((c['available'] == 't').sum() / c['listing_id'].nunique(), 2)",
+      "note": "分母是房源数不是行数（虽然此处每套都是 365 行，但写法不该依赖这个巧合）",
+      "expect": 252.3
+    },
+    "m02": {
+      "code": "result = len(set(dfs['房源']['房源编号']) - set(dfs['评论']['房源编号']))",
+      "raw_code": "result = len(set(dfs['房源']['id']) - set(dfs['评论']['listing_id']))",
+      "note": "左连接找空 / 集合差，两种都行",
+      "expect": 51
+    },
+    "m03": {
+      "code": "r = dfs['评论']; r23 = r[pd.to_datetime(r['评论日期']).dt.year == 2023]; j = r23.merge(dfs['房源'][['房源编号','社区']], on='房源编号', how='left'); result = j['社区'].value_counts().idxmax()",
+      "raw_code": "r = dfs['评论']; r23 = r[pd.to_datetime(r['date']).dt.year == 2023]; j = r23.merge(dfs['房源'][['id','neighbourhood_cleansed']], left_on='listing_id', right_on='id', how='left'); result = j['neighbourhood_cleansed'].value_counts().idxmax()",
+      "note": "2023 全年 4014 条，第一名 1130 vs 第二名 530，差距够大",
+      "expect": "SIXTH WARD"
+    },
+    "m04": {
+      "code": "t = dfs['评论'].groupby('房源编号').size().sort_values(ascending=False).head(5); result = dfs['房源'].set_index('房源编号')['社区'].reindex(t.index)",
+      "raw_code": "t = dfs['评论'].groupby('listing_id').size().sort_values(ascending=False).head(5); result = dfs['房源'].set_index('id')['neighbourhood_cleansed'].reindex(t.index)",
+      "note": "有序 5 元组；并列时按 pandas 默认序，题面已要求按评论数降序",
+      "expect": null
+    },
+    "m05": {
+      "code": "j = dfs['评论'].merge(dfs['房源'][['房源编号','房型']], on='房源编号', how='left'); result = j['房型'].value_counts().idxmax()",
+      "raw_code": "j = dfs['评论'].merge(dfs['房源'][['id','room_type']], left_on='listing_id', right_on='id', how='left'); result = j['room_type'].value_counts().idxmax()",
+      "note": "23152 / 7089 / 10，第一名压倒性",
+      "expect": "Entire home/apt"
+    },
+    "m06": {
+      "code": "big = dfs['房源'][dfs['房源']['可住人数'] >= 4]['房源编号']; c = dfs['可订日历']; result = round((c[c['房源编号'].isin(big)]['可订'] == 't').sum() / len(big), 2)",
+      "raw_code": "big = dfs['房源'][dfs['房源']['accommodates'] >= 4]['id']; c = dfs['可订日历']; result = round((c[c['listing_id'].isin(big)]['available'] == 't').sum() / len(big), 2)",
+      "note": "204 套房源，分母是房源数",
+      "expect": 247.44
+    },
+    "m07": {
+      "code": "result = int(pd.to_datetime(dfs['评论']['评论日期']).dt.year.value_counts().idxmax())",
+      "raw_code": "result = int(pd.to_datetime(dfs['评论']['date']).dt.year.value_counts().idxmax())",
+      "note": "2025 = 5841；2026 只到 9 月（4717），不是最多",
+      "expect": 2025
+    },
+    "m08": {
+      "code": "h = dfs['房源']['房东编号'].value_counts().index[0]; result = int(dfs['房源'][dfs['房源']['房东编号'] == h]['评论数'].sum())",
+      "raw_code": "h = dfs['房源']['host_id'].value_counts().index[0]; result = int(dfs['房源'][dfs['房源']['host_id'] == h]['number_of_reviews'].sum())",
+      "note": "该房东 31 套，唯一不并列；192 条",
+      "expect": 192
+    },
+    "m09": {
+      "code": "p = dfs['房源']['每晚价格']; num = pd.to_numeric(p.str.replace('$', '', regex=False).str.replace(',', '', regex=False), errors='coerce'); result = int(dfs['房源'][num.isna()]['评论数'].sum())",
+      "raw_code": "p = dfs['房源']['price']; num = pd.to_numeric(p.str.replace('$', '', regex=False).str.replace(',', '', regex=False), errors='coerce'); result = int(dfs['房源'][num.isna()]['number_of_reviews'].sum())",
+      "note": "33 套价格缺失，评论合计 920",
+      "expect": 920
+    },
+    "m10": {
+      "code": "result = round(100 * (dfs['可订日历']['可订'] == 't').mean(), 2)",
+      "raw_code": "result = round(100 * (dfs['可订日历']['available'] == 't').mean(), 2)",
+      "note": "126152 / 182500",
+      "expect": 69.12
+    },
+    "m11": {
+      "code": "L = dfs['房源'].copy(); L['_s'] = pd.to_numeric(L['评分'], errors='coerce'); g = L.groupby('社区').agg(n=('房源编号', 'size'), s=('_s', 'mean')); g = g[g['n'] >= 20]; result = g['s'].idxmax()",
+      "raw_code": "L = dfs['房源'].copy(); L['_s'] = pd.to_numeric(L['review_scores_rating'], errors='coerce'); g = L.groupby('neighbourhood_cleansed').agg(n=('id', 'size'), s=('_s', 'mean')); g = g[g['n'] >= 20]; result = g['s'].idxmax()",
+      "note": "不限样本量时 EIGHTH WARD(14 套) 会赢，那条路是噪声",
+      "expect": "FOURTEENTH WARD"
+    },
+    "m12": {
+      "code": "result = '无法回答：数据中只有可订状态（可订=t/f），没有实际入住记录，无法计算入住率'",
+      "note": "应拒答：日历只有 availability，没有 booking",
+      "expect": null
+    },
+
+    "h1_07": {
+      "code": "v1 = pd.to_numeric(df['PM2.5'], errors='coerce'); v2 = pd.to_numeric(df['PM10'], errors='coerce'); result = round(float(v1.corr(v2)), 3)",
+      "raw_code": "result = round(float(df['PM2.5'].corr(df['PM10'])), 3)",
+      "note": "corr 默认按有效对计算（pairwise），两边都不缺失才进分母",
+      "expect": 0.884
+    },
+    "h1_08": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); days = t.dt.normalize().groupby(t.dt.year).nunique(); full = days[days >= 365].index; g = pd.DataFrame({'y': t.dt.year, 'v': v}); result = int(g[g['y'].isin(full)].groupby('y')['v'].mean().idxmax())",
+      "raw_code": "d = df.assign(_d=pd.to_datetime(df[['year', 'month', 'day']])); days = d.groupby('year')['_d'].nunique(); full = days[days >= 365].index; result = int(d[d['year'].isin(full)].groupby('year')['PM2.5'].mean().idxmax())",
+      "note": "2017 只有 59 天（冬季）却均值最高 92.68；完整年只有 2014/2015/2016，其中 2014 最高 85.58",
+      "expect": 2014
+    },
+    "h1_09": {
+      "code": "p = pd.to_numeric(df['降水量'], errors='coerce'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = round(float(v[p > 0].mean()), 2)",
+      "raw_code": "result = round(float(df.loc[df['RAIN'] > 0, 'PM2.5'].mean()), 2)",
+      "note": "降水 16520 条，雨天均值 62.39 低于全表 79.79（湿沉降）",
+      "expect": 62.39
+    },
+    "h1_10": {
+      "code": "result = round(float(pd.to_numeric(df['PM2.5'], errors='coerce').median()), 2)",
+      "raw_code": "result = round(float(df['PM2.5'].median()), 2)",
+      "note": "中位数 55.0 远低于均值 79.79，长尾（最高 999）拉高均值",
+      "expect": 55.0
+    },
+    "h1_11": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = round(100.0 * int((v <= 75).sum()) / int(v.notna().sum()), 2)",
+      "raw_code": "result = round(100.0 * int((df['PM2.5'] <= 75).sum()) / int(df['PM2.5'].notna().sum()), 2)",
+      "note": "分母是有数值的记录 412029；用全表 420768 会得 59.66（口径差 1.26pp）",
+      "expect": 60.92
+    },
+    "h1_12": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); d = pd.DataFrame({'day': t.dt.normalize(), 'v': v}).groupby('day')['v'].mean(); result = round(100.0 * float((d > 75).mean()), 2)",
+      "raw_code": "d = df.groupby(['year', 'month', 'day'])['PM2.5'].mean(); result = round(100.0 * float((d > 75).mean()), 2)",
+      "note": "1461 天里 588 天日均超 75；按记录算（h1_02 口径）会得到不同的数",
+      "expect": 40.25
+    },
+    "h1_13": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = pd.DataFrame({'w': df['风向'], 'v': v}).groupby('w')['v'].mean().idxmax()",
+      "raw_code": "result = df.groupby('wd')['PM2.5'].mean().idxmax()",
+      "note": "ESE 102.01 最高，NW 51.43 最低（西北风最干净）；'未登记' 组 100.18 排第三不影响",
+      "expect": "ESE"
+    },
+    "h1_14": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); t = pd.to_numeric(df['气温'], errors='coerce'); result = round(float(t.corr(v)), 2)",
+      "raw_code": "result = round(float(df['TEMP'].corr(df['PM2.5'])), 2)",
+      "note": "弱负相关 -0.13：线性关系很弱，不能说'气温越低污染越重'有多强",
+      "expect": -0.13
+    },
+    "h1_15": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = pd.DataFrame({'s': df['监测站'], 'v': v}).groupby('s')['v'].mean().sort_values().head(3).index.tolist()",
+      "raw_code": "result = df.groupby('station')['PM2.5'].mean().sort_values().head(3).index.tolist()",
+      "note": "Dingling 65.99 / Huairou 69.63 / Changping 71.10，与第 4 名 Shunyi 79.49 有明显断层",
+      "expect": ["Dingling", "Huairou", "Changping"]
+    },
+    "h1_16": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); a = float(v[t.dt.year == 2013].mean()); b = float(v[t.dt.year == 2016].mean()); result = round(100.0 * (a - b) / a, 2)",
+      "raw_code": "a = float(df[df['year'] == 2013]['PM2.5'].mean()); b = float(df[df['year'] == 2016]['PM2.5'].mean()); result = round(100.0 * (a - b) / a, 2)",
+      "note": "80.04 -> 71.93，相对下降 10.13%（绝对差 8.11 微克）",
+      "expect": 10.13
+    },
+    "h1_17": {
+      "code": "result = int((pd.to_numeric(df['臭氧'], errors='coerce') > 300).sum())",
+      "raw_code": "result = int((df['O3'] > 300).sum())",
+      "note": "O3 最大 1071，超过 300 的 605 条",
+      "expect": 605
+    },
+    "h1_18": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); g = pd.DataFrame({'s': df['监测站'], 'y': t.dt.year, 'v': v}); p = g[g['y'].isin([2013, 2016])].pivot_table(index='s', columns='y', values='v', aggfunc='mean'); result = ((p[2013] - p[2016]) / p[2013]).idxmax()",
+      "raw_code": "g = df[df['year'].isin([2013, 2016])]; p = g.pivot_table(index='station', columns='year', values='PM2.5', aggfunc='mean'); result = ((p[2013] - p[2016]) / p[2013]).idxmax()",
+      "note": "Wanliu 22.02%（91.60 -> 71.42），最小 Gucheng 5.58%，12 站降幅差异明显",
+      "expect": "Wanliu"
+    },
+
+    "c01": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = df.assign(_v=v).groupby('监测站')['_v'].mean()",
+      "raw_code": "result = df.groupby('station')['PM2.5'].mean()",
+      "note": "12 项 Series，画柱状图；数值同 h1_03 的分组均值"
+    },
+    "c02": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); v = pd.to_numeric(df['PM2.5'], errors='coerce'); result = pd.DataFrame({'m': t.dt.month, 'v': v}).groupby('m')['v'].mean()",
+      "raw_code": "result = df.groupby('month')['PM2.5'].mean()",
+      "note": "12 项，索引 1..12；12 月 104.58 最高、8 月 53.47 最低"
+    },
+    "c03": {
+      "code": "result = df.loc[df['风向'] != '未登记', '风向'].value_counts()",
+      "raw_code": "result = df['wd'].value_counts()",
+      "note": "16 项（去掉 1822 条'未登记'）；NE 43335 第一"
+    },
+    "c04": {
+      "code": "result = dfs['房源']['社区'].value_counts()",
+      "raw_code": "result = dfs['房源']['neighbourhood_cleansed'].value_counts()",
+      "note": "15 个社区，房源数降序"
+    },
+    "c05": {
+      "code": "r = dfs['评论']; d = pd.to_datetime(r['评论日期']); m = d.dt.year == 2023; result = r[m].groupby(d[m].dt.month).size()",
+      "raw_code": "r = dfs['评论']; d = pd.to_datetime(r['date']); m = d.dt.year == 2023; result = r[m].groupby(d[m].dt.month).size()",
+      "note": "2023 年 12 个月，总 4014 条"
+    },
+
+    "t01": {
+      "code": "result = int((df['PM2.5'] == '未登记').sum())",
+      "raw_code": "result = int(df['PM2.5'].isna().sum())",
+      "note": "缺失被写成'未登记'而不是空值，isna() 会返回 0",
+      "expect": 8739
+    },
+    "t02": {
+      "code": "v = pd.to_numeric(df['PM2.5'], errors='coerce'); i = v.idxmax(); result = (df.loc[i, '监测站'], pd.to_datetime(df.loc[i, '监测时间'], format='%Y/%m/%d %H').strftime('%Y-%m-%d %H:%M'))",
+      "raw_code": "i = df['PM2.5'].idxmax(); r = df.loc[i]; result = (r['station'], f\"{int(r['year']):04d}-{int(r['month']):02d}-{int(r['day']):02d} {int(r['hour']):02d}:00\")",
+      "note": "999.0 只有一条，2016-02-08 02:00 于 Wanshouxigong（除夕夜间，烟花峰值）"
+    },
+    "t03": {
+      "code": "d = df.copy(); d.columns = [str(x) for x in d.iloc[0]]; d = d.iloc[1:].reset_index(drop=True); d = d[d['序号'] != '合计']; result = round(float(pd.to_numeric(d['PM2.5'], errors='coerce').mean()), 2)",
+      "raw_code": "result = round(float(df['PM2.5'].mean()), 2)",
+      "note": "两级表头（第 1 行分组名、第 2 行列名）+ 末行合计 32877206；两者都要跳过才是 79.79",
+      "expect": 79.79
+    },
+    "t04": {
+      "code": "t = pd.to_datetime(df['监测时间'], format='%Y/%m/%d %H'); days = t.dt.normalize().groupby(t.dt.year).nunique(); result = int((days >= 365).sum())",
+      "raw_code": "d = df.assign(_d=pd.to_datetime(df[['year', 'month', 'day']])); days = d.groupby('year')['_d'].nunique(); result = int((days >= 365).sum())",
+      "note": "2014/2015/2016 完整；2013 只有 306 天、2017 只有 59 天",
+      "expect": 3
+    },
+    "t05": {
+      "code": "v1 = pd.to_numeric(df['PM2.5'], errors='coerce'); v2 = pd.to_numeric(df['PM10'], errors='coerce'); result = int((v1.isna() & v2.isna()).sum())",
+      "raw_code": "result = int((df['PM2.5'].isna() & df['PM10'].isna()).sum())",
+      "note": "PM2.5 缺 8739、PM10 缺 6449，同时缺 6233（不是相加也不是较小值）",
+      "expect": 6233
+    }
+  }
+}
