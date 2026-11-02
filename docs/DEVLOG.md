@@ -4159,3 +4159,67 @@ License 段就在里面（`<h1>License</h1>` + Creative Commons 署名段）。�
 `questions.json` / `answers_spec.json` / `answers.json` / 数据全在题库目录
 （`scripts/holdout/README.md` 规则 1），仓库里只有通用脚本。所以本条目能公开写答案，
 但**题面与数据不会随仓库分发**。
+
+## [107] 2026-11-02 · 多表数据源定了：Inside Airbnb（CC BY 4.0），四表 21 万行
+
+### 三个候选，核到的许可原文
+
+| 候选 | 表数 | 许可（实核） | 数据性质 |
+|---|---|---|---|
+| Chinook（`lerocha/chinook-database`） | 11 | MIT 全文，`Copyright (c) 2008-2024 Luis Rocha` | 合成示例 |
+| Pagila（`devrimgunduz/pagila`） | 15 | PostgreSQL License（GitHub SPDX 认到 `PostgreSQL`） | 合成示例，Sakila 的 PG 译本 |
+| **Inside Airbnb Albany** | **4** | **CC BY 4.0**（当前季度）+ **CC0**（归档） | **真实业务** |
+
+前两个是**软件许可**、数据是合成的。§1 第 5 条字面要求「CC BY / CC0 / 公有领域」，
+MIT 和 PostgreSQL License 都比 CC BY 宽松（都允许商用和再分发，只要求保留声明），
+但它们是代码许可，覆盖的是软件不是数据内容；而 H1 存在的意义就是「非自造的、真实的脏数据」。
+所以选第三个 —— 字面符合，且脏值不是人造的。
+
+许可原文（`insideairbnb.com/get-the-data/` 页面 HTML，两段并存）：
+
+```
+This data is licensed under a Creative Commons Attribution 4.0 International License.
+To the extent possible under law, Murray Cox has waived all copyright and related or
+neighboring rights to Inside Airbnb Data.
+```
+
+### 数据实测（Albany, New York, 2026-09-14 快照）
+
+| 输出 | 来源 | 行 × 列 | sha12 |
+|---|---|---|---|
+| `房源.csv` | `data/listings.csv.gz` | 500 × 21 | `3367776330ce` |
+| `可订日历.csv` | `data/calendar.csv.gz` | 182,500 × 5 | `8be3a4d60fa5` |
+| `评论.csv` | `data/reviews.csv.gz` | 30,251 × 5 | `f5bfe119fbbe` |
+| `社区.csv` | `visualisations/neighbourhoods.csv` | 15 × 2 | `1be9e3ae671a` |
+
+**外键零孤儿**：calendar 覆盖 500/500 房源，reviews 覆盖 449/500；`社区.csv` 的 15 个值
+与 `房源.社区` 完全一致（集合相等，双向差集皆空）。
+
+天然的脏（一个都不是我造的）：
+
+- `每晚价格` 是 `$65.73` 这种字符串，**93.4% 带 `$`、33/500 无法直接转数字**（6.6% 缺失）
+- `可订` 是 `t` / `f`（126,152 / 56,348）
+- `listings.csv` 原始 90 列里 **15 列 100% 全空**（`host_since`、`host_response_rate`、
+  `neighborhood_overview` 等，Inside Airbnb 对 Albany 做了隐私裁剪）
+- 日期是 ISO（`2026-09-16`），跨表 join 靠 `房源编号`
+
+### 裁剪与脏化口径
+
+裁列：90 → 21（**只删列，不删行、不改值**）。不裁的话 schema 摘要比题面长一个数量级。
+脏化照闸门口径：中文列名、GB18030 + CRLF、文本列空值写"未登记"。
+**数值列的缺失保持 NaN** —— 写成字符串会让整列退化成 object，模型连 `mean()` 都调不了，
+那不是脏，是坏。
+
+### 一个我自己读错的数
+
+第一遍核外键时我写了「与维度表 0 匹配」，实际是 `len(set(A) - set(B)) == 0`，即**差集为空
+= 完全匹配**。把"匹配数为 0"和"差集为 0"读反了。已改正，外键是干净的。
+
+### 两个限制（写进 docstring，出题时必须绕开）
+
+1. **`calendar.csv` 没有 `price` 列。** Inside Airbnb 2026 版删了，只剩
+   `listing_id / date / available / minimum_nights / maximum_nights`。
+   「某天的价格」这类题出不了，价格只能取 `listings.price`（每房源标价）。
+   这不是我们裁的，是源数据就没有。
+2. **社区维度表的 `neighbourhood_group` 全空**，只有一个有效维度。所以按社区分组的题
+   只能分一层，不能分两层。
