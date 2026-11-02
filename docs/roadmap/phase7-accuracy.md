@@ -24,7 +24,7 @@
 
 ### E0 留出集 H1（约 40 题）
 - 组成：单表 18、多表 12、画图 5、陷阱 5（陷阱就是 E1 的题，放进同一个集）。
-- 数据：**闸门没用过的**外部数据，按闸门的办法做中文 GBK 脏化（只改呈现，不改数值）。候选：UCI Beijing Multi-Site Air Quality（CC BY 4.0，单表，时间序列）、UCI Bike Sharing（CC BY 4.0）、一套多表关系数据（许可证在 E0 PR 里逐个核对，不合格的换掉）。
+- 数据（2026-11-02 定）：**闸门没用过的**外部数据，按闸门的办法做中文 GBK 脏化（只改呈现，不改数值）。单表 = UCI Beijing Multi-Site Air Quality（CC BY 4.0，12 站合并 420,768 行）；多表 = Inside Airbnb（CC BY 4.0 / CC0，四表 21 万行）。UCI Bike Sharing 没用上 —— 空气质量表的时间维度和列数已经够撑 18 道单表题，再加一套只会摊薄逐题判定的精力。
 - 流程照搬闸门（gate-phase35.md）：先写题 → 独立脚本在原始数据上算答案 → 冻结（questions_sha256 / answers.json）→ 才跑模型。**冻结以后不改题**；题出错就作废那一题，记进 DEVLOG，不在原题上改。
 - 脚本：复用 scripts/gate 的结构，新目录 scripts/holdout/，报告 docs/eval/holdout_<时间>_<agent>.json。人工字段和闸门一样（human_correct / failure_class / reason / guessing），另加 `first_error_step`（审计待办：判定时记下第一个出错的 step 序号）。
   **前置（2026-11-02 核对）：多表 12 题没有 CLI 入口。** `--data` 只覆盖 sales 表
