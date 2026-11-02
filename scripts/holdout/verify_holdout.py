@@ -82,8 +82,12 @@ def run(code: str, data):
 
 
 def load_raw(bank: str, name: str):
-    """原始数据（未脏化）。单表返回 DataFrame，多表返回 dict。"""
-    if name == "air":
+    """原始数据（未脏化）。单表返回 DataFrame，多表返回 dict。
+
+    `air_report` 与 `air` 是同一份数据的两种导出（前者多了两级表头），
+    所以原始侧的对照表完全相同 —— 差的是脏化表怎么读出来的。
+    """
+    if name in ("air", "air_report"):
         zpath = os.path.join(bank, "data", "_cache", "air.zip")
         if not os.path.exists(zpath):
             sys.exit(f"找不到原始数据 {zpath}；先跑 build_holdout_data.py")

@@ -20,18 +20,36 @@
 
 ## 现状
 
-本目录有一个脚本：`run_holdout.py`（2026-11-02 加）。它只做三件事——读题库、跑、出报告；
-不做选样、不做汇总、不做门槛判定。
+四个脚本（2026-11-02）：
 
-不加它的原方案是「手工指路径就够」，但那句话的前提（`--data` 能换数据表）只对单表成立，
-见下一节。所以加的不是"体系"，是**一个能跑多表的入口**：`EvalRunner` 本来就支持整表替换
-（`runner.py:72` 的 `datasets` 参数），只是没人从 CLI 用过。
+| 脚本 | 干什么 |
+|---|---|
+| `build_holdout_data.py` | 从 UCI 原始包造单表（420,768 行，12 站合并，缺失写成"未登记"），外加一份报表导出变体 |
+| `build_holdout_multi.py` | 从 Inside Airbnb 造四表（房源/可订日历/评论/社区） |
+| `verify_holdout.py` | 在脏化表与原始表上各算一遍标准答案，不一致就拒写 `answers.json` |
+| `run_holdout.py` | 跑题、出报告；不做选样、不做汇总、不做门槛判定 |
 
-    python scripts/holdout/run_holdout.py --oracle        # 自检，不调模型
-    python scripts/holdout/run_holdout.py --agent react   # 正式跑
+    python scripts/holdout/verify_holdout.py --dir <题库> --write   # 先算答案
+    python scripts/holdout/run_holdout.py --oracle --dir <题库>     # 自检，不调模型
+    python scripts/holdout/run_holdout.py --agent react             # 正式跑
 
-题库格式见脚本头部 docstring。仍然**不要**在这上面加东西：pass^k 有 `--repeat 3`，
+题库格式见 `run_holdout.py` 头部 docstring。仍然**不要**在这上面加东西：pass^k 有 `--repeat 3`，
 汇总有报告里的 `overall`，判定靠人工填。等这些真的不够用了再说。
+
+### 40 题的配比（2026-11-02 出齐）
+
+| 组 | 题数 | 题号 | 数据集 |
+|---|---|---|---|
+| 单表 | 12 | `h1_01`–`h1_06`（首批）、`h1_07`–`h1_18` | 空气质量 |
+| 多表 | 12 | `m01`–`m12` | 民宿四表 |
+| 画图 | 5 | `c01`–`c05` | 空气 3 + 民宿 2 |
+| 陷阱 | 5 | `t01`–`t05` | 空气 4 + 报表变体 1 |
+
+画图题的 `has_chart` 只是评测侧标记，判分仍是比 `result`；出图另由
+`report.chart_smoke()` 的 `has_chart` 一项检查（有 option 或 png 即算有图）。
+
+**`--oracle` 下这 5 道画图题一定报缺图**，因为 oracle 用标准答案当模型输出，
+而标准答案只算数不画图。那是伪失败，不是题目有问题 —— 真实出图率要 `--agent` 跑才有意义。
 
 ### 但"换数据表"只对单表成立（2026-11-02 核对）
 
