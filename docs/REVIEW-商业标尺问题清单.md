@@ -33,7 +33,7 @@
 | M04 | P1 | `app/eval/` | 数据集无版本冻结；B47 改题后"与之前基线不完全可比" | 无法做能力回归：改一次 prompt 就没有可比数字 |
 | M05 | P1 | 评测方法 | 全部 baseline 是 n=1；B31 网关对 temperature 0 缓存 → `--repeat` 不独立，标准差=0 是假象 | 不能对外声称任何准确率数字 |
 | M06 | P1 | `app/tools/sandbox.py:96` | `cmd = [sys.executable, ...]`，PyInstaller 下 `sys.executable` 是应用本身（B35 已登记未解决） | 桌面产品能否启动的地基，零验证 |
-| M07 | P1 | `ui/chat_app.py:38` | 会话记忆是进程内 `MemorySaver`（B18） | 重开会话历史全丢——"能不能用"的门槛，不是"好不好用" |
+| M07 | P1 | `ui/chat_app.py:38`（**该文件已于 `c668ff4` 删除**，F5 去 Streamlit；会话记忆现状见 `app/memory/`，2026-11-02 注） | 会话记忆是进程内 `MemorySaver`（B18） | 重开会话历史全丢——"能不能用"的门槛，不是"好不好用" |
 | M08 | P1 | `app/tools/persist.py:27` | `open(RUNS_LOG, "a")` 无锁追加；无结构化日志、无 trace id、无按会话成本聚合 | 并发写会交错；产品出问题无法定位；企业用户无法审计 |
 | M09 | P1 | `app/core/service.py:31` | `analyze()` 只在内部 `stream()`，对外整体返回 `AnalysisResult`，无任务句柄 | 阶段 4 的 SSE"逐步推送"必须回头改内核——阶段 1/4 之间的隐藏返工 |
 | M10 | P1 | `app/core/service.py` | `analyze(dataset, question)` 是**单文件单表**；字典靠"同名 .dict.csv" | 真实业务是订单+用户+商品多表 join，当前架构不表达多表关系 |
@@ -95,5 +95,5 @@ B34 自己写明："阶段 4 把 Key 从 .env 挪进系统钥匙串后，磁盘�
 ## 4. 本清单的证据来源（可复核）
 
 - 只读核验，未运行任何测试、未改动代码。
-- 关键事实均取自：`git ls-files`/`git log --all`（分支与提交）、`app/core/service.py`、`app/tools/sandbox.py:96`、`app/tools/sandbox_worker.py`、`app/eval/comparator.py`（规则 20c）、`app/eval/report.py`、`app/tools/persist.py:27`、`ui/chat_app.py:38`、`scripts/gen_eval_data.py:12`、`docs/DEVLOG.md` [0]–[8]、`.gitignore`、`.github/workflows/tests.yml`。
+- 关键事实均取自：`git ls-files`/`git log --all`（分支与提交）、`app/core/service.py`、`app/tools/sandbox.py:96`、`app/tools/sandbox_worker.py`、`app/eval/comparator.py`（规则 20c）、`app/eval/report.py`、`app/tools/persist.py:27`、`ui/chat_app.py:38`（已删）、`scripts/gen_eval_data.py:12`、`docs/DEVLOG.md` [0]–[8]、`.gitignore`、`.github/workflows/tests.yml`。
 - 与 DEVLOG 的 B 系列关系：M 系列是叠加视角，**不替代 B**。B 里已登记未解决的（B05/B09/B33/B34/B35/B38 等）仍有效，本清单只在"商业后果"层面补充排序建议。
