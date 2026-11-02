@@ -180,3 +180,39 @@ def test_flip_detects_all_wrong():
     assert f["all_wrong"] == ["always_wrong"]
     assert f["flipped"] == []
     assert f["pass_pow_k"] == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------- 基线标注
+
+def test_baseline_needs_matching_case_count():
+    """光指纹对上不算基线，题数也要对上。
+
+    实际踩到的：eval-v4 的 `d617102729fa` 名下还有一批「多表 20 题」的重复跑（n=20），
+    只按指纹认的话它会被标成 `**eval-v4**`——一批 20 题的读数被当成 183 题基线的组成部分。
+    """
+    cands = [("eval-v4", {"code_sha12": "abc", "n": [33, 150]})]
+    assert L._baseline_for(cands, 150)[0] == "eval-v4"
+    assert L._baseline_for(cands, 33)[0] == "eval-v4"
+    assert L._baseline_for(cands, 20) is None
+
+
+def test_baseline_without_n_still_matches():
+    """老记录（eval-v0 ~ v3 早期写法）没有 n，不能因为缺字段就全不认。"""
+    assert L._baseline_for([("eval-v1", {"code_sha12": "abc"})], 130)[0] == "eval-v1"
+
+
+def test_baseline_int_n_matches_exactly():
+    cands = [("eval-v2", {"code_sha12": "abc", "n": 143})]
+    assert L._baseline_for(cands, 143)[0] == "eval-v2"
+    assert L._baseline_for(cands, 130) is None
+
+
+def test_code_sha_override_is_documented():
+    """指纹改写表必须逐条写清理由，否则它就成了"让数字对上"的橡皮擦。
+
+    断言的是"表里每条都在 normalize 的注释里被解释过"——这里退化成检查值形状，
+    真正的理由是代码注释，评审时看 diff。
+    """
+    for name, sha in L._CODE_SHA_OVERRIDE.items():
+        assert name.startswith("eval_") and name.endswith(".json"), name
+        assert len(sha) == 12 and all(c in "0123456789abcdef" for c in sha), sha

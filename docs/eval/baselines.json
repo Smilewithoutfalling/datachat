@@ -1,9 +1,10 @@
 {
-  "_comment": "基线登记表。tag 指向的 commit 与跑报告的 commit 常常不同（报告要能对上 outputs 里的 git_sha），所以这里显式记 code_sha12 —— 台账按指纹认基线，不按 commit 认。新增基线时手写一行。",
+  "_comment": "基线登记表。tag 指向的 commit 与跑报告的 commit 常常不同（报告要能对上 outputs 里的 git_sha），所以这里显式记 code_sha12 —— 台账按指纹认基线，不按 commit 认。新增基线时手写一行。 「n」是这份基线覆盖的题数（列表 = 由多批组成）；台账只在指纹和题数都对上时才标基线名，否则同指纹的零散批（如多表 20 题的重复跑）会被一起标成基线。",
   "eval-v0": {
     "commit": "fc1f823",
     "run_commit": "4d3ab5e",
     "code_sha12": "af3d486c2e1b",
+    "n": 130,
     "evalset_sha12": "478204bf6a7f",
     "rendered_set_sha12": "6b23655c28a6",
     "date": "2026-10-28",
@@ -13,6 +14,7 @@
     "commit": "de509a4",
     "run_commit": "de509a4",
     "code_sha12": "28d8b0d21488",
+    "n": 130,
     "evalset_sha12": "478204bf6a7f",
     "rendered_set_sha12": "6b23655c28a6",
     "date": "2026-10-29",
@@ -22,6 +24,7 @@
     "commit": "见 tag eval-v2",
     "run_commit": "4f19a36",
     "code_sha12": "89d28c86ca74",
+    "n": 143,
     "run_code_sha12": "8399e5287468",
     "evalset_sha12": "122129ad186b",
     "rendered_set_sha12": "42cc3caace7a",
@@ -32,10 +35,28 @@
     "commit": "见 tag eval-v3",
     "run_commit": "多轮批跑在 145a3f5；单轮批跑在 145a3f5 + 未提交的 run_eval.py（给 --category 加逗号分隔）。run_eval.py 不在 A 组指纹内，两批 code_sha12 相同。",
     "code_sha12": "7562832e9e11",
+    "n": [
+      33,
+      130
+    ],
     "code_all_sha12": "6f23857936a3",
     "evalset_sha12": "945c94d8641f",
     "rendered_set_sha12": "80a028f7c254",
     "date": "2026-10-30",
     "note": "163 题（130 单轮 + 33 多轮）首个基线，react / off / 3 跑。单轮 130/130/130 = 100%，pass^3 100%，翻转 0——**这套单轮题已饱和，只能当回归护栏**。多轮 off 16/16/19 = 51.5% ± 5.2pp，pass^3 36.4%；多轮 state 30/28/28 = 86.9% ± 3.5pp，pass^3 81.8%。off vs state 正确率 17 升 / 3 降（McNemar p = 2.6e-03），执行率 17 升 / 0 降（p = 1.5e-05）——**记忆系统第一次拿到统计显著的结论**（13 题那批是 5:0 / p = 0.0625）。3 处反向翻车：mul_012 state 三跑分布对不上任何候选口径、mul_028 state 自行加了 status=已完成、mul_030 state 丢失 2 月约束。与 eval-v2 一律不可比：题集 143 → 163，且修了 mul_012 / mul_015 两处口径歧义。"
+  },
+  "eval-v4": {
+    "commit": "见 tag eval-v4",
+    "run_commit": "c53874f-dirty（跑批期间 app/ 有未提交改动：新增 app/eval/provenance.py 与报告字段）",
+    "code_sha12": "d617102729fa",
+    "n": [
+      33,
+      150
+    ],
+    "code_all_sha12": "91cd24727d07",
+    "evalset_sha12": "4270d57adf72",
+    "rendered_set_sha12": "6bf0d1c623c8",
+    "date": "2026-11-02",
+    "note": "183 题（150 单轮 + 33 多轮）首个基线，也是第一次三层齐全：单轮 off 148/146/147 = 98.0% ± 0.7pp（pass^3 96.0%，翻转 2.67%/6 题，执行率 100%）；多轮 off 19/15/13 = 47.5% ± 9.3pp（pass^3 24.2%，翻转 28.28%/14 题，执行率 45–58%）；多轮 state 28/26/28 = 82.8% ± 3.5pp（pass^3 75.8%，翻转 8.08%/4 题，执行率 100%）。state 比 off 高 35.3pp，执行率 100% vs 45–58% —— off 的失败主因是末轮不执行代码，不是记不住；翻转率同向（28.28%→8.08%）也是同一件事的副产物。单轮那 2pp 缺口（6 道翻转）逐条查过，没有一道是算错，全在尺子上：缺口 11（ord_004 没赋 result）、12（biz_020 编答案）、13（inv_007 判定随排序方向）、14（emp_022 半拒答），biz_013/014 是口径与 strip。与 eval-v3 一律不可比：题集 163 → 183（+20 多表单轮题）。⚠️ code_sha12 记的是**实际执行**的 d617102729fa，三份报告写的是 db1b660e8afc —— 指纹在每轮落盘时采样，而这批跨了 09:04–09:18，中途改了 runner.py；三份报告的 result_origins 均为 None 即证明跑的是旧代码。判定零变化，依据是 diff 只新增两个 dict 键、score_detail 未动（DEVLOG [90]、台账缺口 15）。rendered_set_sha12 与 eval-v3 批完全相同，模型输入零变化。"
   }
 }

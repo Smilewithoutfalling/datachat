@@ -37,6 +37,19 @@ NOTES_BEGIN = "<!-- NOTES:BEGIN -->"
 NOTES_END = "<!-- NOTES:END -->"
 DEBUG_N = 10  # 少于这么多题的报告当单题调试，不进趋势表
 
+# 报告里 code_sha12 与**实际执行**的指纹不符的批次：{报告文件名: 实际指纹}。
+# 唯一原因是"跑批期间改了 A 组文件"——指纹在每轮落盘时采样，不是启动快照（已知缺口 15）。
+# 只收判定被证明等价的情况，理由逐条写在下面；别拿它当"让数字对上"的橡皮擦。
+_CODE_SHA_OVERRIDE = {
+    # 2026-11-02 state 三跑。09:04 落第 1 轮时 runner.py 已加了结果归因的两个键，
+    # 但进程里跑的还是启动那一刻的旧代码（Python 模块已加载）。三份报告因此都写
+    # db1b660e8afc，实际执行 d617102729fa。diff 证明只新增两个 dict 键、
+    # score_detail 零改动，判定必然一致，故按实际执行值归档（DEVLOG [90]）。
+    "eval_v4_mul_state_run1.json": "d617102729fa",
+    "eval_v4_mul_state_run2.json": "d617102729fa",
+    "eval_v4_mul_state_run3.json": "d617102729fa",
+}
+
 
 # ---------------------------------------------------------------- 读报告
 
@@ -93,6 +106,16 @@ def normalize(path, data):
     cases = data.get("cases") or []
     n = overall.get("n") or len(cases)
     sha = (data.get("git_sha") or "unknown").rstrip("?")
+    code_sha = fps.get("code_sha12")
+    # 报告里的 code_sha12 是**每轮落盘那一刻**采样的，不是启动快照。`--repeat 3` 跨十几分钟，
+    # 期间只要有人动过 app/ 里的 A 组文件，三份报告就会各标一个没跑过的尺子。
+    # 第一次踩到：2026-11-02 state 三跑（09:04–09:18），中途给 runner.py 加了两个报告字段，
+    # 于是三份报告都写 db1b660e8afc，而实际执行的是 d617102729fa。改动只往 out.update 加键，
+    # score_detail 一行没动，判定零变化（DEVLOG [90] 有 diff 证据）。
+    # 台账按**实际执行**的指纹记，否则这批会被当成新尺子的第一批，与它真正可比的那批断开。
+    override = _CODE_SHA_OVERRIDE.get(os.path.basename(path))
+    if override:
+        code_sha = override
     # oracle 与 canary 都不能进趋势批次：
     #   oracle —— 模型输出就是标准答案，那几个数字不代表能力，只证明流水线通；
     #   canary —— 十条探针，读数只用来比"模型权重变没变"，混进全量趋势会污染均值。
@@ -120,7 +143,7 @@ def normalize(path, data):
         "avg_tokens": overall.get("avg_tokens"),
         "match_kinds": overall.get("match_kinds") or {},
         "memory_mode": fps.get("memory_mode") or data.get("memory_mode"),
-        "code_sha12": fps.get("code_sha12"),
+        "code_sha12": code_sha,
         "code_all_sha12": fps.get("code_all_sha12"),
         "evalset_sha12": fps.get("evalset_sha12") or (data.get("evalset") or {}).get("sha256"),
         "rendered_set_sha12": fps.get("rendered_set_sha12"),
@@ -194,11 +217,30 @@ def batch_key(r):
 
 
 def load_baselines():
-    """tag -> code_sha12。按指纹认基线，不按 commit 认 —— tag 指向的 commit 常常
-    与跑报告的那个不同（报告要能对上 outputs 里的 git_sha）。"""
+    """code_sha12 -> [(tag, cfg), ...]。按指纹认基线，不按 commit 认 —— tag 指向的
+    commit 常常与跑报告的那个不同（报告要能对上 outputs 里的 git_sha）。
+
+    同一指纹可能对应多份基线（例如 eval-v4 由 150 单轮 + 33 多轮两批组成），
+    所以这里是列表。**光指纹对上不够，题数也要对上**：2026-11-02 加 eval-v4 时，
+    同指纹下的「多表 20 题」重复跑批被一起标成了基线，那批只有 20 题、不是基线的一部分。
+    """
     data = _load(BASELINES) or {}
-    return {v["code_sha12"]: (k, v) for k, v in data.items()
-            if isinstance(v, dict) and v.get("code_sha12")}
+    out = {}
+    for tag, cfg in data.items():
+        if isinstance(cfg, dict) and cfg.get("code_sha12"):
+            out.setdefault(cfg["code_sha12"], []).append((tag, cfg))
+    return out
+
+
+def _baseline_for(cands, n):
+    """在候选基线里按题数挑一个；老记录没写 n 就不校验（兼容）。"""
+    for tag, cfg in cands or []:
+        want = cfg.get("n")
+        if want is None:
+            return tag, cfg
+        if (n in want) if isinstance(want, list) else (n == want):
+            return tag, cfg
+    return None
 
 
 def build_batches(records):
@@ -362,7 +404,7 @@ def render(records, batches, notes, now, baselines=None):
         else:
             flip_cell, flip_n = "—", "—"
         label = ("`%s`" % b["code_sha12"]) if b["code_sha12"] else "legacy"
-        base = baselines.get(b["code_sha12"])
+        base = _baseline_for(baselines.get(b["code_sha12"]), b["n"])
         L.append("| %s / %d 题 | %s | %s | %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
             b["agent"], b["n"], (b["first"] or "?")[:10], b["agent"], b["n"],
             b["memory_mode"] or "—", run_desc,
