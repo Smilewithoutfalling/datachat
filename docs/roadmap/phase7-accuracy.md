@@ -27,6 +27,12 @@
 - 数据：**闸门没用过的**外部数据，按闸门的办法做中文 GBK 脏化（只改呈现，不改数值）。候选：UCI Beijing Multi-Site Air Quality（CC BY 4.0，单表，时间序列）、UCI Bike Sharing（CC BY 4.0）、一套多表关系数据（许可证在 E0 PR 里逐个核对，不合格的换掉）。
 - 流程照搬闸门（gate-phase35.md）：先写题 → 独立脚本在原始数据上算答案 → 冻结（questions_sha256 / answers.json）→ 才跑模型。**冻结以后不改题**；题出错就作废那一题，记进 DEVLOG，不在原题上改。
 - 脚本：复用 scripts/gate 的结构，新目录 scripts/holdout/，报告 docs/eval/holdout_<时间>_<agent>.json。人工字段和闸门一样（human_correct / failure_class / reason / guessing），另加 `first_error_step`（审计待办：判定时记下第一个出错的 step 序号）。
+  **前置（2026-11-02 核对）：多表 12 题没有 CLI 入口。** `--data` 只覆盖 sales 表
+  （`run_eval.py:97` 的 help、`app/eval/runner.py:77-78` 只看这一张），`DATASETS` 是硬编码 dict。
+  闸门能跑 Olist 8 张表是因为它绕开了 `run_eval.py`：`scripts/gate/run_gate.py:160` 把
+  `q["dataset"]` 当路径直接传给 `analyze()`。所以 holdout runner 必须照这个形状写
+  （约 150 行，见 `scripts/holdout/README.md`「但"换数据表"只对单表成立」），
+  不要指望给 `run_eval.py` 加参数——那是新增 CLI 入口，属于产品行为，按仓库规矩要先开 issue。
 - **使用纪律**：H1 只在三个时间点跑：基线、A 系列中途一次（可选）、终测。平时调参只用闸门 25、自造 130 和单测。S 那 1/3 的题，Hark 只看汇总分数和 failure_class 分布，不看题面和逐题输出。
 - CI：和 gate-oracle 一样跑 oracle 自检（标准答案在脏表上可解），不调模型。
 

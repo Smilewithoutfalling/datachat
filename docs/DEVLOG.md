@@ -3911,3 +3911,61 @@ A 组  da0af7c3efce   ← 改之前是 ac1ebcd66c5a
   （oracle 的假 answer 是「（oracle）结论见结果。」，既无前缀也无拒答语义，分类正确），
   `code_sha12` 仍为 `ac1ebcd66c5a`。
 - 相关测试 6 个文件 174 条全过（新增 6 条）。
+
+## [103] 2026-11-02 · 出题前置核查：`--data` 只够单表，多表留出集必须另写 runner
+
+### 起因
+
+`scripts/holdout/README.md` 写着「`--data` 参数与 `run_eval.py` 已经支持换数据表，
+缺的只是数据本身」，所以上一轮我提议「搭 `scripts/holdout/` 骨架」时以为不用动代码。
+按 E0 的题型配比（单表 18 / 多表 12 / 画图 5 / 陷阱 5）核对了一遍入口，发现这句话只对单表成立。
+
+### 证据链
+
+| 事实 | 位置 |
+|---|---|
+| `--data` 的 help 写的是「替换 **sales** 表的数据文件」 | `run_eval.py:97` |
+| 消费点把它传成 `EvalRunner(args.data)` | `run_eval.py:178` |
+| `EvalRunner` 只做 `self.datasets["sales"] = df_path`，别的表碰不到 | `app/eval/runner.py:77-78` |
+| `DATASETS` 是模块级硬编码 dict，`--data` 改不了它 | `app/eval/cases.py:357` |
+| 闸门能跑 Olist 8 张表，是因为**绕开了 `run_eval.py`** | `scripts/gate/run_gate.py:160` |
+| 它把 `q["dataset"]`（相对路径，指向目录）直接传给 `analyze()` | 同上 |
+| `analyze(dataset, ...)` 第一个参数本来就是路径 | `app/core/service.py:46-47` |
+
+顺带发现：`EvalRunner.__init__` **已经有** `datasets: dict | None = None`（`runner.py:72`），
+即整表替换的能力早就有了，只是 `run_eval.py` 没暴露 CLI 入口。
+
+### 结论：走闸门那条路，不给 `run_eval.py` 加参数
+
+两条路里选成本低的那条：
+
+1. **加 CLI 参数**（把整个 dict 传进去）—— 技术上只差一个 argparse 项，但**新增 CLI 入口属于
+   产品行为**，按仓库规矩要先开 issue。只为跑一次留出集，不值得开一个 issue 再等。
+2. **照闸门的形状写 holdout runner**（`scripts/holdout/run_holdout.py`，约 150 行）：
+   题库里存相对路径，直接传给 `analyze()`。不改 `run_eval.py`、不改 `app/`，
+   **A 组指纹零变动**，6 个基线一个不动。选这条。
+
+等 holdout 真要每月跑一次、或多表题确认长期保留，再回头考虑第 1 条。
+
+### 落点
+
+- `scripts/holdout/README.md`：新增「但"换数据表"只对单表成立」一节，含对照表与全部行号依据；
+  保留「不要先搭框架」的原文，因为这条依然成立 —— 要写的不是体系，是**一个 runner + 数据**。
+- `docs/roadmap/phase7-accuracy.md` §2 E0：脚本那一条补前置说明，指向上面那一节。
+
+### 未完成：数据源许可证仍是「待核对」，不是我核过的
+
+`phase7-accuracy.md` §1 第 5 条要求「只用 CC BY / CC0 / 公有领域；NC 许可的只能在 CI 里跑」，
+§2 说候选是 UCI Beijing Multi-Site Air Quality 与 Bike Sharing，两者都标注 CC BY 4.0。
+本轮尝试核实，**没坐实**：
+
+- `https://archive.ics.uci.edu/api/dataset?id=501` 返回的 JSON **没有 license 字段**
+  （有 `dataset_doi: 10.24432/C5RK5G`），而且元数据本身是坏的 —— `num_features: 0`，
+  `variables` 里 18 个变量的 `name` 全是空格串。用这个 API 核许可不可行。
+- `id=275`（Bike Sharing）的 API 直接 fetch 失败。
+- 数据集页面是 SPA，`curl` 只拿到空壳，抓不到 License 文本。
+
+所以「CC BY 4.0」目前只是 `phase7` 文档里的既有说法，**没有本次核对的证据**。
+真要走 E0，得下载 zip 看包内说明、或在浏览器里人工确认并记下核对日期 + 页面 URL
+（`docs/gate/README.md` 现有的记录方式连日期和 URL 都没有，只写了「CC BY 4.0」——
+这条格式本身也该补）。
