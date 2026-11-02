@@ -3616,3 +3616,77 @@ phase35 那一段本身没变，所以数字可复现；这一点已写进两份
   这不是漏实现，是本来就该由人填。
 - 不动 10-14 四份参照基线：它们没有 `infra` 键，`verdict` 也不需要重渲染。
 
+
+## [98] 2026-11-02 · 缺口 15 修掉：指纹从「落盘时」改成「开跑前」
+
+### 起因
+
+缺口 15 的原描述是「`code_sha12` 是每轮落盘那一刻采样的，不是启动快照」。听起来像个小
+时序问题，实际后果比它严重：**报告会声称自己是用一份从没执行过的代码量出来的。**
+
+机制是这样的：`EvalReport.fingerprint()` 惰性求值，缓存挂在**实例**上。`--repeat 3` 每轮
+新建一个 `EvalReport`，于是每轮各自重算一次。2026-10-30 的 state 三跑撞上了：第 1 轮跑完
+之后给 `runner.py` 加了归因字段，Python 模块早已加载、跑的还是旧代码，但第 2、3 轮落盘时
+算的是磁盘上的新文件——三份报告全标 `db1b660e8afc`，实际执行的是 `d617102729fa`。
+
+当时的处置是在 `eval_ledger._CODE_SHA_OVERRIDE` 里按实际值硬改。那是补丁，不是修复：
+下一批照样会踩。
+
+### 改法
+
+`fingerprint.py` 加三个函数，语义严格分开：
+
+| 函数 | 谁用 | 语义 |
+|---|---|---|
+| `snapshot_code_fingerprint()` | `run_eval.py` main，开跑前一次 | 建立快照；幂等，重复调不刷新 |
+| `report_code_fingerprint()` | `EvalReport.fingerprint()` | 有快照用快照，没快照现算 |
+| `code_fingerprint()` | `rescore.py`、测试、外部查询 | **永远实时**，不碰快照 |
+
+`rescore` 必须走实时那条：重判要回答的是「我用**现在这把**尺子重判」，不是「跑的时候那把」。
+把它也接到快照上等于让重判记一个假的判分器版本。
+
+调用点放在 `run_eval.py` 的 `--rescore` 分支**之后**、`--baseline` 读取之前——重判不建快照。
+
+### 边界（都写进了测试）
+
+1. **A 组哈希没变。** 这次改的是 B 组的 `fingerprint.py` / `report.py` 和根目录的
+   `run_eval.py`，都不进 `affects_results_sha256`。实测工作区与 HEAD 同为 `ac1ebcd66c5a`，
+   所以 `baselines.json` 里那六个基线一个都不用动，历史读数全部仍可比。这是刻意的：
+   修一个记录时机的问题不该换来一轮全部重跑。
+2. **`_CODE_SHA_OVERRIDE` 保留但封存。** 表里那三条是历史事实（那批确实跑在旧代码上），
+   删了会让台账与报告重新分裂。注释改成「只服务修复之前的批次，不要再往里加」。
+3. **纪律还在，但理由变了。** 以前是「跑批期间别动 A 组文件，否则报告会撒谎」；现在是
+   「别动，否则这批可能实跑混合版本」——Python 只在首次 import 时读文件，中途改动若被
+   某个后 import 的模块读到，实跑的就是两版拼起来的，而报告只会记启动那一版。
+   报告不再撒谎，但「这批到底跑的什么」仍然会更模糊。
+
+### 顺带：缺口 4 从「盲区」降级成「记录」
+
+`run_eval.py` 在仓库根目录，`code_fingerprint()` 只扫 `app/**/*.py`，扫不到它。而它决定三件
+影响读数的事：选题（`--filter` / `--case` / `--canary` 的解析与顺序）、`--repeat` 的逐题收集
+（`pass^k` / `flip_rate` 全从这来）、`--oracle` 走哪条假模型路径。10-30 一天给它加了三个参数，
+指纹一个字符都没动。
+
+加了 `entry_fingerprint()`，报告 `fingerprints.entry_sha12` 里记（当前 `0c813c8fb952`，
+`run_eval.py` 自身 `0528ab250087`）。**没有进 `GATE_KEYS`**：进口禁会让所有历史报告当晚判
+不可比，得先给 `baselines.json` 每个基线补上对应 commit 的入口哈希，那是单独一步。
+`test_entry_not_a_gate_key` 是防盗门——防止后人顺手加进去而不补基线。
+
+### 顺带：缺口 9 只补提示，不改默认
+
+`--agent` 默认仍是 `workflow`，但 `--help` 现在写明「默认 workflow；已归档的全部基线用的是
+react」。默认值不动：改它会静默改变所有不带参数的调用，那是产品行为，不是改文档能代劳的。
+
+### 验证
+
+- `pytest tests/test_fingerprint.py`：**32 passed**（新增 6 条 + 一个 autouse 的快照清理 fixture）
+- 端到端：`run_eval.py --case ord_004,biz_009 --agent react --oracle` 跑出
+  `code_sha12 = ac1ebcd66c5a`、`entry_sha12 = 0c813c8fb952`、`evalset_sha12 = 4270d57adf72`，
+  与预期逐项一致
+- 工作区与 `git archive HEAD` 的 A 组指纹同为 `ac1ebcd66c5a` → 本轮改动零门禁影响
+
+### 没做
+
+- 不给 `baselines.json` 补 `entry_sha12`，不把入口哈希进门禁（要重认基线，单独一步）
+- 不改 `--agent` 默认值
+- 不重跑任何评测批次：这次改的是「怎么记」，不是「记什么」，历史读数一个都没变

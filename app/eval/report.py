@@ -357,13 +357,23 @@ class EvalReport:
         code_sha12：app/ 下"影响分数"的源码全量哈希，含 prompt 全部来源（react_agent 的内联
         system、nodes/*、tools/{schema,dataset,dictionary,plotting}）和评分器 comparator.py。
         evalset 指纹不含 comparator，所以单靠它判不出"尺子变了"。
+        取值走 `report_code_fingerprint()`：入口在开跑前快照过就用快照（缺口 15），
+        没有快照（单测、REPL）才现算——不然 `--repeat 3` 会让第 2、3 轮标上"跑完之后"的代码。
+        entry_sha12：根目录 `run_eval.py` 的哈希（缺口 4）。它不在 app/ 下，code_sha12 扫不到，
+        但它决定选题、`--repeat` 的逐题收集、`--oracle` 走哪条假模型路径。**只记录，不进门禁**
+        ——进 GATE_KEYS 会让所有历史基线判不可比，那要先给 baselines.json 补入口哈希。
         rendered：每题 system prompt 的渲染指纹，用途是当 code_sha12 变了但逐题渲染串完全相同时
         允许标"等价可比"，不必为空改动重跑 baseline。workflow 路径不提供（见 fingerprint.py）。
         memory_mode 取不到就记 unknown——comparable 遇到 unknown 一律判不可比。
         """
         if self._fingerprint is None:
-            from app.eval.fingerprint import code_fingerprint, rendered_fingerprints, runtime_config
-            code = code_fingerprint()
+            from app.eval.fingerprint import (entry_fingerprint, report_code_fingerprint,
+                                              rendered_fingerprints, runtime_config)
+            # 缺口 15：走 report_code_fingerprint() 而不是 code_fingerprint()。
+            # `--repeat 3` 每轮新建一个 EvalReport，各自重算会把"跑完之后"的代码
+            # 标成"跑的时候用的代码"。入口在开跑前快照过，这里取的就是那一份。
+            code = report_code_fingerprint()
+            entry = entry_fingerprint()
             runtime = runtime_config()
             agents = {r.get("agent", "workflow") for r in self.results}
             agent = next(iter(agents)) if len(agents) == 1 else "mixed"
@@ -378,6 +388,9 @@ class EvalReport:
                 "evalset_sha12": evalset_sha12 or evalset_fingerprint()["sha256"],
                 "code_sha12": code["affects_results_sha256"],
                 "code_all_sha12": code["sha256"],
+                # 缺口 4：入口脚本（run_eval.py）不在 app/ 下，code_sha12 扫不到。
+                # **只记录，不进 GATE_KEYS** —— 加门禁会让所有历史基线判不可比。
+                "entry_sha12": entry["sha12"],
                 "rendered_set_sha12": rendered.get("set_sha12"),
                 "rendered": rendered,
             }

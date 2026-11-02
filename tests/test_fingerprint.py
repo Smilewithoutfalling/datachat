@@ -21,6 +21,18 @@ def _point_at(monkeypatch, root):
     monkeypatch.setattr(fp, "_APP", str(root / "app"))
 
 
+@pytest.fixture(autouse=True)
+def _clear_code_snapshot():
+    """快照是模块级全局，测试之间必须清干净。
+
+    一个测试建立的快照会漏到下一个测试（pytest 同进程），下一个测试改了自己的假仓库
+    却读到上一个的指纹 —— 那种失败看起来像逻辑错，实际是测试隔离没做。
+    """
+    fp.reset_code_snapshot()
+    yield
+    fp.reset_code_snapshot()
+
+
 # ---------------------------------------------------------------- 分区
 
 def test_real_repo_partition_covers_every_file():
@@ -277,3 +289,106 @@ def test_report_emits_fingerprints_and_null_comparable():
     # 给一个空基准：必须判不可比，而不是当成可比（复用已算好的指纹，不再渲一遍 130 题）
     rep.baseline = {}
     assert rep.summary()["comparable"]["comparable"] is False
+
+
+# ---------------------------------------------------------------- 启动快照（缺口 15）
+
+def test_snapshot_freezes_against_later_file_changes(tmp_path, monkeypatch):
+    """快照之后改 A 组文件，报告取的仍是快照值 —— 缺口 15 的核心断言。
+
+    不修的话：`EvalReport.fingerprint()` 惰性求值且缓存挂在实例上，`--repeat 3`
+    每轮新建一个实例就各自重算。第 2、3 轮会把"跑完之后"的代码标成"跑的时候用的代码"，
+    报告等于谎称自己是用那把尺子量的。2026-10-30 的 state 三跑就是这样：
+    三份报告记 `db1b660e8afc`，实际执行的是 `d617102729fa`。
+    """
+    root = _make_repo(tmp_path, {"app/eval/comparator.py": "TOL = 1e-4\n"})
+    _point_at(monkeypatch, root)
+    snap = fp.snapshot_code_fingerprint()
+
+    (root / "app" / "eval" / "comparator.py").write_text("TOL = 1e-2\n", encoding="utf-8")
+
+    # 实时算能看见改动，报告用的快照看不见 —— 两者必须分开，不然修了等于没修
+    assert fp.code_fingerprint()["affects_results_sha256"] != snap["affects_results_sha256"]
+    assert fp.report_code_fingerprint()["affects_results_sha256"] == snap["affects_results_sha256"]
+
+
+def test_snapshot_is_idempotent(tmp_path, monkeypatch):
+    """重复调用返回同一份，不刷新 —— 快照一旦建立就代表"这批跑在哪份代码上"。"""
+    root = _make_repo(tmp_path, {"app/eval/comparator.py": "A = 1\n"})
+    _point_at(monkeypatch, root)
+    first = fp.snapshot_code_fingerprint()
+    (root / "app" / "eval" / "comparator.py").write_text("A = 2\n", encoding="utf-8")
+    assert fp.snapshot_code_fingerprint() == first
+
+
+def test_reset_lets_next_snapshot_see_new_code(tmp_path, monkeypatch):
+    """reset 之后重新快照能读到新代码。reset 只给测试用，但语义必须对。"""
+    root = _make_repo(tmp_path, {"app/eval/comparator.py": "A = 1\n"})
+    _point_at(monkeypatch, root)
+    before = fp.snapshot_code_fingerprint()["affects_results_sha256"]
+    fp.reset_code_snapshot()
+    (root / "app" / "eval" / "comparator.py").write_text("A = 2\n", encoding="utf-8")
+    assert fp.snapshot_code_fingerprint()["affects_results_sha256"] != before
+
+
+def test_no_snapshot_falls_back_to_live(tmp_path, monkeypatch):
+    """没有快照时现算 —— 单测/REPL 里直接构造 EvalReport 本来就没有"跑批起点"。"""
+    root = _make_repo(tmp_path, {"app/eval/comparator.py": "A = 1\n"})
+    _point_at(monkeypatch, root)
+    assert fp.report_code_fingerprint() == fp.code_fingerprint()
+
+
+# ---------------------------------------------------------------- 入口脚本（缺口 4）
+
+def test_entry_fingerprint_tracks_run_eval(tmp_path, monkeypatch):
+    """`run_eval.py` 在仓库根目录，`code_fingerprint()` 扫不到，靠它单独记。
+
+    它决定选题（--filter/--case 的解析与顺序）、`--repeat` 的逐题收集（pass^k /
+    flip_rate 全从这里来）、`--oracle` 走哪条假模型路径。改它同样改读数。
+    """
+    root = _make_repo(tmp_path, {"run_eval.py": "x = 1\n", "app/eval/comparator.py": "A = 1\n"})
+    _point_at(monkeypatch, root)
+    before = fp.entry_fingerprint()
+    assert before["files"]["run_eval.py"] and before["sha12"]
+
+    (root / "run_eval.py").write_text("x = 2\n", encoding="utf-8")
+    assert fp.entry_fingerprint()["sha12"] != before["sha12"]
+
+    # 两者互不干扰：改入口不动 app/ 的门禁哈希
+    gate_before = fp.code_fingerprint()["affects_results_sha256"]
+    (root / "run_eval.py").write_text("x = 3\n", encoding="utf-8")
+    assert fp.code_fingerprint()["affects_results_sha256"] == gate_before
+
+
+def test_entry_missing_file_is_none_not_fake(tmp_path, monkeypatch):
+    """扫不到就记 None，不假装有 —— 假指纹比没有指纹更坏，它会替你撒谎。"""
+    root = _make_repo(tmp_path, {"app/eval/comparator.py": "A = 1\n"})
+    _point_at(monkeypatch, root)
+    assert fp.entry_fingerprint()["files"]["run_eval.py"] is None
+
+
+def test_entry_not_a_gate_key():
+    """缺口 4 这次只做到"记录"。
+
+    进门禁需要先给 `baselines.json` 每个基线补上对应 commit 的入口哈希，否则所有历史
+    报告一夜之间判不可比（它们的 `fingerprints` 里没有这个键 → comparable 判 unknown）。
+    在那之前它必须留在 GATE_KEYS 外面 —— 这条断言是防盗门，别顺手加进去。
+    """
+    assert "entry_sha12" not in fp.GATE_KEYS
+
+
+def test_report_fingerprints_expose_entry_sha12(monkeypatch):
+    """报告的 fingerprints 块里能看到入口哈希（缺口 4 的落地）。"""
+    from app.eval import report as rp
+    from app.eval.cases import ALL_CASES
+
+    # 只测指纹块的拼装，不做真实渲染与评测集哈希（那要跑 130 题）
+    monkeypatch.setattr(rp, "evalset_fingerprint", lambda: {"sha256": "abc123def456"})
+    monkeypatch.setattr(fp, "rendered_fingerprints",
+                        lambda **kw: {"supported": False, "set_sha12": None})
+    rep = rp.EvalReport(
+        [{"case": ALL_CASES[0], "agent": "react", "correct": True, "executed": True}],
+        meta={"use_dictionary": True, "memory_mode": "off", "rewrite": "0"})
+    f = rep.summary()["fingerprints"]
+    assert f["entry_sha12"] == fp.entry_fingerprint()["sha12"]
+    assert f["code_sha12"] == fp.code_fingerprint()["affects_results_sha256"]

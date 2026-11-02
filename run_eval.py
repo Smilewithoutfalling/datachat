@@ -96,7 +96,9 @@ def main():
                         help="跑 canary 十条（app/eval/canary.py 的固定清单），用来探模型权重漂移")
     parser.add_argument("--data", default=None, help="替换 sales 表的数据文件（默认 data/sample_eval.csv）")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出（含code和result）")
-    parser.add_argument("--agent", choices=["workflow", "react", "both"], default="workflow", help="被测 Agent")
+    parser.add_argument("--agent", choices=["workflow", "react", "both"], default="workflow",
+                        help="被测 Agent。默认 workflow；**已归档的全部基线用的是 react**，"
+                             "要跟基线比就别省这个参数（缺口 9：默认值与基线口径不一致）")
     parser.add_argument("--no-dict", action="store_true", help="关闭数据字典检索")
     parser.add_argument("--oracle", action="store_true", help="离线自检：用标准答案代替模型输出")
     parser.add_argument("--out", default=None, help="JSON 报告路径（默认 outputs/eval_<agent>_<时间>.json）")
@@ -111,6 +113,13 @@ def main():
     if args.rescore:
         _rescore(args.rescore, args.data, args.write)
         return
+
+    # 缺口 15：指纹必须在**开跑之前**快照一次。`EvalReport.fingerprint()` 是惰性的，
+    # `--repeat 3` 每轮新建一个 EvalReport 就各自重算，跑批期间改 A 组文件会让后面几轮
+    # 标上一个从没执行过的指纹（2026-10-30 的 state 三跑就是这样）。
+    # 快照放在 --rescore 之后：重判要的是"现在这把尺子"，不是"启动时的尺子"。
+    from app.eval.fingerprint import snapshot_code_fingerprint
+    snapshot_code_fingerprint()
 
     baseline_fp = None
     if args.baseline:

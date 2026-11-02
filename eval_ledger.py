@@ -38,7 +38,9 @@ NOTES_END = "<!-- NOTES:END -->"
 DEBUG_N = 10  # 少于这么多题的报告当单题调试，不进趋势表
 
 # 报告里 code_sha12 与**实际执行**的指纹不符的批次：{报告文件名: 实际指纹}。
-# 唯一原因是"跑批期间改了 A 组文件"——指纹在每轮落盘时采样，不是启动快照（已知缺口 15）。
+# 成因是"跑批期间改了 A 组文件"——旧版指纹在每轮落盘时采样，不是启动快照。
+# **缺口 15 已于 2026-11-02 修掉**（run_eval.py 在开跑前调 snapshot_code_fingerprint()），
+# 此后新报告不会再出现这种情况。这张表只服务修复之前的历史批次，**不要再往里加**。
 # 只收判定被证明等价的情况，理由逐条写在下面；别拿它当"让数字对上"的橡皮擦。
 _CODE_SHA_OVERRIDE = {
     # 2026-11-02 state 三跑。09:04 落第 1 轮时 runner.py 已加了结果归因的两个键，
@@ -107,11 +109,12 @@ def normalize(path, data):
     n = overall.get("n") or len(cases)
     sha = (data.get("git_sha") or "unknown").rstrip("?")
     code_sha = fps.get("code_sha12")
-    # 报告里的 code_sha12 是**每轮落盘那一刻**采样的，不是启动快照。`--repeat 3` 跨十几分钟，
+    # 旧版报告的 code_sha12 是**每轮落盘那一刻**采样的，不是启动快照。`--repeat 3` 跨十几分钟，
     # 期间只要有人动过 app/ 里的 A 组文件，三份报告就会各标一个没跑过的尺子。
     # 第一次踩到：2026-11-02 state 三跑（09:04–09:18），中途给 runner.py 加了两个报告字段，
     # 于是三份报告都写 db1b660e8afc，而实际执行的是 d617102729fa。改动只往 out.update 加键，
     # score_detail 一行没动，判定零变化（DEVLOG [90] 有 diff 证据）。
+    # 2026-11-02 起改为开跑前快照（缺口 15 已修），这段只剩历史批次会命中。
     # 台账按**实际执行**的指纹记，否则这批会被当成新尺子的第一批，与它真正可比的那批断开。
     override = _CODE_SHA_OVERRIDE.get(os.path.basename(path))
     if override:

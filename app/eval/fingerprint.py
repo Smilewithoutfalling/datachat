@@ -154,6 +154,78 @@ def code_fingerprint() -> dict:
             "files": parts}
 
 
+# ------------------------------------------------------------------ 启动快照（缺口 15）
+
+# `EvalReport.fingerprint()` 是惰性的，且缓存挂在**实例**上。`--repeat 3` 每轮新建一个
+# EvalReport，就各自重算一次指纹。于是「跑批期间改了 A 组文件」会让第 2、3 轮的报告标上
+# 一个**从没执行过**的指纹——报告声称"我是用这份尺子量的"，其实不是。
+#
+# 2026-10-30 的 state 三跑撞上了：三份报告都记 `db1b660e8afc`，而实际执行的是
+# `d617102729fa`（改动落在第 1 轮跑完之后）。判据是 `result_origins` 全为 None ——
+# 那份代码会填这个字段，报告里却没有，说明它没跑过。当时的处置是在台账里按实际值
+# 硬改（`eval_ledger._CODE_SHA_OVERRIDE`），根治要先把这个采样时机改掉。
+#
+# 修法：入口在**开跑之前**快照一次，此后进程内所有报告都用这一份。
+# 语义边界：「快照」代表这批跑在哪份代码上，一旦建立就不该刷新。中途改了代码，
+# 报告仍然记旧的——那正是事实（这批确实跑在旧代码上）；差异下次跑批自然会暴露。
+_CODE_SNAPSHOT: dict | None = None
+
+
+def snapshot_code_fingerprint() -> dict:
+    """在跑批开始前快照一次，返回该快照。幂等：重复调用返回同一份，不会刷新。
+
+    调用点只有一个：`run_eval.py` 的 main，在确定要跑模型之后、第一轮之前。
+    """
+    global _CODE_SNAPSHOT
+    if _CODE_SNAPSHOT is None:
+        _CODE_SNAPSHOT = code_fingerprint()
+    return _CODE_SNAPSHOT
+
+
+def reset_code_snapshot() -> None:
+    """丢掉快照。只给测试用——生产代码一旦建立快照就不该撤销。"""
+    global _CODE_SNAPSHOT
+    _CODE_SNAPSHOT = None
+
+
+def report_code_fingerprint() -> dict:
+    """报告写指纹时走这里：有快照用快照，没快照现算。
+
+    没快照不等于出错：单测、REPL、别处直接构造 EvalReport 时本来就没有"跑批起点"。
+    那种情况下现算与刚启动是同一份，因为中间没人改代码。
+    """
+    return _CODE_SNAPSHOT if _CODE_SNAPSHOT is not None else code_fingerprint()
+
+
+# ------------------------------------------------------------------ 入口脚本（缺口 4）
+
+# `run_eval.py` 在仓库根目录，不在 `app/` 下，所以 `code_fingerprint()` 扫不到它。
+# 但它决定三件影响读数的事：①选题（--filter/--case/--canary 的解析与顺序）；
+# ②`--repeat` 的逐题收集，pass^k / flip_rate 全从这里来；③`--oracle` 走哪条假模型路径。
+# 改它同样改读数，而 `code_sha12` 一个字符都不动。
+#
+# **2026-11-02 先进报告、不进 GATE_KEYS。** 加门禁会让所有历史报告失配（它们的
+# `fingerprints` 里没有这个键 → comparable 判 unknown → 全部不可比），
+# 要把 `baselines.json` 每个基线补上对应 commit 的入口哈希才能改，那是单独一步。
+# 在那之前先把值记下来：至少能回答"两批分数差是不是因为换了入口脚本"。
+_ENTRY_FILES = ("run_eval.py",)
+
+
+def entry_fingerprint() -> dict:
+    """评测入口脚本的指纹。扫不到文件时该项记 None，不假装有。"""
+    parts, h = {}, hashlib.sha256()
+    for rel in _ENTRY_FILES:
+        try:
+            with open(os.path.join(_REPO, rel), "rb") as fh:
+                data = fh.read().replace(b"\r\n", b"\n")
+        except OSError:
+            parts[rel] = None
+            continue
+        parts[rel] = _sha12(data)
+        h.update(rel.encode() + b"\0" + data + b"\0")
+    return {"sha12": h.hexdigest()[:12], "files": parts}
+
+
 # ------------------------------------------------------------------ 运行时配置
 
 def _env_flag(name: str, default: str = "off") -> str:

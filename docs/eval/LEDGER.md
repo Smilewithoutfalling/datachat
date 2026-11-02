@@ -263,6 +263,12 @@ eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题�
 4. `run_eval.py` 不在指纹扫描范围内（只扫 `app/**/*.py`），而它决定 `--filter` / `--agent` /
    `--oracle` / `--canary` / 默认用例集。2026-10-30 连续给它加了 `--category` 逗号分隔、
    `--case` 逗号分隔、`--canary`，这类改动同样不进指纹。
+   **2026-11-02 部分处置**：`fingerprint.entry_fingerprint()` 单独算 `run_eval.py` 的 sha12，
+   报告 `fingerprints.entry_sha12` 里能查到（实测 `0c813c8fb952`）。**但没有进 `GATE_KEYS`**
+   ——加进去会让所有历史报告当晚判不可比（它们的 `fingerprints` 里没有这个键 →
+   `comparable()` 判 unknown），得先把 `baselines.json` 每个基线补上对应 commit 的入口哈希，
+   那是单独一步。在那之前它只回答「两批分数差是不是因为换了入口脚本」，不参与判定。
+   测试里有一条 `test_entry_not_a_gate_key` 当作防盗门，防止后人顺手加进去而不补基线。
 5. ~~题数从 130 变成 143~~ —— **当前题集 183 题**（`evalset = 4270d57adf72`，150 单轮 + 33 多轮，
    单轮含 `biz` 多表 20 条）。eval-v1 / eval-v2 / eval-v3 的所有数字都在旧题集上，与 183 题一律不可比。
    另注：判分器加规则 8b、`app/eval/canary.py` 入 A 组扫描后，**`code_sha12` 已从
@@ -278,6 +284,9 @@ eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题�
 9. **`run_eval.py` 的 `--agent` 默认是 `workflow`，而所有基线都是 `react`。** 不显式写
    `--agent react`，跑出来的批次多轮题只有 15.4%（workflow 在 `off` 下不消费 history，
    `app/server/app.py:526` 就是这么写的）。默认值没动——改它算评测入口的行为变化，要先单独说清楚。
+   **2026-11-02 只补了提示**：`--help` 现在写明「默认 workflow；已归档的全部基线用的是
+   react」，把坑标在参数上。默认值仍未改——它会静默改变所有不带参数的调用，
+   那是产品行为，不是改文档能代劳的决定。
 10. **`--rescore --write` 的边界**：只改 `correct` / `match` 与各处计数，不重算 `multi_turn`
     块里的 `rate`（那是 `expect_turns` 断言层面的通过率，和最终轮 `correct` 是两个指标），
     也不碰 `code` / `answer` / `actual`（那三条是证据）。判分器在 A 组指纹里，所以写回会把
@@ -438,15 +447,26 @@ eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题�
     而且以后没人能从报告本身看出矛盾。
     已处置：`eval_ledger.py` 的 `_CODE_SHA_OVERRIDE` 按实际执行值 `d617102729fa` 归档，
     理由逐条写在表里；判定零变化的依据是 diff（只加键、`score_detail` 未动）。
-    **根因未修**：要改成进程启动时快照（`run_eval.py` main 开头预热一次缓存）。
-    在那之前，纪律是：**跑批期间不要动 `app/` 下的 A 组文件**；非动不可就记进台账。
+    **根因已修（2026-11-02）**：`fingerprint.py` 加 `snapshot_code_fingerprint()`，
+    `run_eval.py` 在 `--rescore` 分支之后、第一轮之前调一次，此后同进程所有报告都用这一份；
+    `EvalReport.fingerprint()` 改走 `report_code_fingerprint()`（有快照用快照，没快照现算）。
+    `rescore.py` 保持实时计算——重判要的是「现在这把尺子」，不是「启动时的尺子」。
+    边界两条：①快照是进程级全局，本轮改动**不影响 A 组哈希**（改的是 B 组的 `fingerprint.py` /
+    `report.py` 与根目录 `run_eval.py`），已验证与 HEAD 的 `affects_results_sha256` 同为
+    `ac1ebcd66c5a`，历史基线全部仍可比；②`_CODE_SHA_OVERRIDE` 表保留但封存，
+    只服务修复之前的历史批次，不要再往里加条目。
+    **纪律仍在，但理由变了**：跑批期间别动 A 组文件——现在报告不会撒谎了，风险变成
+    「Python 只在首次 import 时读文件」，中途改动若被某个后 import 的模块读到，
+    这批实跑的就是**混合版本**，而报告只会记启动那一版。
 
     **同类第二例（2026-11-02 10:16）**：`eval-v5` 归档记 `code_sha12 = 295a4d474097`
-    （10:11 重判那一刻），10:16:56 又改过一次 `comparator.py`，HEAD 现在是 `7b444c892533`。
+    （10:11 重判那一刻），10:16:56 又改过一次 `comparator.py`，HEAD 现在是 `ac1ebcd66c5a`。
     判定等价已实证：用当前代码 `rescore()` 9 份源报告，**441 题的 `correct` / `match` /
     `refusal_leak` 零差异**。所以 **`code_sha12` 相同不代表同一份代码，不同也不代表判定变了**
     —— 要断言判定变没变，只能重判对比。`baselines.json` 不改：`295a4d474097` 作为
     "重判用的尺子"语义没错，只是别把它当成 HEAD 的身份证。
+    这一例**不在本轮修复范围内**：`apply_rescore` 记重判时刻的指纹是正确语义
+    （它描述的是"我用哪把尺子重判的"），不是缺口 15 那个"跑的时候 vs 落盘的时候"的错位。
 16. **多坑题里「口径错了但极值对了」，按值判会放行。** 2026-11-02 复核 `biz_020` 时发现：
     run3 判对，但它的口径**也是错的** —— 只取到 551 单已完成（未 strip `status`）、
     172 行数码明细，gold 是 670 单 / 208 行。它只是赢在 `sku` 那个坑没踩（该坑决定排名），
