@@ -28,7 +28,12 @@
 一段 Python，最后把答案赋给 `result`。可用变量：
 
     pd     pandas
-    df     脏化表（code 用）或原始合并表（raw_code 用）
+    df     单表题：脏化表（code 用）或原始表（raw_code 用）
+    dfs    多表题：表名 → DataFrame 的字典；**两个数据源的表名相同**，
+           列名不同 —— `dfs['房源']['每晚价格']`（脏化）vs `dfs['房源']['price']`（原始）
+
+单表题只注入 `df`，多表题只注入 `dfs`，**不同时给**：写错表名时应当立刻 NameError，
+而不是"恰好也能跑"。
 
 两边列名不同（脏化表是中文列名 + `监测时间` 字符串；原始是 `PM2.5`/`TEMP`/`year` 分列），
 这不是麻烦，是刻意的 —— 它逼你分别写一遍，而不是复制粘贴。
@@ -48,6 +53,9 @@ import zipfile
 
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from app.tools.dataset import load_data  # noqa: E402
+
 AIR_INNER = "PRSA2017_Data_20130301-20170228.zip"
 
 
@@ -56,37 +64,68 @@ def sha256_of(obj) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def run(code: str, df: pd.DataFrame):
-    ns = {"pd": pd, "df": df}
+def run(code: str, data):
+    """执行答案代码。`data` 是单表 DataFrame 时注入 `df`，是多表 dict 时注入 `dfs`。
+
+    两个变量**不同时注入** —— 单表题里写 `dfs[...]` 应该立刻 NameError，
+    而不是"恰好也能跑"。这条是刻意的：它让题面写错表名时当场暴露。
+    """
+    ns = {"pd": pd}
+    if isinstance(data, dict):
+        ns["dfs"] = data
+    else:
+        ns["df"] = data
     exec(compile(code, "<answer>", "exec"), ns)     # noqa: S102 —— 可信代码，与 verify_gate.py 同
     if "result" not in ns:
         raise RuntimeError("代码里没有给 result 赋值")
     return ns["result"]
 
 
-def load_raw(bank: str) -> pd.DataFrame:
-    """原始数据：12 个站点合并，英文列名（未脏化）。"""
-    zpath = os.path.join(bank, "data", "_cache", "air.zip")
-    if not os.path.exists(zpath):
-        sys.exit(f"找不到原始数据 {zpath}；先跑 build_holdout_data.py")
-    with zipfile.ZipFile(zpath) as z:
-        inner = z.read(AIR_INNER)
-    frames = []
-    with zipfile.ZipFile(io.BytesIO(inner)) as z:
-        for n in sorted(x for x in z.namelist() if x.lower().endswith(".csv")):
-            frames.append(pd.read_csv(io.BytesIO(z.read(n))))
-    return pd.concat(frames, ignore_index=True)
+def load_raw(bank: str, name: str):
+    """原始数据（未脏化）。单表返回 DataFrame，多表返回 dict。"""
+    if name == "air":
+        zpath = os.path.join(bank, "data", "_cache", "air.zip")
+        if not os.path.exists(zpath):
+            sys.exit(f"找不到原始数据 {zpath}；先跑 build_holdout_data.py")
+        with zipfile.ZipFile(zpath) as z:
+            inner = z.read(AIR_INNER)
+        frames = []
+        with zipfile.ZipFile(io.BytesIO(inner)) as z:
+            for n in sorted(x for x in z.namelist() if x.lower().endswith(".csv")):
+                frames.append(pd.read_csv(io.BytesIO(z.read(n))))
+        return pd.concat(frames, ignore_index=True)
+
+    if name == "rental":
+        # 多表：键用**中文表名**，与 agent 看到的一致（`dfs['房源']`）。
+        # 列名保持英文原文 —— 这是 raw_code 存在的意义：换一套列名再算一遍。
+        cache = os.path.join(bank, "data", "_cache", "insideairbnb")
+        if not os.path.isdir(cache):
+            sys.exit(f"找不到原始数据 {cache}；先跑 build_holdout_multi.py 并放好缓存")
+        return {
+            "房源": pd.read_csv(os.path.join(cache, "listings.csv.gz"), low_memory=False),
+            "可订日历": pd.read_csv(os.path.join(cache, "calendar.csv.gz"), low_memory=False),
+            "评论": pd.read_csv(os.path.join(cache, "reviews.csv.gz"), low_memory=False),
+            "社区": pd.read_csv(os.path.join(cache, "neighbourhoods.csv"), low_memory=False),
+        }
+    sys.exit(f"不认识的 dataset: {name}")
 
 
-def load_dirty(bank: str, spec: dict) -> pd.DataFrame:
-    """脏化表 —— 与 agent 看到的完全同一份文件。"""
-    rel = (spec.get("datasets") or {}).get("air")
+def load_dirty(bank: str, spec: dict, name: str):
+    """脏化数据 —— 与 agent 看到的**同一份**，而且**同一个读取函数**。
+
+    不能自己 `pd.read_csv(..., dtype=str)`：`EvalRunner.frame()` 走的是
+    `app.tools.dataset.load_data`，类型是推断出来的（`房源编号` 是 int、`每晚价格` 因为带
+    `$` 才是 str）。两边读法不一致，标准答案按字符串算、agent 按数值算，答案会分叉，
+    而这种分叉在核对阶段看不出来 —— 只有真跑模型才会暴露。
+    """
+    rel = (spec.get("datasets") or {}).get(name)
     if not rel:
-        sys.exit("questions.json 的 datasets 里没有 air")
+        sys.exit(f"questions.json 的 datasets 里没有 {name}")
     p = rel if os.path.isabs(rel) else os.path.join(bank, rel)
     if not os.path.exists(p):
-        sys.exit(f"找不到脏化表 {p}；先跑 build_holdout_data.py")
-    return pd.read_csv(p, encoding="gb18030", dtype=str)
+        sys.exit(f"找不到脏化数据 {p}；先跑 build_holdout_*.py")
+    data, _ = load_data(p)
+    return data
 
 
 def same(a, b) -> bool:
@@ -117,19 +156,25 @@ def main() -> None:
 
     questions = qspec["questions"]
     qids = [q["id"] for q in questions]
+    qmap = {q["id"]: q for q in questions}
     specs = sspec.get("answers") or {}
     missing = [i for i in qids if i not in specs]
     extra = [i for i in specs if i not in qids]
     if missing or extra:
         sys.exit(f"题号不一致 —— questions 缺答案：{missing}；answers_spec 多出：{extra}")
 
-    dirty = load_dirty(bank, qspec)
-    raw = load_raw(bank)
-    print(f"脏化表 {len(dirty)} 行 / 原始表 {len(raw)} 行\n")
-
+    dirty_cache, raw_cache = {}, {}
     out, bad = {}, []
     for qid in qids:
         s = specs[qid]
+        name = qmap.get(qid, {}).get("dataset", "air")
+        if name not in dirty_cache:
+            dirty_cache[name] = load_dirty(bank, qspec, name)
+            raw_cache[name] = load_raw(bank, name)
+            n = len(dirty_cache[name]) if not isinstance(dirty_cache[name], dict) else \
+                sum(len(v) for v in dirty_cache[name].values())
+            print(f"{name}: 脏化 {n} 行")
+        dirty, raw = dirty_cache[name], raw_cache[name]
         try:
             got = run(s["code"], dirty)
         except Exception as e:                                    # noqa: BLE001
