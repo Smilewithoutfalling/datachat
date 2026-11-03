@@ -82,6 +82,10 @@ _EXEMPT = {
     # **只往报告里写两个字段，不参与 score_detail，也不进模型输入。** 改它不改任何一题的对错，
     # 所以放 B；但读数的人要能看出"这批 literal 变多了"，那由报告里的分布字段自证。
     "app/eval/provenance.py": "答案来源归因，只记录不判分，不进模型输入",
+    # E2 过程验证：AST 看代码写法（有没有引用 Unnamed 列名、result 是不是占位符文本）。
+    # **只往报告里写 `process_risks`，不进 score_detail、不进模型输入、也不判对错**——
+    # 它标的是"值得人看一眼"，标了不等于错（见模块 docstring 的实测数字）。所以放 B。
+    "app/eval/process_check.py": "过程结构标记，只记录不判分，不回灌模型",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

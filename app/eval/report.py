@@ -18,6 +18,7 @@ from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
 from app.eval.provenance import refusal_shape
+from app.eval.process_check import check_code, summarize as summarize_process
 
 
 # V2d §1：每题 token 拆分（runner.usage_fields 产出）；旧报告没有这些键
@@ -41,6 +42,17 @@ def _refusal_shapes(items) -> dict:
         if s:
             got[s] += 1
     return dict(got)
+
+
+def _process_risks(items) -> dict:
+    """结构异常标记的分布（E2）。**只统计，不判分。**
+
+    和 `_refusal_shapes` 同一个理由放在这里：`runner.py` 在 A 组指纹里，为了让一个纯记录
+    字段多跑一行就把 `code_sha12` 改掉，6 个基线全失配。`report.py` / `process_check.py`
+    都在 B 组，零代价。
+    """
+    rows = [{"id": getattr(r.get("case"), "id", None), "code": r.get("code")} for r in items]
+    return summarize_process(rows)
 
 
 _WIN_GIT = (r"C:\Program Files\Git\cmd\git.exe", r"C:\Program Files (x86)\Git\cmd\git.exe")
@@ -454,6 +466,9 @@ class EvalReport:
                 # 缺口 14a：应拒答题的**回答形态**分布（clean / semantic_no_prefix / infer / empty）。
                 # 与 refusal_leaks 正交：前者是"有没有按格式拒"，后者是"拒了之后有没有偷偷答"。
                 "refusal_shapes": _refusal_shapes(items),
+                # E2：代码写法上的结构异常（引用了 Unnamed 列名 / result 是占位符文本）。
+                # **不进正确率**，只标"值得人看一眼"——标了不等于错，判据见 process_check.py。
+                "process_risks": _process_risks(items),
             }
         agents = sorted({r.get("agent", "workflow") for r in self.results})
         evalset = evalset_fingerprint()
@@ -574,6 +589,8 @@ class EvalReport:
                 # 所以只依赖报告层——runner 不动，`code_sha12` 不变。
                 "refusal_shape": (refusal_shape(r.get("answer"))
                                   if getattr(c, "expect_refusal", False) else None),
+                # E2：结构异常标记，是"值得看一眼"不是"判错"。老报告没这字段，读的时候按 [] 处理。
+                "process_risks": check_code(r.get("code")),
                 # 多轮（EV-A2）：题面全貌 + 逐轮答案 + 逐轮约束判定。
                 # 只存 question（= last turn）的话，事后看不出这题到底问了几轮什么。
                 "turns": list(c.turns) if c.turns else [],
