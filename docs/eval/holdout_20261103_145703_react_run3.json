@@ -39,7 +39,7 @@
     "rewrite": "off",
     "use_dictionary": true,
     "evalset_sha12": "4270d57adf72",
-    "code_sha12": "6735309d434c",
+    "code_sha12": "4b58e8b9fd80",
     "code_all_sha12": "fccd18be3a38",
     "entry_sha12": "0c813c8fb952",
     "rendered_set_sha12": "c8032dde478a",
@@ -5256,6 +5256,18 @@
       "reason": "",
       "guessing": false,
       "first_error_step": null
+    }
+  ],
+  "run_code_sha12": "6735309d434c",
+  "rescored": [
+    {
+      "at": "2026-11-03T16:08:20",
+      "runner_before": "6735309d434c",
+      "scorer": "4b58e8b9fd80",
+      "changed": [],
+      "n_correct": 59,
+      "n": 63,
+      "bank_drift": null
     }
   ]
 }

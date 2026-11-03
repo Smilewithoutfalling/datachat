@@ -28,7 +28,9 @@
  14. 期望索引/列是月份序号（1–12，groupby(dt.month) 的结果），实际是 '2024-01' / Timestamp / Period → 比较月份部分。
  15. ISO 周标签（'2024-W01'，阶段 3d 起也可带括号说明 '2024-W09 (02-26)'）也算时间索引，两边都是时间索引时按位置比值。
  16. 模型自己起键名的汇总 dict：期望数值时 ≤4 项也可（规则 10 的 Series 仍 ≤3）；
-     期望标签元组（最高/最低月份）时，取 dict 里的标签值按顺序比较。
+     期望标签元组（最高/最低月份）时，只要这串标签按顺序出现在 dict 的值里就算对——
+     额外项（数值、口径说明）不参与，也不按"值的类型是不是 str"数个数
+     （CSV 读回来的 '999.0' 是 str，数个数会把正确答案判错，见 t02）。
  17. 实际多了"总计/合计/All/Total"汇总行或列（crosstab margins=True）而期望没有 → 去掉再比。
 阶段 3（新评测集的等价写法）：
  18. 时间索引的其他写法：期望索引是季度序号 1–4 时，实际 'Q1' / '2024Q1' / 季度 Period / '第一季度' 都可；
@@ -648,9 +650,20 @@ def _vs_sequence(a, e: list, tol) -> bool:
         return False
     if isinstance(a, dict) and len(a) > len(e) and all(isinstance(_py(x), str) for x in e):
         # 规则 16：{'最高月份': '2024-06', '最高销售额': 54406.5, ...} → 取标签值
-        labels = [_py(x) for x in a.values() if isinstance(_py(x), (str, pd.Timestamp, pd.Period))]
-        if len(labels) == len(e):
-            a = labels
+        #
+        # 判据是"期望的这串标签能不能按顺序在 dict 的值里找到"，**不是**"str 值的个数等于期望长度"。
+        # 按类型数个数会两头错：
+        #  - 少数：CSV 读回来的数值列是 '999.0' 这种字符串，被当成标签，标签数 3≠2 直接把对的判错
+        #    （t02：期望 ('Wanshouxigong','2016-02-08 02:00')，实际 {'监测站':…, '监测时间':…, 'PM2.5':'999.0'}）；
+        #  - 多滤：把"数值样子的字符串"一律排除，期望本身是 '2024'/'2025' 这类年份标签时又会误杀。
+        # 值是不是标签，只由它等不等于期望决定；多出来的项（数值、口径说明）不参与。
+        vals = [_py(x) for x in a.values()]
+        i = 0
+        for v in vals:
+            if i < len(e) and _eq(v, _py(e[i]), tol, ordered=True):
+                i += 1
+        if i == len(e):
+            return True
     if isinstance(a, pd.Series) and len(a) == len(e) and len(e) > 1 \
             and all(isinstance(_py(x), str) and not _is_num(x) for x in e) \
             and [_label(x) for x in a.index] == [_label(x) for x in e]:

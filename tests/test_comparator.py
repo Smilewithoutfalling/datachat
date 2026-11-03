@@ -543,3 +543,34 @@ def test_ordered_multiindex_not_relaxed():
     idx = pd.MultiIndex.from_tuples([("A", "x"), ("B", "y")])
     e = pd.Series([1, 2], index=idx)
     assert not results_equal([1, 2], e, ordered=True)
+
+
+# ---- 规则 16：dict 里"哪些值算标签"不能按类型数个数（2026-11-03，holdout t02 现场）----
+# 旧判据是 `[str/Timestamp/Period 的值] 的个数 == len(期望)`。CSV 读回来的数值列是 '999.0'
+# 这种字符串，于是 3 个"标签"对 2 个期望 → 规则不触发 → 站名和时刻全对也判错（t02 三轮）。
+# 反向的修法（把数值样子的字符串一律滤掉）会误杀"期望本身就是年份标签"的题，
+# 所以判据改成"这串期望能不能按顺序在 dict 的值里找到"。
+
+def test_rule16_numeric_string_in_dict_does_not_hide_labels():
+    """t02 原样：PM2.5 以 '999.0' 入 dict，不能把站名/时间挤成"标签数不符"。"""
+    e = ("Wanshouxigong", "2016-02-08 02:00")
+    a = {"监测站": "Wanshouxigong", "监测时间": "2016/2/8 2", "PM2.5": "999.0"}
+    assert results_equal(a, e)
+
+
+def test_rule16_year_labels_still_count():
+    """期望本身就是数字样的标签（'2024'/'2025'）—— 不能因为"看着像数值"被滤掉。"""
+    assert results_equal({"起始": "2024", "结束": "2025", "笔数": 12}, ("2024", "2025"))
+
+
+def test_rule16_matches_in_order_and_ignores_extra_fields():
+    """额外项（数值、口径说明）不参与；但顺序仍是答案的一部分。"""
+    e = ("2024-06", "2024-03")
+    assert results_equal({"最高月份": "2024-06", "最高额": 54406.5, "最低月份": "2024-03"}, e)
+    assert not results_equal({"最高月份": "2024-03", "最低月份": "2024-06", "差额": 1}, e)
+
+
+def test_rule16_missing_or_wrong_label_is_still_wrong():
+    e = ("Wanshouxigong", "2016-02-08 02:00")
+    assert not results_equal({"监测站": "Wanshouxigong", "PM2.5": "999.0", "备注": "除夕"}, e)  # 少一项
+    assert not results_equal({"监测站": "Wanshouxigong", "监测时间": "2016-02-09 02:00", "PM2.5": 999.0}, e)

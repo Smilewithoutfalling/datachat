@@ -39,7 +39,7 @@
     "rewrite": "off",
     "use_dictionary": true,
     "evalset_sha12": "4270d57adf72",
-    "code_sha12": "6735309d434c",
+    "code_sha12": "4b58e8b9fd80",
     "code_all_sha12": "fccd18be3a38",
     "entry_sha12": "0c813c8fb952",
     "rendered_set_sha12": "c8032dde478a",
@@ -364,11 +364,11 @@
   "run": 2,
   "overall": {
     "n": 63,
-    "correct": 58,
+    "correct": 59,
     "executed": 63,
-    "correctness_rate": 92.06349206349206,
+    "correctness_rate": 93.65079365079364,
     "execution_success_rate": 100.0,
-    "conditional_correctness_rate": 92.06349206349206,
+    "conditional_correctness_rate": 93.65079365079364,
     "reviewer_fix_rate": 100.0,
     "initial_errors": 4,
     "infra_errors": 0,
@@ -376,7 +376,7 @@
     "avg_tokens": 6647.587301587301,
     "match_kinds": {
       "strict": 53,
-      "relaxed": 2,
+      "relaxed": 3,
       "refusal": 3
     },
     "result_origins": {
@@ -427,9 +427,9 @@
     },
     "filtering": {
       "n": 17,
-      "correct": 16,
+      "correct": 17,
       "executed": 17,
-      "correctness_rate": 94.11764705882352,
+      "correctness_rate": 100.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 94.11764705882352,
       "reviewer_fix_rate": null,
@@ -438,7 +438,8 @@
       "avg_duration_s": 6.432735294117646,
       "avg_tokens": 6177.294117647059,
       "match_kinds": {
-        "strict": 16
+        "strict": 16,
+        "relaxed": 1
       },
       "result_origins": {
         "computed": 17
@@ -571,9 +572,9 @@
   "by_dataset": {
     "air": {
       "n": 25,
-      "correct": 22,
+      "correct": 23,
       "executed": 25,
-      "correctness_rate": 88.0,
+      "correctness_rate": 92.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 88.0,
       "reviewer_fix_rate": 100.0,
@@ -583,7 +584,7 @@
       "avg_tokens": 6546.0,
       "match_kinds": {
         "strict": 20,
-        "relaxed": 1,
+        "relaxed": 2,
         "refusal": 1
       },
       "result_origins": {
@@ -3387,8 +3388,8 @@
       "category": "filtering",
       "dataset": "air",
       "question": "PM2.5 浓度最高的那条记录，出现在哪个监测站、哪个时刻？给出站名和时刻（精确到小时）。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "relaxed",
       "executed": true,
       "initial_error": false,
       "infra_error": false,
@@ -5267,6 +5268,24 @@
       "reason": "",
       "guessing": false,
       "first_error_step": null
+    }
+  ],
+  "run_code_sha12": "6735309d434c",
+  "rescored": [
+    {
+      "at": "2026-11-03T16:07:56",
+      "runner_before": "6735309d434c",
+      "scorer": "4b58e8b9fd80",
+      "changed": [
+        {
+          "id": "t02",
+          "before": false,
+          "after": true
+        }
+      ],
+      "n_correct": 59,
+      "n": 63,
+      "bank_drift": null
     }
   ]
 }
