@@ -71,6 +71,10 @@ _EXEMPT = {
     "app/__init__.py": "包标记，无逻辑",
     "app/eval/__init__.py": "包标记，无逻辑",
     "app/eval/report.py": "只产出报告 JSON，不回灌模型",
+    # 把逐题行折成严格率 / 区间 / MDE。和 report.py 同一层：只读 `correct` 与
+    # `match`，不产生任何判定。放进 A 会让"加一个汇总模块"就报废全部历史报告的
+    # 可比性，而它根本改不动任何一题的判定 —— 那是 comparator 的事。
+    "app/eval/outcome.py": "报告汇总，不产生判定",
     "app/eval/rescore.py": "离线重打分工具",
     "app/eval/chart_smoke.py": "图表统计，只看已产出的图",
     "app/eval/fingerprint.py": "本文件",

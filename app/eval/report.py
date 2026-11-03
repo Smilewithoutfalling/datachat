@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
+from app.eval.outcome import build as build_outcome
 from app.eval.provenance import refusal_shape
 from app.eval.process_check import check_code, summarize as summarize_process
 
@@ -480,6 +481,12 @@ class EvalReport:
             "evalset": evalset,
             "fingerprints": self.fingerprint(evalset["sha256"]),
             "comparable": self.comparable(),
+            # 报告 v2 的 outcome 块（规格 §3.2）。**只追加键，不改旧键**，
+            # 所以老消费者（rescore / 闸门 / 已有脚本）都不受影响。
+            # 刻意不写 `schema_version: 2`：规格里的 v2 还包括 trajectory /
+            # evidence / chart / cost 四块，现在只有这一块，标成 2 会让读者
+            # 以为整套都在。`compare.py` 对缺 outcome 的报告现算，两种都认。
+            "outcome": build_outcome(self.results),
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},

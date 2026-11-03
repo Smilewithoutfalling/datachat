@@ -5074,3 +5074,121 @@ pass^3 未满的 5 道：`m12`、`h1_12`、`c03`（三轮全错）、`t03`（OXX
 那是尺子坏掉造出来的假跌。用本轮的尺子重算旧题面（170）→ 新题面（177）是 **6 道题、7 个题次**
 （8 涨 1 跌）：`h1_22`×2、`h1_23`×2、`m19`×2、`h1_14`×1、`t03`×1 涨，`m15`×1 跌。
 t02 两边都是 OOO，不再出现在差异里 —— 题面没动过它，动的是判分器。
+
+---
+
+## [117] 2026-11-03 · 批 0 第一块：`outcome` 块 + `compare.py`
+
+模型通道不可用，做不依赖它的部分。挑 `compare.py` 的理由是**这个需求已经重复四次**：
+每轮改完判分器，我都要手写一个 `/tmp/dc-eval/snap.py` 跑全量重评前后 diff。第四次就该固化成工具。
+
+### 先排除掉的：B3 图表语义判分现在做不了
+
+原计划里 B3（从 chart option 反算数值）排在第二。查历史报告发现走不通：
+
+```json
+"chart": {"chart_calls": 1, "used_plt": false, "drew": true, "options": 1, "pngs": 0,
+          "chart_errors": [], "chart_internal_errors": [], "charts_discarded": 0}
+```
+
+`report.py` 只序列化了计数器，**option 实体没有落盘**。8 道图表题的历史 output 已经丢了，
+要验语义只能重跑模型。所以 B3 今天能写出来的只有函数和单测，没有真实数据可验 ——
+那不是补齐一个维度，是往规格里填一个漂亮但空着的格子。不做。
+
+### `app/eval/outcome.py`（新）
+
+报告 v2 的 `outcome` 块（规格 §3.2）：`accuracy` / `strict` / `strict_rate` / `tier_mix` /
+`wilson95` / `mde_equiv_pp` / `by_category` / `by_dataset` / `needs_audit`。
+
+单独成模块而不是塞进 `report.py`：`compare.py` 要对没有 `outcome` 键的旧报告**现算**同一套数。
+两份实现一定会漂移，届时"A 的严格率"和"B 的严格率"用的是两套算法，比较本身就是假的。
+
+三个判断：
+
+1. **严格率的分母是判对的题**，不是全部题。用全部题做分母会把"答错"和"判得松"混成一个数 ——
+   一个模型答错 30 题、剩下的全 strict，严格率被压到 70%，看起来像比较器放宽了。
+2. **`rounded` 不算 strict**。它是"舍入后相等"，已经放宽过一层。
+3. **`match` 缺失时不猜**。`match` 键晚于最早那 4 份评测报告，那些行判对了也不知道靠哪层。
+   当 strict 会让旧报告严格率凭空变高，当 relaxed 会凭空变低，都是编数。所以记 `unknown_tier`
+   并把 `strict_rate` 置 `None`：**"算不出来"是诚实答案，"大概多少"不是**。
+
+`n < mde_flips` 时 `mde_equiv_pp` 会超过 100（3 题上要 6 个翻转 = 200pp）。这不是算错，
+它的意思是"这批题无论怎么翻也到不了显著"，另给 `mde_reachable: false` 把这个意思写明。
+
+### `scripts/eval/compare.py`（新）
+
+```
+python scripts/eval/compare.py A.json B.json [--alpha 0.05] [--json OUT]
+```
+
+只读 JSON，不调模型。输出可比性 → 判定来源 → 准确率 Δ → 配对翻转 + McNemar + MDE → 层级迁移 → 结论。
+
+**判定取哪个字段**：`human_correct` → `correct` → `auto_correct`。闸门报告人判优先于比较器，
+规格 §1.2 的既有语义。
+
+### 它在真数据上抓到的两件事
+
+这两条都是**我原来的手写快照脚本抓不到的**，也是这次做工具的主要收获。
+
+**一、混源**。`gate_20261013_151425_react.json` 的人工字段全空，判定落到 `auto_correct`；
+`gate_20261014_162428_react.json` 人工填满了。两份一比：
+
+```
+准确率：A 96.0% (24/25) → B 92.0% (23/25)，Δ -4.0pp
+```
+
+单看这行就是"退步 4pp"。实际比的是"比较器结论 vs 人工结论"，跟模型没有任何关系。
+现在这种报告会多打一行：
+
+```
+判定来源：**25 题两边来源不同**（A 比较器 25 题 / B 人判 25 题） —— 下面的准确率差混合了判定方式，不能读成模型差异
+⚠️ 上面这行不作数：25 题的判定一边来自比较器、一边来自人判（先把人工字段填齐，或都用同一把尺子重判）。
+```
+
+**二、跨 agent 没被拦**。规格 §EV-B1 写的可比性是 prompt / evalset / model 三项。
+拿 react 报告比 workflow 报告时三项全 yes（两边 model 相同、都没有 prompt/evalset 指纹），
+脚本照常出了个 `Δ -10.0pp`。两个执行器不是同一个被测对象，这比换模型还严重。
+
+所以加了第四项 `agent`。规格写三项是**下限不是上限** —— 那一项是我照着规格抄漏的。
+并顺手把判定顺序改了：**确定的差异压过"没数据"**。model 明确不同时就是不可比，
+不能因为 prompt 指纹缺失退回 `legacy` —— 那是拿一个缺失项掩盖一个已知差异。
+
+### 与"改动前后对比"的分工
+
+`compare.py` 比的是**两份报告文件**。我这四轮真正反复做的是**同一批输出、两个代码状态**，
+那是另一条路：`run_eval.py --rescore` 把同一份报告按当前判分器重判，落成两个副本，再 compare。
+两条路不合并 —— 前者不需要 git 状态操作，后者需要，混在一起会让脚本承担它不该管的事。
+
+### 数字
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_report_outcome.py` | 13 passed |
+| `tests/test_compare.py` | 20 passed |
+| 受影响的 10 个测试文件 | **176 passed in 51.6s** |
+| 全量 `pytest tests/` | **没跑完**，见下 |
+
+`outcome` 落盘用 `--oracle` 实跑 3 题验证过：`n=3 / correct=3 / strict_rate=100.0 /
+wilson95=[43.8, 100.0] / mde_equiv_pp=200.0 / mde_reachable=false`。结构对。
+
+### 指纹：一开始归错组，改回来了
+
+`outcome.py` first 放进 A 组（理由：和 `stats.py` 一样是"改它就是改读数"），
+结果 `affects_results_sha12` 从 `4b58e8b9fd80` 变成 `1e1cbc7bfe96` —— **加一个只做汇总的模块，
+把所有历史报告的可比性全废了**。
+
+改判 B 组，理由是判据本身：A 组要回答的是"改了它，同一批模型输出会不会得到不同**判定**"。
+`comparator.py` 会；`outcome.py` 不会，它只读 `correct` 和 `match` 折成汇总，和 `report.py`
+同一层（后者本来就在 B 组）。现在指纹回到 `4b58e8b9fd80`，与 [116] 一致，历史报告全部仍可比。
+
+顺带记一条环境事实：`tests/test_comparator_cases.py` 那 96 条真实写法**单文件要跑 2 分钟以上**
+（每条都建 DataFrame 走一遍比较器）。全量回归慢的主因是它，不是新增的测试。
+这轮我没碰 `comparator.py`，把它塞进"受影响清单"纯属自找。
+
+### 明确没做
+
+- **B3 图表反算**：历史报告没存 option，见上。
+- **`schema_version: 2`**：规格里的 v2 还有 trajectory / evidence / chart / cost 四块，
+  现在只有 outcome 一块，标成 2 会让读者以为整套都在。`compare.py` 对缺 `outcome` 的报告现算，两种都认。
+- **`--rescore` 选项**：不塞进 `compare.py`，见「分工」一节。
+- **CI 里跑真模型**：仍然没有。批 0 的 `replay.py` / `render.py` 也没动。
