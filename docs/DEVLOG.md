@@ -4577,6 +4577,31 @@ CI 没有 `http_proxy`，所以永远绿。这类"本地红、CI 绿"最容易�
 修法一行：路由前 `urlsplit(self.path).path`。绝对 URI 和相对路径都能得到同一个 path，
 `do_GET` 一并改（`/models` 探测走 GET）。改完带代理跑 132 passed。
 
+### 第三个：1370 passed / 1 failed，是沙箱的删除保护
+
+重跑全量，只剩 `test_g1_require_data_fails_with_plain_message` 一条失败，
+断言 `assert "闸门数据缺失" in r.stdout` 落空，`r.stdout` 里只有进度点 `FFFF…`。
+
+我第一反应是"pytest 的失败摘要去了 stderr"，于是把断言改成 `(r.stdout + r.stderr)` 并提交了。
+**这个判断是错的**，revert 了（`25e22ee`）。改成两个流之后照样失败，stderr 里露出来的是：
+
+    [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
+    {"count":92,"threshold":50,"scope":"turn","targets":["...pytest-of-HJH/garbage-..."]}
+
+本机工作区挂了 safe-delete 保护：一次删除超过 50 个文件就要确认。pytest 每轮启动会清理
+上一轮的临时目录，而 `pytest-of-HJH/garbage-*` 里实测有 24 个目录、每个 91–358 个文件，
+清理动作超阈值 → 钩子把 JSON 打到 stderr、删除没执行。
+
+所以这条失败**不是 flaky，也不是代码问题**：
+
+- 单跑 6 次全过 —— 单跑时没有跨轮清理
+- 全量跑两次都失败在同一条 —— 每次启动都撞一次
+- CI 没有这个钩子
+
+**真正的教训不是这个测试，是我"先改断言、后看证据"的顺序。** 看到断言失败就去改断言，
+等于把测量工具调松到能通过为止。正确顺序是先打印 `r.stdout` 和 `r.stderr` 看清楚，
+再决定改代码还是改测试。这次代价是一个 revert commit 和一轮 28 分钟的全量。
+
 ### 推送：git push 走不通时用 Data API
 
 本机 `~/.gitconfig` 里写死了 `http.https://github.com.proxy=http://127.0.0.1:7890`，
