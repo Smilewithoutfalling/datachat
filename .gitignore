@@ -1,5 +1,9 @@
 # 密钥与本地配置（绝不提交）
 .env
+# 改 .env 前留的备份同样含明文 Key —— 曾经漏了这条规则
+.env.bak.*
+# 运行时数据库：settings 表存模型连接与 Key
+datachat.db
 
 # 运行产物
 outputs/
