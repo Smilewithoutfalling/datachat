@@ -385,7 +385,9 @@ def _run_oracle_subprocess(tmp_path, require):
 def test_g1_require_data_fails_with_plain_message(tmp_path):
     r, n = _run_oracle_subprocess(tmp_path, require=True)
     assert r.returncode != 0
-    assert "闸门数据缺失" in r.stdout
+    # 只认内容、不认流：pytest 把失败摘要写 stdout 还是 stderr，取决于子进程是否 TTY、
+    # 有没有被外层捕获。全量跑时出现过"进度点在 stdout、摘要去了 stderr"，单跑则相反。
+    assert "闸门数据缺失" in (r.stdout + r.stderr)
     assert n == {"tests": len(questions.QUESTIONS), "failures": len(questions.QUESTIONS), "errors": 0, "skipped": 0}
 
 
