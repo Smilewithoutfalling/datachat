@@ -4484,3 +4484,110 @@ UCI 页面写 `# Instances 1,067,371` —— 那是**两张 sheet 合计**；本
 
 这批 23 题的题面在验收过程中被完整看过了，所以它们**不是盲测题**。roadmap 里
 "S 出 ≥1/3 的题、不给实现方看"那条仍未满足 —— 现在 63 题全部、或由我出、或由我看过。
+
+## [112] 2026-11-03 · E2 落地：两条 AST 规则、回放零误报，以及被真实数据否掉的两条原规格
+
+E2（过程验证器）开工时做的第一件事不是写代码，是把 13 份闸门报告里 199 条有 `code` 的 case
+的 AST 形态统计一遍。结论是 roadmap §E2 写的两条都不能照做。
+
+### 被否掉的两条
+
+**"`result = <字面量数字>` 单独标记"** —— `provenance.result_origin` 已经在做这件事。
+481 份真实代码里 40 条 `result` 是字面量，其中 **37 条判对**：大多数是拒答文本
+（`'无法回答：数据中没有成本字段'`）和抄读已有值。按这条判错，误伤率 90%+。
+
+**"读取的列必须在 schema 里"** —— 8 道人工判错的题里**一条都没命中**。错因分别是：
+口径歧义（s02 给出 4373 而不是 4372）、量级差 10 倍（s04）、返回 0.0（s12）、
+该拒答没拒（s15/m09/m10）、缺失哨兵当值用（s06）。没有一道是读了不存在的列。
+
+这两条都不是"实现得不好"，是**前提不成立**。规格写在没看过真实代码的时候。
+
+### 留下的两条
+
+| 规则 | 判据 | 命中 |
+|---|---|---|
+| `unnamed_column` | 代码里出现 `Unnamed: N` 字符串 | 4 次，全部 `human_correct=False` |
+| `placeholder_result` | `result` 被赋成 ≤5 字符、且不含拒答措辞的字符串字面量 | 1 次，`m09` 的 `result='ok'` |
+
+`unnamed_column` 抓的是 **header 读错位**的直接证据。s04 把报表第 2 行当表头，
+`Unnamed: 3` 变成"单价列"，算出来的数差 10 倍 —— 代码不报错、结果像个价格，
+人眼要连看完表头和结果才能发现。
+
+只报能确定的：语法错、`result` 来自变量、列名完全动态，一律不产生标记。宁可漏报。
+（有个细节：`col = 'Unnamed: 3'; result = df[col].sum()` 这种变量间接引用**要报** ——
+字符串常量还在 AST 里，能看见。我第一版写成了不报，测试把它揪出来了。）
+
+### 误报 0，但召回只有 23%
+
+| 口径 | 数值 |
+|---|---|
+| 按题次 | 5/22 = 23% |
+| 按题 | 3/8 = 38% |
+| 误报 | 0/177 = 0% |
+
+召回低不是规则坏，是 AST 层看不见"懂不懂这份数据"。剩下 6 道错题的结果**本身是自洽的**：
+4373 和 4372 只差 1，都在合理范围；0.0 也可能真是 0；该拒答没拒就更看不出来。
+
+**这个数字对 A2 是个提前警告**：A2（结果合理性校验）能查"结果为空 / 全 NaN / 量级突变"，
+但上面 22 次失败里，绝大多数结果既不空也不 NaN、量级也对。A2 的天花板不会比 E2 高太多。
+
+### 落位
+
+`app/eval/process_check.py` 进 **B 组**（`fingerprint.py` 的 `_B_GROUP` 注册表），
+只记录不判分。A 组 `code_sha12` 保持 `ac1ebcd66c5a` 不变 —— 否则 6 个基线全失配。
+报告里逐题写 `process_risks`、`overall` 写聚合。`scripts/process_replay.py` 回放历史报告。
+
+### 顺带：数据发了全量包
+
+`holdout-data-full.zip`（211MB 原始 / 92.5MB 压缩），tag `holdout-full-2026-11-03`。
+上一版的 `holdout-data.zip` 只有第一批 40 题的数据，第二批 23 题的数据没处可拿，
+别人 clone 下来复验不了 —— README 写着"oracle 自检在 CI 通过"，这条当时只对 40 题成立。
+
+**题面仍然不进 git**。数据和题面是两件事：数据是 CC BY 4.0 / CC0，没有保密理由；
+题面要保留"没被实现方针对过"的属性。之前 README 把这两件事写在一句话里，读起来像
+"因为题不公开所以数据也不能公开"，是错的。
+
+包里的中文文件名这次设了 UTF-8 标志位（`flag_bits & 0x800`）。上一版对方打的包没设，
+Windows 资源管理器双击解压会得到 `τ╜æσ║ùΣ║ñµÿô` 这种乱码目录。
+
+### 54 个测试失败：环境缺包，不是回归
+
+全量 1340 条跑下来 1286 passed / 54 failed，失败全部集中在 `tests/test_llm_protocols.py`，
+根因是 `ModuleNotFoundError: No module named 'langchain_anthropic'`。
+
+`requirements.txt:8` 明明写了 `langchain-anthropic==1.7.5`，是本机 conda 环境 `dc` 没装
+（阶段 6.5 加的依赖）。装上之后 52 passed，54 个失败全部消失。
+
+**记这一条是因为它验起来花了 20 分钟**：全量跑一遍 21:53。以后见到某个文件整体红，
+先 `pip show <包名>` 再怀疑代码。
+
+### 还有 37 个：本地有 http_proxy，CI 没有
+
+装完包重跑全量，变成 1334 passed / 37 failed，失败全部在 `tests/test_fake_llm.py`，
+报错形如 `[fake_llm] 未知路径 http://127.0.0.1:49212/v1/chat/completions`。
+
+**报错里给的是完整 URL，不是路径。** 这是 HTTP 请求行走代理时的绝对 URI 格式：
+本机设了 `http_proxy=127.0.0.1:57967`，openai/httpx 连本地回环地址也交给代理，
+代理原样转发请求行，于是 `self.path` 变成 `http://127.0.0.1:PORT/v1/chat/completions`，
+`do_POST` 里那三个等值比较全部落空，一律 404。
+
+CI 没有 `http_proxy`，所以永远绿。这类"本地红、CI 绿"最容易误判成代码坏了 ——
+我先怀疑是刚装的 langchain-anthropic 改了构建路径，其实是环境变量。
+
+修法一行：路由前 `urlsplit(self.path).path`。绝对 URI 和相对路径都能得到同一个 path，
+`do_GET` 一并改（`/models` 探测走 GET）。改完带代理跑 132 passed。
+
+### 推送：git push 走不通时用 Data API
+
+本机 `~/.gitconfig` 里写死了 `http.https://github.com.proxy=http://127.0.0.1:7890`，
+但 Clash 没开；当前唯一可用的是 WorkBuddy 沙箱的 `127.0.0.1:57967`，它放行
+`api.github.com`，对 `github.com:443` 的 CONNECT 直接回 502。所以 `git push` 和 `git fetch`
+时通时断，`gh api` 反而稳定。
+
+走 `POST /git/blobs` → `/git/trees` → `/git/commits` → `PATCH /git/refs/heads/master`，
+每个 commit 建出来的 **tree sha 必须与本地 `git rev-parse HEAD^{tree}` 完全一致**才建 ref ——
+这样能保证远端内容与本地逐字节相同，而不是"看着差不多"。两个 commit 推完，
+远端 `bdd1e1e204` 的 tree `71d66b2270` 与本地一致，blob 也逐个对上。
+
+副作用：远端 commit sha 与本地不同（author/committer 重新生成），本地要
+`git fetch && git reset --hard origin/master` 对齐，否则下次 push 会非 fast-forward。
