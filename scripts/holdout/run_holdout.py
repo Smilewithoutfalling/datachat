@@ -274,7 +274,9 @@ def main() -> None:
         model_factory = lambda case: oracle_model(case.ground_truth, args.agent)  # noqa: E731
         print("⚙️  oracle 模式：模型输出 = 标准答案，只校验流水线与数据可解，不代表准确率\n")
     else:
-        from app.config import LLMConfig
+        # LLMConfig 定义在 app/core/llm.py；app/config.py 只有路径常量。
+        # 这条分支之前只跑过 --oracle（不 import 它），所以错路径一直没暴露。
+        from app.core.llm import LLMConfig
         llm_config = LLMConfig.from_env()
 
     runner = EvalRunner(None, datasets=datasets, agent=args.agent, model_factory=model_factory,
