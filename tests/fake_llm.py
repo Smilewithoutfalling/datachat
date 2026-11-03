@@ -60,6 +60,7 @@ import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
+from urllib.parse import urlsplit
 
 from app.tools.charts import KINDS
 
@@ -494,7 +495,7 @@ class _Handler(BaseHTTPRequestHandler):
             pass   # 调用方已放弃（超时 / 取消）
 
     def do_GET(self):  # noqa: N802
-        path = self.path.split("?", 1)[0]
+        path = urlsplit(self.path).path.split("?", 1)[0]
         if path in ("/health", "/v1/health"):
             return self._send(200, {"ok": True})
         if path.endswith("/models"):
@@ -503,7 +504,10 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": {"message": "not found"}})
 
     def do_POST(self):  # noqa: N802
-        path = self.path.split("?", 1)[0].rstrip("/")
+        # 请求行走过 HTTP 代理时是绝对 URI（POST http://127.0.0.1:PORT/v1/chat/completions），
+        # 直接按字符串比路由会全部 404。开发机普遍设了 http_proxy（CI 没有），
+        # 不剥离就变成"本地全红、CI 全绿"，很难查。urlsplit 对相对路径同样安全。
+        path = urlsplit(self.path).path.split("?", 1)[0].rstrip("/")
         if path in ("/v1/chat/completions", "/chat/completions", "/openai/v1/chat/completions"):
             fn = handle
         elif path in ("/v1/responses", "/responses"):
