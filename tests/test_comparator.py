@@ -464,3 +464,82 @@ def test_extras_series_ordering_does_not_change_verdict():
     assert not results_equal(wrong, e)
     assert not results_equal(wrong.sort_values(ascending=False), e)
     assert not results_equal(wrong.sort_values(ascending=False).reset_index(), e)
+
+
+# ---- 规则 25：时间值按字段归一（2026-11-03，holdout t02 / h1_04 现场）----
+
+def test_time_strings_same_instant_different_writing():
+    """'2016/2/8 2'、'2016-02-08 02:00'、Timestamp 是同一个时刻。
+
+    t02 三轮都判错：模型返回 `{'监测时间': '2016/2/8 2'}`，标准答案是
+    `'2016-02-08 02:00'`。站名对、时刻对，只是无前导零。
+    """
+    assert results_equal("2016/2/8 2", "2016-02-08 02:00")
+    assert results_equal(pd.Timestamp("2016-02-08 02:00:00"), "2016-02-08 02:00")
+    assert results_equal("2016/2/8 2", pd.Timestamp("2016-02-08 02:00:00"))
+
+
+def test_bare_date_equals_midnight():
+    """纯日期按当天零点处理 —— 报告序列化会丢时分。
+
+    h1_04 第 3 轮返回 Timestamp 对象，判对；但报告落盘时
+    `Timestamp('2013-03-01 00:00:00')` 被存成 `'2013-03-01'`，离线 rescore
+    必须也能判对，否则同一份输出在线判对、离线判错。
+    """
+    assert results_equal("2013-03-01", "2013-03-01 00:00")
+    assert results_equal(pd.Timestamp("2013-03-01"), "2013-03-01 00:00")
+
+
+def test_time_normalization_keeps_real_differences():
+    """归一化不能吞掉真正的差异。"""
+    assert not results_equal("2013-03-01", "2013-03-01 05:00")
+    assert not results_equal("2016-02-08 02:00", "2016-02-08 03:00")
+    assert not results_equal("2016-02-08", "2016-02-09")
+    # 年月不是月首：'2024-06' 说的是"某个月"，不是"6 月 1 日"这一刻
+    assert not results_equal("2024-06", "2024-06-01")
+
+
+# ---- 排序题的裸值列表：**不**放宽（2026-11-03，m04 现场的反面结论）----
+# 曾按「ordered=True 且长度相同 → 允许丢 index」放宽过，很快否掉：
+# ordered 只表示"顺序计分"，不表示"标签可以丢"。emp_002「各部门在职人数，按人数从多到少」
+# 同样是 ordered=True，但部门名就是答案的一半，只回 [50, 30, 20] 不该判对。
+# m04 的真因在答案表达式（返回了带 index=房源编号 的 Series，题目要的是社区名列表），
+# 修在题库的 alt 上。判分器不该靠"猜这个 index 重不重要"来兜底 —— 猜错的代价是把
+# "没说是哪个部门"判成对。
+
+def test_ordered_series_rejects_bare_value_list():
+    """排序题也不能只给值：ordered 说的是顺序计分，不是标签可丢。
+
+    m04「评论最多的 5 套房源分别属于哪个社区」—— index 是房源编号，确实不是答案；
+    但 emp_002「各部门人数」的 index 是部门名，就是答案。两者数据形态完全相同，
+    判分器无法区分，所以一律不放宽，答案形态的问题回到题库里用 alt 表达。
+    """
+    e = pd.Series(["SIXTH WARD", "FOURTEENTH WARD"], index=[25549565, 10768745], name="社区")
+    assert not results_equal(["SIXTH WARD", "FOURTEENTH WARD"], e, ordered=True)
+
+
+def test_series_with_meaningful_index_rejects_bare_values():
+    """emp_002 现场：部门名在 index 上，只回数值列表等于没说哪个部门是多少。"""
+    e = pd.Series([50, 30, 20], index=["研发部", "市场部", "行政部"], name="人数")
+    assert not results_equal([50, 30, 20], e, ordered=True)
+
+
+def test_unordered_series_still_requires_labels():
+    """非排序题更不能丢标签。"""
+    e = pd.Series([300, 200, 100], index=["华东", "华南", "华北"])
+    assert not results_equal([300, 200, 100], e, ordered=False)
+    # 带标签但顺序打乱，同样不行（ordered=True 时顺序计分）
+    assert not results_equal(["华北", "华南", "华东"], pd.Series(["A", "B", "C"], index=[3, 2, 1]), ordered=True)
+
+
+def test_ordered_series_rejects_wrong_values_or_length():
+    e = pd.Series(["A", "B", "C"], index=[3, 2, 1])
+    assert not results_equal(["A", "B"], e, ordered=True)          # 长度不符
+    assert not results_equal(["A", "B", "X"], e, ordered=True)     # 值错
+
+
+def test_ordered_multiindex_not_relaxed():
+    """两级索引是"长表 vs 透视"的场景，另有规则处理，不走这条放宽。"""
+    idx = pd.MultiIndex.from_tuples([("A", "x"), ("B", "y")])
+    e = pd.Series([1, 2], index=idx)
+    assert not results_equal([1, 2], e, ordered=True)

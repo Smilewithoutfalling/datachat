@@ -418,6 +418,33 @@ def _month_key(x):
     return None
 
 
+# 规则 25：时间值的字段级归一。
+# '2016/2/8 2'、'2016-02-08 02:00'、Timestamp('2016-02-08 02:00:00') 是同一个时刻，
+# 但字符串逐字比较过不了、`_label` 也归一不了（前者无前导零、后者没有秒）。
+# **纯日期按当天零点处理** —— 与 `_label` 对零点 Timestamp 的处理一致，也是报告序列化
+# 的现状：`Timestamp('2013-03-01 00:00:00')` 落盘会变成 `'2013-03-01'`，不补零点的话
+# rescore 与在线判分会不一致（同一份输出，在线判对、离线判错）。
+# 只认完整 Y-M-D：`'2024-06'` 这种年月不匹配 → 返回 None，否则"6 月"会等于"6 月 1 日"。
+_TIME_STR_RE = re.compile(
+    r"^\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})"
+    r"(?:[ T](\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?\s*$")
+
+
+def _time_key(x):
+    """能看成"某年某月某日某时某分某秒"时返回六元组，否则 None。"""
+    x = _py(x)
+    if isinstance(x, pd.Timestamp):
+        if pd.isna(x):
+            return None
+        return (x.year, x.month, x.day, x.hour, x.minute, x.second)
+    if isinstance(x, str):
+        m = _TIME_STR_RE.match(x)
+        if m:
+            return (int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                    int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0))
+    return None
+
+
 def _period_part(x, n: int):
     """期望是序号 n 时：x 能看作季度（Q2、2024Q2、季度 Period）且 1≤n≤4 → 返回季度号；
     能看作月份（'2024-05'、'3月'、'2024年3月'、Timestamp、月 Period）且 1≤n≤12 → 返回月份号；否则 None。"""
@@ -476,6 +503,10 @@ def _scalar_eq(a, e, tol) -> bool:
         return False
     if isinstance(a, bool) or isinstance(e, bool):
         return a == e
+    # 规则 25：时间值按字段归一（'2016/2/8 2' == '2016-02-08 02:00' == Timestamp('2016-02-08 02:00:00')）
+    _ta, _te = _time_key(a), _time_key(e)
+    if _ta is not None and _ta == _te:
+        return True
     # 时间：Timestamp / Period / 日期字符串
     if isinstance(e, str) and _MONTH_RE.match(e.strip()):
         mk = _month_key(a)

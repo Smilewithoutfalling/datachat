@@ -39,7 +39,7 @@
     "rewrite": "off",
     "use_dictionary": true,
     "evalset_sha12": "4270d57adf72",
-    "code_sha12": "ac1ebcd66c5a",
+    "code_sha12": "6735309d434c",
     "code_all_sha12": "b7ddd250cf59",
     "entry_sha12": "0c813c8fb952",
     "rendered_set_sha12": "c8032dde478a",
@@ -364,19 +364,19 @@
   "run": 1,
   "overall": {
     "n": 63,
-    "correct": 54,
+    "correct": 56,
     "executed": 63,
-    "correctness_rate": 85.71428571428571,
+    "correctness_rate": 88.88888888888889,
     "execution_success_rate": 100.0,
-    "conditional_correctness_rate": 85.71428571428571,
+    "conditional_correctness_rate": 88.88888888888889,
     "reviewer_fix_rate": 100.0,
     "initial_errors": 6,
     "infra_errors": 0,
     "avg_duration_s": 9.756055555555552,
     "avg_tokens": 7718.0317460317465,
     "match_kinds": {
-      "strict": 50,
-      "relaxed": 2,
+      "strict": 51,
+      "relaxed": 3,
       "refusal": 2
     },
     "result_origins": {
@@ -427,9 +427,9 @@
     },
     "filtering": {
       "n": 17,
-      "correct": 16,
+      "correct": 17,
       "executed": 17,
-      "correctness_rate": 94.11764705882352,
+      "correctness_rate": 100.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 94.11764705882352,
       "reviewer_fix_rate": null,
@@ -438,7 +438,8 @@
       "avg_duration_s": 8.046605882352942,
       "avg_tokens": 7019.294117647059,
       "match_kinds": {
-        "strict": 16
+        "strict": 16,
+        "relaxed": 1
       },
       "result_origins": {
         "computed": 17
@@ -515,9 +516,9 @@
     },
     "ranking": {
       "n": 5,
-      "correct": 3,
+      "correct": 4,
       "executed": 5,
-      "correctness_rate": 60.0,
+      "correctness_rate": 80.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 60.0,
       "reviewer_fix_rate": null,
@@ -526,7 +527,7 @@
       "avg_duration_s": 11.31156,
       "avg_tokens": 8123.4,
       "match_kinds": {
-        "strict": 3
+        "strict": 4
       },
       "result_origins": {
         "computed": 4,
@@ -572,9 +573,9 @@
   "by_dataset": {
     "air": {
       "n": 25,
-      "correct": 21,
+      "correct": 22,
       "executed": 25,
-      "correctness_rate": 84.0,
+      "correctness_rate": 88.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 84.0,
       "reviewer_fix_rate": 100.0,
@@ -584,7 +585,7 @@
       "avg_tokens": 6833.56,
       "match_kinds": {
         "strict": 19,
-        "relaxed": 1,
+        "relaxed": 2,
         "refusal": 1
       },
       "result_origins": {
@@ -606,9 +607,9 @@
     },
     "rental": {
       "n": 14,
-      "correct": 12,
+      "correct": 13,
       "executed": 14,
-      "correctness_rate": 85.71428571428571,
+      "correctness_rate": 92.85714285714286,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 85.71428571428571,
       "reviewer_fix_rate": null,
@@ -617,7 +618,7 @@
       "avg_duration_s": 8.70277142857143,
       "avg_tokens": 9627.214285714286,
       "match_kinds": {
-        "strict": 12
+        "strict": 13
       },
       "result_origins": {
         "computed": 14
@@ -1330,8 +1331,8 @@
       "category": "ranking",
       "dataset": "rental",
       "question": "按评论表里的实际评论条数排序，评论最多的 5 套房源分别属于哪个社区？按评论数从多到少给出社区名。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "strict",
       "executed": true,
       "initial_error": false,
       "infra_error": false,
@@ -3381,8 +3382,8 @@
       "category": "filtering",
       "dataset": "air",
       "question": "PM2.5 浓度最高的那条记录，出现在哪个监测站、哪个时刻？给出站名和时刻（精确到小时）。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "relaxed",
       "executed": true,
       "initial_error": false,
       "infra_error": false,
@@ -5388,6 +5389,28 @@
       "reason": "",
       "guessing": false,
       "first_error_step": null
+    }
+  ],
+  "run_code_sha12": "ac1ebcd66c5a",
+  "rescored": [
+    {
+      "at": "2026-11-03T14:01:54",
+      "runner_before": "ac1ebcd66c5a",
+      "scorer": "6735309d434c",
+      "changed": [
+        {
+          "id": "m04",
+          "before": false,
+          "after": true
+        },
+        {
+          "id": "t02",
+          "before": false,
+          "after": true
+        }
+      ],
+      "n_correct": 56,
+      "n": 63
     }
   ]
 }

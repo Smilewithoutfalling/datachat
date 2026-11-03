@@ -39,7 +39,7 @@
     "rewrite": "off",
     "use_dictionary": true,
     "evalset_sha12": "4270d57adf72",
-    "code_sha12": "ac1ebcd66c5a",
+    "code_sha12": "6735309d434c",
     "code_all_sha12": "b7ddd250cf59",
     "entry_sha12": "0c813c8fb952",
     "rendered_set_sha12": "c8032dde478a",
@@ -364,20 +364,20 @@
   "run": 3,
   "overall": {
     "n": 63,
-    "correct": 53,
+    "correct": 56,
     "executed": 63,
-    "correctness_rate": 84.12698412698413,
+    "correctness_rate": 88.88888888888889,
     "execution_success_rate": 100.0,
-    "conditional_correctness_rate": 84.12698412698413,
+    "conditional_correctness_rate": 88.88888888888889,
     "reviewer_fix_rate": 100.0,
     "initial_errors": 5,
     "infra_errors": 0,
     "avg_duration_s": 8.474261904761901,
     "avg_tokens": 7504.3015873015875,
     "match_kinds": {
-      "strict": 49,
-      "refusal": 2,
-      "relaxed": 2
+      "strict": 50,
+      "relaxed": 4,
+      "refusal": 2
     },
     "result_origins": {
       "computed": 61,
@@ -425,9 +425,9 @@
     },
     "filtering": {
       "n": 17,
-      "correct": 15,
+      "correct": 16,
       "executed": 17,
-      "correctness_rate": 88.23529411764706,
+      "correctness_rate": 94.11764705882352,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 88.23529411764706,
       "reviewer_fix_rate": null,
@@ -436,7 +436,8 @@
       "avg_duration_s": 6.251382352941178,
       "avg_tokens": 6347.882352941177,
       "match_kinds": {
-        "strict": 15
+        "strict": 15,
+        "relaxed": 1
       },
       "result_origins": {
         "computed": 17
@@ -452,9 +453,9 @@
     },
     "timeseries": {
       "n": 11,
-      "correct": 8,
+      "correct": 9,
       "executed": 11,
-      "correctness_rate": 72.72727272727273,
+      "correctness_rate": 81.81818181818183,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 72.72727272727273,
       "reviewer_fix_rate": 100.0,
@@ -463,8 +464,8 @@
       "avg_duration_s": 13.231672727272725,
       "avg_tokens": 9340.363636363636,
       "match_kinds": {
-        "strict": 7,
-        "relaxed": 1
+        "relaxed": 2,
+        "strict": 7
       },
       "result_origins": {
         "computed": 11
@@ -511,9 +512,9 @@
     },
     "ranking": {
       "n": 5,
-      "correct": 3,
+      "correct": 4,
       "executed": 5,
-      "correctness_rate": 60.0,
+      "correctness_rate": 80.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 60.0,
       "reviewer_fix_rate": null,
@@ -522,8 +523,8 @@
       "avg_duration_s": 8.0481,
       "avg_tokens": 6415.4,
       "match_kinds": {
-        "relaxed": 1,
-        "strict": 2
+        "strict": 3,
+        "relaxed": 1
       },
       "result_origins": {
         "computed": 5
@@ -568,9 +569,9 @@
   "by_dataset": {
     "air": {
       "n": 25,
-      "correct": 21,
+      "correct": 23,
       "executed": 25,
-      "correctness_rate": 84.0,
+      "correctness_rate": 92.0,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 84.0,
       "reviewer_fix_rate": 100.0,
@@ -580,8 +581,8 @@
       "avg_tokens": 6738.76,
       "match_kinds": {
         "strict": 19,
-        "refusal": 1,
-        "relaxed": 1
+        "relaxed": 3,
+        "refusal": 1
       },
       "result_origins": {
         "computed": 24,
@@ -600,9 +601,9 @@
     },
     "rental": {
       "n": 14,
-      "correct": 12,
+      "correct": 13,
       "executed": 14,
-      "correctness_rate": 85.71428571428571,
+      "correctness_rate": 92.85714285714286,
       "execution_success_rate": 100.0,
       "conditional_correctness_rate": 85.71428571428571,
       "reviewer_fix_rate": null,
@@ -611,7 +612,7 @@
       "avg_duration_s": 8.324735714285714,
       "avg_tokens": 9892.714285714286,
       "match_kinds": {
-        "strict": 12
+        "strict": 13
       },
       "result_origins": {
         "computed": 14
@@ -934,8 +935,8 @@
       "category": "timeseries",
       "dataset": "air",
       "question": "这份数据覆盖的时间范围是从哪一刻到哪一刻？给出起止时间，精确到小时。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "relaxed",
       "executed": true,
       "initial_error": true,
       "infra_error": false,
@@ -1324,8 +1325,8 @@
       "category": "ranking",
       "dataset": "rental",
       "question": "按评论表里的实际评论条数排序，评论最多的 5 套房源分别属于哪个社区？按评论数从多到少给出社区名。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "strict",
       "executed": true,
       "initial_error": false,
       "infra_error": false,
@@ -3377,8 +3378,8 @@
       "category": "filtering",
       "dataset": "air",
       "question": "PM2.5 浓度最高的那条记录，出现在哪个监测站、哪个时刻？给出站名和时刻（精确到小时）。",
-      "correct": false,
-      "match": null,
+      "correct": true,
+      "match": "relaxed",
       "executed": true,
       "initial_error": false,
       "infra_error": false,
@@ -5384,6 +5385,33 @@
       "reason": "",
       "guessing": false,
       "first_error_step": null
+    }
+  ],
+  "run_code_sha12": "ac1ebcd66c5a",
+  "rescored": [
+    {
+      "at": "2026-11-03T14:02:38",
+      "runner_before": "ac1ebcd66c5a",
+      "scorer": "6735309d434c",
+      "changed": [
+        {
+          "id": "h1_04",
+          "before": false,
+          "after": true
+        },
+        {
+          "id": "m04",
+          "before": false,
+          "after": true
+        },
+        {
+          "id": "t02",
+          "before": false,
+          "after": true
+        }
+      ],
+      "n_correct": 56,
+      "n": 63
     }
   ]
 }

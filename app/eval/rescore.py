@@ -6,10 +6,12 @@
   差异会逐题列出，便于人工核对。
 """
 import json
+import os
 from collections import Counter
 
 from app.core.llm import api_error_text
 from app.core.result import refusal_from_answer
+from app.eval.case_model import EvalCase
 from app.eval.cases import ALL_CASES
 from app.eval.report import load_obj
 from app.eval.report import evalset_fingerprint
@@ -17,10 +19,123 @@ from app.eval.runner import EvalRunner, score_detail
 from app.eval.comparator import refusal_leak
 
 
+def _questions_sha(questions) -> str:
+    """题面数组的稳定哈希，**必须**与 `scripts/holdout/run_holdout.py:_sha256` 逐字节一致。
+
+    算法抄了一份（scripts/ 不在包路径里，import 不进来），所以
+    `tests/test_rescore_holdout.py::test_questions_sha_matches_run_holdout` 拿同一份数据
+    对比两边的结果 —— 谁改了算法而没改另一边，那条测试立刻红。
+    """
+    import hashlib
+
+    blob = json.dumps(questions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _holdout_setup(meta: dict):
+    """holdout 报告：题目不在 ALL_CASES 里，得从题库目录重建 cases 与 datasets。
+
+    不重建会怎样：`cases.get(row["id"])` 对 63 个 holdout 题号一律返回 None，全走
+    `case is None` 分支判 correct=False —— 一份 54/63 的报告 rescore 出来是 **0.0%**，
+    而且 `changed` 是空的（压根没进新旧对比），看上去像"新判分器把题全判错了"。
+    实测过一次：n=63 / correct=0 / rate=0.0 / changed=0。
+
+    题库目录读不到时**抛错**，不返回空 dict —— 静默退化成分数归零比报错危险得多。
+
+    重建规则与 `scripts/holdout/run_holdout.py:build_cases` 一致（题面取 questions.json，
+    答案取 answers.json 的 ground_truth 表达式）。那侧的一致性校验（缺答案/题号重复/
+    数据集没注册）在这里降级成只报"缺东西"，因为 rescore 面对的是已经跑完的报告。
+
+    另外核对题库哈希：报告记了 `holdout.questions_sha256`，题库后来被改过（补题面提示、
+    改答案）就对不上。**只警告不拦** —— 硬失败会让"改过题面的报告永远不能再判"，
+    而重判恰恰是这类报告最需要的能力；但不说一声就等于用新答案判旧输出。
+    """
+    base = (meta or {}).get("dir")
+    if not base:
+        return {}, None, None
+    qpath = os.path.join(base, "questions.json")
+    apath = os.path.join(base, "answers.json")
+    if not (os.path.exists(qpath) and os.path.exists(apath)):
+        raise FileNotFoundError(
+            f"holdout 题库目录不可用：{base}（缺 questions.json 或 answers.json）\n"
+            "这份报告是用那份题库跑出来的，重建不了标准答案就不该 rescore。"
+        )
+    with open(qpath, encoding="utf-8") as f:
+        spec = json.load(f)
+    with open(apath, encoding="utf-8") as f:
+        ans = (json.load(f).get("answers") or {})
+
+    cases = {}
+    problems = []
+    for q in spec.get("questions") or []:
+        cid = q.get("id")
+        a = ans.get(cid) or {}
+        gt = (a.get("ground_truth") or "").strip()
+        if not cid or not gt:
+            # 不能 continue：漏一道题就是 `case is None` → 静默判 correct=False，
+            # 而且这一路不写 changed，分数掉了也看不出是哪道题掉的。
+            problems.append(f"{cid or '<无 id>'}: 题面或答案缺失")
+            continue
+        if q.get("dataset") not in (spec.get("datasets") or {}):
+            problems.append(f"{cid}: dataset={q.get('dataset')!r} 未在 datasets 里注册")
+        cases[cid] = EvalCase(
+            id=cid,
+            category=q.get("category", "aggregation"),
+            question=q["question"],
+            ground_truth=gt,
+            keywords=q.get("keywords", []),
+            has_chart=q.get("has_chart", False),
+            ordered=q.get("ordered", False),
+            percent_equiv=q.get("percent_equiv", False),
+            dataset=q["dataset"],
+            expect_refusal=q.get("expect_refusal", False),
+            alt_ground_truths=a.get("alt") or [],
+            multi_table=q.get("multi_table", False),
+            gold_kind=q.get("gold_kind", ""),
+        )
+
+    datasets = {}
+    for name, rel in (spec.get("datasets") or {}).items():
+        datasets[name] = rel if os.path.isabs(rel) else os.path.abspath(os.path.join(base, rel))
+    if problems:
+        raise ValueError(
+            f"holdout 题库 {base} 与报告对不上（{len(problems)} 处）：\n  "
+            + "\n  ".join(problems[:10])
+            + ("\n  …" if len(problems) > 10 else "")
+        )
+    if datasets and "sales" not in datasets:
+        # 同 run_holdout._pad_sales：runner.py:79 硬依赖 datasets["sales"]，赋值后无人读取
+        datasets["sales"] = next(iter(datasets.values()))
+
+    drift = None
+    want = (meta or {}).get("questions_sha256")
+    got = _questions_sha(spec.get("questions"))
+    if want and want != got:
+        drift = {"report": want, "bank": got}
+    return cases, (datasets or None), drift
+
+
 def rescore(report_path: str, data_path: str | None = None) -> dict:
     data = json.load(open(report_path, encoding="utf-8"))
     cases = {c.id: c for c in ALL_CASES}
-    runner = EvalRunner(data_path or data.get("data"))     # 阶段 3：按题目的 dataset 取表
+    holdout_cases, holdout_datasets, bank_drift = _holdout_setup(data.get("holdout"))
+    cases.update(holdout_cases)
+    if bank_drift:
+        print(
+            "⚠️  题库与这份报告不是同一版（questions 哈希对不上）：\n"
+            f"     报告记录：{bank_drift['report']}\n"
+            f"     题库现在：{bank_drift['bank']}\n"
+            "   题面或答案在报告跑完之后被改过 —— 下面的判定用的是**现在的**答案。"
+        )
+    if holdout_cases:
+        # holdout 报告的题号必须全在题库里：缺一道就会走 `case is None` 静默判 False
+        unknown = sorted({r["id"] for r in data["cases"]} - set(cases))
+        if unknown:
+            raise ValueError(
+                f"报告里有 {len(unknown)} 道题在题库中找不到：{unknown[:8]}"
+                + ("…" if len(unknown) > 8 else "")
+            )
+    runner = EvalRunner(data_path or data.get("data"), datasets=holdout_datasets)     # 阶段 3：按题目的 dataset 取表
     rows, changed, skipped, infra = [], [], [], []
     for row in data["cases"]:
         case = cases.get(row["id"])
@@ -89,6 +204,7 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
             "refusal_leaks": [{"id": r["id"], "why": r.get("refusal_leak_why")}
                               for r in rows if r.get("refusal_leak")],
             "changed": changed, "skipped_no_obj": skipped, "infra_errors": infra,  # 无结构化结果或还原失败的题，沿用原判定
+            "bank_drift": bank_drift,          # 题库换过版本时记下两边的哈希，None = 同一版
             "rows": rows}
 
 
@@ -153,8 +269,11 @@ def apply_rescore(report_path: str, result: dict) -> dict:
         "at": datetime.now().isoformat(timespec="seconds"),
         "runner_before": old_fp, "scorer": fp_now,
         "changed": result["changed"], "n_correct": n_ok, "n": n,
+        # 题库换过版本时留痕：报告跑在旧题面、判定用的是新答案，这件事不能只活在 stdout 里
+        "bank_drift": result.get("bank_drift"),
     })
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
     return {"path": report_path, "n": n, "correct": n_ok, "changed": result["changed"],
-            "run_code_sha12": data["run_code_sha12"], "scorer_sha12": fp_now}
+            "run_code_sha12": data["run_code_sha12"], "scorer_sha12": fp_now,
+            "bank_drift": result.get("bank_drift")}
