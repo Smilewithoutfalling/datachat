@@ -16,9 +16,10 @@
 | `answers_spec.json` | 题号 → 参考解法（`code` 跑脏化表、`raw_code` 跑原始表） |
 | `answers.json` | 由 `verify_holdout.py --write` 生成，含 `questions_sha256` 冻结哈希 |
 
-数据不在仓库里（第一批约 98 MB；连第二批一共 211 MB）。两种拿法：
+数据不在仓库里（211 MB）。两种拿法：
 
-1. **下载 Release 附件** `holdout-data.zip`，解压到本目录，得到 `data/`；
+1. **下载 Release 附件** `holdout-data-full.zip`（tag `holdout-full-2026-11-03`），解压到本目录，得到 `data/`。
+   一个包覆盖两批全部数据；旧的 `holdout-data.zip` 只有第一批，已被它取代；
 2. **自己构建**（需要能访问 UCI 和 Inside Airbnb）：
 
        python scripts/holdout/build_holdout_data.py --out <本目录>
@@ -123,8 +124,10 @@
 ## 第二批 23 题（本地，不进 git）
 
 外部出题方交付，已验收：双表核对 63/63、`--oracle` 63/63。题库在
-`D:/Coding/claude/datachat-holdout`（本地 `.holdout_path` 指向它），配套数据约 114 MB，
-**没有**发 Release —— 这批题本身不公开，数据也就不单独开放。要复验找实现方要。
+`D:/Coding/claude/datachat-holdout`（本地 `.holdout_path` 指向它）。
+
+**数据已随全量包发出**（`holdout-data-full.zip`），因为它是 CC BY 4.0 / CC0，没有保密理由；
+**题面仍不进 git** —— 这批要保留「没被实现方针对过」的属性。数据和题面是两件事，别混为一谈。
 
 | 组 | 题号 | 说明 |
 |---|---|---|
