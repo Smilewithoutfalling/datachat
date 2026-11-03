@@ -4812,10 +4812,13 @@ oracle 仍 63/63。**但这三份报告跑在旧题面上，h1_22 那 2 个错�
 
 ### 测试
 
-- `tests/test_comparator.py` 52 条（新增规则 25 正反例 4 条，新增"裸值列表必须判错"3 条）
+- `tests/test_comparator.py` 53 条：规则 25 正反例 4 条 + "裸值列表必须判错"3 条
 - `tests/test_comparator_cases.py` 96 条：48 种真实写法的正反例，防虚高/虚低
 - `tests/test_rescore_holdout.py` 新增 14 条：重建一致性、路径解析、4 种硬失败、题库漂移
-- 全量 `tests/`（不含上面的 cases 文件）1292 passed / 0 failed
+- 全量 `tests/`：**1392 passed / 1 failed**。失败的是
+  `test_gate.py::test_g1_require_data_fails_with_plain_message`，报错里带
+  `pytest-of-HJH\garbage-<uuid>` —— 沙箱 `safe-delete` 钩子的批量确认阈值，与本轮改动无关
+  （单跑这条 `1 passed`，因为单跑会绕过沙箱）。[112] 已归过因，不是回归。
 
 ### E2 仍然零命中
 
