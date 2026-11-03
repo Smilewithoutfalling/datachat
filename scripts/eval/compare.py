@@ -32,6 +32,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from app.eval.outcome import STRICT_TIER, build as build_outcome, tier_of  # noqa: E402
+from app.eval.report_adapter import ReportError, load as load_json, verdict_of  # noqa: E402
 from app.eval.stats import mcnemar_exact, mde_flips  # noqa: E402
 
 # 可比性逐项。顺序即输出顺序。
@@ -42,22 +43,9 @@ from app.eval.stats import mcnemar_exact, mde_flips  # noqa: E402
 COMPARABLE_KEYS = ("prompt_sha12", "evalset_sha12", "model", "agent")
 
 
-class ReportError(ValueError):
-    """报告读不了、或不是逐题报告（比如 `*_summary.json`）。"""
-
-
 def load_report(path: str) -> dict:
     """读一份报告并归一成 `{rows, outcome, meta}`。"""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError as e:
-        raise ReportError(f"{path}: 文件不存在") from e
-    except json.JSONDecodeError as e:
-        raise ReportError(f"{path}: 不是合法 JSON（{e.lineno}:{e.colno}）") from e
-
-    if not isinstance(data, dict):
-        raise ReportError(f"{path}: 顶层不是对象")
+    data = load_json(path)
     if "runs" in data and "cases" not in data:
         raise ReportError(
             f"{path}: 这是 *_summary.json（只有 runs[]），请传它引用的那份 run 报告"
@@ -77,7 +65,7 @@ def load_report(path: str) -> dict:
         if cid in rows:
             raise ReportError(f"{path}: id={cid} 重复出现，无法配对")
 
-        ok, source = _verdict(c)
+        ok, source = verdict_of(c)
         sources[source] += 1
         rows[cid] = {
             "correct": ok,
@@ -125,17 +113,6 @@ def _evalset_from_block(data: dict):
     if isinstance(ev, dict) and isinstance(ev.get("sha256"), str):
         return ev["sha256"][:12]
     return None
-
-
-def _verdict(case: dict) -> tuple[bool | None, str]:
-    """单题判定与来源。None = 待判（闸门报告填了 human 才作数）。"""
-    if case.get("human_correct") is not None:
-        return bool(case["human_correct"]), "human"
-    if case.get("correct") is not None:
-        return bool(case["correct"]), "record"
-    if case.get("auto_correct") is not None:
-        return bool(case["auto_correct"]), "auto"
-    return None, "pending"
 
 
 def comparable(a: dict, b: dict) -> dict:
@@ -285,7 +262,12 @@ def _conclusion(n, delta_pp, p, alpha, k_mde, b_only, c_only, pending) -> str:
     )
 
 
-_SOURCE_LABEL = {"human": "人判", "record": "报告记录", "auto": "比较器", "pending": "待判"}
+_SOURCE_LABEL = {
+    "human_correct": "人判",
+    "auto_correct": "比较器",
+    "correct": "报告记录",
+    "pending": "待判",
+}
 
 
 def _fmt_sources(src: dict) -> str:

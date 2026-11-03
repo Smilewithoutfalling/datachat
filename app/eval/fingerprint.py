@@ -75,6 +75,14 @@ _EXEMPT = {
     # `match`，不产生任何判定。放进 A 会让"加一个汇总模块"就报废全部历史报告的
     # 可比性，而它根本改不动任何一题的判定 —— 那是 comparator 的事。
     "app/eval/outcome.py": "报告汇总，不产生判定",
+    # 读报告、把两套格式归一成同一种行。**只读不写**：判定字段的取值优先级
+    # （human_correct → auto_correct → correct）是对已有字段的解释，不是新判定 ——
+    # 它没有能力把一道判错的题变成判对的。改了它，同一份 JSON 读出来的 `correct`
+    # 可能变（比如优先级写反），但那也只是"读错了旧报告"，不会改变任何一次
+    # 模型运行的结果；而 code_sha12 的用途是"这次跑的和上次跑的是不是同一个东西"。
+    "app/eval/report_adapter.py": "报告读取适配，只解释字段不产生判定",
+    # 五段式 Markdown 渲染。纯输出层，连报告 JSON 都不产出。
+    "app/eval/report_md.py": "报告渲染，纯输出",
     "app/eval/rescore.py": "离线重打分工具",
     "app/eval/chart_smoke.py": "图表统计，只看已产出的图",
     "app/eval/fingerprint.py": "本文件",

@@ -5192,3 +5192,131 @@ wilson95=[43.8, 100.0] / mde_equiv_pp=200.0 / mde_reachable=false`。结构对�
   现在只有 outcome 一块，标成 2 会让读者以为整套都在。`compare.py` 对缺 `outcome` 的报告现算，两种都认。
 - **`--rescore` 选项**：不塞进 `compare.py`，见「分工」一节。
 - **CI 里跑真模型**：仍然没有。批 0 的 `replay.py` / `render.py` 也没动。
+
+---
+
+## [118] 2026-11-03 · 批 0 收口：`report_adapter` + `report_md` + `render.py` + `replay.py`
+
+[117] 之后批 0 只剩这两块，都不需要模型。做完它们，规格 §6 的三条硬指标
+（回放 37/37、compare 自比 p=1.0、render 五段）全部可自动验收。
+
+### 规模先纠正：不是 31 份，是 37 份
+
+规格 §1.1.1 那批"31 份历史报告"是 2026-10-27 数出来的。之后新增了 6 份 holdout 报告
+（`holdout_20261103_{111150,145703}_react_run{1,2,3}`），它们的单题行有 **44 个字段**，
+有 `match`、有 `evalset`、有 `holdout` 块 —— 比规格里"评测报告没有 match、没有 evalset"
+的描述新了一代。实测分布：
+
+| 组 | 份数 | 行数字段数 | 有 `match` | 有 `evalset` |
+|---|---|---|---|---|
+| 评测·旧 | 4 | 15 | 否 | 否 |
+| 评测·新 | 11（2 份 n=1） | 18 | 否 | 否 |
+| **holdout** | **6** | **44** | **是** | **是** |
+| 闸门 | 13（5 份 n=1） | 24–27 | 是 | 否 |
+| summary | 3 | 无 `cases` | — | — |
+
+外加 `baselines.json`（基线登记表，不是报告）。共 38 个 JSON 文件 / 37 份报告。
+
+### `app/eval/report_adapter.py`（新，B 组）
+
+把两套格式归一成 `Row`，`iter_rows` / `iter_reports` / `inspect` 三个入口。
+
+**判定字段的单一真相搬过来了。** `compare.py` 原本有一份 `_verdict`（human → correct → auto），
+`render` 还要再来一份，规格 §EV-D1 写的是 human → auto → correct。三处两套顺序，
+迟早漂移。现在只有 `verdict_of` 一处，`compare.py` 改成 import。
+实测两套格式从不并存这两个字段（闸门报告 `correct` 全为 null，评测报告连 `auto_correct`
+这个键都没有），所以顺序调整对现有数据零影响；但 `inspect()` 会检
+`conflicting_verdict_fields` —— 将来真并存且冲突时宁可报出来。
+
+**`correct_field` 记的是报告里的字段名**（`human_correct` / `auto_correct` / `correct`），
+不是简写。出了分歧要能直接回原文找证据。
+
+**判错的行一律 `match=None`。** 闸门报告里有判错但 `match` 残留 `strict` 的行，
+不抹掉会把 `strict_rate` 抬高。
+
+**`tokens=None` 保持 None。** 折成 0 会把均值拉低（规格点名的陷阱）。
+
+### summary 不能合并
+
+`*_summary.json` 的 3 个 run 跑的是**同一批 50 题**。`iter_rows` 展开成 150 行是对的
+（每一行都是真实题次），但**拿这 150 行算一个准确率和 Wilson 区间是错的**：同一道题
+被数了三遍，区间会假性变窄。那不是"样本更大"，是重复计数。
+
+所以 `render` 对 summary 走单独一条路：逐 run 分列，再单算一个跨 run 稳定性。
+
+```
+| run  | 判定  | 准确率 | 严格率 | 平均token |
+| run1 | 40/50 | 80.0%  | 算不出 | 5209.5    |
+| run2 | 38/50 | 76.0%  | 算不出 | 5398.5    |
+| run3 | 40/50 | 80.0%  | 算不出 | 5348.4    |
+
+跨 3 个 run：50 题有完整覆盖，36 题全对（pass^3 = 72.0%），43 题至少对过一次，7 题有波动。
+```
+
+这组 40/38/40 与 [113] 那批老报告的记录值完全对上，是适配器取值正确的一个外部验证。
+
+### `replay.py`：什么算失败，这一条必须窄
+
+规格只写"任一解析失败则非 0 退出"。照字面实现会让 `--check` 永远红着，
+那就等于没有检查。三种情况必须分开：
+
+| 情况 | 判定 | 理由 |
+|---|---|---|
+| 读不了 / 不是合法 JSON / 顶层不是对象 | **失败** | 真的坏了 |
+| 逐题行缺 `id`/`category`/`question` | **失败** | 结构坏了，下游没法配对与分类 |
+| `summary.runs[].file` 指向的文件不存在 | 不算失败，记 `missing_runs` | `outputs/` 在 `.gitignore`，新克隆的仓库本来就没有 |
+| 待判（三字段全空） | 不算失败，单列一列 | 闸门报告人工没签字是已知状态 |
+| 判对但没记 `match` | 不算失败，单列一列 | 18 份评测报告天生如此，规格 §1.1.1 定为 legacy |
+| `baselines.json` 这类非报告 | 不算失败，但**要认出来并说明** | 当"零行报告"混进统计会让人以为报告少了 |
+
+实测：**38 个文件 → 37 份报告解析成功、0 失败、1 个非报告跳过**。
+
+### `render.py`：五段
+
+```
+## 1 结论     过 / 不过 / 无基准（单份报告没有可比对象，不假装有）
+## 2 关键数字 判定、准确率、Wilson、严格率、层级分布、MDE、执行成功、token、耗时
+## 3 分类与数据集
+## 4 异常题   执行失败 / 待判 / 靠放宽判对 / 图表异常 / 证据不一致 / 猜测 / failure_class
+## 5 环境与指纹
+```
+
+**刻意不接受两份报告。** 比两份是 `compare.py` 的事。塞进来会让这个脚本同时承担
+"渲染"和"配对"两种失败模式，出错时分不清是哪一边。
+
+严格率算不出来就写"算不出（59 题判对但报告没记 `match`）"，不给数字。这是
+`outcome.build` 的既有结论，这里只是照抄，不重新解释。
+
+第 4 段的图表异常有个容易搞反的判据：**`options > 0 and not drew` 才是异常**。
+`options == 0, drew == false` 是"这题本来就不需要画图"，不是失败。
+
+### 抓到一个真 bug：`OSError(22)` 逃出去了
+
+`load()` 原来只捕 `FileNotFoundError` / `IsADirectoryError` / `JSONDecodeError`。
+Windows 上传一个 shell 没展开的 glob（`docs/eval/*.nope`）抛的是
+`OSError(22, Invalid argument)` —— 不在这三个里，直接崩栈。而"glob 一个都没匹配上"
+是 `replay` 的合法输入，必须走"这一份解析失败"的正常路径，不能以 traceback 退出去。
+补 `except OSError`。这条是写 `test_unmatched_glob_is_reported_as_failure` 时才暴露的。
+
+### 数字
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_report_adapter.py`（新） | 32 passed |
+| `tests/test_replay.py`（新） | 9 passed |
+| 受影响的 10 个测试文件 | **183 passed / 12.3s** |
+| 全量回放 | 38 文件 / 37 报告 / 0 失败 / exit 0 |
+| `render` 五段 | gate 报告 75 行，五段齐全 |
+| `compare` 自比 | Δ +0.0pp、翻转 0:0、p=1.0 |
+| `affects_results_sha12` | **仍 `4b58e8b9fd80`**（与 [116] 一致） |
+
+`report_adapter.py` 与 `report_md.py` 都归 B 组，理由写在 `_EXEMPT` 注释里：
+前者只解释字段不产生判定，后者连报告 JSON 都不产出。加它们指纹没动，历史报告全部仍可比。
+
+### 明确没做
+
+- **B3 图表反算**：历史报告只存了计数器，option 实体没落盘。函数能写，没有真实数据可验。
+- **`schema_version: 2`**：v2 还有 trajectory / evidence / chart / cost 四块，
+  现在只有 outcome 一块。`render` 与 `compare` 对缺 `outcome` 的报告都能现算，两种都认。
+- **`replay` 的 `--strict-new`**：规格 P7 要求"新跑的报告缺指纹要 fail"。这需要区分
+  "哪份报告是新的"，现在没有判据（`time` 字段可以，但那是猜）。等 EV-A3 落地再说。

@@ -124,12 +124,16 @@ def test_mixed_sources_are_flagged(tmp_path):
 
 
 def test_human_verdict_beats_auto(tmp_path):
-    """闸门报告人判优先于比较器 —— 规格 §1.2 的既有语义，不许改。"""
+    """闸门报告人判优先于比较器 —— 规格 §1.2 的既有语义，不许改。
+
+    `source` 记的是**报告里那个字段名**（`human_correct`），不是一个简写标签：
+    出了分歧要能直接回原文找证据，简写会让人多绕一层映射。
+    """
     a = _eval_report(tmp_path, [{"id": "x", "human_correct": True,
                                  "auto_correct": False, "correct": False}])
     r = load_report(a)
     assert r["rows"]["x"]["correct"] is True
-    assert r["rows"]["x"]["source"] == "human"
+    assert r["rows"]["x"]["source"] == "human_correct"
 
 
 def test_same_source_on_both_sides_is_not_flagged(tmp_path):
