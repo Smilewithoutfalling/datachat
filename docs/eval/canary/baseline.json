@@ -1,0 +1,313 @@
+{
+ "created": "2026-11-04T09:40:26",
+ "runs": 6,
+ "n": 10,
+ "files": [
+  "eval_react_canary_b2_run1.json",
+  "eval_react_canary_b2_run2.json",
+  "eval_react_canary_b2_run3.json",
+  "eval_react_canary_c2_run1.json",
+  "eval_react_canary_c2_run2.json",
+  "eval_react_canary_c2_run3.json"
+ ],
+ "model": "Qwen3.5-397B-A17B",
+ "agent": "react",
+ "canary_sha12": "592b9f3baa7e",
+ "code_sha12": "4b58e8b9fd80",
+ "correct_per_run": [
+  9,
+  10,
+  10,
+  9,
+  10,
+  10
+ ],
+ "min_correct": 9,
+ "accuracy": 0.9667,
+ "flips": 2,
+ "answer_varied": 10,
+ "usage_components": [
+  "tokens_in",
+  "tokens_out"
+ ],
+ "usage_total": {
+  "tokens_in": 261363,
+  "tokens_out": 16438
+ },
+ "usage_ratio": {
+  "tokens_in": 0.9408,
+  "tokens_out": 0.0592
+ },
+ "cases": {
+  "ord_007": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "a560623f8560",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "agg_013": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "7e9bc94ef11a",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ]
+  },
+  "ord_013": {
+   "passes": [
+    false,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "e660c6cd12f1",
+   "result_missing": [
+    "no_assign",
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "ord_012": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "9e4e887dd231",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    false,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "ord_017": {
+   "passes": [
+    true,
+    true,
+    true,
+    false,
+    true,
+    true
+   ],
+   "answer_sha12": "f92fd19f4242",
+   "result_missing": [
+    null,
+    null,
+    null,
+    "no_assign",
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "emp_015": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "2318051d599e",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "ts_010": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "3de7600880fe",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "emp_020": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "898b08f54e83",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "ord_026": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "4e95bc55b6e0",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ]
+  },
+  "inv_022": {
+   "passes": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "answer_sha12": "9e6d65e46085",
+   "result_missing": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "answer_has_gold": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ]
+  }
+ }
+}

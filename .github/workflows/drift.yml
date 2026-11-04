@@ -1,0 +1,59 @@
+# EV-D5 漂移哨兵：每周跑一次十条 canary，与冻结基线（docs/eval/canary/baseline.json）比。
+#
+# **默认不跑。** 需要仓库里配三样东西，缺任一样这个 job 就直接 skip，不产红：
+#   Variable `DATACHAT_CANARY_ENABLED = 1`     —— 总开关（没有它，schedule 到点也跳过）
+#   Secret   `DATACHAT_LLM_KEY`                —— 真 Key（Actions 里的 secret，不入库）
+#   Variable `DATACHAT_LLM_BASE_URL` / `DATACHAT_LLM_MODEL` —— 网关与模型名
+#
+# 为什么用 job 级 if 而不是删掉 workflow 再提交：哨兵的枪要一直存在，只是保险关着。
+# 需要它时打开一个变量，而不是回头写一遍 YAML。
+#
+# 判读看 `scripts/eval/canary.py` 的退出码：0 干净 / 1 漂移 / 2 不可比或基线过期。
+# 2 不代表模型有问题，代表**该重立基线了**（`--init --force`），别混着看。
+name: canary-drift
+
+on:
+  schedule:
+    - cron: "0 1 * * 1"        # 每周一 01:00 UTC = 09:00 北京时间
+  workflow_dispatch:
+
+concurrency:
+  group: canary-drift
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: vars.DATACHAT_CANARY_ENABLED == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+      DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+      DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+      # 探针掉题时 run_eval 退出 1，那正是要判的信号，不该在这里就把 job 打断。
+      - name: 跑十条探针
+        continue-on-error: true
+        run: python run_eval.py --canary --agent react
+      - name: 与冻结基线比
+        id: drift
+        run: python scripts/eval/canary.py "outputs/eval_react_canary_*.json" --out drift.json
+      - name: 漂移时把读数带回去
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-${{ github.run_id }}
+          path: |
+            outputs/eval_react_canary_*.json
+            drift.json
+          retention-days: 90
+          if-no-files-found: warn
