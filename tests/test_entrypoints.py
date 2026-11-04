@@ -57,9 +57,13 @@ def test_run_eval_both_agents_and_rescore_new_tables(tmp_path):
     assert [r.name for r in reports] == ["r_react.json", "r_workflow.json"]
     assert len(list(tmp_path.glob("eval_compare_oracle_*.json"))) == 1   # B42：compare 跟 --out 同目录
     data = json.loads(reports[1].read_text(encoding="utf-8"))
-    assert data["datasets"]["orders"]["dictionary_file"] and {c["dataset"] for c in data["cases"]} == {
-        "orders", "employees", "inventory"}
+    # 拒答类现在跨四张表：EV-B7 的 neg_010（缺具体对象）落在 biz 上。
+    # 题数不写死 —— 语料规模由 test_eval_cases 的 test_case_count_and_ids_unique 管，
+    # 这里只验"报告认得出每张表、且 --rescore 能把它们全判对"。
+    assert data["datasets"]["orders"]["dictionary_file"]
+    assert {c["dataset"] for c in data["cases"]} == {"orders", "employees", "inventory", "biz"}
+    n = len(data["cases"])
     p = subprocess.run([sys.executable, "run_eval.py", "--rescore", str(reports[1])],
                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert "9/9 = 100.0%" in p.stdout
+    assert f"{n}/{n} = 100.0%" in p.stdout

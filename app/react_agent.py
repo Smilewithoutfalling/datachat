@@ -12,6 +12,7 @@ B20（阶段 4 收尾）：不再用已弃用的 langgraph.prebuilt.create_react
 用完抛 GraphRecursionError，由 service 强制收尾（B61）。不同点：模型调用的重试在这里做
 （只重试超时 / 限流 / 连接 / 5xx，指数退避），每次重试记进 tracker，ReAct 的重试次数不再是 None（B21）。
 """
+import os
 import time
 from typing import Annotated, TypedDict
 
@@ -212,7 +213,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         if shown:
             msg += f"\n\nprint 输出：\n{shown}"
         if chart:
-            msg += f"\n（已生成图表并保存到 {chart}）"
+            msg += f"\n（已生成图表并保存到 {os.path.basename(chart)}）"
         if options:
             msg += "\n" + chart_note(None, options)
         if chart_errs:

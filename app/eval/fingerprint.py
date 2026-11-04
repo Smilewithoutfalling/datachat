@@ -105,6 +105,10 @@ _EXEMPT = {
     # **只往报告里写 `process_risks`，不进 score_detail、不进模型输入、也不判对错**——
     # 它标的是"值得人看一眼"，标了不等于错（见模块 docstring 的实测数字）。所以放 B。
     "app/eval/process_check.py": "过程结构标记，只记录不判分，不回灌模型",
+    # 出境审计（EV-B10）：只把"模型实际收到的 prompt"抓出来做四条合同断言。
+    # **只读**——不产生判定、不进模型输入、不写报告字段。改它不会让任何一题从错变对，
+    # 也不会改变任何一次运行的输入；它连 analyze 的返回结果都只是拿来看 executed 的。
+    "app/eval/egress.py": "出境审计，只读 prompt，不产生判定也不进模型输入",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

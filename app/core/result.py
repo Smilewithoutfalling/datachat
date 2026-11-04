@@ -5,6 +5,7 @@ result 字段保留代码执行得到的**原始对象**（DataFrame/Series/标�
 """
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Optional
 
@@ -93,7 +94,11 @@ def chart_items(png: Optional[str], options: list) -> list:
 
 
 def chart_note(png: Optional[str], options: list) -> str:
-    """给 summarizer 的图表提示：PNG 路径，以及 chart() 出的图的标题（没有标题时写图型）。"""
+    """给 summarizer 的图表提示：图片文件名，以及 chart() 出的图的标题（没有标题时写图型）。
+
+    **只放文件名，不放绝对路径**（EV-B10 出境审计的 ④）：模型不需要 `D:\\…\\outputs\\charts\\`，
+    而那段前缀会带着安装路径（桌面版默认装在用户目录下，等于把用户名一起发出去）。
+    """
     parts = []
     names = []
     for o in options or []:
@@ -104,7 +109,7 @@ def chart_note(png: Optional[str], options: list) -> str:
     if names:
         parts.append(f"已生成 {len(names)} 张图表：" + "、".join(names))
     if png:
-        parts.append(f"已生成图表 {png}")
+        parts.append(f"已生成图表 {os.path.basename(png)}")
     return "（" + "；".join(parts) + "）" if parts else ""
 
 

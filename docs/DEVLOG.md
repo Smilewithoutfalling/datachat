@@ -5802,3 +5802,67 @@ planner → codegen → executor → summarizer，codegen 的提示词只有两�
 `test_ambiguity_alternatives_differ_from_main` 与 `test_case_flags_consistent` 排除 clarify
 （它们没有 gold 也没有 alt，"至少有一个 alt"对它们不成立 —— 但要求 ambiguity 类
 "alt 或 clarify 至少占一条"，不许混进什么都不占的普通题）。
+
+## [124] 2026-11-04 · EV-B10 出境审计：把"发出去的 prompt"整个抓出来对四条合同
+
+规格的 B10 要求审的是**出境内容**：样例行 ≤ 3、单值 ≤ 40 字、不含全量列值、不含本机路径。
+审模板没有意义 —— schema 由 `describe_df` 渲染、字段说明经 BM25 检索后截断、结果经
+`format_result` 截断，任何一层漏了截断，看模板都看不出来。所以审计对象是
+**模型实际收到的每一段 prompt**：假模型跑一遍 analyze，`ScriptedChatModel.calls`
+里存的就是每次调用的原始 messages，`prompt_text` 拼平后逐条断言。
+
+### 新增
+
+- **`app/eval/egress.py`**：四条断言 + `audit()` 总入口。归 B 组（`_EXEMPT`）—— 只读，
+  不产生判定、不进模型输入、不写报告字段，改它不可能让任何一题从错变对。
+- **`scripts/egress_audit.py`**：CLI 入口，`--agent both` 一次审两条路，`-v` 打 prompt 明细。
+- **`tests/test_egress.py`**：9 条 —— 每条断言一个正控（该出现的东西必须在）+
+  一个反例（违例必须被抓）。9 passed。
+
+四条合同里有两个设计决定值得记：
+
+**① 第 3 条"不含全量列值"的判据是"任一文本列的取值命中 ≤ 3"，数据字典也在审计范围内。**
+`.dict.csv` 同样是用户上传的文件 —— 一条 `region：华东、华北、华南、西南、东北` 的说明
+就是五个值出境。样例表干净、字典把全量枚举带出去，这种漏法光审样例根本看不见。
+
+**② 第 4 条"不含本机路径"在规格正则之外，加了"本次运行自己的绝对路径"。**
+正则只认 `C:/Users/`、`/home/`、`/Users/` —— 仓库装在 `D:/` 下时一条都不命中，
+但路径确实出境了（见下）。禁用名单 = 项目根 + 图表目录 + 数据集路径，正反斜杠两种形态都查。
+
+### 审计真的抓到了一条真泄漏：图表绝对路径
+
+写审计的过程中抓到一个现行犯：出图后回灌给 summarizer 的提示带**完整绝对路径**——
+
+- workflow 路：`chart_note()` 里的 `已生成图表 {png}`，`png` 是
+  `D:/…/outputs/charts/chart_x.png`；
+- react 路：`（已生成图表并保存到 {chart}）`，同样带盘符。
+
+桌面版默认装在用户目录下，这段前缀等于**把用户名一起发给了模型**。而模型只需要文件名。
+
+两处都改成只回文件名（`os.path.basename`）。这是**改结果通道的文本** → 动
+`result.py` / `react_agent.py`，A 组，指纹变：
+`affects_results_sha12` `410ba3147d15` → **`138e1b9e09e0`**，`code_all_sha12` **`452112430311`**。
+历史报告从此 `compare` 判 legacy；不写 answers_sha256 的老盲点不变（见 [120]）。
+
+### 顺带修了一个 [123] 留下的假红
+
+`tests/test_entrypoints.py::test_run_eval_both_agents_and_rescore_new_tables`
+在 HEAD 上就是红的：B7 加了 neg 题后语料多了 `biz` 表，断言里写死的
+`{"orders","employees","inventory"}` 和 `"9/9"` 全过期。当时收尾时漏跑了这个文件。
+改成数据集集合含 `biz`、分母取实际题数 `n`（语料规模由 `test_case_count_and_ids_unique` 管，
+这里只验"报告认得出每张表 + rescore 全判对"）。5 passed。
+
+### 审计自身的一个取舍：第 1 条不去数"第 4 行有没有出境"
+
+样例行 ≤ 3 的检查是**逐字比对** `describe_df(df, n=3)` 的渲染块，而不是数行数或查第 4 行的值。
+原因：用户问"列出全部订单"时，第 4 行会经 `format_result` 走**结果通道**回灌 ——
+那是设计内的行为，该由第 3 条（列值命中数）去判。混进 sample_rows 会把产品取舍报成 bug。
+代价是：如果有人绕过 `describe_df` 手写 schema 且恰好写了 3 行，逐字比对照样红（渲染不同），
+堵得住。
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_egress.py`（新） | **9 passed** |
+| `tests/test_entrypoints.py` | **5 passed**（修掉 B7 留下的过期断言） |
+| `tier_check` 语义 | egress.py 进 `_EXEMPT`（B 组），改它不动 `affects_results` |
+| 真实审计跑（sample.csv，两 agent） | 修复后 0 findings；修复前抓到 chart 绝对路径 2 处 |
