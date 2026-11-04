@@ -183,6 +183,9 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None, repeat: int = 
         "chart_smoke": chart_summary(rows, [r["id"] for r in rows]),   # M13 图表两条，与准确率分开报
         "cases": rows,
     }
+    # repeat=1 不写这个键：老报告的形状不变，读老报告的脚本不用改（同 runs 的处理）。
+    if repeat > 1:
+        out["stability"] = gate_stability(rows, repeat)
     path = os.path.join(ROOT, "docs", "eval", f"gate_{datetime.now():%Y%m%d_%H%M%S}_{agent}.json")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(out, f, ensure_ascii=False, indent=1, default=str)
@@ -190,6 +193,22 @@ def run(agent: str, use_dictionary: bool, only: list[str] | None, repeat: int = 
     cs = out["chart_smoke"]
     print(f"图表：出图率 无图 {cs['出图率']['no_chart']}/{cs['出图率']['drew']} 题画图；"
           f"chart_option {cs['chart_option']['ok']}/{cs['chart_option']['called']}；内部错误 {cs['internal_errors']}")
+    st = out.get("stability")
+    if st:
+        rate = "无可用读数" if st["flip_rate"] is None else f"{st['flip_rate'] * 100:.2f}%"
+        print(f"稳定性（k={st['k']} × {st['n_cases']} 题，比较器判定）："
+              f"flip_rate {rate}，翻转 {st['flipped']['count']} 题，"
+              f"不稳（>{FLIP_RATE_LIMIT:.0%}）{len(st['unstable'])} 题")
+        if st["unstable"]:
+            print(f"  不稳：{' '.join(st['unstable'])}")
+        if st["unmeasured"]:
+            detail = " ".join(f"{u['id']}（{'/'.join(u['kinds'])}）" for u in st["unmeasured"])
+            print(f"  没测到：{detail}  —— 全部跑次都失败，不计入 flip_rate")
+        if st["unjudged"]:
+            detail = " ".join(f"{u['id']}#{u['runs']}" for u in st["unjudged"])
+            print(f"  判不了：{detail}（答案没交卷或比较器认不出，不是模型翻转）")
+        if not st["valid"]:
+            print(f"  ⚠ {st['invalid_reason']}")
     print(f"报告：{os.path.relpath(path, ROOT)}  —— 下一步人工填 human_correct / failure_class / reason")
     return path
 
@@ -253,10 +272,16 @@ def verdict(path: str, profile: str) -> dict:
         out["labels_final"] = "待 S 终审" not in out["labeled_by"]
     else:
         out.pop("labels_final", None)
+    # EV-C1：老报告没有 repeat 字段 → 1 → 返回 None，不写这个键。
+    stab = gate_stability(rows, int(data.get("repeat") or 1))
+    if stab:
+        out["stability"] = stab
     if prof["kind"] == "phase35":
         out.update(_verdict_phase35(prof, s_ok, s_n, m_ok, m_n, fails, dist))
     else:
         out.update(_verdict_regression(prof, data.get("agent"), rows))
+        out["allowed_fail_warnings"] = allowed_fail_warnings(
+            prof, data.get("agent"), rows, stab)
         if "rerun" in prof:
             out.update(_verdict_rerun(prof, data, path, profile))
     if any(r.get("chart") for r in rows):             # [27] 起的报告才有；与准确率判定分开，不影响 regression_verdict
@@ -267,6 +292,8 @@ def verdict(path: str, profile: str) -> dict:
         json.dump(data, f, ensure_ascii=False, indent=1, default=str)
     if infra:
         print(f"注意：{len(infra)} 题标了 infra，不计入失败分布：{infra}")
+    for w in out.get("allowed_fail_warnings") or []:
+        print(f"⚠ allowed_fail 纪律：{w}")
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return out
 
@@ -292,6 +319,129 @@ def _verdict_phase35(p, s_ok, s_n, m_ok, m_n, fails, dist) -> dict:
             top2 = [str(k) for k, _ in dist.most_common(2)]
             out["distribution_verdict"] = f"中间区间（{len(dist)} 类，最大类 <60%）：第 {'、'.join(top2)} 类都列为 P0，方向不变"
     return out
+
+
+# ---------------------------------------------------------------- EV-C1 方差地板
+# flip_rate > 0.4 的题**不许**进 allowed_fail：它在翻，不是"允许失败"。
+# k=3 时 flip_rate 只有 0 / 0.67 两档（p=1 与 p=2 同值），所以这条在 3 跑上等价于
+# "翻过一次就不许进名单"——粗，但方向是对的：名单是预登记的，预登记的东西不能靠掷硬币。
+FLIP_RATE_LIMIT = 0.4
+# allowed_fail 的长度上限。**先只告警**：现有 workflow/single 是 4/15 = 27%，
+# 一上来 fail 会把历史 profile 全挡死（规格陷阱第 2 条）。
+ALLOWED_FAIL_MAX_RATIO = 0.2
+
+
+def gate_stability(rows: list[dict], k: int) -> dict | None:
+    """EV-C1：闸门侧的逐题翻转率。k<2 或行里没有 runs 时返回 None。
+
+    **判定来源是比较器，不是人工。** `runs` 里只有 match / auto_correct：人工签字只对
+    主行（第 1 次）做，第 2..k 次没人判过。所以这个数回答的是"同一道题跑两遍，比较器的
+    判定一不一致"，不是"人工会不会改判"。两个数不能互相代替——人工能认出"比较器判不了"
+    的答案，直接把 flip_rate 当人工结论的噪声量级会低估。
+
+    `unjudged`：executed=True 但 match=None 的题次。它们在 auto_correct 里算 False，
+    不单独拎出来就会把"测量失败"混进"翻转"。列出来，让读的人能分辨。
+
+    `unmeasured`：k 次**全部**因基础设施失败（llm/cancelled/interrupted/dataset）没跑起来。
+    这些题一回也不计入分母 —— 否则 k 次全 503 会算出 flip_rate=0、always_wrong 里有它，
+    读起来像"这题一直做错"，实际是**一次都没测到**。2026-11-04 实测撞上过这个形态。
+    """
+    from app.eval import stats
+    if k < 2:
+        return None
+    per, skipped, unmeasured = [], [], []
+    for r in rows:
+        runs = r.get("runs") or []
+        if len(runs) != k:
+            skipped.append(r["id"])
+            continue
+        infra = [i + 1 for i, x in enumerate(runs) if x.get("error_kind") in RERUN_INVALID_KINDS]
+        if len(infra) == k:
+            unmeasured.append({"id": r["id"],
+                               "kinds": sorted({runs[i - 1].get("error_kind") for i in infra})})
+            continue
+        passes = sum(1 for x in runs if x.get("auto_correct"))
+        unjudged = [i + 1 for i, x in enumerate(runs)
+                    if x.get("executed") and x.get("match") is None]
+        # 缓存嫌疑：k 次 (tokens, answer) 逐字相同。tokens=None 不算——缺数据不等于相同。
+        sig = [(x.get("tokens"), (x.get("answer") or "")[:300]) for x in runs]
+        per.append({"id": r["id"], "passes": passes,
+                    "flip_rate": stats.flip_rate(passes, k),
+                    "unjudged_runs": unjudged, "infra_runs": infra,
+                    "identical": len(set(sig)) == 1 and sig[0][0] is not None})
+    if not per:
+        # 有 repeat 但一题都没测到：不能返回 None（那是"没跑 repeat"的意思）
+        return {"k": k, "n_cases": 0, "measured": 0, "unmeasured": unmeasured,
+                "basis": "auto_correct（比较器判定）；人工只签第 1 次",
+                "flip_rate": None, "flipped": {"count": 0, "ids": []},
+                "always_wrong": [], "unstable": [], "unjudged": [], "partial_infra": [],
+                "identical_cases": 0, "valid": False,
+                "invalid_reason": (f"{len(unmeasured)} 题在 {k} 跑里全部没执行成功，没有可用的读数"
+                                   if unmeasured else "报告里没有可测的题"),
+                "skipped": skipped, "cases": []}
+    n = len(per)
+    identical = sum(1 for c in per if c["identical"])
+    valid = identical < n
+    return {
+        "k": k, "n_cases": n, "measured": n, "unmeasured": unmeasured,
+        "basis": "auto_correct（比较器判定）；人工只签第 1 次",
+        "flip_rate": sum(c["flip_rate"] for c in per) / n,
+        "flipped": {"count": sum(1 for c in per if 0 < c["passes"] < k),
+                    "ids": [c["id"] for c in per if 0 < c["passes"] < k]},
+        "always_wrong": [c["id"] for c in per if c["passes"] == 0],
+        "unstable": [c["id"] for c in per if c["flip_rate"] > FLIP_RATE_LIMIT],
+        "unjudged": [{"id": c["id"], "runs": c["unjudged_runs"]}
+                     for c in per if c["unjudged_runs"]],
+        # 部分跑失败：这题的翻转里可能夹着基础设施失败，别直接把账记到模型上
+        "partial_infra": [{"id": c["id"], "runs": c["infra_runs"]}
+                          for c in per if c["infra_runs"]],
+        "identical_cases": identical, "valid": valid,
+        "invalid_reason": None if valid else (
+            f"{identical}/{n} 题在 {k} 跑里 (tokens, answer) 逐字相同 —— 多半是网关复用了"
+            "同一份响应，flip_rate 与 pass^k 都没有信息量"),
+        "skipped": skipped,
+        "cases": [{kk: c[kk] for kk in ("id", "passes", "flip_rate")} for c in per],
+    }
+
+
+def _group_totals() -> dict[str, int]:
+    """profile 的 allowed_fail 挂在**全量题集**上，分母必须是全量题数。
+
+    不能用本次报告的题数：`--only s01 s02` 跑 2 题时，1 条 allowed_fail 会被算成 50%，
+    那条名单其实只占全量的 1/15。
+    """
+    from questions import QUESTIONS
+    return dict(Counter(q["group"] for q in QUESTIONS))
+
+
+def allowed_fail_warnings(p, agent, rows, stability) -> list[str]:
+    """EV-C1 的两条纪律。只往 verdict 里写告警，**不碰 regression_verdict**。
+
+    第一条（长度 ≤ 20%）和 repeat 无关，任何时候都能判；
+    第二条（不稳定题不许进名单）需要 k≥2 的 runs，没有数据就跳过——不猜。
+    """
+    warn = []
+    totals = _group_totals()
+    flip = {c["id"]: c["flip_rate"] for c in (stability or {}).get("cases", [])}
+    for g, rule in p["agents"][agent].items():
+        allowed = list(rule["allowed_fail"])
+        total = totals.get(g)
+        if not total:
+            continue
+        if len(allowed) / total > ALLOWED_FAIL_MAX_RATIO:
+            warn.append(
+                f"{g}：allowed_fail {len(allowed)}/{total} = {len(allowed) / total:.0%} "
+                f"> {ALLOWED_FAIL_MAX_RATIO:.0%} —— 允许失败的题太多，门槛会失去分辨力")
+        unstable = [i for i in allowed if flip.get(i, 0.0) > FLIP_RATE_LIMIT]
+        if unstable:
+            warn.append(
+                f"{g}：allowed_fail 里有翻转题：" +
+                "、".join(f"{i}（flip {flip[i]:.2f}）" for i in unstable) +
+                " —— 不稳的题应进稳定性专项，不是「允许失败」")
+    if stability is None and any(p["agents"][agent].values()):
+        warn.append("没有 repeat 跑（k<2）：无法判断 allowed_fail 里的题稳不稳，"
+                    "这一项只核了名单长度")
+    return warn
 
 
 def _verdict_regression(p, agent, rows) -> dict:
@@ -520,7 +670,8 @@ if __name__ == "__main__":
     ap.add_argument("--profile", help="docs/gate/thresholds.json 里的门槛：phase35（阶段 3.5 原判）/ m13（阶段 5 回归）"
                                       " / m13r（m13 + 错题复跑）")
     ap.add_argument("--repeat", type=int, default=1, metavar="N",
-                    help="每题跑 N 次，逐次结果写进 runs；主行恒为第 1 次（人工签字对着它）")
+                    help="每题跑 N 次，逐次结果写进 runs，并产出 stability（逐题 flip_rate，"
+                         "EV-C1）；主行恒为第 1 次（人工签字对着它）")
     a = ap.parse_args()
     if a.verdict or a.rerun:
         if not a.profile:

@@ -5543,3 +5543,77 @@ exit 0。与 [118] 一致。
 - **`flip_rate` 进报告（EV-C1）。** canary 侧我用 `summarize` 现算翻转数，没动
   `report.py` 的 `stability` 块 —— 那是另一张卡，要动 `run_gate.py` 与 `report.py`。
 - **B3 图表反算。** 仍是"要先落盘 chart option"。
+
+## [121] 2026-11-04 · EV-C1 方差地板：flip_rate 接进闸门，外带一个「没测到 ≠ 很稳」的坑
+
+规格要三样：闸门 `--repeat` 的逐题 `flip_rate`、报告 `stability` 块、`allowed_fail` 两条纪律。
+`--repeat`（EV-A2）与 `stats.flip_rate`（EV-C2）早就在了，缺的是**接线**和**判据**。
+
+### 公式没动，但口径必须写在读者眼前
+
+`flip_rate = passes·(k−passes) / C(k,2)`，k=3 只有 **0 / 0.67 两档**（p=1 与 p=2 同值）。
+这条不是精度不够，是公式的性质：3 次里翻 1 次和翻 2 次，任取两跑不一致的概率一样。
+
+新写的是闸门侧的 `gate_stability()`。它与 `run_eval._stability` 有一处**实质不同**，写进
+`stability.basis` 了：**闸门的判定来源是比较器，不是人工**。`gate_*.json` 里人工只签第 1 次，
+第 2..k 次没人判过。把闸门的 flip_rate 当"人工判定的噪声量级"会低估——人能认出比较器判不了的答案。
+
+### 真撞上的坑：k 跑全 503 会被算成「很稳」
+
+第一版写完跑真模型，网关正好 503。结果报告写：
+
+```
+flip_rate 0.00%，翻转 0 题，不稳 0 题      valid: true
+always_wrong: ["s01", "m01"]
+```
+
+两跑都是 `executed=False / error_kind=llm`——**一次都没测到**，读起来却像"这两题一直做错、
+但很稳定"。这是 EV-C1 最容易犯的错：把"没测到"读成"没变化"。
+
+修法是把失败拆成两层，`unjudged` 与 `unmeasured` 不是一回事：
+
+| 字段 | 含义 | 怎么算 |
+|---|---|---|
+| `unjudged` | 执行了，但 `match=None`（比较器认不出 / 没交卷） | 算进 passes 等同答错，但单列 |
+| `unmeasured` | k 跑**全部**因 llm/cancelled/interrupted/dataset 没跑起来 | **剔除分母**，不参与 flip_rate |
+| `partial_infra` | 部分跑失败 | 照算，但标出"这题的翻转里可能夹着基础设施失败" |
+
+一题都没测到时 `flip_rate` 写 `null` 而不是 `0` —— 0 会被当成"测过了，很稳"。
+网关恢复后重跑同一命令：2 题 × 2 跑全 strict，`flip_rate 0.00%`、`measured=2`，这次是真的。
+
+### `allowed_fail` 的两条纪律，有一条现在就亮着
+
+1. `flip_rate > 0.4` 的题不得进 `allowed_fail`（k=3 时等价于"翻过就不许进"）；该进稳定性专项。
+2. `allowed_fail` ≤ 该组题量的 20%。
+
+分母用**全量题数**（single 15 / multi 10），不是本次报告的题数——`--only` 跑 2 题时
+1 条名单会被算成 50%，那是假的。
+
+两条都只写进 `verdict.allowed_fail_warnings`，**不改 `regression_verdict`**。规格的陷阱条目
+已经预判了原因：一上来 fail 会把历史 profile 全挡死。实测确实如此：
+
+| profile | 组 | allowed_fail | 占全量 | 结论 |
+|---|---|---|---|---|
+| m13/m13r | react/single | 1 | 1/15 = 7% | 通过 |
+| m13/m13r | react/multi | 1 | 1/10 = 10% | 通过 |
+| m13/m13r | workflow/single | 4 | **4/15 = 27%** | **超线，警告亮着** |
+
+不是检查写错了：那份名单是 10 月定的，当时没有这条纪律。收紧只能新增 profile（thresholds.json
+的 `_note`：改门槛只能新增，不改旧的）。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_flip_rate.py`（新） | **19 passed** |
+| `tests/test_gate.py` + 新文件 | **100 passed / 72s** |
+| 真模型 2 题 × 2 跑 | `k=2, measured=2, flip_rate 0.0, valid=true` |
+| `--verdict --profile m13` 写回 | `allowed_fail_warnings: []`（名单里的 s02/m10 本次没跑，不误报） |
+| `affects_results_sha12` | 仍 `4b58e8b9fd80`（`scripts/`、`tests/` 都不在 `app/` 扫描范围） |
+
+改了一条既有测试：`test_m13_baseline_verdict_unchanged` 原来要求 verdict 除门槛哈希外逐字节相同，
+现在多了 `allowed_fail_warnings`。**不是整键白名单**——测试仍断言其余逐字节相等，并把
+"workflow 那份必须带 4/15 的警告、react 那份不许带"钉住，所以它证明的是"只多了这一个键、内容也对"。
+
+`docs/eval/FROZEN.md` 补了「方差地板与 allowed_fail 纪律」一节：口径三条、闸门侧判定来源、
+两条纪律、以及"workflow/single 27% 超线"这个现状。

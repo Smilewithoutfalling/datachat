@@ -783,12 +783,24 @@ def test_cli_exit_codes(tmp_path):
 
 @pytest.mark.parametrize("name", ["gate_20261014_162428_react.json", "gate_20261014_163133_workflow.json"])
 def test_m13_baseline_verdict_unchanged(tmp_path, name):
-    """A1 不动 m13：两份参照基线重跑 verdict，除门槛文件哈希（thresholds.json 加了 m13r）外逐字节一致。"""
+    """A1 不动 m13：两份参照基线重跑 verdict，除门槛文件哈希（thresholds.json 加了 m13r）外逐字节一致。
+
+    EV-C1 唯一允许新增的键是 `allowed_fail_warnings`（纪律检查只告警、不改结论）。
+    其余仍须逐字节相同 —— 所以这里不是"放过新键"，而是"钉住只多了这一个键、且它的内容对得上"。
+    """
     src = json.load(open(os.path.join(ROOT, "docs", "eval", name), encoding="utf-8"))
     p = tmp_path / name
     p.write_text(json.dumps(src, ensure_ascii=False), encoding="utf-8")
     v = run_gate.verdict(str(p), "m13")
     old = dict(src["verdict"])
+    warnings = v.pop("allowed_fail_warnings", None)
+    assert warnings is not None, "EV-C1 的纪律检查必须在 verdict 里留痕"
+    # 两份基线都是单跑（没有 repeat 字段）：稳定性一项无法核，必须自己说出来，不能默认通过
+    assert any("没有 repeat" in w for w in warnings)
+    if name.endswith("_workflow.json"):
+        assert any("4/15" in w for w in warnings)      # workflow/single 真的超 20%
+    else:
+        assert not any("失去分辨力" in w for w in warnings)
     v, old = {k: x for k, x in v.items() if k != "thresholds_sha256"}, {k: x for k, x in old.items()
                                                                          if k != "thresholds_sha256"}
     assert json.dumps(v, ensure_ascii=False, sort_keys=False) == json.dumps(old, ensure_ascii=False, sort_keys=False)
