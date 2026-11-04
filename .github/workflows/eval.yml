@@ -1,0 +1,322 @@
+# EV-C4 门禁分层：PR 快、nightly 全、release 严。
+#
+# **红灯只判「能不能跑完、报告结构完不完整」，不判准确率。** 8 题里翻 1 题就是 12.5pp，
+# 任何门槛拦住的都是噪声（双侧精确 McNemar 要 6:0 才显著）。唯一例外是 PR 档的 oracle：
+# 假模型的输出就是标准答案，判错只能说明判分链路坏了。档位定义、8 题名单与理由见
+# docs/eval/tiers.md。
+#
+# 配置（与 drift.yml 共用同一套 secret/variable 名）：
+#   Secret   DATACHAT_LLM_KEY                 真 Key；fork PR 拿不到，这是 GitHub 的安全设计
+#   Variable DATACHAT_LLM_BASE_URL / DATACHAT_LLM_MODEL
+#   Environment `release`                     要在仓库设置里配 Required reviewers 才有"人工确认"
+#
+# 两条刻意的写法：
+#   1) secret 不进 job 级 env —— 只有真模型那一步注入。PR 来自同仓库分支时 step 能读环境
+#      变量，job 级注入等于把 Key 交给每一条 `run:`。
+#   2) 闸门报告的 glob 不能直接喂给校验器 —— `docs/eval/` 里躺着 4 份历史 gate 报告，
+#      glob 会连它们一起校验，然后因为老格式缺字段而红。只查本次新增（未跟踪）的那份。
+#
+# 跳过一定会打印原因：`if:` 跳过的 step 在 UI 里只是灰色，和"跑绿了"只差一个眼色。
+name: eval
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 19 * * *"        # 19:00 UTC = 次日 03:00 北京时间
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "跑哪一档"
+        type: choice
+        options: [pr, nightly, release]
+        default: pr
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: eval-${{ github.ref }}-${{ inputs.tier || 'auto' }}
+  cancel-in-progress: false      # nightly / release 不能被后到的跑打断
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  # ---------------------------------------------------------------- PR：不花钱，25 分钟内出结论
+  pr:
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+      - name: 评测数据与生成脚本一致
+        run: python scripts/gen_eval_data.py --check
+
+      # --oracle 用假模型：输出 = 标准答案。它不测模型，只测「判分链路 + 执行器 + 报告」还通不通。
+      - name: oracle 全量（不调模型）
+        run: python run_eval.py --oracle --agent react --out outputs/pr_oracle.json
+      - name: 题集规模
+        id: n
+        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(len(ALL_CASES))')" >> "$GITHUB_OUTPUT"
+      - name: oracle 必须全过（判错 = 判分链路坏了，这是本档唯一的红灯）
+        run: >
+          python scripts/eval/tier_check.py outputs/pr_oracle.json
+          --expect-n ${{ steps.n.outputs.n }} --require-all --label pr-oracle
+
+      # fork PR 拿不到 secret，跳过是正常的；不打印原因，绿会骗人。
+      - name: 有没有 secret
+        id: key
+        run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - name: 8 题冒烟（真模型）
+        if: steps.key.outputs.has == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: >
+          python run_eval.py --agent react
+          --case ord_007,agg_013,ord_012,emp_015,ts_010,ord_026,ord_027,mul_005
+          --out outputs/pr_smoke.json
+      - name: 冒烟只产出不判红（8 题测不出小差异）
+        if: steps.key.outputs.has == 'true'
+        run: python scripts/eval/tier_check.py outputs/pr_smoke.json --expect-n 8 --label pr-smoke
+      - name: 跳过冒烟时说明原因
+        if: steps.key.outputs.has != 'true'
+        run: |
+          echo "::notice::跳过 8 题真模型冒烟：本 workflow 没拿到 secret。"
+          echo "::notice::fork PR 拿不到 secret 是 GitHub 的安全设计，不绕；PR 的红灯只由 oracle 决定。"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-pr-${{ github.run_id }}
+          path: outputs/pr_*.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- nightly：真模型，发现问题开 issue
+  nightly:
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+
+      # nightly 的意义就是真模型：没有 Key 不是"跳过"，是配置错了。
+      - name: 有没有 secret
+        id: key
+        run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - name: 缺 Key 直接报错
+        if: steps.key.outputs.has != 'true'
+        run: |
+          echo "::error::nightly 需要 secret DATACHAT_LLM_KEY。schedule 触发的 job 不受 fork 限制，这就是没配。"
+          exit 1
+
+      # 闸门数据不入库（体积），走 Actions cache；命中就不重新下载生成。
+      - name: 恢复闸门数据缓存
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: data/gate
+          key: gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}
+      - name: 生成闸门数据（仅缓存未命中）
+        if: steps.restore.outputs.cache-hit != 'true'
+        run: python scripts/gate/build_gate_data.py
+      - name: 校验闸门数据现场
+        run: python scripts/gate/build_gate_data.py --check
+      - name: 保存闸门数据缓存
+        if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/gate
+          key: ${{ steps.restore.outputs.cache-primary-key }}
+
+      # 闸门报告要人工填 human_correct，CI 填不了 —— 所以这里只查结构，不查准确率。
+      - name: 25 闸门题（真模型）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: python scripts/gate/run_gate.py --agent react
+      - name: 找出本次新产出的闸门报告
+        id: gate
+        run: |
+          FILES=$(git ls-files --others --exclude-standard 'docs/eval/gate_*.json')
+          if [ -z "$FILES" ]; then echo "::error::没找到新产出的闸门报告"; exit 1; fi
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      # 题数从 QUESTIONS 算，不写死 25：加题时 CI 不该红，少跑题才该红。
+      - name: 闸门题数
+        id: gn
+        run: echo "n=$(python -c 'import sys; sys.path.insert(0, "scripts/gate"); from questions import QUESTIONS; print(len(QUESTIONS))')" >> "$GITHUB_OUTPUT"
+      - name: 闸门报告结构必须完整
+        run: >
+          python scripts/eval/tier_check.py ${{ steps.gate.outputs.files }}
+          --kind gate --expect-n ${{ steps.gn.outputs.n }} --label nightly-gate
+
+      - name: 8 题冒烟（真模型）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: >
+          python run_eval.py --agent react
+          --case ord_007,agg_013,ord_012,emp_015,ts_010,ord_026,ord_027,mul_005
+          --out outputs/nightly_smoke.json
+      - name: 冒烟只产出不判红
+        run: python scripts/eval/tier_check.py outputs/nightly_smoke.json --expect-n 8 --label nightly-smoke
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-nightly-${{ github.run_id }}
+          path: |
+            docs/eval/gate_*.json
+            outputs/nightly_smoke.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 失败开 issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 同一个故障连续几晚失败时只留一条：每日新开 issue 会把人训练成不看通知。
+          OPEN=$(gh issue list --state open --search 'nightly 评测失败 in:title' --json number --jq 'length')
+          if [ "$OPEN" -gt 0 ]; then
+            echo "::notice::已有 $OPEN 条开着的 nightly 失败 issue，本次不重复开。"
+            exit 0
+          fi
+          gh issue create \
+            --title "nightly 评测失败：${GITHUB_SHA:0:7}" \
+            --body "运行：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          红灯只可能来自「跑不完」或「报告结构不完整」——准确率不判红（理由见 docs/eval/tiers.md）。
+          先看 artifact 里那份报告缺了什么，再决定是补数据还是修流水线。"
+
+  # ---------------------------------------------------------------- release：人工确认，产出归档
+  release:
+    if: >
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'release')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    environment: release          # 需要 reviewer 批准才会真的开始跑
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+      - name: 有没有 secret
+        id: key
+        run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - name: 缺 Key 直接报错
+        if: steps.key.outputs.has != 'true'
+        run: |
+          echo "::error::release 需要 secret DATACHAT_LLM_KEY。"
+          exit 1
+
+      # 先自检判分链路：如果 oracle 都过不了，后面的真模型读数没有意义。
+      - name: oracle 自检
+        run: python run_eval.py --oracle --agent react --out outputs/rel_oracle.json
+      - name: 题集规模
+        id: n
+        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(len(ALL_CASES))')" >> "$GITHUB_OUTPUT"
+      - name: oracle 必须全过
+        run: >
+          python scripts/eval/tier_check.py outputs/rel_oracle.json
+          --expect-n ${{ steps.n.outputs.n }} --require-all --label release-oracle
+
+      - name: 全量评测（真模型）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: python run_eval.py --agent react --out outputs/rel_full.json
+      - name: 全量报告结构完整
+        run: >
+          python scripts/eval/tier_check.py outputs/rel_full.json
+          --expect-n ${{ steps.n.outputs.n }} --label release-full
+
+      - name: 恢复闸门数据缓存
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: data/gate
+          key: gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}
+      - name: 生成闸门数据（仅缓存未命中）
+        if: steps.restore.outputs.cache-hit != 'true'
+        run: python scripts/gate/build_gate_data.py
+      - name: 25 闸门题（真模型）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: python scripts/gate/run_gate.py --agent react
+      - name: 找出本次新产出的闸门报告
+        id: gate
+        run: |
+          FILES=$(git ls-files --others --exclude-standard 'docs/eval/gate_*.json')
+          if [ -z "$FILES" ]; then echo "::error::没找到新产出的闸门报告"; exit 1; fi
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: 闸门题数
+        id: gn
+        run: echo "n=$(python -c 'import sys; sys.path.insert(0, "scripts/gate"); from questions import QUESTIONS; print(len(QUESTIONS))')" >> "$GITHUB_OUTPUT"
+      - name: 闸门报告结构必须完整
+        run: >
+          python scripts/eval/tier_check.py ${{ steps.gate.outputs.files }}
+          --kind gate --expect-n ${{ steps.gn.outputs.n }} --label release-gate
+
+      # pass^3 用 canary 十条：它们本来就是"锁权重"的固定探针。
+      # 不判红：ord_013 / ord_017 历史上各掉过一轮，读到 8/10 是真实读数，不是 bug。
+      - name: pass^3（canary 十条 × 3 跑）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: python run_eval.py --agent react --canary --repeat 3
+
+      # 归档只做 artifact，不自动 commit 回 master：
+      # 自动 push 会绕过 PR 流程，与本仓库"一个 PR 一个问题"的纪律冲突。
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-release-${{ github.run_id }}
+          path: |
+            outputs/rel_*.json
+            outputs/eval_react_canary_*_run*.json
+            docs/eval/gate_*.json
+          retention-days: 90
+          if-no-files-found: warn
+      - name: 归档说明
+        if: success()
+        run: |
+          echo "::notice::报告已上传 artifact（保留 90 天）。"
+          echo "::notice::要入库请人工挑文件提交到 docs/eval/ —— 自动 push 会绕过 PR 流程。"

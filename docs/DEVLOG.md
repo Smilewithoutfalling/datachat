@@ -5617,3 +5617,72 @@ always_wrong: ["s01", "m01"]
 
 `docs/eval/FROZEN.md` 补了「方差地板与 allowed_fail 纪律」一节：口径三条、闸门侧判定来源、
 两条纪律、以及"workflow/single 27% 超线"这个现状。
+
+## [122] 2026-11-04 · EV-C4 门禁分层：三档 + 8 题名单，红灯只判"跑没跑完"
+
+新 `.github/workflows/eval.yml` 与 `docs/eval/tiers.md`，外加 `scripts/eval/tier_check.py`（14 行判据，
+不是新功能）。三档：PR（`pull_request`，不花钱）/ nightly（`schedule`，真模型）/ release
+（tag 或手动，人工确认）。
+
+### 一条判断决定了整个设计：小样本准确率不能当门禁
+
+规格表里写「PR 档 8 题」。8 题里翻 1 题就是 **12.5pp**，而 EV-C2 算过 MDE：双侧精确 McNemar
+要 **6:0 才显著**（5:0 的 p 是 0.0625）。在 8 题上设任何"≥7/8 通过"，拦住的是噪声。
+
+所以三档的红灯只判两件事：**跑完了没有（题数对得上）、报告结构有没有洞**。
+准确率照常写进报告与 artifact，归 LEDGER 的趋势与 drift 哨兵。唯一例外是 PR 档的 oracle：
+假模型的输出就是标准答案，判错只能是判分链路坏了，必须红。
+
+这与 [121] 的 `flip_rate > 0.4` 是同一条逻辑：先证明这个数不是噪声，再拿它当判据。
+
+### 8 题怎么挑的（不是凭感觉）
+
+7 类各 1 条 + 给最大的类（aggregation 43/183）补 1 条 = 8。其中 6 条直接取自 canary，
+因为那 10 条有 **6 跑 60 题次**的实证：
+
+| 类 | id | 依据 |
+|---|---|---|
+| 聚合 | `agg_013` / `ord_007` | canary 实证，gold 标量 |
+| 过滤 | `ord_012` | canary 实证。**避开 `ord_013`** —— 6 跑里掉过 1 次"算对没交卷"，进冒烟就是假红 |
+| 关联 | `emp_015` | canary 实证。**避开 `ord_017`**，同 `ord_013` |
+| 时序 | `ts_010` | canary 实证 |
+| 拒答 | `ord_026` | canary 实证 |
+| 歧义 | `ord_027` | 8 条里 alt 最全（不区分状态 / 折扣前 / 未去重三种都算对）——验容错机制还在不在 |
+| 多轮 | `mul_005` | 33 条里变量最少：2 轮、只换 `dept` 一个条件（`inherit:市场`） |
+
+歧义与多轮各只给 1 条：这两类判定边界本来就在晃，冒烟里放多了，红灯分不清是 pipeline 坏了
+还是题自己在抖。
+
+### 两处刻意的写法，都是"不写就会白跑一轮"
+
+**1）secret 不进 job 级 env。** 一开始我把 `DEEPSEEK_API_KEY` 放在 job 的 `env:` 里，
+那样每一条 `run:` 都能读到 Key。同仓库分支的 PR 能拿 secret（fork 拿不到），等于把 Key 交给
+PR 里的任意代码。改成：一个 step 只算 `secrets.X != ''` 存进 `steps.key.outputs.has`，
+真模型那一步单独注入 env。
+
+**2）闸门报告的 glob 不能直接喂校验器。** `docs/eval/` 里躺着 4 份历史 gate 报告，
+`"docs/eval/gate_*.json"` 会把它们一起校验，然后因为老格式缺字段而红。改成跑前记录
+`git ls-files --others --exclude-standard`，只校验本次新增（未跟踪）的那份。
+
+### 一个真的会卡住的坑：`environment:` 不等于人工确认
+
+`environment: release` 写在 YAML 里只是给 job 挂个名字。要真有"批准才能跑"，必须去
+Settings → Environments 建同名环境并配 Required reviewers。这条写进 tiers.md 的配置表了。
+
+另一个偏离：release 档**不自动 commit 回 master**。规格原文说"产出归档到 docs/eval/"，
+但自动 push 会绕过 PR 流程，与"一个 PR 只解决一个问题"冲突。改成 artifact 保留 90 天 +
+日志里打印"要入库请人工提交"。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| 全量 oracle（183 题 react） | **183/183 判对，183/183 执行成功**，351 秒，exit 0 |
+| 8 题名单 oracle | 8/8，27 秒（含启动） |
+| 历史闸门报告 `--kind gate --expect-n 25` | 通过；同一份当 eval 报告喂进去被拒（kind=gate） |
+| `tests/test_tier_check.py`（新） | **10 passed** |
+| workflow 静态检查 | `eval.yml` / `drift.yml` / `tests.yml`：无 job 级 if 上下文误用、无悬空 step 引用、无重复 id |
+
+**没验的那一条说清楚**：`gh workflow run eval.yml -f tier=pr` 跑不了 —— 仓库没推、GitHub 上
+也没建 secret 与 environment。`on:` 的四个触发、`environment:` 的审批、`gh issue create`
+的权限，都要等推到远端之后才算验过。本机能证的是"档位判据在真报告上成立"和"YAML 结构没错"。
