@@ -39,6 +39,7 @@ class TurnSnapshot:
     ts: str = ""               # 用户提问的 created_at（UTC ISO）
     calls: int = 0             # 该轮 usage.calls（M12 投影用）
     charts: list = field(default_factory=list)   # result_json.charts（工作状态的 last_chart 用）
+    a_full: str = ""           # 完整回答：只给 get_turn（批 3 B3）读，不渲染进历史块
 
 
 def _head(text: str, n: int) -> str:
@@ -119,7 +120,8 @@ def from_row(q_content: str, q_created_at: str, a_status: str, a_content: str, r
     usage = r.get("usage") or {}
     snap.calls = int(usage.get("calls") or 0) if isinstance(usage, dict) else 0
     if snap.status == "ok":
-        snap.a_brief = brief(a_content or r.get("answer") or "")
+        snap.a_full = a_content or r.get("answer") or ""
+        snap.a_brief = brief(snap.a_full)
         snap.code = r.get("code") or ""
         snap.result_digest = r.get("result_digest") or ""
         snap.charts = list(r.get("charts") or [])
@@ -131,7 +133,7 @@ def from_row(q_content: str, q_created_at: str, a_status: str, a_content: str, r
 
 def from_pair(q, a) -> TurnSnapshot:
     """旧格式 (问题, 结论[, 代码]) → 成功轮快照（评测的多轮 runner、run_react 等直接传元组时）。"""
-    snap = TurnSnapshot(q=str(q), a_brief=brief(str(a)))
+    snap = TurnSnapshot(q=str(q), a_brief=brief(str(a)), a_full=str(a))
     return snap
 
 
@@ -145,6 +147,8 @@ def coerce(history) -> list[TurnSnapshot]:
             known = {k: h[k] for k in TurnSnapshot.__dataclass_fields__ if k in h}
             if "a_brief" not in known and "a" in h:
                 known["a_brief"] = brief(str(h["a"]))
+            if "a_full" not in known and "a" in h:
+                known["a_full"] = str(h["a"])
             out.append(TurnSnapshot(**known))
         else:
             t = tuple(h)

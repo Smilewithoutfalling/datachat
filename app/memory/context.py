@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from app.memory import budget as B
 from app.memory.snapshots import MAX_TURNS, coerce, render_block
-from app.memory.working_state import fold, render
+from app.memory.working_state import fold, render_ex
 
 
 @dataclass
@@ -22,6 +22,14 @@ class MemoryContext:
     history_tokens: int = 0
     trimmed: list = field(default_factory=list)   # memory_trimmed：被裁剪的块名
     warnings: list = field(default_factory=list)
+    snaps: list = field(default_factory=list)     # state 时本轮之前的快照（B3 get_turn 读它）；off 时为空
+
+    def tools(self) -> list:
+        """记忆给 ReAct 追加的工具：state 且本轮之前有轮次时是 [get_turn]，否则 []（off 工具表不变，P8）。"""
+        if self.mode != "state" or not self.snaps:
+            return []
+        from app.memory.recall import make_tool
+        return [make_tool(self.snaps)]
 
     @property
     def system_block(self) -> str:
@@ -38,13 +46,15 @@ def off_context(history, history_messages) -> MemoryContext:
 
 def state_context(history, token_budget: int) -> MemoryContext:
     snaps = coerce(history)
-    mc = MemoryContext(mode="state", prompt_history=None, followup=bool(snaps))
+    mc = MemoryContext(mode="state", prompt_history=None, followup=bool(snaps), snaps=snaps)
     if not snaps:
         return mc
     state = fold(snaps)
-    mc.state_block, cut = render(state, B.STATE_TOKENS)
+    mc.state_block, cut, cut_c = render_ex(state, B.STATE_TOKENS)
     if cut:
         mc.trimmed.append("state")
+    if cut_c:                                          # 用户前提区被裁（B1：最后才裁，一旦裁了单独记）
+        mc.trimmed.append("constraints")
     full, _ = render_block(snaps, 10 ** 9)
     expected = next((s.calls for s in reversed(snaps) if s.calls), None)
     cap = B.history_cap(token_budget, expected, B.estimate_tokens(full))

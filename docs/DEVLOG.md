@@ -4380,7 +4380,7 @@ c03 最初写 `result = df['风向'].value_counts()`。脏化把 1822 条缺失�
 `sys.exit("不认识的 dataset")`。改成 `name in ("air", "air_report")` —— 两者是同一份数据的
 两种导出，原始侧对照表相同，差的是脏化表怎么读出来。
 
-## [110] 2026-11-02 · 记忆批 3 范围增补（方案）· commit <待提交>（PR #96）
+## [110] 2026-11-02 · 记忆批 3 范围增补（方案）· commit cfc8f12（PR #96）
 
 - 新文件 `docs/roadmap/memory-batch3.md`，规格 §5 批 3 后面加一行指向它。只是方案，没有改代码。
 - 依据 eval-v4 多轮 state 的失败分布：8 道错题和翻转题里，有 4 道是同一个形状——第 1 轮只给约束、不提问（mul_012/020/021/030）。纯文字约束轮不进状态（`working_state.py:485-499`），只活在历史块里，而历史块从最早那一轮开始丢。
@@ -5945,3 +5945,14 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 | oracle 单题（pert_001 / mul_034 × react+workflow） | 4/4 判对 |
 | 真模型扰动冒烟（5 跑） | **5/5**，`decay.py` 读表正常 |
 | `validate_cases(ALL_CASES)` | 0 errors |
+
+
+## [待编号] 2026-11-04 · 记忆批 3 实现：B1 用户前提区 + B2 出处轮次 + B3 get_turn · commit <待提交>
+
+方案 `docs/roadmap/memory-batch3.md`（#96 cfc8f12），偏离记在规格 §3.8「批 3」。只动记忆这一侧；off 模式 P8 三个哈希不变。
+
+- **B1**（`app/memory/working_state.py`）：成功但没执行代码的轮次，用户原话进 `constraints`，带轮次，≤6 条、单条 ≤120 字，不随后面的代码轮过期；状态块最前面单列「用户此前明确说过的前提」。裁剪顺序 earlier → filters → 前提区，裁到前提区时 `memory_trimmed` 记 `constraints`。
+- **B2**：筛选 / earlier 标 `（第N轮）`，编号与历史块同一套，窗口截断不重排。
+- **B3**（新 `app/memory/recall.py`）：ReAct 只读工具 `get_turn(n)`，state 且有历史时注册。`service.py` 里按下标对齐 `sink["execs"]` 的两处跳过非执行工具（`_is_exec_tool`），否则取原文之后的每条执行都错位。`react_agent.py` 只加 `extra_tools` 参数，system 文本不变。
+- **改了的旧断言**（行为变了，理由）：`test_merge_dropped_filter_moves_to_earlier` 的 earlier 行多了「（第1轮）」（B2）；`test_render_empty_returns_empty_string` 第 3 行原期望纯文字轮渲染为空，B1 后这句话进前提区；`test_fold_skips_turns_without_code` 增加前提区断言。
+- **评测侧须知**（§14.4）：state 模式下工具表多了 get_turn、状态块头改了，代码指纹会变；off 不变。记忆专项题（batch3 §7 的长会话 / 约束被改 / 指代名字）属于评测侧题库，这批没有写，作为验收需求提出。

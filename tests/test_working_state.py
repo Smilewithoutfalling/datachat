@@ -114,14 +114,17 @@ def test_merge_dropped_filter_moves_to_earlier():
                TurnSnapshot(q="按产品看呢？", code="result = df.groupby('product')['amount'].sum()")])
     assert st.filters == [] and st.grain == "product"
     lines = render(st)[0].split("\n")
-    assert '更早轮次用过、上一次执行的代码里没再用：region == "华东"' in lines
+    # 批 3（B2）：每条前提带出处轮次，期望从 'region == "华东"' 改成带「（第1轮）」
+    assert '更早轮次用过、上一次执行的代码里没再用：region == "华东"（第1轮）' in lines
     assert not any(l.startswith("筛选：") for l in lines)
 
 
 def test_fold_skips_turns_without_code():
     st = fold([TurnSnapshot(q="只看华北", code="result = df[df.region == '华北']"),
-               TurnSnapshot(q="解释一下", code="")])          # 纯文字回答：没有"实际基于什么"，状态不动
+               TurnSnapshot(q="解释一下", code="")])          # 纯文字回答：代码前提不动
     assert [f["value"] for f in st.filters] == ["华北"]
+    # 批 3（B1）：但这句用户原话进前提区（§8 第 3 条：问句先不过滤）
+    assert st.constraints == [{"turn": 2, "text": "解释一下"}]
 
 
 def test_merge_caps_filters_and_counts_dropped():
@@ -144,7 +147,9 @@ def test_fold_only_uses_successful_turns():
 def test_render_empty_returns_empty_string():
     assert render(WorkingState()) == ("", 0)
     assert render(fold([])) == ("", 0)
-    assert render(fold([TurnSnapshot(q="解释一下", code="")])) == ("", 0)
+    # 批 3（B1）：纯文字轮的用户原话进前提区，所以 fold([纯文字轮]) 不再是空状态（原断言为 ("", 0)）；
+    # 空状态仍然整块不出现（P8）由前两行钉住
+    assert render(fold([TurnSnapshot(q="解释一下", code="")]))[0] != ""
 
 
 def test_render_values_are_readable_chinese():
@@ -181,3 +186,104 @@ def test_state_block_in_react_and_planner(sample_path, monkeypatch):
     analyze(sample_path, "按产品拆开", chat_model=wm, llm_config=FAST, history=hist)
     planner = prompt_text(wm.calls[0])
     assert "<<<会话状态开始" in planner and "历史对话" not in planner     # 工作流只吃状态，不吃历史
+
+
+# ------------------------------------------------------------------ 批 3：B1 用户前提区 / B2 出处轮次
+from app.memory.context import state_context
+from app.memory.snapshots import render_block
+from app.memory.working_state import CONSTRAINT_HEAD, MAX_CONSTRAINTS, render_ex
+
+
+def test_b1_text_turn_enters_constraints_code_turn_does_not():
+    st = fold([TurnSnapshot(q="只看 2024 年 3 月的订单，重复录入的只算一次。", code=""),
+               TurnSnapshot(q="各品类笔数占比？", code="result = df.groupby('category').size()")])
+    assert st.constraints == [{"turn": 1, "text": "只看 2024 年 3 月的订单，重复录入的只算一次。"}]
+    block = render(st)[0]
+    lines = block.split("\n")
+    assert lines[1] == CONSTRAINT_HEAD                       # 前提区放在最前面
+    assert lines[2] == "- 第1轮：只看 2024 年 3 月的订单，重复录入的只算一次。"
+
+
+def test_b1_failed_and_cancelled_turns_do_not_enter():
+    st = fold([TurnSnapshot(q="只看华北", status="error"), TurnSnapshot(q="只看华南", status="cancelled")])
+    assert st.constraints == [] and render(st) == ("", 0)
+
+
+def test_b1_constraint_survives_later_code_turns():
+    """不过期：后面执行了代码、甚至筛选换了，前提区仍在，冲突交给模型按块头的优先级判断。"""
+    st = fold([TurnSnapshot(q="只看华北", code=""),
+               TurnSnapshot(q="华南呢", code="result = df[df.region == '华南']['amount'].sum()")])
+    assert st.constraints == [{"turn": 1, "text": "只看华北"}]
+    assert st.filters == [{"col": "region", "op": "==", "value": "华南", "turn": 2}]
+
+
+def test_b1_truncates_and_flattens_newlines():
+    st = fold([TurnSnapshot(q="甲" * 130), TurnSnapshot(q="第一行\n第二行")])
+    assert st.constraints[0]["text"] == "甲" * 117 + "…"         # 方案 §2.1：超过 120 字截到 117 加 …
+    assert len(fold([TurnSnapshot(q="乙" * 120)]).constraints[0]["text"]) == 120    # 正好 120 不截
+    assert st.constraints[1]["text"] == "第一行 第二行"
+
+
+def test_b1_cap_drops_oldest_and_counts_dropped():
+    st = fold([TurnSnapshot(q=f"约束{i}") for i in range(1, MAX_CONSTRAINTS + 3)])
+    assert [c["turn"] for c in st.constraints] == list(range(3, MAX_CONSTRAINTS + 3))
+    assert st.dropped == 2 and "（已省略 2 条较早的前提）" in render(st)[0]
+
+
+def test_b1_long_session_history_drops_turn1_state_keeps_it():
+    """15 轮：历史块 12 轮窗口已经把第 1 轮丢了，状态块里仍有第 1 轮的约束。"""
+    snaps = [TurnSnapshot(q="只看 2024 年 3 月的订单，重复的只算一次", code="")]
+    snaps += [TurnSnapshot(q=f"第{i}个问题", code=f"result = df['c{i}'].sum()") for i in range(2, 16)]
+    hist, dropped = render_block(snaps, 10 ** 9)
+    assert dropped == 3 and "只看 2024 年 3 月" not in hist and "[第1轮" not in hist
+    mc = state_context(snaps, 0)
+    assert "- 第1轮：只看 2024 年 3 月的订单，重复的只算一次" in mc.state_block
+    assert "只看 2024 年 3 月" not in mc.history_block
+
+
+def test_b1_trim_order_earlier_then_filters_then_constraints():
+    st = WorkingState(filters=[{"col": "a", "op": "==", "value": "x" * 80, "turn": 3}],
+                      earlier=[{"col": "b", "op": "==", "value": "y" * 80, "turn": 2}],
+                      constraints=[{"turn": 1, "text": "z" * 100}])
+    full, cut, cut_c = render_ex(st, 10 ** 6)
+    assert cut == cut_c == 0
+    budgets = sorted({-(-len(full) // 2) - k for k in range(0, 400, 5)}, reverse=True)
+    seen = []
+    for b in budgets:
+        block, cut, cut_c = render_ex(st, b)
+        seen.append(("y" * 80 in block, "x" * 80 in block, "z" * 100 in block))
+    # 依次消失：先 earlier（y），再 filters（x），最后前提区（z）
+    order = [s for i, s in enumerate(seen) if i == 0 or s != seen[i - 1]]
+    assert order[:4] == [(True, True, True), (False, True, True), (False, False, True), (False, False, False)]
+
+
+def test_b1_trimmed_constraints_reported(monkeypatch):
+    from app.memory import budget
+    monkeypatch.setattr(budget, "STATE_TOKENS", 150)
+    snaps = [TurnSnapshot(q="长" * 110 + str(i)) for i in range(MAX_CONSTRAINTS)]
+    mc = state_context(snaps, 0)
+    assert "constraints" in mc.trimmed and "state" in mc.trimmed
+
+
+def test_b2_filters_tagged_with_source_turn_after_failed_turn():
+    """编号按全会话（含失败轮）数，和历史块一致。"""
+    snaps = [TurnSnapshot(q="1", status="error"),
+             TurnSnapshot(q="2", code="result = df[df.region == '华北']['amount'].sum()")]
+    st = fold(snaps)
+    assert st.filters[0]["turn"] == 2 and 'region == "华北"（第2轮）' in render(st)[0]
+    assert "[第2轮" in render_block(snaps, 10 ** 9)[0]
+
+
+def test_b2_numbering_not_renumbered_after_window_cut():
+    """15 轮：历史块保留第 4–15 轮，编号不重排；状态块里的（第15轮）对得上历史块里的 [第15轮。"""
+    snaps = [TurnSnapshot(q=f"q{i}", code=f"result = df[df.c{i} == {i}]") for i in range(1, 16)]
+    hist, _ = render_block(snaps, 10 ** 9)
+    assert hist.count("[第") == 12 and "[第4轮" in hist and "[第15轮" in hist and "[第1轮" not in hist
+    assert "c15 == 15（第15轮）" in render(fold(snaps))[0]
+
+
+def test_b2_earlier_keeps_last_used_turn():
+    st = fold([TurnSnapshot(q="1", code="result = df[df.region == '华东']"),
+               TurnSnapshot(q="2", code="result = df[df.region == '华东']['amount'].sum()"),
+               TurnSnapshot(q="3", code="result = df['amount'].sum()")])
+    assert st.earlier == [{"col": "region", "op": "==", "value": "华东", "turn": 2}]

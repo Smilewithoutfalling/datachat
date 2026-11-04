@@ -185,7 +185,7 @@ class WorkingState:
 | `time_range` | `filters` + 问题 | 只从**日期列**上的比较推；问题里出现"2011 年全年"这类才补 `expr`，不做自然语言解析 |
 | `definitions` | `DatasetNote` + 本轮命中 | 只从 `dataset_notes` 里取本轮字典检索命中的条目；**不从模型答案里抽** |
 | `last_chart` | `res.charts[-1]` | 取最后一个 option 的 `series[0].type` 与 `title.text`；`ref` 写 PNG 文件名（若有） |
-| `constraints` | 用户输入 + M6 确认 | 只有经过 M6 确认的才写入 |
+| `constraints` | 用户输入（批 3 B1） | 成功但没执行代码的轮次，用户问题原文原样收下，带轮次；不走 M6（偏离见 §3.8 批 3） |
 
 **合并规则**（批 1.1 改过，原文是"grain 为空保留旧值、filters 取并集"，理由见 §3.8 末节）：
 - `grain` / `filters` / `time_range` 只描述**最近一次执行了代码的那一轮**实际基于什么；纯文字轮次不动状态。
@@ -372,6 +372,17 @@ eval-v3 多轮 33 题 state 下 mul_012 / mul_030 三跑全错，off 下对。�
 | P4 | `print(df[df.pay_amount < 0])` 这类探查被记成前提；多表筛选不带表名 | 只收流向 `result` 的数据流；`dfs['t']` 及其别名带 `[t]` | `test_extract_ignores_exploration_not_flowing_into_result`、`test_extract_multitable_filters_carry_table_name` |
 
 P1/P2 的成因是"代码实测 + 题型吻合"推出来的（逐题原始输出没有归档），以合并后 33 题 state 三跑的读数为准。
+
+### 批 3（B1/B2/B3，2026-11-04，方案见 `memory-batch3.md`）
+
+| 规格原文 | 实际 | 理由 / 钉住的测试 |
+|---|---|---|
+| `constraints` 只收经 M6 确认的（§3.2） | B1：成功但没执行代码的轮次，用户问题原文原样进 `constraints`（`{"turn","text"}`），单条 ≤120 字（超过截到 117 加 …），≤6 条丢最早的，不随后面的代码轮过期；不过滤问句 | S 2026-11-02 定（batch3 §8）：存的是用户原话、不经推断，没有投毒面；桌面端没有确认 UI。`test_b1_*` |
+| 状态块只写前提本身 | B2：筛选 / earlier 每条后标 `（第N轮）`，前提区每条以「第N轮：」开头；编号与历史块 `[第N轮` 同一套（全会话序号，含失败轮），窗口截断不重排 | `test_b2_*`；块头只说"（第N轮）指本次会话的第几轮"，不提"历史对话"——workflow 只吃状态块、没有历史块 |
+| 状态块头"由程序从代码中记录" | 改为：前提区是用户原话，其余由程序从代码记录；冲突时本轮问题明说的为准，其次是轮次更近的 | B1 之后状态块不全是代码来源 |
+| 裁剪顺序 earlier → filters | earlier → filters → 前提区；裁到前提区时 `memory_trimmed` 加 `constraints` | `test_b1_trim_order_earlier_then_filters_then_constraints`、`test_b1_trimmed_constraints_reported` |
+| M3b `get_turn_code(n)` 暂缓（§4 M3） | B3：`get_turn(n)`（`app/memory/recall.py`），返回第 n 轮的问题、完整回答、最后一次成功代码，包数据块，≤4000 字；失败轮只给"问 + 状态"；只在 state 且本轮之前有轮次时注册，off 工具表不变；只做 ReAct | `tests/test_memory_recall.py`；快照新增 `a_full`（不渲染） |
+| — | `service._react_invoke` / 收尾解析按下标对齐 `sink["execs"]`；get_turn 不写 execs，必须跳过，否则后面每条执行都错位 | `_is_exec_tool`；`test_react_get_turn_does_not_shift_exec_alignment`。get_turn 的返回算进 grounding 证据（复述上一轮的数字可核实），不发 code 事件、不记 tool_call 步骤 |
 
 ## 4 任务卡
 
@@ -567,7 +578,7 @@ python -m pytest tests/test_metrics.py -q
 
 **目标**：历史从纯文本变成结构化：追问时模型知道上一轮问了什么、结论是什么、结果长什么样、画了什么图、这一轮成没成。
 
-**不承诺"不再重算"（2026-10-28 改正）**：早先版本写"改图/追问不再整轮重算"（本卡）和"exec 次数从 2 降到 1"（`memory-system.md` M3 行）。做不到：沙箱没有持久内核，每轮 `analyze()` 重建 df 与命名空间，上一轮的变量不在；而快照按设计不放代码正文和图表 option（见下方陷阱）。所以"把刚才那张图改成堆叠"仍要重新执行一次代码。真要省掉重写，需要给模型一个只读工具取第 n 轮的代码（暂记 **M3b**：`get_turn_code(n)`，返回该轮最后一次成功执行的代码，同样包数据块）。它会改工具列表与提示词，影响指纹，所以等 history on/off 消融出来、重复计算真成问题时再定。
+**不承诺"不再重算"（2026-10-28 改正）**：早先版本写"改图/追问不再整轮重算"（本卡）和"exec 次数从 2 降到 1"（`memory-system.md` M3 行）。做不到：沙箱没有持久内核，每轮 `analyze()` 重建 df 与命名空间，上一轮的变量不在；而快照按设计不放代码正文和图表 option（见下方陷阱）。所以"把刚才那张图改成堆叠"仍要重新执行一次代码。真要省掉重写，需要给模型一个只读工具取第 n 轮的代码（暂记 **M3b**：`get_turn_code(n)`，返回该轮最后一次成功执行的代码，同样包数据块）。它会改工具列表与提示词，影响指纹，所以等 history on/off 消融出来、重复计算真成问题时再定。**批 3 已落地为 `get_turn(n)`（§3.8 批 3）。**
 
 **现状**：`history_messages` 只吃 `(q, a)`，`a` 砍 2000 字。
 
