@@ -76,6 +76,10 @@ class Row:
     error: str | None = None
     unverified: int = 0   # 单题 `unverified_numbers` 的条数
     guessing: bool = False
+    # 成本块用（规格 §EV-C5）：估算值与真数必须分得开。
+    # 老报告没有这两个键 → False / None，此时"按真数算"而不是把行丢掉。
+    tokens_estimated: bool = False
+    tokens_reported: bool | None = None
 
 
 def load(path: str) -> dict:
@@ -191,6 +195,8 @@ def _row(report: str, case: dict) -> Row:
         error=case.get("error") or None,
         unverified=_count_unverified(case.get("unverified_numbers")),
         guessing=bool(case.get("guessing")),
+        tokens_estimated=bool(case.get("tokens_estimated")),
+        tokens_reported=case.get("tokens_reported"),
     )
 
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import unicodedata
 
 from app.eval import report_adapter as adapter
+from app.eval.cost import build as build_cost
 from app.eval.outcome import STRICT_TIER, build as build_outcome
 
 # 判对但不算严的层级：比较器在这几层放行过，应人工抽审。
@@ -139,6 +140,19 @@ def _sec_numbers(data: dict, rows: list[adapter.Row], summ: dict) -> list[str]:
         miss = f"，{summ['tokens_missing']} 题缺" if summ["tokens_missing"] else ""
         rows_tbl.append(["平均 token", f"{summ['avg_tokens']}{miss}"])
     rows_tbl.append(["平均耗时", f"{summ['avg_duration_s']}s" if summ["avg_duration_s"] is not None else "算不出"])
+    # 成本与延迟（规格 §EV-C5）。平均数藏得住长尾，p95 才看得出"最慢那一档要等多久"。
+    co = build_cost(rows)
+    if co["n_tokens"]:
+        est = f"，其中 {co['n_estimated']} 题是估算值" if co["n_estimated"] else ""
+        rows_tbl.append(["token p50 / p95",
+                         f"{co['tokens_per_case_p50']} / {co['tokens_per_case_p95']}"
+                         f"（{co['n_tokens']} 题{est}）"])
+    perc = co["per_correct_tokens"]
+    rows_tbl.append(["每正确回答 token",
+                     f"{int(perc)}" if perc is not None else "算不出（没有判对的题）"])
+    if co["n_duration"]:
+        rows_tbl.append(["耗时 p50 / p95",
+                         f"{co['duration_p50_s']}s / {co['duration_p95_s']}s（{co['n_duration']} 题）"])
     if summ["pending"]:
         rows_tbl.append(["待判", f"{summ['pending']} 题（不计入分母）"])
 

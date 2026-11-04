@@ -122,10 +122,11 @@ def rescore(report_path: str, data_path: str | None = None) -> dict:
     cases.update(holdout_cases)
     if bank_drift:
         print(
-            "⚠️  题库与这份报告不是同一版（questions 哈希对不上）：\n"
+            "⚠️  题库与这份报告不是同一版（questions.json 哈希对不上）：\n"
             f"     报告记录：{bank_drift['report']}\n"
             f"     题库现在：{bank_drift['bank']}\n"
-            "   题面或答案在报告跑完之后被改过 —— 下面的判定用的是**现在的**答案。"
+            "   题面在报告跑完之后被改过 —— 下面的判定用的是**现在的**题面与答案。\n"
+            "   （answers.json 没有哈希，它改没改这里看不出来。）"
         )
     if holdout_cases:
         # holdout 报告的题号必须全在题库里：缺一道就会走 `case is None` 静默判 False

@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import datetime
 
 from app.eval.cases import CATEGORY_MAP
+from app.eval.cost import build as build_cost
 from app.eval.outcome import build as build_outcome
 from app.eval.provenance import refusal_shape
 from app.eval.process_check import check_code, summarize as summarize_process
@@ -487,6 +488,9 @@ class EvalReport:
             # evidence / chart / cost 四块，现在只有这一块，标成 2 会让读者
             # 以为整套都在。`compare.py` 对缺 outcome 的报告现算，两种都认。
             "outcome": build_outcome(self.results),
+            # 成本与延迟（规格 §EV-C5）。同样只追加键。p50/p95 用最近秩而不是插值，
+            # 口径写在 cost.py 里；金额不在这里算 —— 单价不进仓库（会变、按 provider 不同）。
+            "cost": build_cost(self.results),
             **self.meta,
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},

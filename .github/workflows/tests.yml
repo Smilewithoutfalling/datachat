@@ -36,6 +36,12 @@ jobs:
         run: python scripts/gen_eval_data.py --check
       - name: 前端事件类型 / 禁用键与后端一致
         run: python scripts/gen_ui_types.py --check
+      # 批 0 的硬指标：37 份历史报告必须能被回放（结构完整性）。与 OS 无关，
+      # 只在一个矩阵格上跑；引号是必需的 —— 不引号时 Windows 的 pwsh 不展开 glob，
+      # 未展开的 `*` 会被当成文件名（`replay.py` 自己也会 glob，两条路都通）。
+      - name: 评测报告回放（结构完整性）
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        run: python scripts/eval/replay.py "docs/eval/*.json" --check
       - name: pytest
         run: python -m pytest -q -p no:cacheprovider --durations=10
 
