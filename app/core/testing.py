@@ -60,9 +60,19 @@ def prompt_text(messages) -> str:
     return "\n".join(str(getattr(m, "content", m)) for m in messages)
 
 
-def oracle_model(code: str, agent: str = "workflow") -> ScriptedChatModel:
+def oracle_model(code: str, agent: str = "workflow", *, say: str | None = None) -> ScriptedChatModel:
     """评测自检用：无论问什么，都"生成"给定代码（通常是 ground truth）。
-    用来在没有 API Key 时验证评测流水线和打分口径本身是否正确。"""
+    用来在没有 API Key 时验证评测流水线和打分口径本身是否正确。
+
+    `say`：只回一句话、**不执行任何代码**。澄清题（EV-B7 的 clarify）用 —— 那类题的
+    正确行为是反问，没有 gold 可执行；照旧执行 `result = None` 会被判成"没问清就动手"，
+    于是 oracle 自检红、PR 档永久红，而红的原因不是判分链路坏了。
+    """
+    if say is not None:
+        def respond(messages):
+            return say
+        return ScriptedChatModel(responder=respond, calls=[])
+
     if agent == "workflow":
         def respond(messages):
             text = prompt_text(messages)
@@ -83,5 +93,28 @@ def oracle_model(code: str, agent: str = "workflow") -> ScriptedChatModel:
     return ScriptedChatModel(responder=respond, calls=[])
 
 
-__all__ = ["ScriptedChatModel", "oracle_model", "prompt_text"]
+def oracle_factory(agent: str):
+    """评测自检用的 `model_factory`：按用例类型给出"完美回答者"。
+
+    这个分叉必须只有一份实现。它原来写在两处（`run_eval.py` 与
+    `tests/test_eval_cases.py`），加 clarify 支持时只改了一处，于是 CLI 跑
+    193/193、测试跑 187/193，红灯看起来像判分坏了 —— 实际是两个入口的假模型不同。
+
+    clarify 题的正确答案是一句反问，不是一段代码。照 gold 执行 `result = None`
+    会被 negative_verdict 判成"没问清口径就猜着算"，与它的本意正好相反。
+    """
+    clarify_say = "您是指哪个时间范围和口径？请确认后我再计算。"
+
+    def make(case):
+        # 只有 react 能表达"不执行、只反问"。workflow 是固定线性图
+        # （planner → codegen → executor → summarizer），codegen 的契约只有
+        # 「算」或「拒答」，没有"反问问清"这条路 —— 硬把一句中文塞给它，
+        # 结果是 executor 拿它当代码跑，报 SyntaxError: invalid character '？'。
+        # 那个失败不是判分链路坏了，是这个 agent 结构上没有这条路。
+        say = clarify_say if (agent == "react" and getattr(case, "expect_kind", "") == "clarify") else None
+        return oracle_model(case.ground_truth, agent, say=say)
+    return make
+
+
+__all__ = ["ScriptedChatModel", "oracle_model", "oracle_factory", "prompt_text"]
 

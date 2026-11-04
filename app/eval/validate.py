@@ -105,6 +105,28 @@ def validate_cases(cases: list) -> list[str]:
             errors.append(f"{c.id}: gold_kind={c.gold_kind!r} 不在 {sorted(GOLD_KINDS - {''})}")
         if not c.expect_refusal and c.expect_kind == "refusal":
             errors.append(f"{c.id}: expect_kind=refusal 与 expect_refusal=False 矛盾")
+        # impossible 是一种拒答（且要说清缺什么），clarify 明确不是拒答。
+        # 这两个组合写错时判据会静默走偏：impossible 少了 expect_refusal 就不过越界检查，
+        # clarify 带上 expect_refusal 会让 refusal_leak 在"该反问却拒答"时也算一次。
+        if c.expect_kind == "impossible" and not c.expect_refusal:
+            errors.append(f"{c.id}: expect_kind=impossible 必须同时 expect_refusal=True")
+        if c.expect_kind == "clarify" and c.expect_refusal:
+            errors.append(f"{c.id}: expect_kind=clarify 与 expect_refusal=True 矛盾（澄清不是拒答）")
+
+        # 7. 负向题的缺失对象：字段与 gold 不许各说各话。
+        #    impossible 的判据是"拒答原因里点名 missing_objects 之一"，所以
+        #    a) 不声明就等于判据无据可依；b) 声明的词若在 gold 原因里都没有，
+        #    这条题永远判不过 —— 那是出题人的错，不是模型的。
+        if c.missing_objects:
+            if c.expect_kind != "impossible":
+                errors.append(f"{c.id}: missing_objects 只在 expect_kind=impossible 上有意义"
+                              f"（当前 {c.expect_kind!r}）")
+            absent = [o for o in c.missing_objects if not o or o not in (c.ground_truth or "")]
+            if absent:
+                errors.append(f"{c.id}: missing_objects={absent} 在 ground_truth 里找不到 —— "
+                              f"字段与 gold 必须一致，否则这题永远判不过")
+        elif c.expect_kind == "impossible":
+            errors.append(f"{c.id}: expect_kind=impossible 必须声明 missing_objects")
 
     for cid, n in seen.items():
         if n > 1:

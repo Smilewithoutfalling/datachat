@@ -80,6 +80,10 @@ class Row:
     # 老报告没有这两个键 → False / None，此时"按真数算"而不是把行丢掉。
     tokens_estimated: bool = False
     tokens_reported: bool | None = None
+    # 负向题三分类（EV-B7）。老报告没有这个键 → ""（等价于普通题）。
+    # 只有 "clarify" 有特殊含义：正确行为是**不执行代码**，所以"没执行"在它身上
+    # 不是失败。判定本身仍看 correct，这里只供渲染与档位校验区分。
+    expect_kind: str = ""
 
 
 def load(path: str) -> dict:
@@ -197,6 +201,7 @@ def _row(report: str, case: dict) -> Row:
         guessing=bool(case.get("guessing")),
         tokens_estimated=bool(case.get("tokens_estimated")),
         tokens_reported=case.get("tokens_reported"),
+        expect_kind=case.get("expect_kind") or "",
     )
 
 

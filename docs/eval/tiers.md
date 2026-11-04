@@ -44,10 +44,12 @@ PR 与 nightly 共用同一份名单。**改名单要改这里并写理由**，�
 ### PR：`pull_request`
 
 ```bash
-python run_eval.py --oracle --agent react          # 全量 183 题，不调模型
+python run_eval.py --oracle --agent react          # 全量 193 题，不调模型
 ```
 
-- **红灯条件**：oracle 有任何一题判错或执行失败（`overall.correct < n`）。
+- **红灯条件**：oracle 有任何一题判错（`overall.correct < n`）。执行失败也算，**但 clarify 除外** ——
+  那 6 条负向题的正确行为就是不执行（反问），把它们算成"执行失败"会让 PR 档永久红。
+  `tier_check --require-all` 里显式排除了 `expect_kind="clarify"`。
 - 产物：`outputs/eval_react_oracle_*.json` → 上传 artifact，不进仓库。
 - 有 secret 时额外跑 8 题真模型，**只产出、不判红**（理由见上一节）。
 
@@ -93,7 +95,7 @@ python run_eval.py --agent react --canary --repeat 3           # pass^3(10)
 
 | 项 | 结果 |
 |---|---|
-| 全量 oracle（183 题，react） | **183/183 判对，183/183 执行成功**，351 秒 |
+| 全量 oracle（193 题，react） | **193/193 判对，187/193 执行成功**（6 条 clarify 按预期不执行），422 秒 |
 | 8 题名单 oracle | 8/8，27 秒（含启动） |
 | 历史闸门报告走 `--kind gate --expect-n 25` | 通过；当成 eval 报告喂进去会被拒 |
 | workflow 静态检查 | `eval.yml` / `drift.yml` / `tests.yml` 三份无 job 级 if 上下文误用、无悬空 step 引用 |

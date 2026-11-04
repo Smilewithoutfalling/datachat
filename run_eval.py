@@ -173,8 +173,10 @@ def main():
 def _run_agent(agent, cases, args, llm_config, stamp):
     model_factory = None
     if args.oracle:
-        from app.core.testing import oracle_model
-        model_factory = lambda case: oracle_model(case.ground_truth, agent)  # noqa: E731
+        # clarify 题的"标准答案"是一句反问，不是一段代码。这个分叉只在
+        # oracle_factory 里实现一次，测试与 CLI 共用（两处各写一份会漂）。
+        from app.core.testing import oracle_factory
+        model_factory = oracle_factory(agent)
     runner = EvalRunner(args.data, agent=agent, model_factory=model_factory, llm_config=llm_config,
                         use_dictionary=not args.no_dict)
     used = {c.dataset for c in cases}

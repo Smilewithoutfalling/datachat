@@ -366,8 +366,9 @@ DATASETS = {
 from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
 from app.eval.cases_multi import MULTI_CASES  # noqa: E402
 from app.eval.cases_biz import BIZ_CASES  # noqa: E402
+from app.eval.cases_negative import NEGATIVE_CASES  # noqa: E402
 
-ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES + BIZ_CASES
+ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES + BIZ_CASES + NEGATIVE_CASES
 
 from app.eval.validate import validate_cases  # noqa: E402
 

@@ -42,7 +42,9 @@ def evaluate(path: str, expect_n: int | None = None, require_all: bool = False,
         if wrong:
             problems.append(f"判错 {len(wrong)} 题：{'、'.join(wrong[:10])}"
                             + ("…" if len(wrong) > 10 else ""))
-        dead = [r.id for r in rows if not r.executed]
+        # clarify 题的正确行为就是**不执行**（反问，而不是猜着算）。把它们算进
+        # "没有执行成功"会让 PR 档永久红 —— 红的原因不是链路坏了，是这题本来就不该执行。
+        dead = [r.id for r in rows if not r.executed and r.expect_kind != "clarify"]
         if dead:
             problems.append(f"没有执行成功 {len(dead)} 题：{'、'.join(dead[:10])}"
                             + ("…" if len(dead) > 10 else ""))
@@ -77,7 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             extra = ""
             if a.require_all:
-                extra = "，全部判对且全部执行成功"
+                # clarify 题的正确行为是不执行（反问），所以文案不能说"全部执行成功" ——
+                # 那份报告的执行率必然 <100%，按字面读会以为有题挂了。
+                n_clarify = sum(1 for r in A.iter_rows(path) if r.expect_kind == "clarify")
+                extra = ("，全部判对" +
+                         (f"（{n_clarify} 条 clarify 按预期未执行）" if n_clarify else "且全部执行成功"))
             print(f"✅ {tag}{path}：{info['n']} 题，结构无洞{extra}")
     if len(a.report) > 1:
         print(f"\n{len(a.report) - bad}/{len(a.report)} 份通过")

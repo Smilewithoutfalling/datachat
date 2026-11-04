@@ -4,7 +4,7 @@ import os
 import pytest
 
 from app.core import LLMConfig
-from app.core.testing import oracle_model
+from app.core.testing import oracle_factory, oracle_model
 from app.eval.case_model import EvalCase
 from app.eval.cases import ALL_CASES, DATASETS
 from app.eval.comparator import is_refusal, results_equal
@@ -23,11 +23,13 @@ def test_case_count_and_ids_unique():
     assert len(set(ids)) == len(ids)
     single = [c for c in ALL_CASES if not c.turns]
     multi = [c for c in ALL_CASES if c.turns]
-    assert (len(single), len(multi)) == (150, 33), "单轮 150（含 biz 20）+ 多轮 33"
+    # 2026-11-04：+10 负向（EV-B7）：orders 4（支付方式 1 + 3 条澄清）、employees 2、
+    # inventory 2、biz 2。单轮 150 → 160。
+    assert (len(single), len(multi)) == (160, 33), "单轮 160（含 biz 22 + 负向 10）+ 多轮 33"
     by = {}
     for c in single:
         by[c.dataset] = by.get(c.dataset, 0) + 1
-    assert by == {"sales": 50, "orders": 30, "employees": 25, "inventory": 25, "biz": 20}
+    assert by == {"sales": 50, "orders": 34, "employees": 27, "inventory": 27, "biz": 22}
 
 
 def test_case_flags_consistent():
@@ -46,8 +48,14 @@ def test_case_flags_consistent():
             # gold 只判最后一轮，所以"整条题期望拒答"等价于"末轮该拒答"
             assert c.expect_turns and c.expect_turns[-1] == "refusal", c.id
         assert bool(c.alt_ground_truths) <= (c.category == "ambiguity"), c.id
+        # ambiguity 类现在有两条腿，判分方式不同：
+        #   alt_ground_truths  有多种合理解法，算对任一即过（8 条）
+        #   expect_kind=clarify 题目模糊到无法作答，必须反问（6 条，EV-B7）
+        # 后者没有 alt 是对的 —— 给它写一个 gold 就等于承认"猜某个口径"及格。
+        # 放宽这条时要保证"两种腿至少占一条"，否则 ambiguity 类会混进既无 alt
+        # 也无 kind 的普通题，那一类的准确率就没人知道在量什么了。
         if c.category == "ambiguity":
-            assert c.alt_ground_truths, c.id
+            assert c.alt_ground_truths or c.expect_kind == "clarify", c.id
 
 
 _RUNNER = EvalRunner(EVAL_DATA)
@@ -65,9 +73,13 @@ def test_ground_truth_executes(case):
 
 
 def test_ambiguity_alternatives_differ_from_main():
-    """歧义题至少有一个其他理解的答案和主答案不同，否则这道题测不出歧义。"""
+    """歧义题至少有一个其他理解的答案和主答案不同，否则这道题测不出歧义。
+
+    clarify 题不在其中：它们没有主答案，也没有备选答案 —— 正确行为是反问。
+    对它们跑这条断言等于要求"一个不存在的 gold 和一个不存在的 alt 不相等"。
+    """
     for c in ALL_CASES:
-        if c.category != "ambiguity":
+        if c.category != "ambiguity" or c.expect_kind == "clarify":
             continue
         outs, _ = _RUNNER.expected_all(c)
         assert any(not results_equal(o, outs[0]) for o in outs[1:]), c.id
@@ -130,14 +142,42 @@ def _runner(agent, factory):
 
 @pytest.mark.parametrize("agent", ["workflow", "react"])
 def test_oracle_pipeline_all_correct(agent):
-    """模型输出 = 标准答案时，全部 130 题必须判对：验证流水线与打分口径本身（含拒答题与 4 张表）。"""
-    runner = _runner(agent, lambda c: oracle_model(c.ground_truth, agent))
-    results = runner.run_all(ALL_CASES)
+    """模型输出 = 标准答案时，必须全部判对：验证流水线与打分口径本身
+    （含拒答题、负向题与 5 张表）。
+
+    用 oracle_factory 而不是自己拼 oracle_model：clarify 题的正确输出是反问、
+    不是执行 gold，那个分叉只能在工厂里有一份（两处各写一遍已经漂过一次）。
+
+    workflow 路排除 clarify：它是固定线性图，没有反问分支（见
+    `test_workflow_cannot_express_clarify`）。让假模型在它上面"不执行"是做不到的，
+    硬做只会得到 SyntaxError —— 那不叫判分链路坏了。
+    """
+    cases = [c for c in ALL_CASES
+             if agent != "workflow" or c.expect_kind != "clarify"]
+    runner = _runner(agent, oracle_factory(agent))
+    results = runner.run_all(cases)
     report = EvalReport(results)
     wrong = [r["case"].id for r in results if not r["correct"]]
     assert wrong == [] and report.correctness_rate() == 100.0
     assert report.reviewer_fix_rate() is None and report.infra_error_count() == 0
     assert all(r["tokens"] and r["duration_s"] is not None for r in results)
+
+
+def test_workflow_cannot_express_clarify():
+    """workflow agent 在 clarify 题上必然判错 —— 这是结构缺口，不是判分 bug。
+
+    它的图是 planner → codegen → executor → summarizer，codegen 的契约只有
+    「算出来」或「数据里没有，拒答」，**没有"问题不清楚，先反问问清"这条路**。
+    所以 clarify 的 6 条题在 workflow 上的准确率恒为 0：它只会挑一个口径算下去。
+
+    钉住这条不是为了记住"它不行"，而是让人知道这是已知缺口：
+    哪天 workflow 加了澄清分支，这条测试会红，那时应当改成"它也能反问"。
+    """
+    case = next(c for c in ALL_CASES if c.id == "neg_001")
+    r = _runner("workflow", oracle_factory("workflow")).run_single(case)
+    assert r["correct"] is False
+    assert r["executed"] is True          # 它算了，而不是反问
+    assert "没问清口径就猜着算" in (r["negative_why"] or "")
 
 
 def test_wrong_answer_scored_wrong():

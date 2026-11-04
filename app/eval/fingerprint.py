@@ -51,6 +51,10 @@ _AFFECTS_RESULTS = (
     # app/eval/cases*.py 由下面的前缀规则接管（题面变 = 换了卷子）
     "app/eval/case_model.py",  # 用例字段（ordered / percent_equiv / expect_refusal）
     "app/eval/comparator.py",  # 打分规则：容差、match_kind、拒答判定
+    # 负向题判据（EV-B7）：refusal / clarify / impossible 三类的通过条件。
+    # 归 A 不是"它读了模型输出"这么简单 —— 放宽一条（比如 clarify 允许已执行代码）
+    # 会让同一份回答从判错变判对，那正是 A 组的定义。
+    "app/eval/negative.py",
     "app/eval/validate.py",    # 校验规则决定哪些用例能进评测；放宽一条等于换了题集
     "app/eval/stats.py",       # 报告里的区间与稳定性数字（pass^k / flip_rate）由它算，改它就是改读数
     # 执行器：决定"把什么当作历史喂给下一轮"。原来记在 B（理由写"不属于被测系统"），

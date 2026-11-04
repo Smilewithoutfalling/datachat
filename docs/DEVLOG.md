@@ -5686,3 +5686,119 @@ Settings → Environments 建同名环境并配 Required reviewers。这条写�
 **没验的那一条说清楚**：`gh workflow run eval.yml -f tier=pr` 跑不了 —— 仓库没推、GitHub 上
 也没建 secret 与 environment。`on:` 的四个触发、`environment:` 的审批、`gh issue create`
 的权限，都要等推到远端之后才算验过。本机能证的是"档位判据在真报告上成立"和"YAML 结构没错"。
+
+## [123] 2026-11-04 · EV-B7 负向题：把"不该答"和"该问清楚"分开，真模型在 6 条澄清题上 0/6
+
+三张卡里 B7 是唯一真缺口（B5 已有 33 条多轮、A1/A2 在 `3ce6b77` 就做完了）。规格要的是
+`expect_kind`（字段早就有，但 183 条题全空）+ `negative.py` + 10 条新题。
+
+### 三种 kind 是三种产品行为，不是一个"拒答率"
+
+| kind | 题目长什么样 | 通过条件 |
+|---|---|---|
+| `refusal` | 数据里没有这个字段 | 按契约拒答（「无法回答：<原因>」，复用旧路径） |
+| `clarify` | 题目本身缺口径/指标/范围 | **不执行代码**，且答案在反问 |
+| `impossible` | 缺一个具体对象（字段/表） | 拒答，且原因里点名缺什么 |
+
+合成一个数会把「猜着算」和「问清再算」算成同一个分数。在「销售额怎么样」上直接给个数
+是越界 —— 用户拿到一个不知道口径的数字，比拿不到更糟。
+
+`impossible` 的"点名缺什么"需要一个机器可读的声明。从 gold 的拒答原因里切中文抽词不可行
+（要么抽到"数据"，要么把"成本或毛利"当一个词），所以加了 `missing_objects` 字段。
+`validate` 强制每个词都出现在 gold 里 —— 字段与 gold 不许各说各话，否则那条题永远判不过，
+是出题人的错不是模型的。
+
+### 真模型读数：impossible 4/4，clarify 0/6
+
+10 条题真跑（react，177 秒）：
+
+| 组 | 结果 |
+|---|---|
+| `impossible`（4 条） | **4/4**，全部拒答且点名了缺失对象 |
+| `clarify`（6 条） | **0/6**，全部 `executed=True` |
+
+6 条澄清题，模型一次都没反问，全部自己定了口径算下去：
+
+- 「这些订单的销售额怎么样？」→ 自己定了"已完成订单 + 2024 上半年"，给了月度/品类/渠道/城市四层拆解
+- 「最近的订单多吗？」→ 自己把"最近"取成最后一个自然月，还对比了前 5 个月均值
+- 「大家的工资高不高？」→ 自己给了分布，结论"中等偏上但差距较大"
+- 「哪个品类表现最好？」→ 自己选了销售额，**而且列了订单量和件数两个口径**，最后仍下结论
+
+最后一条值得单独说：它**意识到了多口径**（"若改按订单量看，服饰最多"），只是选择先给答案。
+这与"完全没意识到歧义"是两种能力状态，但判据都判错 —— 因为 `clarify` 的定义是"必须反问"。
+
+### 这条判据衡量的是"是否反问"，不是"答案质量"
+
+按规格实现，但要把口径写在读者眼前：那 6 个答案本身质量很高（数据准确、结构完整）。
+0% 不是"模型很差"，是"模型从不反问"。产品上要不要接受"给全所有口径 + 说明假设"作为
+clarify 的另一种通过形态，是个产品决策 —— 现在的判据只认反问。
+
+`ambiguity` 类现在混着两套判分标准：8 条 `alt_ground_truths`（算对任一即过）+
+6 条 `clarify`（必须反问）。分类按规格不新增（会改所有按类报表的分母），但这意味着
+「ambiguity 准确率」在拆开之前不能单独解读。留给 EV-D1 报告分层按 `expect_kind` 再拆。
+
+### 四个坑，每一个都会让"通过"变成"红"
+
+**1）oracle 假模型会把 clarify 判成"猜着算"。** oracle 的定义是"照 gold 执行"，
+而 clarify 的 gold 是 `result = None`（没有唯一答案），执行完 `executed=True`
+→ 判据判错 → 全量自检红 → PR 档永久红。给 `oracle_model` 加 `say` 参数：只回一句话、
+不执行代码。
+
+**2）`tier_check --require-all` 把 clarify 的"不执行"算成失败。** PR 档要求
+"全部判对且全部执行成功"，而 clarify 的正确形态就是执行率 0%。改成显式排除
+`expect_kind="clarify"`，打印文案也从"全部执行成功"改成"全部判对（N 条 clarify 按预期未执行）"。
+
+**3）oracle 工厂写了两份，只改一处就是假红。** `run_eval.py` 与
+`tests/test_eval_cases.py` 各拼一个 `model_factory`。加了 clarify 支持只改了 CLI，
+于是 **CLI 跑 193/193、pytest 跑 187/193**，看起来像判分坏了，实际是两个入口的假模型不同。
+抽成 `testing.oracle_factory(agent)`，两处共用。
+
+**4）报告白名单会把新字段丢掉。** `report.py` 逐字段取值，`negative_why` 没进白名单，
+于是判错的 6 条在 JSON 里 `negative_why: null` —— 有现场等于没有。同时 `print_details`
+把"判对但没执行"的题打成 `❌ 错误[agent]`，读起来像失败。两处都改了：白名单补
+`expect_kind` / `negative_why`；判对却带 error 的，打「💬 未执行，按预期反问」。
+
+### 指纹：一次性的、必须记的代价
+
+| 项 | 旧 | 新 |
+|---|---|---|
+| `evalset_sha12` | `4270d57adf72` | `5239d9ffec38` |
+| `affects_results_sha12` | `4b58e8b9fd80` | `410ba3147d15` |
+| `code_sha12` | — | `5f058c3bfe19` |
+
+变的三个原因都真的影响判定：`negative.py` 进 A 组（放宽一条判据就会让同一份回答从判错变判对）、
+`case_model.py` 加字段（改字节）、`cases_negative.py` 是新用例文件（`cases*` 前缀规则覆盖）。
+**所有历史报告的 `compare` 从此判 legacy** —— 这是加题的必然代价，不是 bug。
+`LEDGER` 里的 93.7% / 92.1% 分母是 183，题库现在是 193，下次全量跑出来的数不能直接与它相减。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_negative.py`（新） | **30 passed**（含 6 条 validate 新规则的反例） |
+| 受影响 5 个测试文件 | **287 passed**（2 条两路 oracle 另跑） |
+| 全量 oracle（193 题，react） | **193/193 判对，187/193 执行**（6 条 clarify 按预期不执行），422 秒 |
+| `tier_check --expect-n 193 --require-all` | 通过；`--expect-n 183` 正确判红 |
+| 真模型 10 条 | 4/10（impossible 4/4，clarify 0/6），177 秒 |
+| 两路 oracle（workflow + react） | **2 passed / 716 秒**：react 193/193；workflow 187/187（排除 6 条 clarify，见下） |
+
+### workflow agent 结构上没有"反问"这条路
+
+react 路 193/193 通过。workflow 路第一次是红的，报 `SyntaxError: invalid character '？'`：
+我给假模型加的「只回一句话」被它的 codegen 当成代码交给 executor 了。
+
+但这不是假模型写错了，是 workflow 的结构事实。它的图是固定的
+planner → codegen → executor → summarizer，codegen 的提示词只有两条出口：
+「算出 result」和「数据里没有就 `result = '无法回答：…'`」。**没有"先问清口径"**。
+所以 6 条 clarify 在 workflow 上恒为 0 分 —— 它只会挑一个口径算下去。
+
+没有掩盖这个缺口：workflow 路排除 clarify（假模型没法模拟一条不存在的路径），另加一条
+`test_workflow_cannot_express_clarify` 钉住它 —— 断言 workflow 在 `neg_001` 上
+`executed=True`、判错、`negative_why` 是"没问清口径就猜着算"。哪天 workflow 加了澄清分支，
+那条测试会红，那时应当把它改成"它也能反问"。
+
+两条既有不变式跟着改了，都保留原本的防护意义：
+`test_case_count_and_ids_unique` 的题数（150/33 → 160/33，逐表明细同步）；
+`test_ambiguity_alternatives_differ_from_main` 与 `test_case_flags_consistent` 排除 clarify
+（它们没有 gold 也没有 alt，"至少有一个 alt"对它们不成立 —— 但要求 ambiguity 类
+"alt 或 clarify 至少占一条"，不许混进什么都不占的普通题）。

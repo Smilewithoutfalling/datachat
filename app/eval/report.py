@@ -596,6 +596,10 @@ class EvalReport:
                 # 缺口 14b：应拒答题的越界标记（非拒答题恒为 None）
                 "refusal_leak": r.get("refusal_leak"),
                 "refusal_leak_why": r.get("refusal_leak_why"),
+                # 负向题（EV-B7）：expect_kind 说明这题按哪套判据判的，negative_why 是判错的现场。
+                # 只把这两列转存进报告 —— 判据在 negative.py（A 组），这里不产生判定。
+                "expect_kind": getattr(c, "expect_kind", "") or "",
+                "negative_why": r.get("negative_why") or "",
                 # 缺口 14a：应拒答题的回答形态（非拒答题恒为 None）。读的是 answer 本身，
                 # 所以只依赖报告层——runner 不动，`code_sha12` 不变。
                 "refusal_shape": (refusal_shape(r.get("answer"))
@@ -712,7 +716,13 @@ class EvalReport:
                       f"（重试{r['attempts']}次）")
             if not r.get("executed") and r.get("error"):
                 err_preview = r["error"].replace("\n", " ")[:120]
-                print(f"      ❌ 错误[{r.get('error_kind')}]: {err_preview}")
+                # 判对却带着 error，只有一种情况：这题的正确行为就是「不执行」（clarify）。
+                # 这里照旧打 ❌ 会让"通过"读起来像"失败"，而且那个 error 正是 agent
+                # 「没执行也没拒答」的自动提示 —— 对 clarify 来说那就是预期行为。
+                if r.get("correct"):
+                    print(f"      💬 未执行，按预期反问（{r.get('match')}）：{err_preview}")
+                else:
+                    print(f"      ❌ 错误[{r.get('error_kind')}]: {err_preview}")
             # 缺口 11：代码跑通了但没有可判分的 result —— 这不是"算错"，必须看得见
             if r.get("executed") and r.get("result_missing"):
                 print(f"      📭 没交卷[{r['result_missing']}]：判分取不到 result，按契约算错但数可能对")

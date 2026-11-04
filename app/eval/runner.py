@@ -9,10 +9,10 @@
   AnalysisResult 没有这三个字段，报告照跑，值恒为 off / 0 / []。
 """
 from app.core import analyze
-from app.core.result import refusal_from_answer
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, refusal_leak, results_equal
+from app.eval.negative import negative_verdict, refusal_text
 from app.eval.provenance import describe as describe_provenance
 from app.tools.dataset import copy_data, load_data
 from app.tools.sandbox import run_trusted
@@ -28,12 +28,13 @@ def usage_fields(u) -> dict:
 
 
 def _refused(res) -> bool:
-    """这一轮是否按契约拒答。ReAct 没调工具、直接在结论里拒答时 result 是空的，要看 answer 首行。"""
-    if is_refusal(res.result):
-        return True
-    if res.executed:
-        return False
-    return is_refusal(refusal_from_answer(res.answer))
+    """这一轮是否按契约拒答。实现只有一份：negative.refusal_text。
+
+    原来这里自己写了一版（result 优先、没执行才看 answer 首行），B7 需要同一判断
+    的**文本**（要查原因里有没有点名缺失对象），于是复制了逻辑。两份判断迟早会漂，
+    改成一份：这里只关心"有没有"，那边返回文本。
+    """
+    return refusal_text(res) is not None
 
 
 def _merge_usage(usages: list):
@@ -179,6 +180,9 @@ class EvalRunner:
             "memory_mode": "off", "history_tokens": 0, "memory_trimmed": [],
             # 缺口 14b：拒答越界。所有题都有这两个键（非拒答题恒为 None / ""），形状稳定
             "refusal_leak": None, "refusal_leak_why": "",
+            # 负向题判错的现场（EV-B7）：只写"判错"等于让人回去翻原始输出。
+            # 非负向题恒为空串，形状稳定。
+            "negative_why": "",
         }
 
         # 1. ground truth
@@ -247,19 +251,28 @@ class EvalRunner:
         })
 
         # 3. 打分：直接用 analyze 的结构化结果
+        out["executed"] = bool(res.executed)
         if res.executed:
-            out["executed"] = True
             out["actual"] = res.result
+
+        # 负向题（EV-B7）走自己的判据，不走 score_detail：clarify 要看 answer 与 executed，
+        # 而 score_detail 只拿得到 result 一个值。硬塞进去等于让一个纯函数依赖整个 res。
+        # expect_kind 为空时这里不触发，旧题路径逐字节不变。
+        if case.expect_kind:
+            verdict = negative_verdict(res, case)
+            out["match"], out["negative_why"] = verdict["match"], verdict["why"]
+            out["correct"] = verdict["match"] is not None
+        elif res.executed:
             out["match"] = score_detail(res.result, case, expected_list)
             out["correct"] = out["match"] is not None
-            if out["correct"] and case.expect_refusal:
-                # 缺口 14b：result 是按契约拒答，但 answer 仍把问题答了 —— 用户看到的是推断
-                # 结论，报告却记"正确拒答"，等于报告在撒谎。判错，并清掉 match
-                # （match 的语义是"靠哪一层判对"，判错就没有层级可言）。
-                leak, why = refusal_leak(res.answer)
-                out["refusal_leak"], out["refusal_leak_why"] = leak, why
-                if leak:
-                    out["correct"], out["match"] = False, None
+
+        # 缺口 14b：越界检查。clarify 也要查 —— 一边说"口径没说清"，一边给出百分比分布，
+        # 用户看到的仍是推断结论，和拒答后又给分析是同一件事。
+        if out["correct"] and (case.expect_refusal or case.expect_kind == "clarify"):
+            leak, why = refusal_leak(res.answer)
+            out["refusal_leak"], out["refusal_leak_why"] = leak, why
+            if leak:
+                out["correct"], out["match"] = False, None
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):

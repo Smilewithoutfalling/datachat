@@ -50,6 +50,13 @@ class EvalCase:
     # ---- 负向题三分类（EV-B7）。为空且 expect_refusal=True 时等价于 "refusal" ----
     expect_kind: str = ""          # "refusal" | "clarify" | "impossible" | ""
 
+    missing_objects: list = field(default_factory=list)
+    # impossible 题缺什么（列名 / 字段名 / 表名）。判据要求拒答原因里必须点名其中之一。
+    #
+    # 为什么不从 ground_truth 的拒答原因里抽：那是拿字符串切中文，抽出来的词要么太宽
+    # （"数据"）要么太窄（把"成本或毛利"当成一个词）。出题人本来就知道缺什么，直接写。
+    # validate 会强制每个词都出现在 gold 的拒答原因里 —— 字段与 gold 不许各说各话。
+
     # ---- 脏数据/扰动题（EV-B6） ----
     gold_dataset: str = ""
     # gold 执行时用的数据文件；空 = 与 dataset 相同。
