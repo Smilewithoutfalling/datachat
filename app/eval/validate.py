@@ -81,6 +81,17 @@ def validate_cases(cases: list) -> list[str]:
         if c.no_history_truth and not c.turns:
             errors.append(f"{c.id}: no_history_truth 只在多轮题上有效（turns 为空）")
 
+        # 2c. recall_turn（EV-B5 跨轮数字断言）：只对多轮题有意义，且指向的必须是
+        #     最后一轮**之前**的某轮 —— 指向末轮等于拿自己当证据，永远过、永远测不到。
+        #     写成负数 / 越界的静默失效方式与 expect_turns 拼错一样：断言根本不触发。
+        rt = getattr(c, "recall_turn", 0)
+        if rt:
+            if not c.turns:
+                errors.append(f"{c.id}: recall_turn 只在多轮题上有效（turns 为空）")
+            elif not (1 <= rt <= len(c.turns) - 1):
+                errors.append(f"{c.id}: recall_turn={rt} 越界，必须 1 <= n <= {len(c.turns) - 1}"
+                              f"（指向末轮等于自己当证据）")
+
         # 3. 数据集：名字必须已知，或是一个存在的绝对路径
         for field_name in ("dataset", "gold_dataset"):
             value = getattr(c, field_name)

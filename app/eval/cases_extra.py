@@ -334,3 +334,29 @@ INV_CASES = [
 ]
 
 EXTRA_CASES = ORDER_CASES + EMP_CASES + INV_CASES
+
+
+# ============================================================
+# 扰动题（EV-B6）：agent 看脏表，gold 在干净表上算。
+# 文件在 tests/fixtures/perturb/（进仓库，CI oracle 也能跑）；
+# 由 scripts/perturb.py 生成 —— **别手改 CSV**，改了 evalset 指纹不会动
+# （这些路径不在 DATASETS 里），两份报告会被判"可比"。要换形态就重跑生成器。
+# ============================================================
+import os as _os
+
+_PERT = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+    _os.path.abspath(__file__)))), "tests", "fixtures", "perturb")
+
+PERTURB_CASES = [
+    # total_row：末尾的「合计」行会在 groupby 后自成一组且金额最大 ——
+    # 不剔除汇总行的模型会把「合计」当成销售额最高的地区，当场暴露
+    EvalCase(id="pert_001", category="aggregation",
+             question="哪个地区的总销售额最高？",
+             ground_truth="result = (df['units'] * df['price']).groupby(df['region']).sum().idxmax()",
+             keywords=["groupby", "sum"],
+             dataset=_os.path.join(_PERT, "agg_001.total_row.dirty.csv"),
+             gold_dataset=_os.path.join(_PERT, "agg_001.total_row.clean.csv"),
+             variant_of="agg_001", variant_kind="total_row"),
+]
+
+EXTRA_CASES = ORDER_CASES + EMP_CASES + INV_CASES + PERTURB_CASES

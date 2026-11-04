@@ -47,6 +47,14 @@ class EvalCase:
     #   - 指代对象是上一轮的**计算结果**（如"那个部门""这 3 个地区"），脱离历史无法定义
     #     一个"最直白的答案"，写不出 no_history 就等于没有对照，不能假装有。
 
+    recall_turn: int = 0
+    # 跨轮数字断言（EV-B5 规格的 mt_007 附加项）。0 = 不启用；n（1 起头，且 < len(turns)）
+    # = 最后一轮 answer 里的"有分量"数字必须全部能在第 n 轮的 result_text 里找到
+    # （用 consistency/grounding 的抽取与容差，年份自动豁免）。
+    # 测的是"长会话后回头引用旧数字"——模型复述错第 1 轮的数，结果层完全测不到：
+    # gold 是独立重算的，第 3 轮哪怕把第 1 轮的数记错，只要逻辑对照样判对。
+    # 找不到 → correct=False，原因写 recall_why。
+
     # ---- 负向题三分类（EV-B7）。为空且 expect_refusal=True 时等价于 "refusal" ----
     expect_kind: str = ""          # "refusal" | "clarify" | "impossible" | ""
 

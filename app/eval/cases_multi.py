@@ -413,4 +413,21 @@ MULTI_CASES = [
              keywords=["status", "已完成"],
              # 末轮要撤掉 APP、保住已完成 —— 单纯"把历史全部叠加"会算成 APP 子集，判错
              expect_turns=["any", "any", "inherit:已完成"]),
+
+    # ---- V 长会话回头引用（EV-B5 规格的 mt_007 附加断言：recall_turn）----
+    # 第 3 轮要复述第 1 轮的数字，且中间隔了一轮换过口径（华东）——
+    # 把"华东"继承下来的会算成华东总额，correctness 判错；数字复述错的，
+    # result 层照样对（gold 独立重算），由 recall_turn=1 抓。
+    EvalCase(id="mul_034", category="multi_turn", dataset="sales", gold_kind="scalar",
+             turns=["全渠道的总销售额是多少元？",
+                    "只看华东地区呢？",
+                    "回到最初的问题——全渠道总销售额是多少元？把那个数字直接再报一遍。"],
+             question="回到最初的问题——全渠道总销售额是多少元？把那个数字直接再报一遍。",
+             ground_truth="s = df['units'] * df['price']; result = int(s.sum())",
+             # 豁免：「那个数字」指第 1 轮的计算结果，脱离历史没有指代对象；
+             # 且本题考的是"复述对不对"，单轮重算出同一个值测不出复述能力
+             no_history_truth="",
+             keywords=["units", "price", "sum"],
+             expect_turns=["exec", "exec", "exec"],
+             recall_turn=1),
 ]

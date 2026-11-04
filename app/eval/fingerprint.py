@@ -109,6 +109,10 @@ _EXEMPT = {
     # **只读**——不产生判定、不进模型输入、不写报告字段。改它不会让任何一题从错变对，
     # 也不会改变任何一次运行的输入；它连 analyze 的返回结果都只是拿来看 executed 的。
     "app/eval/egress.py": "出境审计，只读 prompt，不产生判定也不进模型输入",
+    # 证据一致性（EV-B4）：对 analyze 的返回结果做三条断言（答案↔结果/图↔结果/时间词↔代码）。
+    # **只读 res，不碰执行路径**——runner 在打分之后才调它，failures 只作 warnings 展示、
+    # 升级门槛（130 题误报率 <10%）达成前不改 correct。改它不会改变任何一次运行的输入与结果。
+    "app/eval/consistency.py": "证据一致性，只读 res 的 warnings 检查，不改判分",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {
@@ -313,7 +317,8 @@ def render_system(case, datasets: dict, frame_cache: dict | None = None,
 
     cache = frame_cache if frame_cache is not None else {}
     name = getattr(case, "dataset", "sales")
-    path = datasets[name]
+    # 扰动题（EV-B6）的 dataset 是绝对路径，不在 DATASETS 里 —— 直接当路径用
+    path = datasets.get(name, name)
     if name not in cache:
         data, _desc = load_data(path)
         retr = load_retriever(path)

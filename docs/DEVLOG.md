@@ -5866,3 +5866,82 @@ planner → codegen → executor → summarizer，codegen 的提示词只有两�
 | `tests/test_entrypoints.py` | **5 passed**（修掉 B7 留下的过期断言） |
 | `tier_check` 语义 | egress.py 进 `_EXEMPT`（B 组），改它不动 `affects_results` |
 | 真实审计跑（sample.csv，两 agent） | 修复后 0 findings；修复前抓到 chart 绝对路径 2 处 |
+
+## [125] 2026-11-04 · EV-B5/B4/B6 三卡连做：跨轮断言、证据一致性、扰动生成器
+
+批 1 收官。三张卡一次过：B5 补文档 + 跨轮数字断言；B4 新建三条一致性断言（warnings-only）；
+B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5 条冒烟 5/5。
+
+### EV-B5 多轮（收尾）
+
+题量早已超额（33 条，规格下限 8），本卡补两件事：
+
+- **`recall_turn` 跨轮数字断言**（规格 mt_007 的附加项）：末轮 answer 里的"有分量"数字必须
+  能在前几轮 `result_text` 里找到（复用 `grounding.unverified_numbers`：千分位/%/万/亿/容差，
+  年份自动豁免）。为什么需要它：gold 是独立重算的，模型把第 1 轮的数**记错**、末轮逻辑对，
+  result 层照样判对 —— 只有这条路抓得住"长会话后复述错旧数字"。
+  与规格字面（"∈ 第 1 轮"）的偏差：证据取**末轮之前全部轮次**——最终答案常同时复述几个
+  轮次的数，只认第 1 轮会把第 2 轮的合法数字误判成编造；幻觉失败两种口径都抓得到。
+  失败 → `correct=False`，原因写 `recall_why`，汇总在 `summary.multi_turn.recall`。
+- **`mul_034`**（3 轮）：全表总额 → 只看华东（换口径）→ 回头要第 1 轮的数。
+  双重考点：把"华东"继承下来会算成华东总额（correctness 判错），数字复述错由 recall 抓。
+  数据只覆盖 2024 上半年，原计划的"上半年"过滤会退化成全表，所以改成全表/华东对比。
+- **`docs/eval/memory.md`**：34 条的分组、加题七条硬规则、recall_turn 用法与已知偏差。
+
+### EV-B4 证据一致性
+
+- **`app/eval/consistency.py`**：`check_consistency(res, case)` 三条断言：
+  1. `ANSWER_RESULT_MISMATCH` —— answer 的数字必须能在 result_text / str(result) 里找到。
+     数字抽取**复用 `grounding.py`**（不写第二份）。与 service 的 `unverified_numbers`
+     有意不同：**证据不含 question** —— 题面里的数抄进答案不算核实。
+     规格陷阱三条对应：12% 放行（grounding 的 12↔0.12 候选本来就有）、年份豁免
+     （`_significant` 跳过 1900–2100 整数）、时间断言只看代码。
+  2. `CHART_RESULT_MISMATCH` —— 读 `res.chart_check_codes`。**B3（chart_check）尚未落地，
+     恒 not applicable，不装作检查过**；B3 落地后零改动生效。
+  3. `TIME_FILTER_MISMATCH` —— 问句含 本月/上月/今年/去年/本季度/上季度/Q[1-4]/\d{4}年
+     时，代码里必须有时间过滤形态（`>=`/`<=`/`between`/`resample`/dt.year|month|quarter/
+     4 位年份字面量）。答案写"今年销售额 120 万"写得再像样，代码没过滤就是没过滤。
+- **升级门槛照规格执行**：只作 warnings 展示（`summary.evidence`，`verdict: "warnings_only"`，
+  `false_positive_note` 写明 130 题误报率 <10% 才许接判分）。`evidence.failures` 不改 correct。
+- 归 B 组（`_EXEMPT`）—— 只读 res，不碰执行路径。
+- `tests/test_consistency.py` 12 条（规格 9 条下限 + 3 条陷阱钉子）。12 passed。
+
+### EV-B6 扰动
+
+- **`scripts/perturb.py`**：9 种变体（规格表全量），纯 csv 读写（pandas 读回写会自作主张
+  改类型，扰动就测不到原始形态）。干净表/脏表成对产出，stdout 打 EvalCase 片段——
+  **不自动写进 cases.py**，id 与指纹变更由人显式过一次。
+- 两个实现级发现：
+  - **千分位变体在大数值表上才有意义**：sales 全表 <1000，f"{120:,}"="120" 等于没扰动。
+    orders（pay_amount 到 14,379）才测得到。
+  - **orders 有空单元格**（未支付订单的金额）：`_numeric_cols` 改为"非空值全是数字即算"，
+    变换时空值保持空、合计按 0 —— 与真实导出一致。
+- **`gold_dataset` 之前只是声明、没人消费**：runner 的 gold 一直跑 `case.dataset`。
+  补了 `_gold_source`（gold 走干净表，agent 看脏表），`path_for`/`frame`/`render_system`
+  三处允许 dataset 是直接路径。没声明的题回退同表，旧行为逐字节不变。
+- **`pert_001` 进题库**（total_row 变体的 agg_001）：fixture 在 `tests/fixtures/perturb/`
+  **进仓库**（CI 的 PR 档 oracle 没有预生成文件也能跑）。合计行 groupby 后自成一组且
+  金额最大 —— 不剔除汇总行的模型会答「合计」，当场暴露。题库 194 → **195**。
+- **`scripts/eval/decay.py`**：报告行新增 `variant_of`/`variant_kind` 两列，按 kind 分组
+  算 pass_rate 与 decay_pp，基线取同报告里被指向的原题。
+- **真模型冒烟（规格：80 次太贵，先 5 条）**：基线 agg_001 + total_row / merged_header /
+  two_row_header / date_compact 各 1 跑，**5/5 判对**（two_row_header 那次模型自己说明
+  "已剔除文件中重复的表头行，共 60 条有效记录"）。衰减 +0.0pp —— 样本 1 只能证明链路通，
+  放量到 20×4 才有曲线。
+
+### 指纹
+
+`evalset_sha12` `5239d9ffec38` → **`98f454fe21e6`**（+mul_034 +pert_001）；A 组改动
+（runner 的 gold_dataset / recall / evidence 接线）：
+`affects_results_sha12` `138e1b9e09e0` → **`6b9b00795dcc`**，`code_all_sha12` **`a6fdf05f5651`**。
+历史报告从此判 legacy（预期内，批 1 每张卡都有此代价）。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_consistency.py`（新） | **12 passed** |
+| 受影响 9 个测试文件 | **371 + 2 = 373 passed**（修掉 pert_001 引起的两条过期断言） |
+| oracle 单题（pert_001 / mul_034 × react+workflow） | 4/4 判对 |
+| 真模型扰动冒烟（5 跑） | **5/5**，`decay.py` 读表正常 |
+| `validate_cases(ALL_CASES)` | 0 errors |

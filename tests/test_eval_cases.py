@@ -23,18 +23,21 @@ def test_case_count_and_ids_unique():
     assert len(set(ids)) == len(ids)
     single = [c for c in ALL_CASES if not c.turns]
     multi = [c for c in ALL_CASES if c.turns]
-    # 2026-11-04：+10 负向（EV-B7）：orders 4（支付方式 1 + 3 条澄清）、employees 2、
-    # inventory 2、biz 2。单轮 150 → 160。
-    assert (len(single), len(multi)) == (160, 33), "单轮 160（含 biz 22 + 负向 10）+ 多轮 33"
+    # 2026-11-04：+10 负向（EV-B7）→ 单轮 160；+1 长会话回头引用（EV-B5 mul_034）→ 多轮 34；
+    # +1 扰动题（EV-B6 pert_001）→ 单轮 161。
+    assert (len(single), len(multi)) == (161, 34), "单轮 161（含 biz 22 + 负向 10 + 扰动 1）+ 多轮 34"
     by = {}
     for c in single:
-        by[c.dataset] = by.get(c.dataset, 0) + 1
-    assert by == {"sales": 50, "orders": 34, "employees": 27, "inventory": 27, "biz": 22}
+        # 扰动题（EV-B6）的 dataset 是 fixture 路径，不在 DATASETS 里 —— 按 variant_kind 归 "pert"
+        key = "pert" if c.variant_kind else c.dataset
+        by[key] = by.get(key, 0) + 1
+    assert by == {"sales": 50, "orders": 34, "employees": 27, "inventory": 27, "biz": 22, "pert": 1}
 
 
 def test_case_flags_consistent():
     for c in ALL_CASES:
-        assert c.dataset in DATASETS, c.id
+        # dataset 三选一：DATASETS 的键 / 存在的绝对路径（EV-B6 扰动题的 fixture）
+        assert c.dataset in DATASETS or (os.path.isabs(c.dataset) and os.path.exists(c.dataset)), c.id
         # 原来的写法是一行等价：expect_refusal == (category == "refusal")。那条不变式
         # 立在只有单轮拒答题的时候；mul_029（两轮都该拒答）加进来之后它挡住了合法用例——
         # 多轮必须 category="multi_turn"，而 gold 一旦是「无法回答：…」又必须标 expect_refusal，

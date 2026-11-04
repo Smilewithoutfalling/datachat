@@ -497,6 +497,7 @@ class EvalReport:
             "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
             "memory": self.memory_block(),
             "multi_turn": self.multi_turn_block(),
+            "evidence": self.evidence_block(),
             "chart_smoke": self.chart_smoke(),
         }
 
@@ -536,6 +537,42 @@ class EvalReport:
             "rate": (total - sum(failed.values())) / total * 100 if total else None,
             "by_kind": {k: {"checked": checked[k], "failed": failed[k]} for k in sorted(checked)},
             "fails": fails,
+            # 跨轮数字断言（EV-B5）：recall_turn 题的通过情况与失败现场
+            "recall": self._recall_block(ms),
+        }
+
+    @staticmethod
+    def _recall_block(ms: list[dict]) -> dict | None:
+        """recall_turn 题的判定汇总；没有启用该断言的题时为 None（键仍稳定存在与否由 multi_turn 是否为 None 决定）。"""
+        rs = [r for r in ms if getattr(r["case"], "recall_turn", 0)]
+        if not rs:
+            return None
+        fails = [{"id": r["case"].id, "why": r.get("recall_why") or ""}
+                 for r in rs if r.get("recall_why")]
+        return {"cases": len(rs), "failed": len(fails), "fails": fails}
+
+    def evidence_block(self) -> dict:
+        """证据一致性（EV-B4）的批次汇总。**只作 warnings 展示，不进正确率**。
+
+        升级门槛（规格）：连续 130 题实测误报率 <10% 后才允许接进判分；门槛达成前，
+        这里的 failures 只是"值得人看一眼"。误报率本身怎么测：抽 failures 逐条人审，
+        审出来的误报写进 false_positive_note —— 这个字段就是留给那句话的。
+        """
+        applicable = [r for r in self.results if (r.get("evidence") or {}).get("applicable")]
+        by_code = Counter()
+        fails = []
+        for r in applicable:
+            for code in (r.get("evidence") or {}).get("failures") or []:
+                by_code[code] += 1
+                fails.append({"id": r["case"].id, "code": code,
+                              "detail": (r["evidence"].get("detail") or {})})
+        return {
+            "applicable": len(applicable),
+            "flagged": sum(by_code.values()),
+            "by_code": dict(by_code),
+            "fails": fails,
+            "verdict": "warnings_only",
+            "false_positive_note": "升级硬判定前需连续 130 题实测误报率 <10%（EV-B4 规格），当前只作展示",
         }
 
     def memory_block(self) -> dict:
@@ -611,6 +648,13 @@ class EvalReport:
                 "turns": list(c.turns) if c.turns else [],
                 "turn_answers": [a[:800] for a in (r.get("turn_answers") or [])],
                 "turn_status": r.get("turn_status") or [],
+                # 跨轮数字断言（EV-B5）：失败原因，非 recall 题恒为 ""
+                "recall_why": r.get("recall_why") or "",
+                # 证据一致性（EV-B4）：三条断言的判定，warnings-only
+                "evidence": r.get("evidence") or {"applicable": False, "failures": [], "detail": {}},
+                # 扰动题（EV-B6）：decay.py 按 variant_kind 分组算衰减，行里不带就得回题库翻
+                "variant_of": getattr(c, "variant_of", "") or "",
+                "variant_kind": getattr(c, "variant_kind", "") or "",
                 # 可还原的结构化结果：比较器改了之后可以用 run_eval.py --rescore 离线重新打分（B26）
                 "expected_obj": dump_obj(r.get("expected")),
                 "actual_obj": dump_obj(r.get("actual")) if r.get("executed") else None,
@@ -648,8 +692,22 @@ class EvalReport:
         mt = s.get("multi_turn") or {}
         if mt.get("cases"):
             by = "  ".join(f"{k}:{v['failed']}/{v['checked']}" for k, v in mt["by_kind"].items())
-            print(f"  多轮: {mt['cases']} 题 {mt['turns']} 轮   约束满足 {self._pct(mt['rate'])}"
-                  f"  ({mt['checked'] - mt['failed']}/{mt['checked']})   按类型 {by}")
+            line = (f"  多轮: {mt['cases']} 题 {mt['turns']} 轮   约束满足 {self._pct(mt['rate'])}"
+                    f"  ({mt['checked'] - mt['failed']}/{mt['checked']})   按类型 {by}")
+            rc = mt.get("recall")
+            if rc:
+                line += f"   跨轮数字 {rc['cases'] - rc['failed']}/{rc['cases']}"
+            print(line)
+            for it in (rc or {}).get("fails") or []:
+                print(f"      🔁 {it['id']}: {it['why']}")
+        ev = s.get("evidence") or {}
+        if ev.get("flagged"):
+            codes = "  ".join(f"{k}:{v}" for k, v in sorted(ev.get("by_code", {}).items()))
+            print(f"  证据一致性（仅提示，不改分）: {ev['flagged']} 条   {codes}")
+            for it in ev.get("fails", [])[:8]:
+                print(f"      ⚠ {it['id']}[{it['code']}]")
+            if len(ev.get("fails", [])) > 8:
+                print(f"      …另有 {len(ev['fails']) - 8} 条")
         print(f"  总用例: {self.total}")
         print("=" * 60)
 

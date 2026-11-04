@@ -8,10 +8,13 @@
   报告能自证"这一轮确实开了记忆、历史确实被裁过"。用 getattr 兜底——批 1 合入之前
   AnalysisResult 没有这三个字段，报告照跑，值恒为 off / 0 / []。
 """
+import os
+
 from app.core import analyze
 from app.eval.chart_smoke import chart_row
 from app.eval.cases import DATASETS, EvalCase
 from app.eval.comparator import is_refusal, match_kind, refusal_leak, results_equal
+from app.eval.consistency import check_consistency
 from app.eval.negative import negative_verdict, refusal_text
 from app.eval.provenance import describe as describe_provenance
 from app.tools.dataset import copy_data, load_data
@@ -86,9 +89,12 @@ class EvalRunner:
         self.max_attempts = max_attempts
 
     def path_for(self, case: EvalCase) -> str:
-        if case.dataset not in self.datasets:
-            raise KeyError(f"未知数据表 {case.dataset!r}，可选：{', '.join(self.datasets)}")
-        return self.datasets[case.dataset]
+        if case.dataset in self.datasets:
+            return self.datasets[case.dataset]
+        # EV-B6 扰动题：dataset 是直接路径（脏表），不在 DATASETS 里
+        if os.path.isabs(case.dataset) and os.path.exists(case.dataset):
+            return case.dataset
+        raise KeyError(f"未知数据表 {case.dataset!r}，可选：{', '.join(self.datasets)}")
 
     def frame(self, name: str = "sales"):
         """单表返回 DataFrame，多表（目录 / 路径列表）返回 {表名: DataFrame}。
@@ -96,26 +102,47 @@ class EvalRunner:
         走 load_data 而不是 read_csv：`analyze()` 早就支持多表（代码里用 df['表名']），
         但评测这一侧一直只 read_csv，所以 130 道题全是单表——多表能力从没被测过。
         缓存的是原始数据，调用方要改必须先 copy（见 _run_code），多道题共用一份。
+        缓存键是**解析后的路径**：`_run_code` 允许直接传路径（扰动题的 gold_dataset），
+        按名字缓存会在路径与名字混用时读错表。
         """
-        if name not in self._frames:
-            data, _ = load_data(self.datasets[name])
-            self._frames[name] = data
-        return self._frames[name]
+        path = self.datasets.get(name, name)
+        if path not in self._frames:
+            data, _ = load_data(path)
+            self._frames[path] = data
+        return self._frames[path]
 
     @property
     def df(self):
         return self.frame("sales")
 
     def _run_code(self, code: str, dataset: str = "sales"):
-        """执行标准答案（可信代码，本进程执行，不走子进程沙箱），返回 (result, error)。"""
+        """执行标准答案（可信代码，本进程执行，不走子进程沙箱），返回 (result, error)。
+
+        `dataset` 可以是 DATASETS 的键，也可以是直接路径 —— EV-B6 扰动题的
+        `gold_dataset` 是 outputs/ 下的绝对路径，不在 DATASETS 里。
+        """
         result, error = run_trusted(code, copy_data(self.frame(dataset)))
         return result, error or None
 
+    def _gold_source(self, case: EvalCase) -> str:
+        """gold 用哪份数据：声明了 gold_dataset（干净表）就用它，否则与 agent 同表。
+
+        扰动题的设计是 agent 看脏表、gold 在干净表上算 —— "答错"才归因到
+        数据处理而不是期望值本身（case_model.py 的字段注释）。空值回退到
+        `path_for(case)`，183 条旧题行为逐字节不变。
+        """
+        return case.gold_dataset or self.path_for(case)
+
     def expected_all(self, case: EvalCase):
-        """标准答案及歧义题的其他合理答案。返回 ([结果...], 第一个报错)。"""
+        """标准答案及歧义题的其他合理答案。返回 ([结果...], 第一个报错)。
+
+        gold 在 `gold_dataset`（干净表）上跑 —— EV-B6 扰动题 agent 看脏表；
+        没声明的题回退到 agent 同表，旧行为不变。
+        """
         outs, first_err = [], None
+        gold_src = self._gold_source(case)
         for code in [case.ground_truth, *case.alt_ground_truths]:
-            r, err = self._run_code(code, case.dataset)
+            r, err = self._run_code(code, gold_src)
             if err:
                 first_err = first_err or err
             else:
@@ -183,6 +210,11 @@ class EvalRunner:
             # 负向题判错的现场（EV-B7）：只写"判错"等于让人回去翻原始输出。
             # 非负向题恒为空串，形状稳定。
             "negative_why": "",
+            # 证据一致性（EV-B4）：三条断言，**只作 warnings 展示不改 correct**
+            # （升级门槛见 consistency.py 模块 docstring）。全部题都有这个键，形状稳定。
+            "evidence": {"applicable": False, "failures": [], "detail": {}},
+            # 跨轮数字断言（EV-B5 mt_007 附加项）：recall_turn 题专用，其余恒为 ""。
+            "recall_why": "",
         }
 
         # 1. ground truth
@@ -197,6 +229,7 @@ class EvalRunner:
         turns = list(case.turns) if multi else [case.question]
         history = [] if multi else None
         turn_answers, turn_status, durations, usages = [], [], [], []
+        turn_result_texts = []   # 每轮的 result_text（recall_turn 断言要用）
         memory_by_turn = []      # [(mode, history_tokens, [trimmed...]), ...]
         res = None
         for i, q in enumerate(turns):
@@ -210,6 +243,7 @@ class EvalRunner:
             turn_status.append(self._turn_status(res, expect))
             answer = res.answer or ""
             turn_answers.append(answer)
+            turn_result_texts.append(getattr(res, "result_text", "") or "")
             if res.timings.get("total"):
                 durations.append(res.timings["total"])
             usages.append(res.usage)
@@ -273,6 +307,25 @@ class EvalRunner:
             out["refusal_leak"], out["refusal_leak_why"] = leak, why
             if leak:
                 out["correct"], out["match"] = False, None
+
+        # 跨轮数字断言（EV-B5，规格 mt_007 的附加项）：最后一轮 answer 里的"有分量"数字
+        # 必须能在第 recall_turn 轮的 result_text 里找到。这是结果层测不到的失败——
+        # gold 是独立重算的，模型把第 1 轮的数记错、只要最后一轮逻辑对照样判对。
+        # 证据取**最后一轮之前**的全部 result_text 而不只第 n 轮：最终答案常常同时复述
+        # 几个轮次的数（"合计 X，其中 6 月 Y"），只认第 n 轮会把这些误判成编造；
+        # 而幻觉了旧数字的失败样样都抓得到。这与规格字面（"∈ 第 1 轮"）的偏差记在
+        # memory.md。没有 result_text 的轮次（执行失败）等于没有证据，此时不断言。
+        if getattr(case, "recall_turn", 0) and multi and out["correct"]:
+            from app.core.grounding import unverified_numbers
+            src = "\n".join(t for t in turn_result_texts[:len(turn_result_texts) - 1] if t)
+            missing = unverified_numbers(res.answer or "", [src]) if src else []
+            if missing:
+                out["correct"], out["match"] = False, None
+                out["recall_why"] = (
+                    f"答案里的数字 {missing} 在前几轮的 result_text 里都找不到（recall_turn={case.recall_turn}）")
+
+        # 证据一致性（EV-B4）：三条断言，只作 warnings 展示不改 correct（升级门槛见模块 docstring）
+        out["evidence"] = check_consistency(res, case)
         return out
 
     def run_all(self, cases: list[EvalCase] = None, verbose: bool = False):
