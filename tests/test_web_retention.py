@@ -183,12 +183,20 @@ def test_incremental_vacuum_is_noop_on_none_mode(tmp_path):
 # ------------------------------------------------------------------ 记忆开关接线
 def test_settings_memory_mode_roundtrip(home, monkeypatch):
     c = client(home, ScriptedChatModel(replies=[], calls=[]))
-    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "off", "env": None}
+    monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
+    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "off", "env": None,
+                                                              "rewrite": False}
     r = c.put("/settings", json={"memory_mode": "state"}, headers=H)
-    assert r.status_code == 200 and r.json()["memory"] == {"mode": "state", "setting": "state", "env": None}
-    assert c.put("/settings", json={"memory_mode": "full"}, headers=H).status_code == 422
+    assert r.status_code == 200 and r.json()["memory"] == {"mode": "state", "setting": "state", "env": None,
+                                                           "rewrite": False}
+    # 批 4a：full 是独立一档（原先 422），不认识的值仍是 422
+    r = c.put("/settings", json={"memory_mode": "full"}, headers=H)
+    assert r.status_code == 200 and r.json()["memory"]["mode"] == "full"
+    assert c.put("/settings", json={"memory_mode": "bogus"}, headers=H).status_code == 422
+    assert c.put("/settings", json={"memory_mode": "state"}, headers=H).status_code == 200
     monkeypatch.setenv("DATACHAT_MEMORY", "off")
-    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "state", "env": "off"}
+    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "state", "env": "off",
+                                                              "rewrite": False}
 
 
 def test_state_mode_end_to_end_with_failed_turn(home, sample_path):

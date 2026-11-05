@@ -2,6 +2,8 @@
 
 off：什么都不组装，history 照旧走 user / assistant 消息（service.history_messages），只额外记 history_tokens。
 state：历史渲染成数据块（M3 / M5）+ 工作状态块（M1），按 M12 的预算裁剪；ReAct 的消息里不再回灌历史。
+full：同 state；完整历史超过本轮上限时先遮罩（M4，app/memory/compact.py），遮罩后仍超才丢最早的轮次。
+      没超上限时 full 与 state 的输出逐字节相同。
 """
 from __future__ import annotations
 
@@ -25,8 +27,9 @@ class MemoryContext:
     snaps: list = field(default_factory=list)     # state 时本轮之前的快照（B3 get_turn 读它）；off 时为空
 
     def tools(self) -> list:
-        """记忆给 ReAct 追加的工具：state 且本轮之前有轮次时是 [get_turn]，否则 []（off 工具表不变，P8）。"""
-        if self.mode != "state" or not self.snaps:
+        """记忆给 ReAct 追加的工具：state / full 且本轮之前有轮次时是 [get_turn]，否则 []（off 工具表不变，P8）。
+        get_turn 读的是原始快照（self.snaps），不是遮罩后的。"""
+        if self.mode == "off" or not self.snaps:
             return []
         from app.memory.recall import make_tool
         return [make_tool(self.snaps)]
@@ -44,9 +47,9 @@ def off_context(history, history_messages) -> MemoryContext:
                          history_tokens=B.estimate_tokens("".join(t for _, t in msgs)))
 
 
-def state_context(history, token_budget: int) -> MemoryContext:
+def state_context(history, token_budget: int, mode: str = "state") -> MemoryContext:
     snaps = coerce(history)
-    mc = MemoryContext(mode="state", prompt_history=None, followup=bool(snaps), snaps=snaps)
+    mc = MemoryContext(mode=mode, prompt_history=None, followup=bool(snaps), snaps=snaps)
     if not snaps:
         return mc
     state = fold(snaps)
@@ -58,7 +61,11 @@ def state_context(history, token_budget: int) -> MemoryContext:
     full, _ = render_block(snaps, 10 ** 9)
     expected = next((s.calls for s in reversed(snaps) if s.calls), None)
     cap = B.history_cap(token_budget, expected, B.estimate_tokens(full))
-    mc.history_block, dropped = render_block(snaps, cap)
+    if mode == "full":                                 # M4：先遮罩再丢轮；只遮罩不丢轮不算裁剪（能用 get_turn 取回）
+        from app.memory.compact import fit
+        mc.history_block, dropped, _ = fit(snaps, cap)
+    else:
+        mc.history_block, dropped = render_block(snaps, cap)
     mc.history_tokens = B.estimate_tokens(mc.history_block)
     if dropped > max(0, len(snaps) - MAX_TURNS):      # 超过 12 轮的那部分是固定窗口，不算"被预算裁掉"
         mc.trimmed.append("history")
@@ -68,4 +75,6 @@ def state_context(history, token_budget: int) -> MemoryContext:
 
 
 def build(mode: str, history, *, token_budget: int, history_messages) -> MemoryContext:
-    return state_context(history, token_budget) if mode == "state" else off_context(history, history_messages)
+    if mode in ("state", "full"):
+        return state_context(history, token_budget, mode)
+    return off_context(history, history_messages)
