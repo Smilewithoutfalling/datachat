@@ -52,11 +52,32 @@ export type Settings = {
   timeout: number;
   sources?: { model: SettingSource; base_url: SettingSource; timeout: SettingSource };
   connection?: { id: string; name: string };
-  // 阶段 6.6：会话记忆（实验）。mode 是实际生效值；env 非空 = 被环境变量 DATACHAT_MEMORY 覆盖
-  memory?: { mode: MemoryMode; setting: MemoryMode; env: MemoryMode | null };
+  // 阶段 6.6：会话记忆（实验）。mode 是实际生效值；env 非空 = 被环境变量 DATACHAT_MEMORY 覆盖。
+  // 批 4a：rewrite 是改写开关的实际生效值；批 4b：rewrite_setting 是设置页存的值，rewrite_env 非空 = 被 DATACHAT_REWRITE 覆盖
+  memory?: { mode: MemoryMode; setting: MemoryMode; env: MemoryMode | null; rewrite?: boolean; rewrite_setting?: boolean; rewrite_env?: boolean | null };
   memory_mode?: MemoryMode; // 只写（PUT /settings）
+  memory_rewrite?: boolean; // 只写（PUT /settings）
 };
-export type MemoryMode = "off" | "state";
+export type MemoryMode = "off" | "state" | "full";
+
+// ---- 批 4b：数据集的口径与规则（GET/POST /datasets/{id}/notes，app/server/app.py；手写，不经 gen_ui_types.py）
+export type NoteKind = "metric" | "rule";
+export type DatasetNote = {
+  id: string;
+  dataset_id: string;
+  kind: NoteKind;
+  name: string;
+  body: string; // 指标公式或规则文本：只是文本，按纯文本渲染
+  unit: string;
+  synonyms: string; // 逗号分隔
+  sha: string;
+  source: string;
+  supersedes: string | null;
+  retired_at: string | null;
+  created_at: string;
+};
+export type NoteIn = { kind: NoteKind; name: string; body: string; unit: string; synonyms: string };
+export type NoteImport = { added: number; updated: number; unchanged: number; errors: string[] };
 
 // ---- 阶段 6.5：多服务商模型连接（app/server/connections.py、app/core/providers.json）
 export type Protocol = "openai_chat" | "openai_responses" | "azure" | "anthropic";

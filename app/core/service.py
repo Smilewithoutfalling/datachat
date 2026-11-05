@@ -63,6 +63,8 @@ def analyze(
     memory_mode: str | None = None,
     rewrite=None,
     today=None,
+    dataset_notes=None,
+    accepted_pairs=None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -90,13 +92,19 @@ def analyze(
              只在记忆模式不是 off、有 Key、本轮之前有轮次时生效；改写后的问题用于字典检索、ReAct / workflow，
              res.question 仍是原话，改写记录在 res.rewrite。
     today：改写时「今天」的日期（datetime.date），只给测试和评测固定日期用；None 时取本地日期。
+    dataset_notes：数据集的口径（M2，批 4b）：[{kind, name, body, unit, synonyms, sha}, ...]，只放在用的行
+             （后端从 dataset_notes 表读；评测可直接传）。记忆模式不是 off 时生效：指标按检索取前 5 条、规则全部注入，
+             上限 2000 token；进了 prompt 的记在 res.memory_notes（[{name, sha}]）。body 只是文本，永不执行。
+    accepted_pairs：用户 👍 过的参考写法（M9，批 4b）：[{question, code}, ...]，后端每轮从库里现算。
+             只在 full 档、只给 ReAct；检索取前 3 条，只给问题和代码。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
                              max_attempts=max_attempts, exec_timeout=exec_timeout,
                              recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
-                             trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today):
+                             trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today,
+                             dataset_notes=dataset_notes, accepted_pairs=accepted_pairs):
         if ev.type == "done":
             res = ev.result
     return res
@@ -123,6 +131,8 @@ def analyze_stream(
     memory_mode: str | None = None,
     rewrite=None,
     today=None,
+    dataset_notes=None,
+    accepted_pairs=None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -163,7 +173,7 @@ def analyze_stream(
                  chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                  memory=memory, thread_id=thread_id, history=history, encoding=encoding,
-                 rewrite=rewrite, today=today)
+                 rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs)
     try:
         for ev in inner:
             if cancelled():
@@ -192,7 +202,7 @@ def analyze_stream(
 
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
-         rewrite=None, today=None):
+         rewrite=None, today=None, dataset_notes=None, accepted_pairs=None):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -208,6 +218,10 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     cfg = llm_config or LLMConfig.from_env()
     # 批 4a M7：改写在字典检索之前；之后的检索、ReAct / workflow 都用改写后的问题（res.question 仍是原话）
     question = _maybe_rewrite(res, cfg, chat_model, question, history, rewrite, today)
+    if res.memory_mode != "off":
+        from app.memory import gate
+        if gate.detect(res.question):      # 批 4b M6：只追加 warning，不写库、不改 prompt（判断用用户原话）
+            res.warnings.append(gate.WARNING)
     notes = []
     if use_dictionary:
         try:
@@ -232,12 +246,27 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
                       history_messages=history_messages)
     res.history_tokens, res.memory_trimmed = mc.history_tokens, list(mc.trimmed)
     res.warnings += mc.warnings
+    metrics_block, pairs_block = _memory_blocks(res, agent, question, dataset_notes, accepted_pairs)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
-                      dataset, max_attempts, exec_timeout, mc.state_block)
+                      dataset, max_attempts, exec_timeout, mc.state_block, metrics_block)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-                   recursion_limit, exec_timeout, memory, thread_id, history, mc)
+                   recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block)
+
+
+def _memory_blocks(res, agent, question, dataset_notes, accepted_pairs):
+    """批 4b：口径块（M2，memory_mode != off）与参考写法块（M9，只在 full、只给 ReAct）。
+    question 是改写后的问题（检索用）。都没有时返回 ("", "")，prompt 不变（P8 / state 哈希）。"""
+    if res.memory_mode == "off":
+        return "", ""
+    from app.memory import metrics, pairs
+    metrics_block, used, omitted = metrics.build_block(question, dataset_notes)
+    res.memory_notes = used
+    if omitted:
+        res.memory_trimmed.append("notes")
+    pairs_block = pairs.build_block(question, accepted_pairs) if res.memory_mode == "full" and agent == "react" else ""
+    return metrics_block, pairs_block
 
 
 def _maybe_rewrite(res, cfg, chat_model, question, history, setting, today):
@@ -270,7 +299,7 @@ def _evidence_with_original(res, question, evidence):
 
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
-                  max_attempts, exec_timeout, state_block=""):
+                  max_attempts, exec_timeout, state_block="", metrics_block=""):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
@@ -282,6 +311,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
     }
     if state_block:            # 阶段 6.6 M1：工作流只吃工作状态（planner），不吃历史
         state["memory_state"] = state_block
+    if metrics_block:          # 批 4b M2：口径块只给 planner（同一句拒答补句在 planner 里）
+        state["metrics_block"] = metrics_block
     config = {
         "configurable": {"llm": client, "df": df},
         # 每轮 reviewer→executor 占 2 步，留足余量，避免 max_attempts 调大后撞上默认上限 25
@@ -332,8 +363,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         res.error, res.error_kind = state["error"], "execution"
     if res.answer and res.executed and refusal_from_answer(res.answer) is None:
         from app.core.grounding import unverified_numbers
-        res.unverified_numbers = unverified_numbers(res.answer,
-                                                    _evidence_with_original(res, question, [question, res.result_text]))
+        res.unverified_numbers = unverified_numbers(res.answer, _evidence_with_original(
+            res, question, [question, res.result_text] + ([metrics_block] if metrics_block else [])))
 
 
 def _tally_charts(res, e: dict):
@@ -464,7 +495,8 @@ def _final_text(messages):
 
 
 def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-               recursion_limit, exec_timeout, memory, thread_id, history=None, mc=None):
+               recursion_limit, exec_timeout, memory, thread_id, history=None, mc=None,
+               metrics_block="", pairs_block=""):
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
 
@@ -491,7 +523,9 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                                   llm_config=cfg, tracker=tracker,
                                   nudge_no_exec=memory is None and not followup,
                                   **({"memory_block": mc.system_block} if mc.system_block else {}),
-                                  **({"extra_tools": extra} if (extra := mc.tools()) else {}))
+                                  **({"extra_tools": extra} if (extra := mc.tools()) else {}),
+                                  **({"metrics_block": metrics_block} if metrics_block else {}),
+                                  **({"pairs_block": pairs_block} if pairs_block else {}))
         messages, rec_err = [], None
         res.error = res.error_kind = res.llm_kind = None
         out = {}
@@ -641,6 +675,7 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     if answer_truncated and res.answer and not out_of_steps:
         res.warnings.append(ANSWER_TRUNCATED_WARNING)
     if res.answer and refusal is None:
-        res.unverified_numbers = unverified_numbers(res.answer, _evidence_with_original(res, question, evidence))
+        res.unverified_numbers = unverified_numbers(res.answer, _evidence_with_original(
+            res, question, evidence + ([metrics_block] if metrics_block else [])))
     if res.answer:
         yield em.answer(res.answer, forced=bool(out_of_steps and res.answer))

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { type Client, errText, formatSize } from "../client";
 import type { Agent, DatasetDetail } from "../types";
 import { IconCheck, IconFileAlert, IconPlus, IconTrash } from "./icons";
+import { NotesSection } from "./NotesSection";
 import { PreviewTable } from "./PreviewTable";
 import { Dialog, MoreMenu, relTime, Topbar } from "./ui";
 
@@ -157,6 +158,8 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
               {current && current.error === undefined && !/^(utf-8|utf-8-sig|ascii)$/i.test(current.encoding) ? (
                 <p className="enc-note">这张表按 {current.encoding} 读取。预览里出现乱码时，请在 Excel 里另存为 CSV（UTF-8）后重新上传。</p>
               ) : null}
+              {/* 批 4b M2：口径与规则在数据预览下方；读取失败的数据集（allFailed）走上面的失败卡，不显示这一节（视觉 24 不变） */}
+              <NotesSection c={c} datasetId={id} />
             </div>
             <aside className="ds-col">
               <section className="side-card">

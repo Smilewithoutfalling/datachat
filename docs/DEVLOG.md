@@ -5969,7 +5969,7 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 - 规格与代码的 17 处不一致列在方案 §7（含 `cases_memory.py` 实际是 `cases_multi.py`、M8 现状过时、`full` 只是别名等）；§8 九条 S 已于 11-05 定为全部按倾向（1A 2C 3A 4A 5A 6A 7A 8A 9A）。
 - 评测侧的需求写成验收需求（方案 §5.3，R1–R10），不替评测排期。
 
-## [128] 2026-11-05 · 记忆批 4a 实现：full 档后端 + M7 改写 + M8 + M4 遮罩 · commit <待提交>
+## [128] 2026-11-05 · 记忆批 4a 实现：full 档后端 + M7 改写 + M8 + M4 遮罩 · commit 0e5a3b0
 
 [127] 回填 0e5a554（PR #99）。
 
@@ -6007,3 +6007,47 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 **评测侧须知**（§14.4）：off 的渲染指纹不变（P8 三个哈希）；state 在没开改写时渲染出来的 prompt 与 f39753c 逐字节相同，但 `app/memory/`、`service.py`、`app.py` 改了，按源文件算的代码指纹（`code_sha12`）会变；`memory_mode` 现在可能是 `full`；`runtime_config.rewrite` 仍只读环境变量，和 settings `memory_rewrite` 不同步（方案 §5.3 R9，评测侧的事）；相对时间题要固定日期请调 `analyze(..., today=date(...))`（R4）。
 
 **未做**（本批范围外或留给 4b）：前端（设置页第三档、改写复选框）；M2 / M10 / M6 / M9；`GET /settings` 只加了 `rewrite`，前端若要分开显示「设置值 / 被环境变量覆盖」再加；pytest 只跑了默认档（env 未设）：P8 等 off 测试假定 env 未设，整套换成 `DATACHAT_MEMORY=state/full` 跑会按设计红；state / full 的行为由新测试在用例内设 env 覆盖，e2e 跑了三档。
+
+## [待编号] 2026-11-05 · 记忆批 4b 实现：M2 口径库 + M10 生命周期 + M6 写入门槛 + M9 参考写法 + 前端 · commit <待提交>
+
+[128] 回填 0e5a3b0（PR #100）。
+
+方案 `docs/roadmap/memory-batch4.md` §3.4–3.7（4b 范围），§8 已定 1A 2C 3A 4A 5A 6A 7A 8A 9A；偏离记在规格 §3.8「批 4b」（附文件:行）。基线 master `0e5a3b0`（4a squash 合并；与 4a 分支 c91902b 只差 DEVLOG 的编号）。不碰 `app/eval/`、`scripts/gate/`（`git diff --stat` 对这两处为空）；`react_agent.py` 只改签名、system 拼接和文件头一行 import，EV-B10 那一行图表 basename 没动。
+
+- **M2 口径库**：`app/server/db.py` 新表 `dataset_notes`（规格 §3.1 + `source / supersedes / retired_at`，`created_at` 取代 `updated_at`，外键 `ON DELETE CASCADE`，部分唯一索引兜底「在用的 (kind, name) 至多一行」）。新 `app/memory/metrics.py`：校验 / sha / 检索（名称别名最长匹配优先，再在抹掉已命中片段的问题上 BM25 补足，取前 5）/ 渲染（规则全部注入，整块 ≤ 2000 token，超了按得分从低到高丢并写「已省略 N 条」）。路由 `GET/POST /datasets/{id}/notes`、`PUT/DELETE …/{note_id}`：改 = 新版本取代旧版本、删 = 只写 `retired_at`、撞名 409、校验 400。`post_message` 在 `memory_mode != off` 时读出在用的口径传给 `analyze(dataset_notes=…)`；`service._memory_blocks` 渲染后交给 ReAct（表结构 / 取数约定之后、记忆块之前）和 workflow 的 planner（状态块之前）。两处都只在块非空时另补一句「口径里用到的字段必须在表结构里真实存在，否则照旧拒答」。body 永远只是文本。
+- **`result_json.memory_notes`**：`[{name, sha}]`，本轮真正进了 prompt 的口径；off / 没有口径时 `[]`。先改了规格 §14.3 的表（新增一行；`memory_trimmed` 的 `notes` 写明批 4b 起会出现）。
+- **M10**：删数据集时口径随外键级联删除（停用的行也删）；`POST …/notes/import`（CSV 或 JSON 数组，整批校验、任何一行不合法 400 且不写，幂等：同名同 sha 跳过、sha 不同按版本取代、没有同名新增，返回 `{added, updated, unchanged, errors}`）；`GET …/notes/export?format=csv|json`（只导在用的，CSV 别名用 `;`，可原样导回，sha 不变）。sha = `sha256(kind|name|body|unit|synonyms)[:12]`。
+- **M6**：新 `app/memory/gate.py`，整句模式检测「以后都 / 从现在起 / 记住…以后 / 忽略…条件 / always / from now on / ignore … filter」；`service._run` 在 `memory_mode != off` 时只往 warnings 追加一条指向「口径与规则」的固定文案，不写库、不改 prompt。
+- **M9**：新 `app/memory/pairs.py`（`dataset_fingerprint` 照规格 §3.2、`eligible`、`search`、`render`）。`post_message` 只在 `full` 且 ReAct 时，从同一数据集指纹、**其他会话**里最近 200 条 👍 的助手消息现算 `[{question, code}]`（status ok、执行成功、代码非空、没有未核实数字、不是拒答）；`service` 只在 `full`、只给 ReAct 检索前 3 条、渲染成「参考写法（只给代码，不代表本次答案）」块，插在 CHART_GUIDE 之前。不建 jsonl、不写挖掘脚本；取消 👍 或删掉那一轮后样本自动消失。
+- **设置**：`GET /settings` 的 `memory` 段再加 `rewrite_setting` / `rewrite_env`（4a 的「未做」）。
+- **前端**：`DatasetView.tsx` 数据预览下方加「口径与规则」（新组件 `NotesSection.tsx`：只读列表、添加 / 编辑表单、两次点击「停用」、导入、导出 CSV / JSON；记忆 off 时写明不生效；读取失败的数据集不显示这一节）；`client.ts` 加 6 个方法，`types.ts` 手写 `DatasetNote` 等类型、`MemoryMode` 加 `"full"`。设置页记忆改成三选一（关闭 / 开启 / 开启（完整）），下面加「追问前先改写」复选框，保存时一并发 `memory_mode` 和 `memory_rewrite`，被 `DATACHAT_REWRITE` 覆盖时写明。`gen_ui_types.py --check` 通过（生成的 JSON 不涉及这些类型）。
+- 文档：规格 §3.8 新增「批 4b」小节、§14.3 表加 `memory_notes`；`docs/sidecar-contract.md` 记忆一节补上新路由与设置字段。
+
+**硬规则核对**：P8 三个 off 哈希不变（`test_off_mode_prompt_is_byte_identical` 等 4a 测试原样通过；新增 `test_notes_not_injected_when_off`：off 下传了口径哈希也不变）；state 档没有口径、没开改写时与 f39753c 逐字节一致（4a 的 `test_state_mode_prompt_matches_f39753c` 原样通过；新增 `test_state_hash_unchanged_without_notes` 覆盖 `dataset_notes=None/[]`、`test_full_without_pairs_equals_state_hash` 覆盖 full 没有样本时）；闸门 m10 一字不动，补了反向回归（`test_refusal_still_holds_when_note_uses_missing_field`、`test_refusal_still_holds_in_workflow_with_note`、`test_gate_m10_untouched`）；迁移有测试（`test_old_db_gets_notes_table`：旧库启动后新表与两个索引出现、八张旧表结构与行数不变、外键是 CASCADE）。
+
+**改了期望值的旧断言（行为变了）**
+- `tests/test_web_retention.py::test_settings_memory_mode_roundtrip`：`GET/PUT /settings` 的 `memory` 段多了 `rewrite_setting`、`rewrite_env` 两个键（设置页要分开显示「存的值 / 被环境变量覆盖」），三处整字典比较各加 `**NO_RW`（`{"rewrite_setting": False, "rewrite_env": None}`）。
+- `ui/web/src/views/views.test.tsx`「详情与预览只发一个请求；上传后直接用响应里的预览，不再请求」：数据集页多了口径区，会单独请求 `/datasets/{id}/notes`；两处按 `/datasets/d1`、`/datasets/d2` 前缀过滤的断言改为排除 `…/notes`。这条用例钉的「详情 + 预览只读一次、上传后不再请求详情」不变。
+- `ui/web/src/views/views.test.tsx`「设置：会话记忆开关默认关闭…」：保存记忆设置时请求体从 `{memory_mode}` 变成 `{memory_mode, memory_rewrite}`（复选框和下拉同一个表单、同一个保存按钮），期望改为 `{ memory_mode: "state", memory_rewrite: false }`，用例标题同步改。
+
+**新增测试**：`tests/test_metrics.py`（22 条）、`tests/test_dataset_notes_api.py`（9 条，含参数化）、`tests/test_dataset_notes_lifecycle.py`（8 条）、`tests/test_memory_gate.py`（27 条，含参数化）、`tests/test_pairs.py`（22 条，含参数化），方案 §3.4–3.7 列的测试名全部在内；vitest `ui/web/src/views/dataset-notes.test.tsx`（8 条）；e2e `ui/web/e2e/f4-notes.spec.ts`（1 条，fake project，三档都跑）。
+
+**闸门**：见下表（沙箱 aarch64，最后一次代码改动之后串行重跑，脚本 `/workspace/work/logs/b4b_gates.sh`）。
+
+| 闸门 | 结果 | 日志 |
+|---|---|---|
+| gen_ui_types / gen_eval_data `--check` | 通过 | b4b_gencheck.log |
+| pytest A 段（除 oracle 两条） | 999 passed，2 deselected | b4b_pytestA.log |
+| pytest B 段 | 771 passed | b4b_pytestB.log |
+| oracle（workflow / react） | 2 passed | b4b_oracle.log |
+| vitest | 896 passed（27 个文件） | b4b_vitest.log |
+| lint / build | 通过 | b4b_lint.log / b4b_build.log |
+| e2e off | 42 passed | b4b_e2e_off.log |
+| e2e state | 42 passed（第一遍 41 + 1 失败：f3-errors echo 那一轮后端卡了 98 秒后才报错，单独重复 3 遍 6/6 通过，整套重跑 42 passed） | b4b_e2e_state2.log |
+| e2e full | 42 passed | b4b_e2e_full.log |
+
+**视觉基线**：本批前端改动不落在四条视觉用例的画面上——口径区只在数据集页「读取成功」时出现（视觉 24 是读取失败页，`allFailed` 时不渲染、也不请求口径），视觉 08 / 11 / 25 是会话页，设置页没有视觉用例。预期不需要换基线；若 CI x64 上视觉用例红了，按 HANDOVER §6 用 `playwright-results` 工件的 actual 覆盖，不提交沙箱生成的图。
+
+**评测侧须知**（§14.4）：off 的渲染指纹不变；state 在没有口径、没开改写时渲染出来的 prompt 与 f39753c 逐字节相同，full 在没有 👍 样本、历史不超上限时也相同；`app/memory/`、`app/core/`、`react_agent.py`、`app/nodes/planner.py`、`app/state.py` 改了，按源文件算的 `code_sha12` 会变（新文件都在 `app/memory/` 下，归 A 组，不会出现未归类文件）。结果多了 `memory_notes` 字段（方案 §5.3 R10，runner 需要抄录）；口径题需要 `EvalCase.dataset_notes` 透传给 `analyze(dataset_notes=…)`（R7），格式为 `[{kind, name, body, unit, synonyms, sha?}]`（缺 sha 时现算）。M9 在评测里测不到（没有 👍、runner 不传 `accepted_pairs`）；M6 只改 warnings。
+
+**未做**：桌面壳里的口径导出（`<a download>` 在 WebView2 里不生效，和图表导出同一个老问题；浏览器模式可用）；前端展示改写结果 / 遮罩情况 / 本轮用了哪几条口径（`memory_notes` 只进结果，界面另定）；口径的历史版本浏览界面（接口 `?history=1` 已有）；pytest 只跑了默认档（env 未设），state / full 的行为由用例内设 env 覆盖，e2e 跑了三档。

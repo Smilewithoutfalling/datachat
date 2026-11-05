@@ -406,6 +406,36 @@ P1/P2 的成因是"代码实测 + 题型吻合"推出来的（逐题原始输出
 | M8 规格「`_run_workflow` 接受 `rewritten_question`」「planner 模板加可选块」 | 两样都不用加参数：`_run` 把改写后的问题当 `question` 传下去；planner 的可选块批 1 已经有 | `app/core/service.py:210`、`app/nodes/planner.py:22-23`（未改） | 方案 §3.2；`test_workflow_uses_rewritten_question`、`test_workflow_planner_no_blank_line_when_empty` |
 | 硬规则 3 的 state 哈希 | 在 `f39753c` 上算四条（`react_single` / `react_history` / `workflow` / `workflow_history`），其中 `react_single`、`workflow` 与 off 基线相同（没有历史时 state 不出任何块） | `tests/test_memory_p8.py:19-22` | `test_state_mode_prompt_matches_f39753c`；只哈希消息文本，不含工具表（get_turn 的有无由批 3 的测试钉） |
 
+### 批 4b（M2 口径库 + M10 生命周期 + M6 写入门槛 + M9 参考写法 + 前端，2026-11-05，方案见 `memory-batch4.md` §3.4–3.7）
+
+行号对照本批实现（基线 master `0e5a3b0`，即 4a）。方案里已经写明的（建 `dataset_notes` 表加 `source / supersedes / retired_at`、模块放 `app/memory/`、M6 / M9 放在 `service.py` 与 `post_message`、M9 每轮现算不建 jsonl、规则全部注入 §8-9A、`result_json.memory_notes` §8-3A、口径在 `memory_mode != off` 生效 §8-6A）不再重复理由，只在第一行把「规则全部注入」按方案要求记一笔；其余只记**偏离方案或方案没写死、实现时定下的**。
+
+| 方案 / 规格原文 | 实际 | 文件:行 | 理由 / 钉住的测试 |
+|---|---|---|---|
+| 规格 M2：metric、rule 都按检索 top-5 | 指标按检索取前 5 条；在用的规则**全部**注入（受 2000 token 约束） | `app/memory/metrics.py:152-155` | 方案 §8-9A；`test_rules_always_injected_within_budget` |
+| 规格 §3.2 `WorkingState.definitions` 由口径填 | 不填：口径块是唯一出处，状态块不重复 | `app/memory/working_state.py`（未改） | 方案 §3.4 已定，随实现记一笔 |
+| 「超过 2000 token 按得分从低到高丢」（得分没定义） | 得分：名称 / 别名精确命中的指标 = 1000 + 词长；规则 = 500；BM25 补进来的指标 = BM25 分（远小于 500）。所以先丢 BM25 补的指标，再丢规则，最后才丢精确命中的指标 | `app/memory/metrics.py:30-33`、`:158-179` | 用户点名的指标最该保住；规则靠名称检索不到，排在「猜的」前面。`test_render_notes_capped_at_budget` |
+| 「jieba + BM25 补到 top-5」 | ① 先做最长匹配并把命中的片段从问题里抹掉，BM25 只在剩下的部分上分词；② 「是否命中」按词重合判（只看长度 ≥ 2 的词），BM25 只决定先后 | `app/memory/metrics.py:94-113`、`:116-139` | ① 不抹掉的话 jieba 会把「利润率」切成「利润 / 率」，又把「利润」串回来（规格陷阱）；② 语料只有一两条时 BM25 的 idf 为负，按 `score > 0` 过滤会什么都找不到；单字（「率」「额」）太泛。`test_search_longest_match_first`、`test_search_top5_and_bm25_fill` |
+| 规格 §3.5 块格式：规则写成一行「规则：A；B。」 | 规则单列在「规则：」下面，每条一行「- 规则「名」：正文」；指标行 `- 名 = 公式（单位：…；别名：…）` 照规格 | `app/memory/metrics.py:140-150`、`:164-170` | 规则有名字，删 / 改按名字对得上；一行一条，省略时整条丢，不会截半句。`test_render_line_format` |
+| 拒答补句「口径里用到的字段必须在表结构里真实存在，否则照旧拒答」 | 补句前半句另说明「数据口径是用户已确认的定义，涉及时按口径算」，后半句照原意；ReAct 版接在原拒答规则之后，planner 版接在 planner prompt 末尾（planner 的拒答措辞是「数据不足以回答」）。都只在口径块非空时出现 | `app/memory/metrics.py:191-197`、`app/react_agent.py:258`、`app/nodes/planner.py:29-30` | 原规则「不要自己给指标另下定义」不放宽；只说明用户的口径不算「自己另下定义」。反向回归：`test_refusal_still_holds_when_note_uses_missing_field`、`test_refusal_still_holds_in_workflow_with_note`；`test_gate_m10_untouched` |
+| 方案 §1-4：`react_agent.py` 只改签名和 system 拼接 | 另在文件头加了一行 `from app.memory.metrics import REACT_REFUSAL_LINE` | `app/react_agent.py:26` | 补句的文本只有一份，测试直接比对同一常量；EV-B10 那一行（`os.path.basename(chart)`，现 `:224`）没动 |
+| 口径的数字（「按 13% 税率含税」）被结论复述 | 有口径块时，把口径块也算进 `unverified_numbers` 的证据 | `app/core/service.py:366-367`、`:678-679` | 用户亲手写的口径是合法出处；没有口径时证据列表原样不动。`test_numbers_in_notes_count_as_evidence` |
+| `memory_trimmed` 记 `notes` | 只记 `notes`，**不**加 warning | `app/core/service.py:264-267` | 块尾已写「（已省略 N 条）」；`TRIM_WARNING` 的文案说的是「较早的对话」，套在口径上不对。`test_notes_trimmed_reported` |
+| 唯一性：「在用的 `(kind, name)` 只能有一行，POST 撞名 409」 | 路由先查后写给 409；另建部分唯一索引 `ux_dataset_notes_active (dataset_id, kind, name) WHERE retired_at IS NULL` 兜底 | `app/server/db.py:130-133` | 防绕过路由（导入、并发）写出两条在用的同名行；停用的行不占名额。`test_unique_index_backstops_route`、`test_notes_duplicate_active_name_409` |
+| `PUT` 写新版本 | 内容（sha）没变时原样返回旧行、不产生新版本；对已停用 / 已被取代的行 `PUT` → 409；`DELETE` 已停用的行仍是 204 | `app/server/app.py:537-559` | 版本链只记真正的修改；旧版本只读。`test_notes_put_creates_new_version`、`test_notes_delete_is_soft` |
+| 校验（kind / 长度 / 控制字符） | 一律 400、带中文原因（不用 pydantic 的 422）；`kind` 也接受「指标 / 规则」；别名接受 `, ， ; ； 、` 换行或数组，入库统一成 `,` 并去重 | `app/memory/metrics.py:36-80`、`app/server/app.py:131-140` | 前端和导入的行号报错共用同一份校验与文案。`test_notes_clean_validation_unit`、`test_notes_crud_and_validation` |
+| 导入「接受 CSV 或 JSON 数组」「用 `app/tools/csv_io` 读」 | 请求体就是文件内容，按 `Content-Type`（含 `json` → JSON，其余 → CSV）区分，不用 multipart；CSV 用 `csv_io.detect_encoding` 探测编码后交给标准库 `csv` 解析（不用 pandas）；上限 1 MB / 1000 条；同一批里同名两行也算不合法 | `app/server/app.py:561-640` | pandas 会把空的单位读成 NaN、把纯数字公式读成数字；编码探测仍是 csv_io 那一套（GBK 能读）。`test_import_csv_idempotent`、`test_import_rejects_whole_batch_on_bad_row`、`test_import_json_array` |
+| 导出 | CSV 带 BOM（Excel 直接打开不乱码）、别名用 `;`；JSON 的别名保持 `,` 字符串；两者都能原样导回、sha 一致 | `app/server/app.py:642-659` | `test_export_roundtrip` |
+| M6 正则 `always|from now on`、`ignore .*(filter|instruction|rule)` | 英文词两侧加「不是英文字母」的环视，避免 `hallways` 一类误报；判断用用户原话（`res.question`），不用改写后的问题 | `app/memory/gate.py:17-23`、`app/core/service.py:221-224` | 宁可漏；改写可能补出「以后」之类的词。`test_detect_does_not_fire_on_normal_question` |
+| M9「数据集指纹一致」 | `post_message` 按 `dataset_files.sha256` 现算指纹，**指纹相同的其他数据集**（同一份文件重新上传）的 👍 也算；样本来自两种 agent 的会话（只是消费方限 ReAct） | `app/server/app.py:666-692` | 数据集不可变，重新上传会得到新 id，按 id 比就永远拿不到旧样本；指纹是规格 §3.2 的唯一定义，列名一致才会相同。`test_pairs_cross_dataset_not_returned` |
+| M9 入选条件「结论不是拒答」 | 另外排除 `result_text` 以「无法回答」开头的轮次 | `app/memory/pairs.py:40-55` | ReAct 直接拒答时结论可能被改写过，结果文本是更稳的判据。`test_pair_requires_thumb_up_and_exec` |
+| M9 检索「BM25 复用 `dictionary._tok`」 | 与口径同一个 `rank()`（词重合判命中、BM25 定先后、只看长度 ≥ 2 的词） | `app/memory/pairs.py:58-65`、`app/memory/metrics.py:100-113` | 理由同口径检索。`test_pairs_top3_by_bm25` |
+| M9 块格式（方案只给了标题） | 数据标记包着「参考写法（只给代码，不代表本次答案）：」+ 每条「例 i｜问：…」「代码：」+ python 代码块；只读 `question` / `code` 两个键 | `app/memory/pairs.py:20-24`、`:71-85` | `test_render_has_no_answer_text`、`test_render_caps_code_and_block` |
+| `GET /settings` 的 `memory` 段（4a 只加了 `rewrite`） | 再加 `rewrite_setting`（设置页存的值）和 `rewrite_env`（`DATACHAT_REWRITE` 覆盖值，没设为 null），同 `setting / env` 的分法 | `app/server/app.py:912-915` | 设置页的复选框显示存的值，被环境变量覆盖时另写一句。`test_settings_reports_rewrite_setting_and_env` |
+| 前端 §3.4.1「数据预览下方加一节」 | 独立组件 `NotesSection.tsx`，放在左栏数据预览下方（不放右侧 316px 的边栏）；读取列表失败只写一行说明、不用 `role=alert`；导出用 data URL + `<a download>`（与图表导出同一个 `download()`） | `ui/web/src/views/DatasetView.tsx:161-162`、`ui/web/src/views/NotesSection.tsx:36`、`:75-79`、`:93` | 表格五列放不进边栏；数据集页已有按固定顺序断言的 alert（`views.test.tsx` 多表用例）。桌面壳里 `<a download>` 不生效是图表导出同一个老问题（DEVLOG「未做」） |
+| 设置页保存只发 `memory_mode` | 保存时一并发 `memory_rewrite` | `ui/web/src/views/SettingsView.tsx:77` | 复选框和下拉在同一个表单、同一个「保存记忆设置」按钮 |
+
+
 ## 4 任务卡
 
 > 每张卡：**目标 / 现状 / 改动 / 接口 / 步骤 / 测试 / 验收 / 陷阱 / 依赖**。
@@ -1351,9 +1381,10 @@ DATACHAT_MEMORY=state python -m app.server --open
 |---|---|---|---|---|
 | `memory_mode` | `str` | `"off"` | §3.7 | 本轮实际生效的记忆模式：`off` / `state` / `full`（批 4a 起 `full` 是独立一档，此前解析成 `state`） |
 | `history_tokens` | `int` | 按现有 `history_messages` 输出估算（`estimate_tokens`） | M12 | 本轮送进模型的历史块 token 估算值；`off` 下也记，作为基线 |
-| `memory_trimmed` | `list[str]` | `[]` | M12 | 本轮被裁剪的块名，取值 `history` / `notes` / `state` / `constraints`（批 3）/ `field_notes`；`full` 下只遮罩（M4）不丢轮不记 |
+| `memory_trimmed` | `list[str]` | `[]` | M12 | 本轮被裁剪的块名，取值 `history` / `notes`（批 4b：口径超 2000 token 有省略）/ `state` / `constraints`（批 3）/ `field_notes`；`full` 下只遮罩（M4）不丢轮不记 |
 | `rewrite` | `dict \| None` | `None` | M7 | `{original, rewritten, changed, needs_clarify, tokens, ms}`；没触发（off、开关关、没有历史、没有 Key）时为 `None`；回落时 `changed=false`、`rewritten=original`，调用失败 `tokens=0`（批 4a） |
 | `result_digest` | `str` | 有结果时照常写 | M3 | 结果的类型与形状，不含值（"Series(3) 索引=region"）；下一轮的快照读它（2026-10-28 批 1 新增，§3.8） |
+| `memory_notes` | `list[{name: str, sha: str}]` | `[]` | M2 / M10 | 本轮真正进了 prompt 的口径（名称 + 12 位 sha），按块内顺序；没有口径、本轮没命中且没有规则、记忆 off 时为 `[]`（2026-11-05 批 4b 新增，方案 §8-3A） |
 
 这些字段只进结果，不进 prompt，所以不影响 `off` 的逐字节一致（`tests/test_memory_p8.py` 用 3ce6b77 上算出的哈希钉住）。前端类型不是生成的，`gen_ui_types.py --check` 不受影响（§3.8）。`EVENT_TYPES` 不加新类型。
 

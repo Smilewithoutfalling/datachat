@@ -23,6 +23,7 @@ from langgraph.graph.message import add_messages
 
 from app.config import ensure_dirs
 from app.core.result import chart_items, chart_note, format_result
+from app.memory.metrics import REACT_REFUSAL_LINE
 from app.tools.dataset import access_rule, copy_data, is_multi, load_data, describe_data
 from app.tools.persist import new_chart_path
 from app.tools.plotting import CHART_GUIDE
@@ -150,7 +151,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20,
                       llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False,
                       out_system: dict | None = None,
-                      memory_block: str = "", extra_tools: list | None = None):
+                      memory_block: str = "", extra_tools: list | None = None,
+                      metrics_block: str = "", pairs_block: str = ""):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -170,6 +172,10 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
           字段说明之前。为空时 system 与阶段 6.6 之前逐字节一致（P8，tests/test_memory_p8.py 钉住）。
     extra_tools: 记忆追加的只读工具（批 3 B3 的 get_turn，MemoryContext.tools()）；为空时工具表只有
           run_python_on_data，与之前一致。这些工具不写 sink["execs"]，不算执行代码。
+    metrics_block: 记忆 M2 的口径块（app/memory/metrics.py，已带数据标记）：插在表结构 / 取数约定之后、记忆块之前
+          （优先级：表结构 > 口径 > 字段说明）；非空时拒答规则后面另补一句「口径里的字段必须真实存在，否则照旧拒答」。
+          为空时 system 一个字都不变。
+    pairs_block: 记忆 M9 的参考写法块（app/memory/pairs.py，只在 full 档、有 👍 样本时非空）：插在 CHART_GUIDE 之前。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -231,6 +237,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "你是一个数据分析智能体，可以调用工具在真实数据上执行 pandas 代码。\n\n"
         f"数据表结构：\n{schema}\n\n"
         + (f"取数约定：{access_rule(df)}\n\n" if multi else "")
+        + (f"{metrics_block}\n\n" if metrics_block else "")
         + (f"{memory_block}\n\n" if memory_block else "") +
         f"与本轮问题相关的字段说明（来自数据字典）：\n{field_notes or '（无）'}\n\n"
         "工作方式：先想清分析思路，再用 run_python_on_data 执行代码来验证；"
@@ -248,7 +255,9 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         "仍然调用一次 run_python_on_data，代码为 result = '无法回答：<一句话原因>'（原因说明缺什么，"
         "如 '无法回答：数据中没有成本字段'），最终结论的第一行也必须原样以 '无法回答：' 开头"
         "（不要写成'无法直接回答''无法计算'等其他说法）。"
+        + (REACT_REFUSAL_LINE if metrics_block else "") +
         "如果问题需要图表，请务必出图。\n\n"
+        + (f"{pairs_block}\n\n" if pairs_block else "") +
         f"{CHART_GUIDE}\n\n"
         "最终用中文给出简洁、直接的结论；结论里的数字必须来自工具返回的 result 或 print 输出，不要估算或编造；"
         "若已生成图表，说明图表展示了什么。"

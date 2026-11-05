@@ -337,6 +337,29 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .failcard .fc-tip { font-size: calc(11 * var(--px)); color: #A0A0A5; margin: 16px 0 0; }
 .failcard .actions-row { justify-content: center; margin-top: 18px; }
 
+/* ---------------- 批 4b：数据集页「口径与规则」（数据预览下方） */
+.notes-card { gap: 8px; }
+.notes-card .card-head { margin-bottom: 0; }
+.notes-intro, .notes-card .hint { margin: 0; }
+.notes-card .hint { font-size: calc(10.5 * var(--px)); color: #A0A0A5; }
+.notes-table { width: 100%; border-collapse: collapse; font-size: calc(12 * var(--px)); table-layout: auto; }
+.notes-table th { text-align: left; font-weight: 500; color: var(--muted); font-size: calc(11 * var(--px)); padding: 6px 8px; border-bottom: 1px solid var(--line-muted); white-space: nowrap; }
+.notes-table td { padding: 7px 8px; border-bottom: 1px solid var(--line-muted); vertical-align: top; overflow-wrap: anywhere; }
+.notes-table .n-name { font-weight: 700; white-space: nowrap; }
+.notes-table .n-body { white-space: pre-wrap; font-family: "JetBrains Mono", Consolas, monospace; font-size: calc(11.5 * var(--px)); }
+.notes-table .n-actions { white-space: nowrap; text-align: right; }
+.notes-table .n-actions button { margin-left: 8px; height: 26px; font-size: calc(11.5 * var(--px)); }
+.notes-table .n-actions button.link { height: auto; }
+.notes-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.notes-actions button { height: 30px; font-size: calc(12 * var(--px)); }
+.note-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding-top: 6px; }
+.note-form label { display: flex; flex-direction: column; gap: 5px; font-size: calc(11.5 * var(--px)); color: #333336; }
+.note-form label:has(textarea) { grid-column: 1 / -1; }
+.note-form textarea { resize: vertical; min-height: 54px; border: 1px solid var(--line-input); border-radius: 8px; padding: 8px 12px; background: var(--panel); font-family: "JetBrains Mono", Consolas, monospace; }
+.note-form .banner, .note-form-actions { grid-column: 1 / -1; margin: 0; }
+.note-form-actions { display: flex; gap: 10px; }
+.note-form-actions button { height: 34px; }
+
 /* ---------------- 设置 */
 .settings { max-width: 778px; display: flex; flex-direction: column; gap: 14px; }
 .settings form { border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: #fff; }

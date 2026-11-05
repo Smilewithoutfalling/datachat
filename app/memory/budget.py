@@ -8,7 +8,7 @@ from __future__ import annotations
 from app.core.llm import EST_CHARS_PER_TOKEN
 
 STATE_TOKENS = 500          # 工作状态块（M1）
-DICT_TOKENS = 2000          # 口径块（M2，批 4b 才用；4a 只参与 fixed）
+DICT_TOKENS = 2000          # 口径块（M2，批 4b：app/memory/metrics.py 的注入上限；同时参与投影闸门的 fixed）
 HISTORY_TOKENS = 6000       # 历史块（M3/M5）
 HISTORY_TOKENS_TIGHT = 4000 # 投影超阈值时的历史上限
 SYSTEM_TOKENS = 1500

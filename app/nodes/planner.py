@@ -1,4 +1,5 @@
 from app.core.llm import node_llm
+from app.memory.metrics import PLANNER_REFUSAL_LINE
 
 _PROMPT = """你是数据分析规划助手。下面是数据表的结构：
 {schema}
@@ -19,6 +20,12 @@ def plan(state, config=None):
         field_notes=state.get("field_notes") or "（无）",
         question=state["question"],
     )
-    if state.get("memory_state"):   # 阶段 6.6 M1：工作状态块（已带数据标记），插在表结构之后；没有时 prompt 不变
-        msg = msg.replace("\n\n相关字段说明（来自数据字典）：", f"\n\n{state['memory_state']}\n\n相关字段说明（来自数据字典）：", 1)
+    # 阶段 6.6 M1：工作状态块；批 4b M2：口径块（在状态块之前，优先级 表结构 > 口径 > 字段说明）。
+    # 两者都已带数据标记，插在表结构之后；都没有时 prompt 不变（P8 / state 哈希）。
+    blocks = [b for b in (state.get("metrics_block"), state.get("memory_state")) if b]
+    if blocks:
+        joined = "\n\n".join(blocks)
+        msg = msg.replace("\n\n相关字段说明（来自数据字典）：", f"\n\n{joined}\n\n相关字段说明（来自数据字典）：", 1)
+    if state.get("metrics_block"):   # 拒答补句：只在有口径块时出现
+        msg += "\n" + PLANNER_REFUSAL_LINE
     return {"plan": llm.invoke(msg)}
