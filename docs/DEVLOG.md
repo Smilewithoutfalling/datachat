@@ -5947,7 +5947,7 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 | `validate_cases(ALL_CASES)` | 0 errors |
 
 
-## [126] 2026-11-04 · 记忆批 3 实现：B1 用户前提区 + B2 出处轮次 + B3 get_turn · commit <待提交>
+## [126] 2026-11-04 · 记忆批 3 实现：B1 用户前提区 + B2 出处轮次 + B3 get_turn · commit f39753c
 
 方案 `docs/roadmap/memory-batch3.md`（#96 cfc8f12），偏离记在规格 §3.8「批 3」。只动记忆这一侧；off 模式 P8 三个哈希不变。
 
@@ -5956,3 +5956,15 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 - **B3**（新 `app/memory/recall.py`）：ReAct 只读工具 `get_turn(n)`，state 且有历史时注册。`service.py` 里按下标对齐 `sink["execs"]` 的两处跳过非执行工具（`_is_exec_tool`），否则取原文之后的每条执行都错位。`react_agent.py` 只加 `extra_tools` 参数，system 文本不变。
 - **改了的旧断言**（行为变了，理由）：`test_merge_dropped_filter_moves_to_earlier` 的 earlier 行多了「（第1轮）」（B2）；`test_render_empty_returns_empty_string` 第 3 行原期望纯文字轮渲染为空，B1 后这句话进前提区；`test_fold_skips_turns_without_code` 增加前提区断言。
 - **评测侧须知**（§14.4）：state 模式下工具表多了 get_turn、状态块头改了，代码指纹会变；off 不变。记忆专项题（batch3 §7 的长会话 / 约束被改 / 指代名字）属于评测侧题库，这批没有写，作为验收需求提出。
+
+## [127] 2026-11-05 · 记忆批 4 方案 · commit <待提交>
+
+[126] 回填 f39753c（PR #97）。
+
+- 新文件 `docs/roadmap/memory-batch4.md`；规格 §5 批 3 后面加一行指向它；`plan.md` 进度表加 6.6 一行。只是方案，没有改代码。
+- 背景：S 要求把记忆这边剩下的卡全部做完，评测由 S 统一去跑。范围是规格 §4 里还没做的 M2、M4、M6、M7、M8、M9、M10；M11 属于评测侧，不做。
+- 结论：M7 原样做，但改写放进 `service.py`（评测 runner 直接调 `analyze()`，放在 `app.py` 测不到）；M8 批 1 已经做了大半（state 下 workflow 的 planner 已有状态块），只补改写接入和缺的测试；M4 只做遮罩，不调模型、不建 `compactions` 表；M2 / M10 做，写入规则继承批 3 §5，`dataset_notes` 表多加 `source / supersedes / retired_at` 三列；M6 做，只加 warning；M9 做最小版（只用 👍，每轮从库里现算，只在 `full`）。
+- `full` 档真正落地：`state` 保持批 3 行为，M4 / M9 进 `full`，改写单独开关。新增一条硬约束：`state` 档、没有口径、没开改写时 system 与 `f39753c` 逐字节一致。
+- 建议拆两个实现 PR：4a（档位 + M7 + M8 + M4，纯后端，约 3 天）、4b（M2 + M10 + M6 + M9 + 前端，约 5 天）。前端靠 CI 构建，视觉基线用 CI x64 的 actual 重取。
+- 规格与代码的 17 处不一致列在方案 §7（含 `cases_memory.py` 实际是 `cases_multi.py`、M8 现状过时、`full` 只是别名等）；§8 九条 S 已于 11-05 定为全部按倾向（1A 2C 3A 4A 5A 6A 7A 8A 9A）。
+- 评测侧的需求写成验收需求（方案 §5.3，R1–R10），不替评测排期。
