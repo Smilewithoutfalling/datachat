@@ -384,9 +384,13 @@ def _react_invoke(graph, question, config, em, sink, attempt, out, history=None)
             for m in messages[max(start, seen):]:
                 if isinstance(m, AIMessage) and m.tool_calls:
                     for tc in m.tool_calls:
+                        if not _is_exec_tool(tc.get("name")):     # B3 get_turn：只读取原文，不是执行代码，不发 code 事件
+                            continue
                         yield em.code((tc.get("args") or {}).get("code", ""), source="tool_call",
                                       attempt=attempt, thought=message_text(m))
                 elif isinstance(m, ToolMessage):
+                    if not _is_exec_tool(m.name):
+                        continue
                     execs = sink.get("execs", [])
                     e = execs[n_tool] if n_tool < len(execs) else {}
                     n_tool += 1
@@ -398,6 +402,13 @@ def _react_invoke(graph, question, config, em, sink, attempt, out, history=None)
     except (GraphRecursionError, BudgetExceeded) as e:   # V2d §2c：超预算与步数到顶走同一个收尾通道
         err = e
     out["messages"], out["err"] = messages, err
+
+
+def _is_exec_tool(name) -> bool:
+    """这条工具调用 / 工具消息是不是执行代码（对应 sink["execs"] 里的一条）。
+    记忆的只读工具（批 3 B3 get_turn）不写 execs：按下标对齐 execs 时必须跳过它，否则后面每一条都错位。
+    name 为空的旧消息按执行代码算（之前只有这一个工具）。"""
+    return not name or name == "run_python_on_data"
 
 
 def _final_text(messages):
@@ -437,7 +448,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                                   field_notes=notes_text, exec_timeout=exec_timeout,
                                   llm_config=cfg, tracker=tracker,
                                   nudge_no_exec=memory is None and not followup,
-                                  **({"memory_block": mc.system_block} if mc.system_block else {}))
+                                  **({"memory_block": mc.system_block} if mc.system_block else {}),
+                                  **({"extra_tools": extra} if (extra := mc.tools()) else {}))
         messages, rec_err = [], None
         res.error = res.error_kind = res.llm_kind = None
         out = {}
@@ -487,8 +499,13 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     for m in messages[start:]:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
+                if not _is_exec_tool(tc.get("name")):
+                    continue
                 res.steps.append(Step("tool_call", content=message_text(m),
                                       code=(tc.get("args") or {}).get("code", "")))
+        elif isinstance(m, ToolMessage) and not _is_exec_tool(m.name):
+            # B3 get_turn 取回的此前轮次原文：算作证据（复述上一轮的数字可核实），不占 execs 下标
+            evidence.append(str(m.content))
         elif isinstance(m, ToolMessage):
             e = execs[obs_i] if obs_i < len(execs) else {}
             obs_i += 1

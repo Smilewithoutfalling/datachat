@@ -150,7 +150,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       df=None, field_notes: str = "", exec_timeout: int = 20,
                       llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False,
                       out_system: dict | None = None,
-                      memory_block: str = ""):
+                      memory_block: str = "", extra_tools: list | None = None):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -168,6 +168,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
           供评测算渲染指纹（app/eval/fingerprint.py）。指纹必须拿真实字符串，不能复刻拼接逻辑。
     memory_block: 阶段 6.6 记忆（app/memory/context.py）：工作状态块 + 历史块，已带数据标记；插在表结构之后、
           字段说明之前。为空时 system 与阶段 6.6 之前逐字节一致（P8，tests/test_memory_p8.py 钉住）。
+    extra_tools: 记忆追加的只读工具（批 3 B3 的 get_turn，MemoryContext.tools()）；为空时工具表只有
+          run_python_on_data，与之前一致。这些工具不写 sink["execs"]，不算执行代码。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -259,6 +261,6 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         if sink is not None:
             sink["nudges"] = sink.get("nudges", 0) + 1
 
-    return build_loop(model, [run_python_on_data], system, checkpointer,
+    return build_loop(model, [run_python_on_data, *(extra_tools or [])], system, checkpointer,
                       llm_config=llm_config, tracker=tracker, sleep=sleep,
                       nudge=NUDGE_NO_EXEC if nudge_no_exec else None, on_nudge=_count_nudge)
