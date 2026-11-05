@@ -5947,7 +5947,7 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 | `validate_cases(ALL_CASES)` | 0 errors |
 
 
-## [待编号] 2026-11-04 · 记忆批 3 实现：B1 用户前提区 + B2 出处轮次 + B3 get_turn · commit <待提交>
+## [126] 2026-11-04 · 记忆批 3 实现：B1 用户前提区 + B2 出处轮次 + B3 get_turn · commit <待提交>
 
 方案 `docs/roadmap/memory-batch3.md`（#96 cfc8f12），偏离记在规格 §3.8「批 3」。只动记忆这一侧；off 模式 P8 三个哈希不变。
 
