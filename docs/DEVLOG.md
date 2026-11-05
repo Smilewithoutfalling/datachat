@@ -5957,7 +5957,7 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 - **改了的旧断言**（行为变了，理由）：`test_merge_dropped_filter_moves_to_earlier` 的 earlier 行多了「（第1轮）」（B2）；`test_render_empty_returns_empty_string` 第 3 行原期望纯文字轮渲染为空，B1 后这句话进前提区；`test_fold_skips_turns_without_code` 增加前提区断言。
 - **评测侧须知**（§14.4）：state 模式下工具表多了 get_turn、状态块头改了，代码指纹会变；off 不变。记忆专项题（batch3 §7 的长会话 / 约束被改 / 指代名字）属于评测侧题库，这批没有写，作为验收需求提出。
 
-## [待编号] 2026-11-05 · 记忆批 4 方案 · commit <待提交>
+## [127] 2026-11-05 · 记忆批 4 方案 · commit <待提交>
 
 [126] 回填 f39753c（PR #97）。
 
