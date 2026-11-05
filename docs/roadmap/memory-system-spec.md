@@ -384,6 +384,28 @@ P1/P2 的成因是"代码实测 + 题型吻合"推出来的（逐题原始输出
 | M3b `get_turn_code(n)` 暂缓（§4 M3） | B3：`get_turn(n)`（`app/memory/recall.py`），返回第 n 轮的问题、完整回答、最后一次成功代码，包数据块，≤4000 字；失败轮只给"问 + 状态"；只在 state 且本轮之前有轮次时注册，off 工具表不变；只做 ReAct | `tests/test_memory_recall.py`；快照新增 `a_full`（不渲染） |
 | — | `service._react_invoke` / 收尾解析按下标对齐 `sink["execs"]`；get_turn 不写 execs，必须跳过，否则后面每条执行都错位 | `_is_exec_tool`；`test_react_get_turn_does_not_shift_exec_alignment`。get_turn 的返回算进 grounding 证据（复述上一轮的数字可核实），不发 code 事件、不记 tool_call 步骤 |
 
+### 批 4a（档位后端 + M7 + M8 + M4 遮罩，2026-11-05，方案见 `memory-batch4.md` §2 / §3.1–3.3）
+
+行号对照本批实现（基线 `0e5a554`）。方案里已经写明的挪位置（改写放 `service.py`、M4 只遮罩、不建 `compactions` 表、模块放 `app/memory/`）不再重复，这里只记**偏离方案或方案没写死、实现时定下的**。
+
+| 方案 / 规格原文 | 实际 | 文件:行 | 理由 / 钉住的测试 |
+|---|---|---|---|
+| 上面「批 1」表里的「`full` 档解析为 `state`」 | 作废：`MODES = ("off", "state", "full")`，删掉别名 | `app/memory/config.py:21` | batch4 §2.2 / §8-1A；`test_resolve_memory_mode_order` 的 `("full", None, "full")` |
+| `analyze(rewrite=...)`：「`None` 时按 `resolve_rewrite()`」（读起来像传了 True/False 就绝对生效） | `rewrite` 是**设置页的值**，环境变量 `DATACHAT_REWRITE` 仍然优先：`resolve_rewrite(setting)` = env → setting → False | `app/core/service.py:248`、`app/memory/config.py:79` | 与 `memory_mode` 参数同一语义（设置值，env 覆盖）。评测 runner 不传参数，只靠 env，结果一样；`test_rewrite_skipped_when_switch_off`（`DATACHAT_REWRITE=0` 压过 `rewrite=True`）、`test_resolve_rewrite_order` |
+| 改写调用「SDK 不重试」 | 另外把 `LLMClient` 的 `max_retries` 也设成 0：一次请求，失败就回落 | `app/core/service.py:258` | 方案要求超时 5 秒；`LLMClient` 自己的重试会把等待放大到 5 秒 × (1+3) 再加退避。`test_rewrite_timeout_falls_back` 断言只调一次、`timeout=5 / max_retries=0 / temperature=0 / max_tokens=200` |
+| 改写用「独立的 `LLMClient`」 | 注入了 `chat_model`（测试 / 评测 oracle）时，改写也用这个模型；没注入时按 `rcfg` 新建 | `app/core/service.py:259` | 方案「陷阱」第 1 条就是这么假设的（第一条回复被改写吃掉）；只在新测试里打开改写 |
+| 数字守卫：「由 today 推出来的年、月、日」 | 推出来的集合是：今年、去年、本月、上个月（及其年份）、今天、1 号、本月与上个月的天数；最近 3 轮只收「问」和「答摘要」里的数字，**不收时间戳** | `app/memory/rewrite.py:88-102` | 只放「年、月、日」的话方案自己的验收例子「上个月 → 2026 年 10 月」过不去（10 不是本月）；时间戳是程序写的，收进来会让 14、30 之类的数字白白放行。推不出的（「上季度 → 7–9 月」）一律回落，宁可不改。`test_rewrite_guard_unit`、`test_rewrite_relative_month_uses_local_today` |
+| `unverified_numbers` 的证据「用的就是改写后的问题，确认即可」 | 确认了；另外在改写真的生效（`res.question != question`）时把原话也追加进证据 | `app/core/service.py:266-268`、`:336`、`:644` | 原话里有、改写丢掉的数字被结论复述时，不该被判成编出来的；没改写时证据列表原样不动（off / state 路径零变化）。`test_rewritten_question_counts_as_evidence` |
+| 回落的 `needs_clarify` | 记模型给的值（`needs_clarify=true` 时 `changed=false`、`rewritten=原问题`）；其余回落原因只进日志（`RewriteResult.reason`），不进 `result_json` | `app/memory/rewrite.py:143-148` | `rewrite` 字段写死六个键（§14.3），不加第七个 |
+| `GET /settings` 的 `memory` 段「加 `rewrite`」 | 只加 `rewrite`（实际生效值）；`PUT /settings` 的 `memory_rewrite` 存 `"1"/"0"` | `app/server/app.py:120`、`:665`、`:691-692` | 照方案；前端（4b）若要分开显示「设置值 / 被环境变量覆盖」，再加 `rewrite_setting / rewrite_env`，见 DEVLOG「未做」 |
+| M4「`a_brief` 压成第一句 + 原有的关键数字」 | 「原有的关键数字」= `brief()` 已经附上的「（关键数字：…）」后缀，原样保留；「第一句」只按 。！？ 切，不按换行切；最长 80 字 | `app/memory/compact.py:37-52` | 不再从被截掉的那半段里另挑数字：被遮的原文都能 `get_turn` 取回。`test_mask_unit_rules` |
+| M4 长粘贴截断的范围 | 只截「最近 2 轮以外」的轮次（含失败 / 取消轮的问题）；最近 2 轮的长粘贴逐字保留 | `app/memory/compact.py:70-89` | `test_mask_keeps_last_two_turns_verbatim` 要求最近两轮逐字；遮罩后仍超就照旧丢最早的轮次（`test_full_still_drops_when_mask_not_enough`） |
+| M4「完整历史超过 `cap` 时先遮罩」 | `cap` 仍按**遮罩前**的历史 token 做投影（`history_cap` 不变）；遮罩只在 `full`、只在超 `cap` 时发生，否则 `full` 走与 `state` 完全相同的 `render_block` | `app/memory/context.py:61-68`、`app/memory/compact.py:93-104` | 投影闸门保守一点没坏处；同时保证短会话里 `full` 与 `state` 的 prompt 逐字节相同（`test_full_mode_under_budget_equals_state` 用 state 哈希钉住） |
+| M4 `explain(snaps, cap)` | 返回 `{"masked": [轮次], "dropped": [轮次]}`，`dropped` 含 12 轮窗口外的轮次；与渲染共用 `fit()`，不会两套逻辑 | `app/memory/compact.py:107-111` | `test_explain_lists_masked_and_dropped` |
+| M4 规格验收「20 轮不触顶；compactions 表有 1 行」 | 按 batch4 §3.3 改成「4000 字粘贴 + 11 轮，`full` 历史 ≤ 6000 token 且不丢轮」；另加小预算（历史上限 4000）下「state 丢轮、full 不丢」 | `tests/test_compact.py` | `test_acceptance_paste_plus_eleven_turns`、`test_masked_before_dropped` |
+| M8 规格「`_run_workflow` 接受 `rewritten_question`」「planner 模板加可选块」 | 两样都不用加参数：`_run` 把改写后的问题当 `question` 传下去；planner 的可选块批 1 已经有 | `app/core/service.py:210`、`app/nodes/planner.py:22-23`（未改） | 方案 §3.2；`test_workflow_uses_rewritten_question`、`test_workflow_planner_no_blank_line_when_empty` |
+| 硬规则 3 的 state 哈希 | 在 `f39753c` 上算四条（`react_single` / `react_history` / `workflow` / `workflow_history`），其中 `react_single`、`workflow` 与 off 基线相同（没有历史时 state 不出任何块） | `tests/test_memory_p8.py:19-22` | `test_state_mode_prompt_matches_f39753c`；只哈希消息文本，不含工具表（get_turn 的有无由批 3 的测试钉） |
+
 ## 4 任务卡
 
 > 每张卡：**目标 / 现状 / 改动 / 接口 / 步骤 / 测试 / 验收 / 陷阱 / 依赖**。
@@ -1327,10 +1349,10 @@ DATACHAT_MEMORY=state python -m app.server --open
 
 | 字段 | 类型 | `off` 时的值 | 产生于 | 含义 |
 |---|---|---|---|---|
-| `memory_mode` | `str` | `"off"` | §3.7 | 本轮实际生效的记忆模式 |
+| `memory_mode` | `str` | `"off"` | §3.7 | 本轮实际生效的记忆模式：`off` / `state` / `full`（批 4a 起 `full` 是独立一档，此前解析成 `state`） |
 | `history_tokens` | `int` | 按现有 `history_messages` 输出估算（`estimate_tokens`） | M12 | 本轮送进模型的历史块 token 估算值；`off` 下也记，作为基线 |
-| `memory_trimmed` | `list[str]` | `[]` | M12 | 本轮被裁剪的块名，取值 `history` / `notes` / `state` / `field_notes` |
-| `rewrite` | `dict \| None` | `None` | M7 | `{original, rewritten, changed, needs_clarify, tokens, ms}`；M7 未做时恒为 `None` |
+| `memory_trimmed` | `list[str]` | `[]` | M12 | 本轮被裁剪的块名，取值 `history` / `notes` / `state` / `constraints`（批 3）/ `field_notes`；`full` 下只遮罩（M4）不丢轮不记 |
+| `rewrite` | `dict \| None` | `None` | M7 | `{original, rewritten, changed, needs_clarify, tokens, ms}`；没触发（off、开关关、没有历史、没有 Key）时为 `None`；回落时 `changed=false`、`rewritten=original`，调用失败 `tokens=0`（批 4a） |
 | `result_digest` | `str` | 有结果时照常写 | M3 | 结果的类型与形状，不含值（"Series(3) 索引=region"）；下一轮的快照读它（2026-10-28 批 1 新增，§3.8） |
 
 这些字段只进结果，不进 prompt，所以不影响 `off` 的逐字节一致（`tests/test_memory_p8.py` 用 3ce6b77 上算出的哈希钉住）。前端类型不是生成的，`gen_ui_types.py --check` 不受影响（§3.8）。`EVENT_TYPES` 不加新类型。

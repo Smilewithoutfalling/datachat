@@ -5957,7 +5957,7 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 - **改了的旧断言**（行为变了，理由）：`test_merge_dropped_filter_moves_to_earlier` 的 earlier 行多了「（第1轮）」（B2）；`test_render_empty_returns_empty_string` 第 3 行原期望纯文字轮渲染为空，B1 后这句话进前提区；`test_fold_skips_turns_without_code` 增加前提区断言。
 - **评测侧须知**（§14.4）：state 模式下工具表多了 get_turn、状态块头改了，代码指纹会变；off 不变。记忆专项题（batch3 §7 的长会话 / 约束被改 / 指代名字）属于评测侧题库，这批没有写，作为验收需求提出。
 
-## [127] 2026-11-05 · 记忆批 4 方案 · commit <待提交>
+## [127] 2026-11-05 · 记忆批 4 方案 · commit 0e5a554
 
 [126] 回填 f39753c（PR #97）。
 
@@ -5968,3 +5968,42 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 - 建议拆两个实现 PR：4a（档位 + M7 + M8 + M4，纯后端，约 3 天）、4b（M2 + M10 + M6 + M9 + 前端，约 5 天）。前端靠 CI 构建，视觉基线用 CI x64 的 actual 重取。
 - 规格与代码的 17 处不一致列在方案 §7（含 `cases_memory.py` 实际是 `cases_multi.py`、M8 现状过时、`full` 只是别名等）；§8 九条 S 已于 11-05 定为全部按倾向（1A 2C 3A 4A 5A 6A 7A 8A 9A）。
 - 评测侧的需求写成验收需求（方案 §5.3，R1–R10），不替评测排期。
+
+## [128] 2026-11-05 · 记忆批 4a 实现：full 档后端 + M7 改写 + M8 + M4 遮罩 · commit <待提交>
+
+[127] 回填 0e5a554（PR #99）。
+
+方案 `docs/roadmap/memory-batch4.md` §2、§3.1–3.3（4a 范围），偏离记在规格 §3.8「批 4a」。只动后端记忆侧：不碰前端、不建表、不碰 `app/eval/`、`scripts/gate/`、`react_agent.py`、`planner.py`（`git diff --stat` 对这几处为空）。
+
+- **档位**（`app/memory/config.py`）：`MODES = ("off", "state", "full")`，删掉 `full → state` 别名；新增 `resolve_rewrite(setting)`（env `DATACHAT_REWRITE` → settings `memory_rewrite` → False，每次调用时读）。`context.build` 让 `full` 走 state 的组装，再加 M4；`MemoryContext.tools()` 在 state / full 都注册 get_turn。`app.py`：`SettingsIn.memory_mode` 加 `"full"`，新增 `memory_rewrite`（存 `"1"/"0"`），`GET /settings` 的 `memory` 段加 `rewrite`；`post_message` 在 `memory_mode != off` 时取快照，读改写开关往下传，不在这里改写。
+- **M7**（新 `app/memory/rewrite.py`；`service._maybe_rewrite`）：在字典检索之前改写，之后检索、ReAct / workflow 都用改写后的问题；`res.question`、`messages.content` 仍是原话；`res.rewrite` 写 §14.3 的六个键。独立 `LLMClient`（不进本轮 usage），temperature 0、超时 min(cfg.timeout, 5)、max_tokens 200、SDK 与 LLMClient 都不重试；输入包 `data_block`；超时 / 网关错误 / 坏 JSON / 空串 / 超 4000 字 / needs_clarify / 数字守卫不过，一律回落原问题、不报错。`analyze()` / `analyze_stream()` 新增 `rewrite`、`today` 两个关键字参数。
+- **M8**：不改 planner；改写后的问题经 `_run` 送进 workflow，planner / codegen / reviewer / summarizer 都拿到。补齐方案 §7-2 说的缺口：第一次有测试断言 state 下 workflow 的 planner 有状态块、且只有 planner 有。
+- **M4**（新 `app/memory/compact.py`）：只在 `full`、完整历史超过本轮上限时遮罩：最近 2 轮逐字，更早的轮次结论压成第一句 + 原有关键数字、结果只留类型和形状、图只留图型、200 字以上的问题截断并指向 `get_turn(N)`；遮罩后仍超才从最早一轮开始丢。只遮罩不丢轮不记 `memory_trimmed`、不给 warning。`explain()` 可重算被遮 / 被丢的轮次。不调模型、不建 `compactions` 表。
+- **硬规则 3**：在 `f39753c` 上先算出 state 档四条消息哈希（`react_single` / `react_history` / `workflow` / `workflow_history`），新测试 `test_state_mode_prompt_matches_f39753c` 钉住；短历史下 `full` 也等于这组哈希。off 的 P8 三个哈希不变，改写开关打开、记忆 off 时也不变。
+- 规格 §14.3 表同步：`memory_mode` 取值加 `full`；`memory_trimmed` 补上批 3 起就有的 `constraints`；`rewrite` 写明何时为 None、回落时怎么记。代码注释里「批 1 未用 / 恒为 None」的两处（方案 §7-17）一并改掉。
+
+**改了期望值的旧断言（行为变了）**
+- `tests/test_memory_p8.py::test_resolve_memory_mode_order` 的 `("full", None, "state")` → `("full", None, "full")`：full 不再是 state 的别名，`resolve_memory_mode` 如实报 full（方案 §2.2、§8-1A）。同一参数表里新增 `(None, "full", "full")`、`("state", "full", "state")`。
+- `tests/test_web_retention.py::test_settings_memory_mode_roundtrip`：① `GET/PUT /settings` 返回的 `memory` 段多了 `rewrite`（改写开关的实际生效值，方案 §2.2 要求），三处整字典比较各加 `"rewrite": False`；② `PUT memory_mode=full` 原先期望 422（设置只认 off / state），现在 full 是合法的一档，期望 200 且 `mode == "full"`；不认识的值改用 `"bogus"` 继续断言 422。
+
+**新增测试**：`tests/test_rewrite.py`（33 条，含方案列的 13 个名字）、`tests/test_compact.py`（13 条，含方案列的 8 个名字）、`tests/test_workflow_memory.py`（6 条，含方案列的 4 个名字）；`tests/test_memory_p8.py` 新增 `test_state_mode_prompt_matches_f39753c`、`test_state_mode_explicit_rewrite_off_matches_f39753c`、`test_full_mode_under_budget_equals_state`、`test_off_mode_ignores_rewrite_switch`。
+
+**闸门**（沙箱 aarch64、2 核，最后一次代码改动之后串行重跑，脚本 `/workspace/work/logs/b4a_gates.sh` / `b4a_e2e.sh`）：
+
+| 闸门 | 结果 | 日志 |
+|---|---|---|
+| pytest 段 A（35 个文件，deselect 两条 oracle） | 999 passed, 2 deselected，411 s | `b4a_pytestA.log` |
+| pytest 段 B（34 个文件 + 3 个新文件） | 683 passed，307 s | `b4a_pytestB.log` |
+| oracle（`test_oracle_pipeline_all_correct[workflow/react]`） | 2 passed，442 s | `b4a_oracle.log` |
+| vitest（`--no-file-parallelism`） | 888 passed / 26 files | `b4a_vitest.log` |
+| build（tsc + vite + check-dist） | rc=0 | `b4a_build.log` |
+| e2e off（`--grep-invert 视觉`） | 41 passed | `b4a_e2e_off.log` |
+| e2e `DATACHAT_MEMORY=state` | 41 passed | `b4a_e2e_state.log` |
+| e2e `DATACHAT_MEMORY=full` | 41 passed（跑完核对 fake 后端库里 51 条结果的 `memory_mode` 全是 full） | `b4a_e2e_full.log` |
+| `gen_ui_types.py --check` / `gen_eval_data.py --check` | 通过 | — |
+
+第一次 e2e off 因沙箱缺 `libatk-1.0.so.0` 全部起不了浏览器（`b4a_e2e_off_nolibatk.log`，与代码无关），`playwright install-deps chromium` 之后三档重跑，上表是重跑结果。
+
+**评测侧须知**（§14.4）：off 的渲染指纹不变（P8 三个哈希）；state 在没开改写时渲染出来的 prompt 与 f39753c 逐字节相同，但 `app/memory/`、`service.py`、`app.py` 改了，按源文件算的代码指纹（`code_sha12`）会变；`memory_mode` 现在可能是 `full`；`runtime_config.rewrite` 仍只读环境变量，和 settings `memory_rewrite` 不同步（方案 §5.3 R9，评测侧的事）；相对时间题要固定日期请调 `analyze(..., today=date(...))`（R4）。
+
+**未做**（本批范围外或留给 4b）：前端（设置页第三档、改写复选框）；M2 / M10 / M6 / M9；`GET /settings` 只加了 `rewrite`，前端若要分开显示「设置值 / 被环境变量覆盖」再加；pytest 只跑了默认档（env 未设）：P8 等 off 测试假定 env 未设，整套换成 `DATACHAT_MEMORY=state/full` 跑会按设计红；state / full 的行为由新测试在用例内设 env 覆盖，e2e 跑了三档。

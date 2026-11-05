@@ -16,6 +16,10 @@ from tests.test_core_analyze import wf_model
 
 FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
 BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "167addb043be1eda", "workflow": "c2139ed91836bb54"}
+# 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
+# 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
+STATE_BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "a9c62ff882a7728a",
+                  "workflow": "c2139ed91836bb54", "workflow_history": "3c241f4880db5e29"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 
@@ -41,6 +45,14 @@ def run_all(sample_path, **kw):
     m = wf_model(["result = df.groupby('region')['units'].sum()"])
     results["workflow"] = analyze(sample_path, "哪个地区卖得最好", chat_model=m, llm_config=FAST, **kw)
     got["workflow"] = digest(m.calls)
+    return got, results
+
+
+def run_state_all(sample_path, **kw):
+    got, results = run_all(sample_path, **kw)
+    m = wf_model(["result = df.groupby('region')['units'].sum()"])
+    results["workflow_history"] = analyze(sample_path, "那华东呢", chat_model=m, llm_config=FAST, history=HISTORY, **kw)
+    got["workflow_history"] = digest(m.calls)
     return got, results
 
 
@@ -78,7 +90,8 @@ def test_state_mode_changes_prompt_and_reports_state(sample_path, monkeypatch):
 
 @pytest.mark.parametrize("env,setting,want", [
     (None, None, "off"), (None, "state", "state"), ("off", "state", "off"), ("state", None, "state"),
-    ("full", None, "state"),            # 批 1 只实现了 state：full 如实解析成实际生效的 state
+    ("full", None, "full"),             # 批 4a：full 是独立一档，不再是 state 的别名（原期望 "state"）
+    (None, "full", "full"), ("state", "full", "state"),
     ("bogus", "state", "state"),        # 不认识的环境变量值忽略，落到设置
     (None, "bogus", "off"), ("", "state", "state"), (" STATE ", None, "state"),
 ])
@@ -105,3 +118,41 @@ def test_env_off_overrides_settings_value(sample_path, monkeypatch):
     r = analyze(sample_path, "那华东呢", agent="react", chat_model=m, llm_config=FAST, history=HISTORY,
                 memory_mode="state")
     assert r.memory_mode == "off" and digest(m.calls) == BASELINE["react_history"]
+
+
+# ------------------------------------------------------------------ 批 4a：state 哈希、full、改写开关
+@pytest.fixture
+def no_rewrite_env(monkeypatch):
+    monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
+
+
+def test_state_mode_prompt_matches_f39753c(sample_path, monkeypatch, no_rewrite_env):
+    """硬规则 3：state、没有口径、没开改写 → 与批 3（f39753c）的 state 逐字节一致。"""
+    monkeypatch.setenv("DATACHAT_MEMORY", "state")
+    got, results = run_state_all(sample_path)
+    assert got == STATE_BASELINE
+    assert all(r.memory_mode == "state" and r.rewrite is None for r in results.values())
+
+
+def test_state_mode_explicit_rewrite_off_matches_f39753c(sample_path, monkeypatch, no_rewrite_env):
+    monkeypatch.delenv("DATACHAT_MEMORY", raising=False)
+    got, _ = run_state_all(sample_path, memory_mode="state", rewrite=False)
+    assert got == STATE_BASELINE
+
+
+def test_full_mode_under_budget_equals_state(sample_path, monkeypatch, no_rewrite_env):
+    """full 只在历史超上限时才遮罩：短历史下 prompt 与 state 完全相同，结果里如实记 full。"""
+    monkeypatch.setenv("DATACHAT_MEMORY", "full")
+    got, results = run_state_all(sample_path)
+    assert got == STATE_BASELINE
+    assert all(r.memory_mode == "full" for r in results.values())
+
+
+def test_off_mode_ignores_rewrite_switch(sample_path, monkeypatch):
+    """P8：改写开关打开、记忆 off 时，prompt 仍与 3ce6b77 一致，也不发改写请求。"""
+    monkeypatch.setenv("DATACHAT_REWRITE", "1")
+    got, results = run_all(sample_path)
+    assert got == BASELINE
+    got, results = run_all(sample_path, rewrite=True)
+    assert got == BASELINE
+    assert all(r.rewrite is None for r in results.values())

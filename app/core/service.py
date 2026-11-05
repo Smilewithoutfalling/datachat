@@ -61,6 +61,8 @@ def analyze(
     log: bool = False,
     trace_id: str | None = None,
     memory_mode: str | None = None,
+    rewrite=None,
+    today=None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -83,13 +85,18 @@ def analyze(
     memory_mode：设置页的记忆模式（阶段 6.6，app/memory/config.py）。环境变量 DATACHAT_MEMORY 优先；都没有时 off。
              off 时 prompt 与阶段 6.6 之前逐字节一致；state 时 history 可以是 (问题, 结论[, 代码]) 元组或
              app.memory.snapshots.TurnSnapshot（含失败轮），渲染成数据块进 system，不再以消息回灌。
+             full（批 4a）：同 state，历史超上限时先遮罩（M4）再丢轮。
+    rewrite：设置页的改写开关（M7，settings memory_rewrite）；环境变量 DATACHAT_REWRITE 优先，都没有时关。
+             只在记忆模式不是 off、有 Key、本轮之前有轮次时生效；改写后的问题用于字典检索、ReAct / workflow，
+             res.question 仍是原话，改写记录在 res.rewrite。
+    today：改写时「今天」的日期（datetime.date），只给测试和评测固定日期用；None 时取本地日期。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
                              max_attempts=max_attempts, exec_timeout=exec_timeout,
                              recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
-                             trace_id=trace_id, memory_mode=memory_mode):
+                             trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today):
         if ev.type == "done":
             res = ev.result
     return res
@@ -114,6 +121,8 @@ def analyze_stream(
     trace_id: str | None = None,
     cancel=None,
     memory_mode: str | None = None,
+    rewrite=None,
+    today=None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -153,7 +162,8 @@ def analyze_stream(
     inner = _run(em, res, tracker, dataset, question, agent=agent, llm_config=llm_config,
                  chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
-                 memory=memory, thread_id=thread_id, history=history, encoding=encoding)
+                 memory=memory, thread_id=thread_id, history=history, encoding=encoding,
+                 rewrite=rewrite, today=today)
     try:
         for ev in inner:
             if cancelled():
@@ -181,7 +191,8 @@ def analyze_stream(
 
 
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
-         exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding):
+         exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
+         rewrite=None, today=None):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -194,6 +205,9 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
         res.steps.append(Step("load", error=res.error))
         return
     schema = describe_data(df)
+    cfg = llm_config or LLMConfig.from_env()
+    # 批 4a M7：改写在字典检索之前；之后的检索、ReAct / workflow 都用改写后的问题（res.question 仍是原话）
+    question = _maybe_rewrite(res, cfg, chat_model, question, history, rewrite, today)
     notes = []
     if use_dictionary:
         try:
@@ -207,7 +221,6 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
                           duration_s=res.timings["load"]))
 
     # 2. 模型
-    cfg = llm_config or LLMConfig.from_env()
     if chat_model is None and not cfg.api_key:
         res.error, res.error_kind = user_error("text", NO_KEY_MESSAGE, trace_id=res.trace_id), "llm"
         res.llm_kind = "no_key"
@@ -225,6 +238,34 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id, history, mc)
+
+
+def _maybe_rewrite(res, cfg, chat_model, question, history, setting, today):
+    """M7 改写（docs/roadmap/memory-batch4.md §3.1）。不满足条件时原样返回 question、res.rewrite 保持 None：
+    记忆 off（含测试用的 checkpointer 多轮）、开关关、没有 Key 也没注入模型、本轮之前没有轮次。
+    改写调用用独立的 LLMClient（自带 tracker，不进本轮 usage），失败一律回落原问题。"""
+    from app.memory.config import resolve_rewrite
+    if res.memory_mode == "off" or not resolve_rewrite(setting):
+        return question
+    if chat_model is None and not cfg.api_key:
+        return question                    # 分析本身会以 NO_KEY 失败，不先发一次必然失败的请求
+    from app.memory.snapshots import coerce
+    snaps = coerce(history)
+    if not snaps:
+        return question
+    import datetime as _dt
+    from app.memory import rewrite as rw
+    rcfg = cfg.with_(temperature=0.0, timeout=min(cfg.timeout, rw.TIMEOUT_S), max_retries=0)
+    model = chat_model if chat_model is not None else build_chat_model(rcfg, sdk_retries=0, max_tokens=rw.MAX_TOKENS)
+    client = LLMClient(rcfg, model=model)          # tracker=None：LLMClient 自建一个，与本轮 tracker 无关
+    r, tokens, ms = rw.rewrite(question, snaps, today or _dt.date.today(), client)
+    res.rewrite = rw.record(question, r, tokens, ms)
+    return r.rewritten if r.changed else question
+
+
+def _evidence_with_original(res, question, evidence):
+    """改写后的问题已经在证据里；原话里有、改写里没有的数字也算有出处。没改写时原样返回（不改变旧路径）。"""
+    return evidence + [res.question] if res.question != question else evidence
 
 
 # ------------------------------------------------------------------ 工作流版
@@ -291,7 +332,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         res.error, res.error_kind = state["error"], "execution"
     if res.answer and res.executed and refusal_from_answer(res.answer) is None:
         from app.core.grounding import unverified_numbers
-        res.unverified_numbers = unverified_numbers(res.answer, [question, res.result_text])
+        res.unverified_numbers = unverified_numbers(res.answer,
+                                                    _evidence_with_original(res, question, [question, res.result_text]))
 
 
 def _tally_charts(res, e: dict):
@@ -599,6 +641,6 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
     if answer_truncated and res.answer and not out_of_steps:
         res.warnings.append(ANSWER_TRUNCATED_WARNING)
     if res.answer and refusal is None:
-        res.unverified_numbers = unverified_numbers(res.answer, evidence)
+        res.unverified_numbers = unverified_numbers(res.answer, _evidence_with_original(res, question, evidence))
     if res.answer:
         yield em.answer(res.answer, forced=bool(out_of_steps and res.answer))

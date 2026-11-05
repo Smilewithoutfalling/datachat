@@ -116,7 +116,8 @@ class SettingsIn(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     base_url: Optional[str] = Field(None, max_length=500)
     timeout: Optional[float] = Field(None, ge=TIMEOUT_RANGE[0], le=TIMEOUT_RANGE[1])
-    memory_mode: Optional[Literal["off", "state"]] = None    # 阶段 6.6：会话记忆（实验），默认 off
+    memory_mode: Optional[Literal["off", "state", "full"]] = None    # 阶段 6.6：会话记忆（实验），默认 off；批 4a 起 full 是独立一档
+    memory_rewrite: Optional[bool] = None    # 批 4a M7：追问前先改写指代 / 相对时间（多一次模型调用），默认关
 
 
 class FeedbackIn(BaseModel):
@@ -519,10 +520,12 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(409, "这个会话还有一条消息在分析中")
         target = dataset_target(get_or_404(db, Dataset, s.dataset_id))
         agent = s.agent
-        from app.memory.config import SETTING_KEY, resolve_memory_mode
+        from app.memory.config import REWRITE_SETTING_KEY, SETTING_KEY, normalize_flag, resolve_memory_mode
         row = db.get(Setting, SETTING_KEY)
         mem_setting = row.value if row else None
-        if resolve_memory_mode(mem_setting) == "state":
+        rw_row = db.get(Setting, REWRITE_SETTING_KEY)
+        rw_setting = normalize_flag(rw_row.value) if rw_row else None   # 批 4a：只读下传，改写在 service.py 里做
+        if resolve_memory_mode(mem_setting) != "off":
             history = turn_snapshots(s.messages)          # 阶段 6.6：两种 agent 都带（workflow 只用来折叠工作状态）
         else:
             history = turn_history(s.messages) if agent == "react" else None
@@ -535,7 +538,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         db.commit()
         msg_id = a.id
 
-        kwargs = dict(agent=agent, trace_id=msg_id, log=False, memory_mode=mem_setting, **(analyze_kwargs or {}))
+        kwargs = dict(agent=agent, trace_id=msg_id, log=False, memory_mode=mem_setting, rewrite=rw_setting,
+                      **(analyze_kwargs or {}))
         cfg, meta = llm_config_meta()     # 阶段 6.5：每条分析消息记下当时的连接名和模型（result.meta）
         if chat_model_factory is not None:
             kwargs["chat_model"] = chat_model_factory()
@@ -654,9 +658,11 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 over.discard("timeout")      # 同 llm_config：坏值不生效
         sources = {k: "settings" if k in over else "env" if conns.legacy_env_source(k) else "default"
                    for k in SETTING_KEYS}
-        from app.memory.config import SETTING_KEY, env_override, normalize, resolve_memory_mode
+        from app.memory.config import (REWRITE_SETTING_KEY, SETTING_KEY, env_override, normalize, resolve_memory_mode,
+                                       resolve_rewrite)
         memory = {"mode": resolve_memory_mode(st.get(SETTING_KEY)), "setting": normalize(st.get(SETTING_KEY)) or "off",
-                  "env": env_override()}        # 阶段 6.6：mode 是实际生效值；env 非空时设置页提示被环境变量覆盖
+                  "env": env_override(),        # 阶段 6.6：mode 是实际生效值；env 非空时设置页提示被环境变量覆盖
+                  "rewrite": resolve_rewrite(st.get(REWRITE_SETTING_KEY))}   # 批 4a：改写开关的实际生效值（env → settings → False）
         if who["id"] != conns.ENV_ID:
             sources["model"] = sources["base_url"] = "connection"
             return {"model": cfg.model, "base_url": cfg.base_url, "timeout": cfg.timeout, "sources": sources,
@@ -682,6 +688,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 row.model = m
             row.updated_at = now()
         for k, v in vals.items():
+            if isinstance(v, bool):              # 批 4a memory_rewrite：存 1 / 0（config.normalize_flag 两种都认）
+                v = "1" if v else "0"
             conns.put_setting(db, k, str(v).strip())
         db.commit()
         return get_settings(db)
