@@ -25,6 +25,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
   const [settings, setSettings] = useState<Settings | null>(null);
   const [timeout, setTimeoutText] = useState("");
   const [memory, setMemory] = useState<MemoryMode>("off");
+  const [rewrite, setRewrite] = useState(false); // 批 4b：改写开关（设置页存的值，不是生效值）
   const [edit, setEdit] = useState<Edit>(null);
   const [test, setTest] = useState<TestState | null>(null);
   const [msg, setMsg] = useState("");
@@ -51,6 +52,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
         setSettings(s);
         setTimeoutText(String(s.timeout));
         setMemory(s.memory?.setting ?? "off");
+        setRewrite(s.memory?.rewrite_setting ?? s.memory?.rewrite ?? false);
         // D2：没有任何能用的连接（只有环境变量且没 Key）→ 直接新建第一个连接
         if (act?.readonly && !act.key.configured) setEdit({ kind: "new" });
       })
@@ -72,7 +74,10 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
 
   const saveMemory = (e: FormEvent) => {
     e.preventDefault();
-    c.saveSettings({ memory_mode: memory }).then((s) => (setSettings(s), setMemory(s.memory?.setting ?? memory), done("设置已保存。")), fail);
+    c.saveSettings({ memory_mode: memory, memory_rewrite: rewrite }).then(
+      (s) => (setSettings(s), setMemory(s.memory?.setting ?? memory), setRewrite(s.memory?.rewrite_setting ?? rewrite), done("设置已保存。")),
+      fail,
+    );
   };
 
   const runTest = (id: string) => {
@@ -169,12 +174,23 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
                 <select aria-label="会话记忆" value={memory} onChange={(e) => setMemory(e.target.value as MemoryMode)}>
                   <option value="off">关闭：只带最近几轮问答（默认）</option>
                   <option value="state">开启：再带上分析前提和失败的轮次</option>
+                  <option value="full">开启（完整）：再压缩较长的历史，并参考你点过赞的写法</option>
                 </select>
               </span>
             </label>
             <p className="hint" data-testid="memory-hint">
-              开启后，追问时会附上此前各轮的问题、结论摘要、分组和筛选条件，被停止或失败的轮次也会带上。
+              开启后，追问时会附上此前各轮的问题、结论摘要、分组和筛选条件，被停止或失败的轮次也会带上；数据集页里写的「口径与规则」也会生效。
               {settings.memory?.env ? `当前被环境变量 DATACHAT_MEMORY=${settings.memory.env} 覆盖，这里的选择暂不生效。` : ""}
+            </p>
+            <label className="check">
+              <input type="checkbox" aria-label="追问前先改写问题" checked={rewrite} onChange={(e) => setRewrite(e.target.checked)} />
+              追问前先把"刚才那个 / 上个月"改写成完整问题（多一次模型调用）
+            </label>
+            <p className="hint" data-testid="rewrite-hint">
+              {memory === "off" ? "会话记忆关闭时不改写。" : "改写失败或拿不准时，按你的原话分析。"}
+              {settings.memory?.rewrite_env != null
+                ? `当前被环境变量 DATACHAT_REWRITE=${settings.memory.rewrite_env ? "1" : "0"} 覆盖，这里的选择暂不生效。`
+                : ""}
             </p>
             <div className="form-actions">
               <button type="submit" className="primary">保存记忆设置</button>

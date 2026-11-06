@@ -7,7 +7,14 @@
     GET    /datasets                     列表
     GET    /datasets/{id}?rows=20        详情（文件、每张表的列与概要）；带 rows（1–100）时加每张表前 N 行预览，
                                          单元格一律字符串或 null（阶段 5 F1.1：预览与详情合并，每个文件只读一遍）
-    DELETE /datasets/{id}
+    DELETE /datasets/{id}                 口径（dataset_notes）随数据集级联删除（批 4b M10）
+    GET    /datasets/{id}/notes?history=1 口径与规则（批 4b M2）：默认只给在用的；history=1 带上被取代 / 停用的版本
+    POST   /datasets/{id}/notes          {"kind": "metric"|"rule", "name", "body", "unit"?, "synonyms"?}；在用的同名 409
+    PUT    /datasets/{id}/notes/{nid}    改口径 = 新增一行（supersedes 指向旧行），旧行记 retired_at；内容没变时原样返回
+    DELETE /datasets/{id}/notes/{nid}    停用（软遗忘，只写 retired_at），204
+    POST   /datasets/{id}/notes/import   请求体是 CSV（列 kind,name,body,unit,synonyms，别名用 ; 分隔）或 JSON 数组
+                                         （Content-Type: application/json）；整批校验，幂等（同名同 sha 跳过，sha 不同按版本取代）
+    GET    /datasets/{id}/notes/export?format=csv|json  在用的口径，供重新上传的数据集导入（M10）
     POST   /sessions                     {"dataset_id", "agent": "workflow"|"react", "title"?}
     GET    /sessions                     列表（按更新时间倒序）
     PATCH  /sessions/{id}                {"title"} 改名（阶段 5 F1）
@@ -69,7 +76,8 @@ from app.core.errors import user_error
 from app.core.text import BIDI_CONTROLS as _BIDI_CONTROLS, CONTROL_CHARS as _CONTROL_CHARS
 from app.core.events import CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE
 from app.server import connections as conns
-from app.server.db import ChatSession, Dataset, DatasetFile, EventRow, Feedback, Message, Setting, make_sessionmaker, now
+from app.server.db import (ChatSession, Dataset, DatasetFile, DatasetNote, EventRow, Feedback, Message, Setting,
+                           make_sessionmaker, now)
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
 MAX_FILES = 50
@@ -118,6 +126,19 @@ class SettingsIn(BaseModel):
     timeout: Optional[float] = Field(None, ge=TIMEOUT_RANGE[0], le=TIMEOUT_RANGE[1])
     memory_mode: Optional[Literal["off", "state", "full"]] = None    # 阶段 6.6：会话记忆（实验），默认 off；批 4a 起 full 是独立一档
     memory_rewrite: Optional[bool] = None    # 批 4a M7：追问前先改写指代 / 相对时间（多一次模型调用），默认关
+
+
+class NoteIn(BaseModel):
+    """口径（批 4b M2）。长度与取值在 app/memory/metrics.clean 里校验（400，中文原因）；这里只给一个宽松的上限防超大请求。"""
+    kind: str = Field(max_length=16)
+    name: str = Field(max_length=1000)
+    body: str = Field(max_length=10000)
+    unit: str = Field("", max_length=1000)
+    synonyms: str = Field("", max_length=2000)
+
+
+NOTES_IMPORT_MAX_BYTES = 1024 * 1024       # 口径导入文件上限 1 MB
+NOTES_IMPORT_MAX_ROWS = 1000
 
 
 class FeedbackIn(BaseModel):
@@ -453,6 +474,223 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         retention.remove_files(pngs)
         return {"ok": True}
 
+    # ---------------------------------------------------------------- 口径与规则（批 4b M2 / M10）
+    def note_out(n: DatasetNote) -> dict:
+        return {"id": n.id, "dataset_id": n.dataset_id, "kind": n.kind, "name": n.name, "body": n.body, "unit": n.unit,
+                "synonyms": n.synonyms, "sha": n.sha, "source": n.source, "supersedes": n.supersedes,
+                "retired_at": n.retired_at, "created_at": n.created_at}
+
+    def active_notes(db, dataset_id: str) -> list[DatasetNote]:
+        return list(db.scalars(select(DatasetNote).where(DatasetNote.dataset_id == dataset_id,
+                                                         DatasetNote.retired_at.is_(None))
+                               .order_by(DatasetNote.kind, DatasetNote.created_at, DatasetNote.name)))
+
+    def find_active(db, dataset_id: str, kind: str, name: str) -> DatasetNote | None:
+        return db.scalar(select(DatasetNote).where(DatasetNote.dataset_id == dataset_id, DatasetNote.kind == kind,
+                                                   DatasetNote.name == name, DatasetNote.retired_at.is_(None)))
+
+    def clean_or_400(raw: dict) -> dict:
+        from app.memory.metrics import NoteError, clean
+        try:
+            return clean(raw)
+        except NoteError as e:
+            raise HTTPException(400, str(e)) from None
+
+    def write_note(db, dataset_id: str, vals: dict, supersedes: DatasetNote | None = None) -> DatasetNote:
+        """写一行新版本。supersedes 给出时先把旧行停用（同一事务里，部分唯一索引不会撞）。只追加，不改旧行内容。"""
+        from app.memory.metrics import SOURCE, note_sha
+        if supersedes is not None:
+            supersedes.retired_at = now()
+            db.flush()
+        n = DatasetNote(dataset_id=dataset_id, **vals, sha=note_sha(vals), source=SOURCE,
+                        supersedes=supersedes.id if supersedes is not None else None, created_at=now())
+        db.add(n)
+        db.flush()
+        return n
+
+    def get_note_or_404(db, dataset_id: str, note_id: str) -> DatasetNote:
+        n = db.get(DatasetNote, note_id)
+        if n is None or n.dataset_id != dataset_id:
+            raise HTTPException(404, f"口径不存在：{note_id}")
+        return n
+
+    @app.get("/datasets/{dataset_id}/notes", dependencies=[Depends(auth)])
+    def list_notes(dataset_id: str, history: bool = Query(False), db=Depends(db_dep)):
+        get_or_404(db, Dataset, dataset_id)
+        if not history:
+            return [note_out(n) for n in active_notes(db, dataset_id)]
+        rows = db.scalars(select(DatasetNote).where(DatasetNote.dataset_id == dataset_id)
+                          .order_by(DatasetNote.kind, DatasetNote.name, DatasetNote.created_at))
+        return [note_out(n) for n in rows]
+
+    @app.post("/datasets/{dataset_id}/notes", dependencies=[Depends(auth)])
+    def create_note(dataset_id: str, body: NoteIn, db=Depends(db_dep)):
+        get_or_404(db, Dataset, dataset_id)
+        vals = clean_or_400(body.model_dump())
+        if find_active(db, dataset_id, vals["kind"], vals["name"]) is not None:
+            raise HTTPException(409, f"已经有一条在用的「{vals['name']}」，请改用编辑")
+        n = write_note(db, dataset_id, vals)
+        db.commit()
+        return note_out(n)
+
+    @app.put("/datasets/{dataset_id}/notes/{note_id}", dependencies=[Depends(auth)])
+    def update_note(dataset_id: str, note_id: str, body: NoteIn, db=Depends(db_dep)):
+        old = get_note_or_404(db, dataset_id, note_id)
+        if old.retired_at is not None:
+            raise HTTPException(409, "这条口径已经停用或被新版本取代，不能再改")
+        vals = clean_or_400(body.model_dump())
+        from app.memory.metrics import note_sha
+        if note_sha(vals) == old.sha:
+            return note_out(old)              # 内容没变：不产生新版本
+        clash = find_active(db, dataset_id, vals["kind"], vals["name"])
+        if clash is not None and clash.id != old.id:
+            raise HTTPException(409, f"已经有一条在用的「{vals['name']}」，请改用编辑")
+        n = write_note(db, dataset_id, vals, supersedes=old)
+        db.commit()
+        return note_out(n)
+
+    @app.delete("/datasets/{dataset_id}/notes/{note_id}", dependencies=[Depends(auth)], status_code=204)
+    def retire_note(dataset_id: str, note_id: str, db=Depends(db_dep)):
+        """软遗忘：只写 retired_at，不物理删行；已经停用的再停一次也是 204。"""
+        n = get_note_or_404(db, dataset_id, note_id)
+        if n.retired_at is None:
+            n.retired_at = now()
+            db.commit()
+        return Response(status_code=204)
+
+    def parse_import(raw: bytes, content_type: str) -> list[tuple[int, dict]]:
+        """→ [(行号, 原始字段)]。CSV 的行号按文件行（表头是第 1 行），JSON 按数组下标从 1 起。"""
+        if not raw.strip():
+            raise HTTPException(400, "导入文件是空的")
+        if "json" in (content_type or "").lower():
+            try:
+                data = json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, ValueError):
+                raise HTTPException(400, "JSON 解析失败：请导入一个口径对象的数组") from None
+            if not isinstance(data, list):
+                raise HTTPException(400, "JSON 必须是数组")
+            return [(i, x if isinstance(x, dict) else {"_bad": True}) for i, x in enumerate(data, 1)]
+        import csv
+        import io
+        from app.tools.csv_io import CSVEncodingError, detect_encoding
+        try:
+            text = raw.decode(detect_encoding(raw), errors="strict")
+        except (CSVEncodingError, UnicodeDecodeError) as e:
+            raise HTTPException(400, str(e)) from None
+        text = text.lstrip("\ufeff")
+        reader = csv.DictReader(io.StringIO(text))
+        cols = [str(c or "").strip().lower() for c in (reader.fieldnames or [])]
+        if "kind" not in cols or "name" not in cols or "body" not in cols:
+            raise HTTPException(400, "CSV 表头必须包含 kind,name,body（可选 unit,synonyms）")
+        out = []
+        for row in reader:
+            row = {str(k or "").strip().lower(): v for k, v in row.items() if k is not None}
+            if not any(str(v or "").strip() for v in row.values()):
+                continue                       # 空行跳过
+            out.append((reader.line_num, row))
+        return out
+
+    @app.post("/datasets/{dataset_id}/notes/import", dependencies=[Depends(auth)])
+    async def import_notes(dataset_id: str, request: Request):
+        """M10 导入：整批校验，任何一行不合法就整批拒绝（400，指出行号），不写一半。
+        幂等：在用的同名行 sha 相同 → 跳过；sha 不同 → 新版本取代旧行（批 3 §5：不覆盖）；没有同名行 → 新增。"""
+        with Session() as db:
+            get_or_404(db, Dataset, dataset_id)
+        raw = await request.body()
+        if len(raw) > NOTES_IMPORT_MAX_BYTES:
+            raise HTTPException(413, f"导入文件超过 {NOTES_IMPORT_MAX_BYTES // 1024} KB")
+        from app.memory.metrics import NoteError, clean, note_sha
+        rows = parse_import(raw, request.headers.get("content-type", ""))
+        if len(rows) > NOTES_IMPORT_MAX_ROWS:
+            raise HTTPException(400, f"一次最多导入 {NOTES_IMPORT_MAX_ROWS} 条")
+        errors, vals, seen = [], [], {}
+        for line, r in rows:
+            try:
+                if r.get("_bad"):
+                    raise NoteError("每条口径必须是一个对象")
+                v = clean(r)
+            except NoteError as e:
+                errors.append(f"第 {line} 行：{e}")
+                continue
+            key = (v["kind"], v["name"])
+            if key in seen:
+                errors.append(f"第 {line} 行：与第 {seen[key]} 行同名（{v['name']}）")
+                continue
+            seen[key] = line
+            vals.append(v)
+        if errors:
+            raise HTTPException(400, "导入失败，没有写入任何一条：" + "；".join(errors[:20])
+                                + (f"；另有 {len(errors) - 20} 处" if len(errors) > 20 else ""))
+        if not vals:
+            raise HTTPException(400, "导入文件里没有口径")
+        added = updated = unchanged = 0
+        with Session() as db:
+            get_or_404(db, Dataset, dataset_id)
+            for v in vals:
+                cur = find_active(db, dataset_id, v["kind"], v["name"])
+                if cur is None:
+                    write_note(db, dataset_id, v)
+                    added += 1
+                elif cur.sha == note_sha(v):
+                    unchanged += 1
+                else:
+                    write_note(db, dataset_id, v, supersedes=cur)
+                    updated += 1
+            db.commit()
+        return {"added": added, "updated": updated, "unchanged": unchanged, "errors": []}
+
+    @app.get("/datasets/{dataset_id}/notes/export", dependencies=[Depends(auth)])
+    def export_notes(dataset_id: str, format: Literal["csv", "json"] = Query("csv"), db=Depends(db_dep)):
+        """只导出在用的口径。CSV 的别名用 ; 分隔（和导入格式一致），带 BOM 方便 Excel 打开。"""
+        get_or_404(db, Dataset, dataset_id)
+        items = [{"kind": n.kind, "name": n.name, "body": n.body, "unit": n.unit, "synonyms": n.synonyms}
+                 for n in active_notes(db, dataset_id)]
+        if format == "json":
+            return Response(json.dumps(items, ensure_ascii=False, indent=2), media_type="application/json",
+                            headers={"Content-Disposition": 'attachment; filename="notes.json"'})
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(["kind", "name", "body", "unit", "synonyms"])
+        for x in items:
+            w.writerow([x["kind"], x["name"], x["body"], x["unit"], x["synonyms"].replace(",", ";")])
+        return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="notes.csv"'})
+
+    def notes_for_analysis(db, dataset_id: str) -> list[dict]:
+        """post_message 传给 analyze 的口径：在用的行，纯 dict（app/core 不 import app/server）。"""
+        return [{"kind": n.kind, "name": n.name, "body": n.body, "unit": n.unit, "synonyms": n.synonyms, "sha": n.sha}
+                for n in active_notes(db, dataset_id)]
+
+    def accepted_pairs_for(db, ds: Dataset, session_id: str) -> list[dict]:
+        """M9：同一数据集指纹、其他会话里 👍 过的助手消息 → [{question, code}]。每轮现算，只看最近 SCAN_LIMIT 条 👍。
+        数据集不可变（重新上传得到新 id），指纹相同的数据集（同一份文件重新上传）也算同一数据集。"""
+        from app.memory.pairs import SCAN_LIMIT, dataset_fingerprint, eligible
+        fp = dataset_fingerprint(ds.files)
+        same = [d.id for d in db.scalars(select(Dataset)) if d.id == ds.id or dataset_fingerprint(d.files) == fp]
+        rows = db.execute(
+            select(Message, Feedback.rating)
+            .join(Feedback, Feedback.message_id == Message.id)
+            .join(ChatSession, ChatSession.id == Message.session_id)
+            .where(ChatSession.dataset_id.in_(same), Message.session_id != session_id, Message.role == "assistant",
+                   Message.status == "ok", Feedback.rating == "up")
+            .order_by(Message.created_at.desc()).limit(SCAN_LIMIT)).all()
+        out = []
+        for m, rating in rows:
+            try:
+                r = json.loads(m.result_json) if m.result_json else None
+            except ValueError:
+                r = None
+            if not eligible(r, m.status, rating):
+                continue
+            q = db.scalar(select(Message).where(Message.session_id == m.session_id, Message.role == "user",
+                                                Message.created_at <= m.created_at)
+                          .order_by(Message.created_at.desc()).limit(1))
+            if q is not None and q.content.strip():
+                out.append({"question": q.content, "code": r["code"]})
+        return out
+
     @app.post("/sessions", dependencies=[Depends(auth)])
     def create_session(body: SessionIn, db=Depends(db_dep)):
         if body.agent not in AGENTS:
@@ -525,8 +763,13 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         mem_setting = row.value if row else None
         rw_row = db.get(Setting, REWRITE_SETTING_KEY)
         rw_setting = normalize_flag(rw_row.value) if rw_row else None   # 批 4a：只读下传，改写在 service.py 里做
-        if resolve_memory_mode(mem_setting) != "off":
+        mode = resolve_memory_mode(mem_setting)
+        notes, pairs = [], []
+        if mode != "off":
             history = turn_snapshots(s.messages)          # 阶段 6.6：两种 agent 都带（workflow 只用来折叠工作状态）
+            notes = notes_for_analysis(db, s.dataset_id)  # 批 4b M2：口径在 memory_mode != off 时生效
+            if mode == "full" and agent == "react":       # 批 4b M9：只在 full、只给 ReAct
+                pairs = accepted_pairs_for(db, get_or_404(db, Dataset, s.dataset_id), session_id)
         else:
             history = turn_history(s.messages) if agent == "react" else None
         q = Message(session_id=session_id, role="user", content=body.content, created_at=now())
@@ -547,6 +790,10 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             kwargs["llm_config"] = cfg
         if history:
             kwargs["history"] = history
+        if notes:
+            kwargs["dataset_notes"] = notes
+        if pairs:
+            kwargs["accepted_pairs"] = pairs
 
         cancel = threading.Event()
         cancels[msg_id] = cancel
@@ -658,11 +905,14 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 over.discard("timeout")      # 同 llm_config：坏值不生效
         sources = {k: "settings" if k in over else "env" if conns.legacy_env_source(k) else "default"
                    for k in SETTING_KEYS}
-        from app.memory.config import (REWRITE_SETTING_KEY, SETTING_KEY, env_override, normalize, resolve_memory_mode,
-                                       resolve_rewrite)
+        from app.memory.config import (REWRITE_SETTING_KEY, SETTING_KEY, env_override, normalize, normalize_flag,
+                                       resolve_memory_mode, resolve_rewrite, rewrite_env_override)
         memory = {"mode": resolve_memory_mode(st.get(SETTING_KEY)), "setting": normalize(st.get(SETTING_KEY)) or "off",
                   "env": env_override(),        # 阶段 6.6：mode 是实际生效值；env 非空时设置页提示被环境变量覆盖
-                  "rewrite": resolve_rewrite(st.get(REWRITE_SETTING_KEY))}   # 批 4a：改写开关的实际生效值（env → settings → False）
+                  "rewrite": resolve_rewrite(st.get(REWRITE_SETTING_KEY)),   # 批 4a：改写开关的实际生效值（env → settings → False）
+                  # 批 4b：设置页要分开显示「这里存的值」和「被环境变量覆盖」（同 setting / env 的分法）
+                  "rewrite_setting": bool(normalize_flag(st.get(REWRITE_SETTING_KEY))),
+                  "rewrite_env": rewrite_env_override()}
         if who["id"] != conns.ENV_ID:
             sources["model"] = sources["base_url"] = "connection"
             return {"model": cfg.model, "base_url": cfg.base_url, "timeout": cfg.timeout, "sources": sources,

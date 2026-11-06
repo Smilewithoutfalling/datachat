@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text, create_engine, event
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -104,6 +104,33 @@ class Feedback(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[str] = mapped_column(String(40), default=now)
     message: Mapped[Message] = relationship(back_populates="feedback")
+
+
+class DatasetNote(Base):
+    """数据集级的口径与规则（记忆 M2 / M10，docs/roadmap/memory-batch4.md §3.4–3.5）。新表：create_all 自动建，旧表不动。
+    body 是给人 / 模型读的文本（指标公式或规则），**永不 eval**。
+    版本化（批 3 §5）：一行写入后不再修改内容——改口径 = 新增一行，supersedes 指向被取代的行，旧行记 retired_at；
+    删除 = 软遗忘（只写 retired_at）。进 prompt 的只有 retired_at 为空的行；同一数据集里在用的 (kind, name) 至多一行
+    （下面的部分唯一索引兜底，路由先查后写给 409）。source 本批只有 explicit_user（用户在数据集页 / API / 导入里亲手写的）。
+    与 Dataset 之间不加 ORM relationship：级联只靠数据库外键 ON DELETE CASCADE（和 ChatSession 一样，db.py 的
+    PRAGMA foreign_keys=ON）。sha = sha256(kind|name|body|unit|synonyms)[:12]，写入时算（app/memory/metrics.note_sha）。"""
+    __tablename__ = "dataset_notes"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))           # "metric" | "rule"
+    name: Mapped[str] = mapped_column(String(64))
+    body: Mapped[str] = mapped_column(Text, default="")     # metric：公式；rule：规则文本
+    unit: Mapped[str] = mapped_column(String(16), default="")
+    synonyms: Mapped[str] = mapped_column(Text, default="")  # 逗号分隔（导入文件里的 ; 入库时统一成 ,）
+    sha: Mapped[str] = mapped_column(String(12), default="")
+    source: Mapped[str] = mapped_column(String(32), default="explicit_user")
+    supersedes: Mapped[Optional[str]] = mapped_column(String(32), default=None)   # 被它取代的那一行 id
+    retired_at: Mapped[Optional[str]] = mapped_column(String(40), default=None)   # 停用 / 被取代的时间；None = 在用
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+    __table_args__ = (
+        Index("ux_dataset_notes_active", "dataset_id", "kind", "name", unique=True,
+              sqlite_where=text("retired_at IS NULL")),
+    )
 
 
 class Setting(Base):

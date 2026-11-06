@@ -79,13 +79,15 @@ test("详情与预览只发一个请求；上传后直接用响应里的预览�
   });
   fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
   await screen.findByTestId("dataset-view");
-  expect(be.calls.filter((x) => x.path.startsWith("/datasets/d1")).map((x) => x.path)).toEqual(["/datasets/d1?rows=20"]);
+  // 批 4b：数据集页另有口径区，会单独请求 /datasets/d1/notes；这里钉的是「详情 + 预览」只读一次，口径请求不算
+  expect(be.calls.filter((x) => x.path.startsWith("/datasets/d1") && !x.path.startsWith("/datasets/d1/notes")).map((x) => x.path))
+    .toEqual(["/datasets/d1?rows=20"]);
 
   const file = new File(["a,b\n1,2\n"], "x.csv", { type: "text/csv" });
   fireEvent.change(screen.getByLabelText("选择 CSV 文件"), { target: { files: [file] } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "上传" })));
   expect(await screen.findByRole("heading", { name: "新上传" })).toBeTruthy();
-  expect(be.calls.some((x) => x.path.startsWith("/datasets/d2"))).toBe(false);
+  expect(be.calls.some((x) => x.path.startsWith("/datasets/d2") && !x.path.startsWith("/datasets/d2/notes"))).toBe(false);
 });
 
 test("上传对话框常驻「来路不明」提示（THREAT_MODEL §4 (a)，阶段 6 D2）", async () => {
@@ -312,7 +314,8 @@ test("结论 Markdown：标题、列表、表格都渲染在 .md 下，第一个
 });
 
 // 阶段 6.6：会话记忆开关（memory-system-spec.md §3.7）。默认 off；保存发 {memory_mode}；被环境变量覆盖时提示
-test("设置：会话记忆开关默认关闭，保存只发 memory_mode；环境变量覆盖时写明", async () => {
+// 批 4b：保存时一并发改写开关 memory_rewrite（原来只发 memory_mode）
+test("设置：会话记忆开关默认关闭，保存发 memory_mode 与 memory_rewrite；环境变量覆盖时写明", async () => {
   const be = setup({
     "PUT /settings": (b: unknown) => ({ model: "qwen", base_url: "https://x/v1", timeout: 60,
       memory: { mode: (b as { memory_mode: string }).memory_mode, setting: (b as { memory_mode: string }).memory_mode, env: null } }),
@@ -323,7 +326,7 @@ test("设置：会话记忆开关默认关闭，保存只发 memory_mode；环�
   expect(sel.value).toBe("off");
   fireEvent.change(sel, { target: { value: "state" } });
   await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存记忆设置" })));
-  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({ memory_mode: "state" });
+  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({ memory_mode: "state", memory_rewrite: false });
   expect(screen.getByRole("status").textContent).toBe("设置已保存。");
   expect(within(view).getByTestId("memory-hint").textContent).not.toContain("覆盖");
 });

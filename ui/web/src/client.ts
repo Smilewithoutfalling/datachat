@@ -4,8 +4,8 @@ import { dataUrlBytes } from "./charts/pngSaver";
 import { parseSse } from "./sse";
 import type { Ev } from "./turn";
 import type {
-  Agent, Catalog, Connection, ConnectionIn, Connections, ConnectionTest, ConnKey, Dataset, DatasetDetail, KeyStatus, ModelList,
-  Rating, Session, SessionDetail, Settings, SettingsTest,
+  Agent, Catalog, Connection, ConnectionIn, Connections, ConnectionTest, ConnKey, Dataset, DatasetDetail, DatasetNote, KeyStatus,
+  ModelList, NoteImport, NoteIn, Rating, Session, SessionDetail, Settings, SettingsTest,
 } from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
@@ -29,6 +29,23 @@ export function client(api: Api) {
       return api.upload<DatasetDetail>("/datasets", fd, onProgress);
     },
     deleteDataset: (id: string) => api.json(`/datasets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    // 批 4b：口径与规则。改 = 新版本取代旧版本；停用 = 软遗忘（204）
+    notes: (id: string) => api.json<DatasetNote[]>(`/datasets/${encodeURIComponent(id)}/notes`),
+    addNote: (id: string, n: NoteIn) => api.json<DatasetNote>(`/datasets/${encodeURIComponent(id)}/notes`, jsonBody("POST", n)),
+    updateNote: (id: string, noteId: string, n: NoteIn) =>
+      api.json<DatasetNote>(`/datasets/${encodeURIComponent(id)}/notes/${encodeURIComponent(noteId)}`, jsonBody("PUT", n)),
+    retireNote: async (id: string, noteId: string) => {
+      await api.request(`/datasets/${encodeURIComponent(id)}/notes/${encodeURIComponent(noteId)}`, { method: "DELETE" });
+    },
+    /** 导入：请求体就是文件内容；.json 按 JSON 数组，其余按 CSV（后端探测编码）。整批校验，任何一行不合法 400 且不写入。 */
+    importNotes: (id: string, file: File) =>
+      api.json<NoteImport>(`/datasets/${encodeURIComponent(id)}/notes/import`, {
+        method: "POST",
+        headers: { "Content-Type": /\.json$/i.test(file.name) ? "application/json" : "text/csv" },
+        body: file,
+      }),
+    exportNotes: async (id: string, format: "csv" | "json") =>
+      (await api.request(`/datasets/${encodeURIComponent(id)}/notes/export?format=${format}`)).text(),
 
     sessions: () => api.json<Session[]>("/sessions"),
     session: (id: string) => api.json<SessionDetail>(`/sessions/${encodeURIComponent(id)}`),

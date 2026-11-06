@@ -181,14 +181,18 @@ def test_incremental_vacuum_is_noop_on_none_mode(tmp_path):
 
 
 # ------------------------------------------------------------------ 记忆开关接线
+NO_RW = {"rewrite_setting": False, "rewrite_env": None}
+
+
 def test_settings_memory_mode_roundtrip(home, monkeypatch):
     c = client(home, ScriptedChatModel(replies=[], calls=[]))
     monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
+    # 批 4b：memory 段另加 rewrite_setting / rewrite_env（设置页分开显示「存的值 / 被环境变量覆盖」）
     assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "off", "env": None,
-                                                              "rewrite": False}
+                                                              "rewrite": False, **NO_RW}
     r = c.put("/settings", json={"memory_mode": "state"}, headers=H)
     assert r.status_code == 200 and r.json()["memory"] == {"mode": "state", "setting": "state", "env": None,
-                                                           "rewrite": False}
+                                                           "rewrite": False, **NO_RW}
     # 批 4a：full 是独立一档（原先 422），不认识的值仍是 422
     r = c.put("/settings", json={"memory_mode": "full"}, headers=H)
     assert r.status_code == 200 and r.json()["memory"]["mode"] == "full"
@@ -196,7 +200,7 @@ def test_settings_memory_mode_roundtrip(home, monkeypatch):
     assert c.put("/settings", json={"memory_mode": "state"}, headers=H).status_code == 200
     monkeypatch.setenv("DATACHAT_MEMORY", "off")
     assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "state", "env": "off",
-                                                              "rewrite": False}
+                                                              "rewrite": False, **NO_RW}
 
 
 def test_state_mode_end_to_end_with_failed_turn(home, sample_path):

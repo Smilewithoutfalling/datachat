@@ -59,9 +59,10 @@ class AnalysisResult:
     # 阶段 6.6 记忆（memory-system-spec.md §14.3，字段名与类型写死，改名先改规格）：只进结果，不进 prompt
     memory_mode: str = "off"                    # 本轮实际生效的记忆模式（off | state | full）
     history_tokens: int = 0                     # 送进模型的历史估算 token（off 下按回灌的消息估，作为基线）
-    memory_trimmed: list = field(default_factory=list)  # 本轮被预算裁剪的块名：history / state / constraints
+    memory_trimmed: list = field(default_factory=list)  # 本轮被预算裁剪的块名：history / state / constraints / notes（批 4b）
     rewrite: Optional[dict] = None              # M7 改写记录（批 4a）：没触发时 None；触发时 {original, rewritten, changed, needs_clarify, tokens, ms}
     result_digest: str = ""                     # 结果的类型与形状（不含值），下一轮的历史快照用（M3）
+    memory_notes: list = field(default_factory=list)  # 批 4b M2/M10：本轮进了 prompt 的口径 [{name, sha}]；off / 没有口径时 []
 
     @property
     def ok(self) -> bool:

@@ -5,8 +5,8 @@
 
 返回的是**实际生效的值**。批 4a 起三档都是真的（docs/roadmap/memory-batch4.md §2）：
 - off：什么都不变（P8）；
-- state：批 1–3 的全部（以后加口径 M2、M6 warning）；没有口径、没开改写时 system 与 f39753c 逐字节一致；
-- full：state + M4 遮罩（以后加 M9 参考写法），会改变模型看到的历史。
+- state：批 1–3 的全部 + 口径 M2（有口径时）+ M6 warning（批 4b）；没有口径、没开改写时 system 与 f39753c 逐字节一致；
+- full：state + M4 遮罩 + M9 参考写法（批 4b，只给 ReAct、有 👍 样本时），会改变模型看到的历史 / 示例。
 评测的指纹（app/eval/fingerprint.py）直接调 resolve_memory_mode()；评测进程里没有 settings 表，
 结果与 analyze() 自己解析出来的一致。
 
