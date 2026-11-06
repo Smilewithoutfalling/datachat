@@ -135,16 +135,18 @@ def test_impossible_rejects_number_even_if_answer_mentions_missing_field():
 # ---------------------------------------------------------------- 题库层面
 
 def test_negative_cases_are_in_all_cases():
+    """expect_kind 是负向题的注册表：neg_001..010 十条 + 记忆专项的反向回归 mem_003
+    （口径引用缺失字段仍拒答，批 4 起 expect_kind 也被 memory 类合法使用）。"""
     from app.eval.cases import ALL_CASES
     ids = {c.id for c in ALL_CASES if c.expect_kind}
-    assert ids == {f"neg_{i:03d}" for i in range(1, 11)}, sorted(ids)
+    assert ids == {f"neg_{i:03d}" for i in range(1, 11)} | {"mem_003"}, sorted(ids)
 
 
 def test_negative_mix_matches_the_spec():
-    """6 澄清 + 4 不可能。比例写死在测试里：全做成 impossible 也能"通过"，
-    但那测不出"该反问却算了一个数"这件事。"""
+    """6 澄清 + 4 不可能（neg_* 十条的比例写死：全做成 impossible 也能"通过"，
+    但那测不出"该反问却算了一个数"这件事）。mem_003 是记忆类的反向回归，不计入这个配比。"""
     from app.eval.cases import ALL_CASES
-    kinds = [c.expect_kind for c in ALL_CASES if c.expect_kind]
+    kinds = [c.expect_kind for c in ALL_CASES if c.expect_kind and c.id.startswith("neg_")]
     assert kinds.count("clarify") == 6
     assert kinds.count("impossible") == 4
 

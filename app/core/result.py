@@ -53,6 +53,7 @@ class AnalysisResult:
     llm_kind: Optional[str] = None              # error_kind=llm 时的子类（events.LLM_KINDS 或 http_NNN），其余为 None（V2a 错误卡分出口）
     warnings: list = field(default_factory=list)  # 不算失败但要让用户知道的情况（如 ReAct 步数用完后强制收尾）
     unverified_numbers: list = field(default_factory=list)  # 结论里在证据中找不到的数字（B64，只检测不改写）
+    chart_check_codes: list = field(default_factory=list)  # 图 ↔ 结果一致性（EV-B3）：CHART_BAR_VALUE / CHART_PIE_SUM
     steps: list = field(default_factory=list)   # list[Step]
     timings: dict = field(default_factory=dict) # {"total": 秒, "planner": 秒, ...}
     usage: TokenUsage = field(default_factory=TokenUsage)

@@ -45,9 +45,13 @@ def test_multi_cases_last_turn_is_the_question():
 
 
 def test_multi_cases_have_own_category():
-    """多轮单独成类。混进 aggregation 之类，分类表就读不出"多轮表现"这个数了。"""
+    """多轮单独成类。混进 aggregation 之类，分类表就读不出"多轮表现"这个数了。
+    例外：记忆专项多轮题（requires_memory 非空）category="memory"，是设计好的第三类。"""
     for c in MULTI:
-        assert c.category == "multi_turn", c.id
+        if getattr(c, "requires_memory", ""):
+            assert c.category == "memory", c.id
+        else:
+            assert c.category == "multi_turn", c.id
 
 
 def test_last_turn_is_never_self_contained():
@@ -237,6 +241,9 @@ _NOT_ABOUT_REMEMBERING = {
     "mul_032": "「它」指上一轮的 K200，占比分母也来自当轮上下文",
     "mul_034": "「那个数字」指第 1 轮的计算结果；本题考复述对不对（recall_turn 断言），"
                "单轮重算出同一个值测不出复述能力",
+    "mem_006": "「那张表」指第 1 轮的计算结果；本题考隔 7 轮的复述（recall_turn），不是测记忆档位",
+    "mem_007": "「第二十九条」是历史里的条款编号；本题考 M9 截断后还能不能答对（trimmed 路径），"
+               "单轮没有这个测点",
 }
 
 

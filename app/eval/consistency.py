@@ -18,8 +18,10 @@ result 里 84 单，结论写"1,061 单"）。`unverified_numbers`（B64）早�
     - 只看代码不看答案措辞 → 断言 3 只读 res.code。
 
 断言 2 **图 ↔ 结果**（CHART_RESULT_MISMATCH）
-    读 `res.chart_check_codes`（EV-B3 chart_check 的产出，二值列表）。B3 尚未落地时该
-    属性不存在 → 恒 not applicable，**不装作检查过**。B3 落地后这里零改动生效。
+    读 `res.chart_check_codes`（EV-B3 chart_check 的产出，app/core/chart_check.py，
+    二值列表）。列表非空即说明该次执行的图与 result 三条判定路（值/系列和/总和）全断，
+    记一条失败。B3 未覆盖的形态（散点、matplotlib PNG）不产生 code，保持 not applicable
+    语义——没检查不装作检查过。
 
 断言 3 **时间词 ↔ 代码**（TIME_FILTER_MISMATCH）
     问题里出现 本月/上月/今年/去年/本季度/上季度/Q[1-4]/\\d{4}年 时，最终代码里必须有
@@ -47,7 +49,7 @@ _TIME_CODE_EVIDENCE = re.compile(
     r"|query\("
 )
 
-# chart_check（EV-B3）约定会写的两个 code；B3 落地前 res 上没有这个属性
+# chart_check（EV-B3，app/core/chart_check.py）会写的两个 code
 _CHART_CHECK_CODES = ("CHART_BAR_VALUE", "CHART_PIE_SUM")
 
 

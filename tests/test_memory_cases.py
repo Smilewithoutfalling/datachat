@@ -104,3 +104,29 @@ def test_report_memory_block_keys():
     mb = rep.memory_block()
     assert set(mb["trimmed_cases"]) == {"history", "state", "constraints", "notes"}
     assert "实收销售额" in mb["notes_used"]
+
+
+# ---------------------------------------------------------------- M9 截断专项
+
+def test_mem007_guarantees_trim_and_keeps_operative_turn():
+    """mem_007 的存在意义：**保证**撑爆 6000 token 历史上限（mem_006 不保证，实测没触发）。
+
+    用 runner 同款路径构造快照（前 3 轮 (q, a) 元组），按 state 档的 cap 渲染历史块：
+    1) 必须至少丢 1 轮（trimmed 记 history 的前提）；
+    2) 丢完之后第 3 轮（重点订单口径所在轮）必须还在块里——截断不许吃掉答题依据，
+       否则这题就从「截断不伤正确性」变成「截断必错」，读数没法解读。
+    用最保守的极短答案构造：真实运行里答案 brief 只会更长，只会更容易触发丢弃。
+    """
+    from app.memory.budget import HISTORY_TOKENS
+    from app.memory.snapshots import from_pair, render_block
+
+    c = _case("mem_007")
+    assert len(c.turns) == 4
+    snaps = [from_pair(q, "收到。") for q in c.turns[:-1]]
+    block, dropped = render_block(snaps, HISTORY_TOKENS)
+    assert dropped >= 1, f"mem_007 没触发丢轮（块 {len(block)} 字符），制度条款撑爆上限的设计失效"
+    assert "第二十九条" in block and "重点订单" in block, "关键规则轮被截断吃掉了，题目设计要改"
+    # 关键规则轮的存活要留余量：再丢一轮后它必须还是活的最老轮（防 brief 变长后多丢一轮）
+    block2, dropped2 = render_block(snaps[1:], HISTORY_TOKENS)
+    assert dropped2 == 0 and "第二十九条" in block2, \
+        "只喂第 2、3 轮就超限了——条款文本太短或答案 brief 余量不足，末轮规则可能被丢"

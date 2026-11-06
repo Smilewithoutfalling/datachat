@@ -27,7 +27,8 @@ def test_case_count_and_ids_unique():
     # +1 扰动题（EV-B6 pert_001）→ 单轮 161。
     # 2026-11-06：+6 记忆专项（批 4 mem_001–006）→ 单轮 164（口径 3）+ 多轮 37（改写 2 +
     # 长历史 1）= 201。全部 requires_memory，off 档跳过。改写题天然是多轮（追问省略指代）。
-    assert (len(single), len(multi)) == (164, 37), "单轮 164（含 biz 22 + 负向 10 + 扰动 1 + 记忆口径 3）+ 多轮 37"
+    # 同日 +mem_007（M9 截断专项，多轮）→ 多轮 38 = 202。
+    assert (len(single), len(multi)) == (164, 38), "单轮 164（含 biz 22 + 负向 10 + 扰动 1 + 记忆口径 3）+ 多轮 38"
     by = {}
     for c in single:
         # 扰动题（EV-B6）的 dataset 是 fixture 路径，不在 DATASETS 里 —— 按 variant_kind 归 "pert"
@@ -35,8 +36,9 @@ def test_case_count_and_ids_unique():
         by[key] = by.get(key, 0) + 1
     assert by == {"sales": 53, "orders": 34, "employees": 27, "inventory": 27, "biz": 22, "pert": 1}
     # 记忆专项的档位标记：全部 requires_memory 非空，且都在 sales 表
+    # 2026-11-06：+mem_007（M9 截断专项）→ 7
     mem = [c for c in ALL_CASES if c.category == "memory"]
-    assert len(mem) == 6 and all(c.requires_memory for c in mem)
+    assert len(mem) == 7 and all(c.requires_memory for c in mem)
     assert all(c.dataset == "sales" for c in mem)
 
 

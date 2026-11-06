@@ -354,6 +354,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         res.result_text = state.get("result_text", "")
         res.chart_path = state.get("chart_path") or None
         res.charts = chart_items(res.chart_path, state.get("chart_options") or [])
+    from app.core.chart_check import chart_check
+    res.chart_check_codes = chart_check(res)
     res.warnings += chart_warnings(res, (state.get("chart_warnings") or []) if res.executed else [])
     if tracker.snapshot().budget_hit:
         res.warnings.append(BUDGET_WARNING.format(budget=tracker.usage.budget))
@@ -657,6 +659,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
         res.result = last["result"]
         res.result_text = format_result(last["result"])
         res.chart_path = last["chart"] or last_png(res.charts)
+        from app.core.chart_check import chart_check
+        res.chart_check_codes = chart_check(res)
     elif refusal is not None:
         # 模型没调用工具、直接在结论里按契约拒答（B40）
         res.result = res.result_text = refusal

@@ -6159,3 +6159,40 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 
 三档读数支持批 4 合入后的验收口径：state 档是性价比拐点（+32pp 正确率、执行成功率拉满），
 full 再 +3pp 属边际。反向回归（口径缺失拒答）与 R10 抄录两条硬需求均实证通过。
+
+## [132] B3 chart_check 落地 + M9 截断专项题（2026-11-06）
+
+### B3：图 ↔ 结果检查（`app/core/chart_check.py`，新）
+
+- 产出 `AnalysisResult.chart_check_codes`（新字段），二值：`CHART_BAR_VALUE` / `CHART_PIE_SUM`。
+  service 两条收尾路径（workflow `_finish` / react ok 分支）各挂一次，与 `unverified_numbers`（B64）同一先例。
+- 判定口径（宁可漏报）：一张图判**通过**只需命中三条路之一——任一数值在证据里（含比例↔百分数
+  双向，0.2493↔24.93）；各系列和；全部值之和。**和匹配是关键**：覆盖"明细拆解图 + 合计 result"
+  的正当组合（每项都不等于合计，但加起来等于），这是最容易误报的形态。
+- 不判：散点（逐点数据无聚合语义）、matplotlib PNG（无结构化 option）、无数值、未执行。
+- 证据与断言 1 同源：result_text + str(result)，不含 question。
+- B4 断言 2 消费端零改动生效：codes 命中 → `CHART_RESULT_MISMATCH`。
+- 测试 `tests/test_chart_check.py` 13 条（通过 4 路 / 失败 3 路 / 不判 4 路 / 契约联动 2）。
+
+### M9 截断专项 mem_007（消除三档读数的最后一个盲区）
+
+- mem_006 的注记自己承认「不保证必超」，三档读数实测 `trimmed_any=0`——M9 从来没被真正执行过。
+- mem_007：3 轮 × 20 条制度条款（每条 ~210 字，**问题原文在快照里不截断**，render_turn 只截答案
+  brief）→ 历史块 ~12700 字符 ≈ 6400 token，state 档 render_block **必然**从第 1 轮开始丢轮。
+- 关键规则（「重点订单」= 2024 年 1 月华北）放第 3 轮开头：丢 1 轮后剩余 ~8700 字符回到 cap 内，
+  规则轮必定存活 → 截断发生但末轮照样答得对，读数是「截断不伤正确性」而不是「截断必错」。
+- 保证性测试 `test_mem007_guarantees_trim_and_keeps_operative_turn`：用 runner 同款快照路径
+  断言 dropped≥1 且第二十九条仍在块里。oracle ✅（华北 1 月销量 190）。
+
+### 顺带修的批 4 漏网（全量套件第一次跑全）
+
+上轮批 4 验收只跑了存量 299 选集，全量 33 分钟跑出来 5 个注册表断言漏改：test_multi_cases 的
+category 断言（mem 多轮题 category="memory" 是第三类，修成 requires_memory 分支）、
+`_NOT_ABOUT_REMEMBERING` 漏 mem_006（本轮补 006/007）、test_negative 的 expect_kind 集合
+（mem_003 impossible 合法入库）、负向配比改按 neg_* 前缀统计、mem 计数 6→7。
+全量基线：**1794 passed / 5 failed（全是注册表）→ 修复后相关 49 passed**。
+
+### 指纹
+
+evalset 因 +mem_007 变化；code 因 B3 变化。跑批报告用新指纹，与上午三档读数不可直接比
+（题目集不同），mul 题本身零改动。
