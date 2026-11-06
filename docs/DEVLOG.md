@@ -6120,3 +6120,42 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 一个测试自身踩过的坑值得记：off 档正控不能用口径名当判据——问题原文
 「全表的实收销售额合计…」本身就含这四个字，那是用户输入不是注入；
 能证明"没注入"的只有 body 独有的片段（1.05 / 渠道服务费）。
+
+## [131] 真模型三档读数（记忆批 4 验收，2026-11-06）
+
+六组串行跑完（`--agent react`，模型 Qwen3.5-397B-A17B @ grg-aikits 网关），六份报告指纹一致
+（`code_sha12=5978a3b7a212`、`evalset=48f3ca603eab`）→ `comparable=true`，可直接比。
+报告在 `outputs/mul_{off,state,full}.json`、`outputs/mem_{state,full}.json`、`outputs/mem_rewrite_on.json`。
+
+### mul_* 三档（34 题）
+
+| 档位 | 正确 | 正确率 | 执行成功率 | memory.uniform | notes_used |
+|---|---|---|---|---|---|
+| off | 19/34 | 55.9% | 61.8% | True（modes={off:34}） | [] |
+| state | 30/34 | 88.2% | 100% | True | [] |
+| full | 31/34 | 91.2% | 100% | True | [] |
+
+- off→state **+11 题**（mul_002/003/005/006/008/010/013/014/015/018/031，全部 fail→pass，
+  模式一致：追问省略指代，off 档无 state 块只能瞎猜）；
+- state→full **+1 题**（mul_027 fail→pass）；
+- 反向翻转 2 处：mul_020 off=pass/state=exec_ok、mul_028 state=pass/full=exec_ok——噪声级，不改变结论方向。
+- multi_turn(state)：76 turns，exec 43 / inherit 20 / refusal 5 全 checked 全过；recall 1/1。
+
+### mem_* 专项（6 题）
+
+- state 与 full 均 **5/6**：mem_001（口径 1.05×274673=288407）、mem_002（剔 C）、
+  **mem_003 反向回归 pass**（净销售额口径引用缺失仍拒答，expect_kind=impossible 生效）、
+  mem_004/005 改写多轮 pass；唯一 ⚠️ 是 mem_006（8 轮长历史回放 1 月明细，exec_ok 但回放内容 warn）。
+- R10 抄录实证：`notes_used=['停产剔除','净销售额','实收销售额']`，与题目 dataset_notes 一一对应。
+- `trimmed_any=0`：这批读数历史 token（p50≈111）远未触 6000 上限，截断路径未测到——与交接单
+  预告一致（M9/M6 触发路径要长历史/超限场景才有读数）。
+
+### 改写对照（M7）
+
+`DATACHAT_REWRITE=1` × state × mem_004/005：2/2 pass，报告 `rewrite=on` 读数正确记录。
+用例级 rewrite=True 与 env 全局改写两条路径都能走通（env 优先级语义与 R9 设计一致）。
+
+### 结论（给记忆侧）
+
+三档读数支持批 4 合入后的验收口径：state 档是性价比拐点（+32pp 正确率、执行成功率拉满），
+full 再 +3pp 属边际。反向回归（口径缺失拒答）与 R10 抄录两条硬需求均实证通过。
