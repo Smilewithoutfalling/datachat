@@ -6196,3 +6196,29 @@ category 断言（mem 多轮题 category="memory" 是第三类，修成 requires
 
 evalset 因 +mem_007 变化；code 因 B3 变化。跑批报告用新指纹，与上午三档读数不可直接比
 （题目集不同），mul 题本身零改动。
+
+### [132 附] 真模型读数：扰动全量 + M9 截断（2026-11-06 16:04）
+
+**扰动全量（100 跑 = 20 基线 × 4 变体 + 20 基线，react，11 分钟，`outputs/perturb_full_react.json`）**
+
+| kind | n | pass_rate | base_rate | decay_pp |
+|---|---|---|---|---|
+| date_compact | 20 | 100% | 100% | +0.0 |
+| thousand_sep | 20 | 100% | 100% | +0.0 |
+| two_row_header | 20 | 100% | 100% | +0.0 |
+| **total_row** | 20 | **75%** | 100% | **-25.0** |
+
+- 5 个失败全是同一模式：**合计行没剔除**——emp_001/004/005（"全表 241 人"把合计行当员工）、
+  ord_001（1219 行 - 18 重复 = 1201 笔，合计行没扣）、agg_003（61 条含合计行）。
+- 千分位 / 紧凑日期 / 两行表头零衰减——表头识别和类型转换这两个历史风险点实际已经稳了。
+- total_row -25pp 是全量扰动唯一真实短板，修复候选：executor 提示词加"警惕合计行"引导，
+  或 codegen 模板里默认 drop 末行合计（先在提示词层试，代价最小）。harness 留档
+  `scripts/perturb_full.py`，复跑只需一条命令。
+
+**M9 截断（mem_007，state/full 两档）**
+
+- state：`trimmed_cases.history=1` —— **M9 截断首次真实触发**，mem_007 correct=True
+  （47.6k tokens 的题，含 3 轮 × 20 条制度条款）。「截断不伤正确性」读数成立。
+- full：trimmed_any=0 但 correct=True —— M4 遮罩后不丢轮，按 context.py 的语义
+  "只遮罩不丢轮不算裁剪（get_turn 能取回）"，行为与设计一致。
+- mem 三档读数更新：state/full 均 **6/7**（85.7%），唯一 ⚠️ 仍是 mem_006 长历史回放。
