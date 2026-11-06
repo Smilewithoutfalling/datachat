@@ -350,6 +350,9 @@ CATEGORY_MAP = {
     "refusal": "应拒答",
     "ambiguity": "歧义",
     "multi_turn": "多轮",
+    # 批 4 记忆专项：口径/改写/长历史。全部 requires_memory，默认（off）跑批自动跳过，
+    # 只在 --memory state|full 的报告里出现 —— by_category 的这一类在 off 报告里不存在
+    "memory": "记忆",
 }
 
 _DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
@@ -367,8 +370,9 @@ from app.eval.cases_extra import EXTRA_CASES  # noqa: E402
 from app.eval.cases_multi import MULTI_CASES  # noqa: E402
 from app.eval.cases_biz import BIZ_CASES  # noqa: E402
 from app.eval.cases_negative import NEGATIVE_CASES  # noqa: E402
+from app.eval.cases_memory import MEMORY_CASES  # noqa: E402
 
-ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES + BIZ_CASES + NEGATIVE_CASES
+ALL_CASES = SALES_CASES + EXTRA_CASES + MULTI_CASES + BIZ_CASES + NEGATIVE_CASES + MEMORY_CASES
 
 from app.eval.validate import validate_cases  # noqa: E402
 

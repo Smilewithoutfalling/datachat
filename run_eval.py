@@ -104,6 +104,9 @@ def main():
     parser.add_argument("--out", default=None, help="JSON 报告路径（默认 outputs/eval_<agent>_<时间>.json）")
     parser.add_argument("--repeat", type=int, default=1, help="同一配置连跑几次（默认 1）")
     parser.add_argument("--rescore", default=None, metavar="REPORT", help="离线重新打分一份已有报告，不调用模型")
+    parser.add_argument("--memory", default=None, choices=["off", "state", "full"],
+                        help="记忆档位（批 4 三档读数）。默认 None = analyze 自己解析（env DATACHAT_MEMORY → off）。"
+                             "显式指定时每题固定这一档；env 若与此档冲突会直接报错退出，不做静默覆盖")
     parser.add_argument("--write", action="store_true",
                         help="配合 --rescore：把新判定写回报告（不改模型输出，另记 rescored 与 run_code_sha12）")
     parser.add_argument("--baseline", default=None, metavar="REPORT",
@@ -145,6 +148,30 @@ def main():
 
     ensure_dirs()
     cases = _select_cases(args.category, args.case, args.dataset, args.canary)
+
+    # 批 4 三档（--memory）。env DATACHAT_MEMORY 优先于一切显式参数（记忆侧的设计，
+    # config.resolve_memory_mode），所以这里必须断言一致而不是静默吞掉：env=off 时
+    # 代码里传 state 会被覆盖成 off，跑出来的"三档读数"三份全是 off，还不报错。
+    effective_memory = args.memory
+    if effective_memory is not None:
+        from app.memory.config import env_override as _env_mode
+        env_mode = _env_mode()
+        if env_mode is not None and env_mode != effective_memory:
+            print(f"环境变量 DATACHAT_MEMORY={env_mode!r} 与 --memory {effective_memory!r} 冲突；"
+                  f"显式参数会被 env 覆盖，跑出来就不是你要的档位。清掉 env 或两者改成一致。")
+            sys.exit(1)
+    # requires_memory 题（口径/改写/长历史）只在对应档位有意义：off 档口径不进 prompt、
+    # 改写被 service 短路，判分必错。默认（off）跑批自动跳过并提示，不静默、也不误跑。
+    if (effective_memory or "off") == "off":
+        skipped = [c.id for c in cases if getattr(c, "requires_memory", "")]
+        if skipped:
+            cases = [c for c in cases if not getattr(c, "requires_memory", "")]
+            print(f"⚠ 记忆档位 off：跳过 {len(skipped)} 条 requires_memory 题"
+                  f"（{', '.join(skipped)}）——口径/改写/长历史题要在 --memory state|full 下跑")
+            if not cases:
+                print("全部被跳过，没有可跑的用例。加 --memory state|full 或换非记忆题。")
+                sys.exit(1)
+
     tables = sorted({c.dataset for c in cases})
     print(f"📋 加载 {len(cases)} 条测试用例，数据表: {', '.join(tables)}\n")
     if args.canary:
@@ -178,11 +205,15 @@ def _run_agent(agent, cases, args, llm_config, stamp):
         from app.core.testing import oracle_factory
         model_factory = oracle_factory(agent)
     runner = EvalRunner(args.data, agent=agent, model_factory=model_factory, llm_config=llm_config,
-                        use_dictionary=not args.no_dict)
+                        use_dictionary=not args.no_dict, memory_mode=args.memory)
     used = {c.dataset for c in cases}
     meta = run_metadata(llm_config, runner.datasets["sales"] if "sales" in used else None)
     meta.update({"data": args.data or "data/sample_eval.csv", "oracle": args.oracle,
                  "use_dictionary": not args.no_dict,
+                 # 三档读数：报告 meta 必须记"我们要求的档位"。运行时实际生效值由
+                 # runtime_config 的 memory_mode（resolve_memory_mode）独立记录，
+                 # 两处不一致 = env 插了一脚，comparable 那边能看到。
+                 "memory_mode": args.memory,
                  "datasets": datasets_metadata({k: v for k, v in runner.datasets.items() if k in used}),
                  "filter": {"dataset": args.dataset, "category": args.category, "case": args.case}})
     if args.canary:

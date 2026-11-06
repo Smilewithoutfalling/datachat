@@ -583,14 +583,21 @@ class EvalReport:
         """
         modes = Counter(r.get("memory_mode") or "off" for r in self.results)
         ht = [r.get("history_tokens") or 0 for r in self.results]
+        # 批 4b：trimmed 的块名多了 constraints（批 3）、notes（口径超 2000 token 被省略）。
+        # 写全四个键而不是"出现过才写"——消融表的列不随档位漂移，没有的就是 0。
         per_block = {k: sum(1 for r in self.results if k in (r.get("memory_trimmed") or []))
-                     for k in ("history", "state")}
+                     for k in ("history", "state", "constraints", "notes")}
+        used_notes = {n.get("name") for r in self.results
+                      for n in (r.get("memory_notes") or []) if isinstance(n, dict)}
         return {
             "modes": dict(modes),
             "uniform": len(modes) <= 1,
             "avg_history_tokens": round(sum(ht) / len(ht), 1) if ht else None,
-            "trimmed_cases": {k: v for k, v in per_block.items() if v},
+            "trimmed_cases": per_block,
             "trimmed_any": sum(1 for r in self.results if r.get("memory_trimmed")),
+            # 批 4b：本题库实际被引用过的口径名（去重排序）。空 = 没跑口径题或全在 off 档。
+            # 用它当场核对"口径真的进 prompt 了"——memory_mode=state 但这里是空，说明接线断了。
+            "notes_used": sorted(used_notes),
         }
 
     def chart_smoke(self) -> dict:
@@ -626,6 +633,8 @@ class EvalReport:
                 "memory_mode": r.get("memory_mode"),
                 "history_tokens": r.get("history_tokens"),
                 "memory_trimmed": r.get("memory_trimmed"),
+                # 批 4b（R10）：本题实际用到的口径（全轮并集）。老报告没这个键，读时按 None 处理
+                "memory_notes": r.get("memory_notes"),
                 # 归因（缺口 11 / 12）：答案值是不是算出来的、没交卷的具体原因。
                 # 老报告没有这两个键，读的时候按 None 处理即可，不需要兼容层。
                 "result_origin": r.get("result_origin"),

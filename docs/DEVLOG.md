@@ -6051,3 +6051,72 @@ B6 新建扰动生成器 + 衰减脚本 + 首条扰动题进题库，真模型 5
 **评测侧须知**（§14.4）：off 的渲染指纹不变；state 在没有口径、没开改写时渲染出来的 prompt 与 f39753c 逐字节相同，full 在没有 👍 样本、历史不超上限时也相同；`app/memory/`、`app/core/`、`react_agent.py`、`app/nodes/planner.py`、`app/state.py` 改了，按源文件算的 `code_sha12` 会变（新文件都在 `app/memory/` 下，归 A 组，不会出现未归类文件）。结果多了 `memory_notes` 字段（方案 §5.3 R10，runner 需要抄录）；口径题需要 `EvalCase.dataset_notes` 透传给 `analyze(dataset_notes=…)`（R7），格式为 `[{kind, name, body, unit, synonyms, sha?}]`（缺 sha 时现算）。M9 在评测里测不到（没有 👍、runner 不传 `accepted_pairs`）；M6 只改 warnings。
 
 **未做**：桌面壳里的口径导出（`<a download>` 在 WebView2 里不生效，和图表导出同一个老问题；浏览器模式可用）；前端展示改写结果 / 遮罩情况 / 本轮用了哪几条口径（`memory_notes` 只进结果，界面另定）；口径的历史版本浏览界面（接口 `?history=1` 已有）；pytest 只跑了默认档（env 未设），state / full 的行为由用例内设 env 覆盖，e2e 跑了三档。
+
+## [130] 2026-11-06 · 评测侧接住记忆批 4（R4/R7/R9/R10）· 基于 a36a2cb
+
+接 DEVLOG [128]/[129] 的「评测侧须知」。记忆侧三件套验收需求（mul_* 三档读数、
+记忆专项题、反向回归真模型确认）的**离线部分**全部落地，真模型读数随后跑。
+
+### 接线
+
+- **`EvalRunner(memory_mode=...)`**：显式传 `off/state/full`，每题固定这一档；None = 不传
+  （analyze 自己解析）。**env 冲突断言**：`resolve_memory_mode` 是 env 优先于显式参数
+  （记忆侧的设计），env 设着 `DATACHAT_MEMORY=off` 时代码里传 state 会被静默覆盖成 off，
+  跑出来三份"三档读数"全是 off 还不报错——`run_eval.py` 在开跑前断言 env 与 `--memory`
+  一致，冲突直接退出。
+- **`--memory off|state|full`**（run_eval.py）：写进报告 meta；实际生效值仍由
+  `runtime_config` 独立记录，两处不一致 = env 插了一脚，comparable 能看到。
+- **requires_memory 跳过**：off 档自动跳过带 `requires_memory` 的题并打印提示，
+  全跳光时退出——口径/改写在 off 档判分必错，不能混进默认跑批污染准确率。
+  CI 的 PR 档 oracle（off，`--expect-n` 动态取值）不受影响。
+- **R7**：`EvalCase.dataset_notes` 透传 `analyze(dataset_notes=...)`；**R4**：`today`
+  （YYYY-MM-DD）；**R9**：`EvalCase.rewrite` 只在该题显式要求时传 True——False 不传，
+  env `DATACHAT_REWRITE=1` 时普通题仍走全局改写（resolve_rewrite 也是 env 优先）。
+- **R10**：runner 抄录 `memory_notes`（多轮取**全轮并集**——每轮注入同一份口径但检索
+  命中可能轮轮不同，并集才回答"这条用例用过哪些口径"）；`memory_trimmed` 可能出现
+  `notes`（口径超 2000 token 被省略）与 `constraints`。
+
+### 报告
+
+- rows 白名单加 `memory_notes`（老报告无此键，读时按 None）。
+- `memory_block()`：`trimmed_cases` 从"0 不出现"改成**恒四键**
+  `{history, state, constraints, notes}`——消融表的列不随档位漂移；新增 `notes_used`
+  （本题库实际引用过的口径名去重排序），用它当场核对"口径真的进了 prompt"：
+  `memory_mode=state` 但这里是空，说明接线断了。
+
+### 记忆专项题（`app/eval/cases_memory.py`，6 条，category="memory"）
+
+| id | 测什么 | 档位 |
+|---|---|---|
+| mem_001 | 口径改语义：实收销售额 = units×price×1.05（字面 274673 / 口径 288407，不同值，按字面算判分立刻错） | state |
+| mem_002 | rule 剔除：统计剔除已停产的 C 系列（不剔除则 C 仍在 series 里，整表比对错） | state |
+| mem_003 | **反向回归**：口径 body 引用不存在的 `net_amount` 列仍须拒答（钉记忆侧"口径字段必须真实存在"那句） | state |
+| mem_004 | 改写：华东 4 月 →「那 5 月呢？」（华东 5 月 15091 ≠ 全表 5 月 50998，无巧合可猜） | state |
+| mem_005 | 改写：华东 3 月 A →「那 C 产品呢？」（A=180 / C=55 都非零，避开"答 0"边界） | state |
+| mem_006 | 长历史：8 轮堆料后回头复述第 1 轮的明细表（recall_turn=1）；没触发 M4 遮罩时退化为普通回头引用题，不算白跑 | full |
+
+设计决定：**改写题判分只看末轮结果对不对**，不区分"改写兜底"还是"state 块继承"——
+产品语义是"组合起来用户拿到正确答案"，拆开归因是消融的事。改写题天然是多轮
+（追问省略指代），所以题数是单轮 164 / 多轮 37（我一开始按"5 单轮 + 1 多轮"写断言，
+实际 3 + 3，被 test_case_count_and_ids_unique 当场拦住）。
+
+### 校验（validate.py 规则 8）
+
+`requires_memory ∈ {"", "state", "full"}`；口径每条 `kind ∈ metric|rule` 且 name/body 非空；
+**带 dataset_notes 必须标档位**（off 档口径不进 prompt，判分必错）；`rewrite=True` 必须标
+档位（off 档改写被 service 短路，不标的改写题在默认跑批里等于普通题，语义骗人）；
+`today` 必须 YYYY-MM-DD；标了档位但题里没有口径/改写/多轮任何一样 = 测不出档位差异，拒绝。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_memory_cases.py`（新） | **5 passed** —— 正控：state 档口径名 + body 片段逐字出现在模型实际收到的 prompt 里；off 档 body 一个字不出现 |
+| 存量批次（eval_cases / memory_p8 / fingerprint / eval_runner） | **296 + 3 = 299 passed**（3 条过期断言更新：题数、拒答类目允许 memory、trimmed 恒四键） |
+| oracle 全量（off 档 195 条 = CI PR 档镜像） | 后台跑，见下 |
+| 闸门 m10 | 后台跑，见下 |
+| 指纹 | `affects_results_sha12` `6b9b00795dcc` → **`5978a3b7a212`**，`code_all` **`a0a364828700`**，`evalset` `98f454fe21e6` → **`48f3ca603eab`**。记忆侧新文件全在 `app/memory/` 前缀下，无未归类文件 |
+
+一个测试自身踩过的坑值得记：off 档正控不能用口径名当判据——问题原文
+「全表的实收销售额合计…」本身就含这四个字，那是用户输入不是注入；
+能证明"没注入"的只有 body 独有的片段（1.05 / 渠道服务费）。

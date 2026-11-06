@@ -25,13 +25,19 @@ def test_case_count_and_ids_unique():
     multi = [c for c in ALL_CASES if c.turns]
     # 2026-11-04：+10 负向（EV-B7）→ 单轮 160；+1 长会话回头引用（EV-B5 mul_034）→ 多轮 34；
     # +1 扰动题（EV-B6 pert_001）→ 单轮 161。
-    assert (len(single), len(multi)) == (161, 34), "单轮 161（含 biz 22 + 负向 10 + 扰动 1）+ 多轮 34"
+    # 2026-11-06：+6 记忆专项（批 4 mem_001–006）→ 单轮 164（口径 3）+ 多轮 37（改写 2 +
+    # 长历史 1）= 201。全部 requires_memory，off 档跳过。改写题天然是多轮（追问省略指代）。
+    assert (len(single), len(multi)) == (164, 37), "单轮 164（含 biz 22 + 负向 10 + 扰动 1 + 记忆口径 3）+ 多轮 37"
     by = {}
     for c in single:
         # 扰动题（EV-B6）的 dataset 是 fixture 路径，不在 DATASETS 里 —— 按 variant_kind 归 "pert"
         key = "pert" if c.variant_kind else c.dataset
         by[key] = by.get(key, 0) + 1
-    assert by == {"sales": 50, "orders": 34, "employees": 27, "inventory": 27, "biz": 22, "pert": 1}
+    assert by == {"sales": 53, "orders": 34, "employees": 27, "inventory": 27, "biz": 22, "pert": 1}
+    # 记忆专项的档位标记：全部 requires_memory 非空，且都在 sales 表
+    mem = [c for c in ALL_CASES if c.category == "memory"]
+    assert len(mem) == 6 and all(c.requires_memory for c in mem)
+    assert all(c.dataset == "sales" for c in mem)
 
 
 def test_case_flags_consistent():
@@ -46,7 +52,9 @@ def test_case_flags_consistent():
         if c.category == "refusal":
             assert c.expect_refusal, c.id
         if c.expect_refusal:
-            assert c.category in ("refusal", "multi_turn"), c.id
+            # memory 类的 mem_003 是口径反向回归（口径引用缺失字段仍拒答）——拒答语义
+            # 的题也允许待在 memory 类里，它的 expect_kind=impossible 判据与 refusal 类同源
+            assert c.category in ("refusal", "multi_turn", "memory"), c.id
         if c.expect_refusal and c.category == "multi_turn":
             # gold 只判最后一轮，所以"整条题期望拒答"等价于"末轮该拒答"
             assert c.expect_turns and c.expect_turns[-1] == "refusal", c.id

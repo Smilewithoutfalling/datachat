@@ -21,7 +21,9 @@ ID_RE = re.compile(r"^[a-z]{2,6}_\d{3}$")
 CATEGORIES = {"aggregation", "filtering", "correlation", "timeseries", "refusal", "ambiguity",
               # 多轮单独成类，不混进上面 6 类：混进去之后"聚合 36 题 35 对"里就掺了多轮题，
               # 既看不出多轮本身的表现，也没法--filter category=multi_turn 单独跑消融
-              "multi_turn"}
+              "multi_turn",
+              # 批 4 记忆专项（口径/改写/长历史）。全部 requires_memory，off 档自动跳过
+              "memory"}
 
 EXPECT_TURN_KINDS = {"exec", "refusal", "any"}
 EXPECT_TURN_PREFIX = "inherit:"
@@ -138,6 +140,34 @@ def validate_cases(cases: list) -> list[str]:
                               f"字段与 gold 必须一致，否则这题永远判不过")
         elif c.expect_kind == "impossible":
             errors.append(f"{c.id}: expect_kind=impossible 必须声明 missing_objects")
+
+        # 8. 记忆批 4 的四个字段（R4/R7/R9）。与 expect_turns 同理：写错 = 断言静默失效。
+        rm = getattr(c, "requires_memory", "")
+        if rm not in ("", "state", "full"):
+            errors.append(f"{c.id}: requires_memory={rm!r} 只能是 '' / 'state' / 'full'")
+        notes = getattr(c, "dataset_notes", None) or []
+        if notes:
+            for i, n in enumerate(notes):
+                if not isinstance(n, dict):
+                    errors.append(f"{c.id}: dataset_notes[{i}] 不是 dict（格式见 R7）")
+                    continue
+                if n.get("kind") not in ("metric", "rule"):
+                    errors.append(f"{c.id}: dataset_notes[{i}].kind={n.get('kind')!r} 只能是 metric|rule")
+                if not n.get("name") or not n.get("body"):
+                    errors.append(f"{c.id}: dataset_notes[{i}] 缺 name 或 body")
+            if not rm:
+                errors.append(f"{c.id}: 带 dataset_notes 必须 requires_memory=state|full"
+                              f"——off 档口径不进 prompt，判分必错")
+        if getattr(c, "today", ""):
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c.today):
+                errors.append(f"{c.id}: today={c.today!r} 必须 YYYY-MM-DD")
+        if getattr(c, "rewrite", False) and not rm:
+            # 改写在 off 档被 service 直接短路（_maybe_rewrite 第一行），不标档位的改写题
+            # 在默认跑批里等于一条普通题 —— 语义骗人。
+            errors.append(f"{c.id}: rewrite=True 必须 requires_memory=state|full（off 档改写不生效）")
+        if rm and not (notes or getattr(c, "rewrite", False) or c.turns):
+            errors.append(f"{c.id}: requires_memory={rm} 但题里没有口径/改写/多轮任何一样"
+                          f"——一条什么都不依赖的档位题测不出档位差异")
 
     for cid, n in seen.items():
         if n > 1:

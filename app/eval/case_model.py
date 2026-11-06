@@ -80,3 +80,23 @@ class EvalCase:
     gold_kind: str = ""
     # "scalar" | "series" | "frame" | "text" | ""（空 = 不约束）
     # 只用于报告分组与图表反算的前置判断，不参与判分
+
+    # ---- 记忆批 4（R4/R7/R9/R10，docs/roadmap/memory-batch4.md §5.3） ----
+    dataset_notes: list = field(default_factory=list)
+    # 口径题（R7）：透传 analyze(dataset_notes=...)，格式 [{kind, name, body, unit, synonyms, sha?}]
+    # （kind ∈ metric|rule；缺 sha 时 service 现算）。只在 memory_mode != off 时注入。
+    # off 档跑口径题 = 口径根本不进 prompt，判分必然错 —— 所以口径题必须标 requires_memory。
+
+    today: str = ""
+    # 相对时间题固定日期（R4）：透传 analyze(today=...)，"YYYY-MM-DD"。
+    # 不固定的话"本月/上月"类题的读数随运行日期漂移。
+
+    rewrite: bool = False
+    # 改写显式开关（R9）：透传 analyze(rewrite=...)。off 档改写不生效（service 直接短路）；
+    # state 档生效。注意 runtime_config.rewrite 只读环境变量 DATACHAT_REWRITE，
+    # 用例级 rewrite=True 跑批时报告的 rewrite 读数仍是 env 的 —— 偏差记在 DEVLOG。
+
+    requires_memory: str = ""
+    # 该题只在指定档位有效："state" | "full" | ""（不约束）。
+    # --memory 为 off（默认）时 run_eval 自动跳过这类题并提示；全量 oracle / canary 也跳过。
+    # 没有这个标记，口径题会在 off 档被静默判错，污染准确率。

@@ -73,10 +73,12 @@ def _merge_usage(usages: list):
 class EvalRunner:
     def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
                  model_factory=None, use_dictionary: bool = True, max_attempts: int = 3,
-                 datasets: dict | None = None):
+                 datasets: dict | None = None, memory_mode: str | None = None):
         """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
         为 None 时用真实模型（llm_config 或环境变量）。
-        阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。"""
+        阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。
+        memory_mode（批 4 三档读数）：None = 不传，analyze 自己解析（env DATACHAT_MEMORY → off）；
+        显式传 "off"/"state"/"full" 时每题都用这一档 —— 三档对照必须显式，靠 env 容易串档。"""
         self.datasets = dict(DATASETS if datasets is None else datasets)
         if df_path:
             self.datasets["sales"] = df_path
@@ -87,6 +89,7 @@ class EvalRunner:
         self.model_factory = model_factory
         self.use_dictionary = use_dictionary
         self.max_attempts = max_attempts
+        self.memory_mode = memory_mode
 
     def path_for(self, case: EvalCase) -> str:
         if case.dataset in self.datasets:
@@ -158,7 +161,16 @@ class EvalRunner:
         """
         return analyze(self.path_for(case), question, agent=self.agent, llm_config=self.llm_config,
                        chat_model=chat_model, max_attempts=self.max_attempts,
-                       use_dictionary=self.use_dictionary, log=False, history=history)
+                       use_dictionary=self.use_dictionary, log=False, history=history,
+                       memory_mode=self.memory_mode,
+                       # 批 4（R7/R4/R9）：口径、固定日期、改写开关。口径只在 memory_mode != off
+                       # 时注入（service 端保证），off 档传了也等于没传。
+                       dataset_notes=getattr(case, "dataset_notes", None) or None,
+                       today=getattr(case, "today", "") or None,
+                       # rewrite：只在该题显式要求时传 True。False 不显式传 None —— env
+                       # DATACHAT_REWRITE=1 时普通题也走全局改写（R9：env 优先于参数，
+                       # 跑改写对照要显式设 env，光靠用例字段不够）。
+                       rewrite=True if getattr(case, "rewrite", False) else None)
 
     @staticmethod
     def _turn_status(res, expect: str) -> str:
@@ -205,6 +217,8 @@ class EvalRunner:
             "turn_answers": [], "turn_status": [],
             # 记忆（阶段 6.6）。记忆模块尚未合入时恒为 off / 0 / []，形状不随模块存不存在而变
             "memory_mode": "off", "history_tokens": 0, "memory_trimmed": [],
+            # 批 4b（R10）：本轮真正进了 prompt 的口径 [{name, sha}]；off / 没口径恒 []
+            "memory_notes": [],
             # 缺口 14b：拒答越界。所有题都有这两个键（非拒答题恒为 None / ""），形状稳定
             "refusal_leak": None, "refusal_leak_why": "",
             # 负向题判错的现场（EV-B7）：只写"判错"等于让人回去翻原始输出。
@@ -251,6 +265,7 @@ class EvalRunner:
                 getattr(res, "memory_mode", "off") or "off",
                 getattr(res, "history_tokens", 0) or 0,
                 list(getattr(res, "memory_trimmed", None) or []),
+                list(getattr(res, "memory_notes", None) or []),   # 批 4b R10：本轮真进 prompt 的口径
             ))
             if i < len(turns) - 1:
                 # 失败也要照实追加空串：换成占位文案会让下一轮以为上一轮真答了东西
@@ -275,10 +290,13 @@ class EvalRunner:
             "turn_answers": turn_answers if multi else [],
             "turn_status": turn_status if multi else [],
             # 记忆：模式取最后一轮（同一进程里不该变），历史体积取最后一轮（多轮里它最大），
-            # trimmed 取全轮并集（"这条用例被裁过没有"才是消融表要看的）
+            # trimmed 取全轮并集（"这条用例被裁过没有"才是消融表要看的）；
+            # notes（批 4b R10）取全轮并集 —— 每轮都注入同一份口径，但某轮没命中检索时
+            # 该轮 notes 可能比别的轮少，并集才回答"这条用例用过哪些口径"。
             "memory_mode": memory_by_turn[-1][0] if memory_by_turn else "off",
             "history_tokens": memory_by_turn[-1][1] if memory_by_turn else 0,
-            "memory_trimmed": sorted({b for _, _, t in memory_by_turn for b in t}),
+            "memory_trimmed": sorted({b for _, _, t, _ in memory_by_turn for b in t}),
+            "memory_notes": [n for _, _, _, notes in memory_by_turn for n in notes],
             # 归因（缺口 11 / 12）：`result` 是算出来的还是写出来的 /
             # 没交卷时到底是没赋、赋了空、还是分支没走到。**只记录，不参与判分。**
             **describe_provenance(res.code or "", bool(res.executed), res.result),

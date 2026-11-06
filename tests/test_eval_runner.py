@@ -172,7 +172,10 @@ def test_memory_block_flags_mixed_modes():
     mem = rep.memory_block()
     assert mem["modes"] == {"off": 1, "state": 1}
     assert mem["uniform"] is False
-    assert mem["trimmed_cases"] == {"history": 1}          # 0 的不出现，报告里不堆零
+    # 2026-11-06（批 4）：恒四键 {"history","state","constraints","notes"} —— 有意从
+    # "0 的不出现"改掉的：消融表的列不随档位漂移，没有的就是 0（见 report.memory_block）。
+    assert mem["trimmed_cases"] == {"history": 1, "state": 0, "constraints": 0, "notes": 0}
     assert mem["trimmed_any"] == 1
     assert mem["avg_history_tokens"] == 450.0
+    assert mem["notes_used"] == []          # 没跑口径题 → 空，当场能核对"口径没进 prompt"
 
