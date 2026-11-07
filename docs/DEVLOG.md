@@ -6331,3 +6331,40 @@ m10 归 F06_REFUSAL，s04/m09（ReAct 超步数）进 infra 桶；`outputs/pertu
 `overall.correctness_rate` 分母仍是"跑了的全部题"（老报告语义不动）；能力口径看
 `lifecycle.capability`。毕业/退役后 `uniform=False`，此时**不能与历史读数直接比**，
 即使 fingerprints 判可比（题面没变 → `evalset_sha12` 不变）。
+
+## [136] EV-D4 👎 → 草稿用例（2026-11-07）
+
+### 落地
+
+- `scripts/draft_case.py`：从一条 👎 的消息生成 YAML 草稿（id / question / turns /
+  ground_truth（空）/ dataset / schema / note）。`--raw` 才带原始答案前 200 字，
+  `--any-rating` 才允许非 👎 的消息。**数据库只以 `mode=ro` 打开**——脚本没有任何写库路径。
+- `docs/eval/drafting.md`：脱敏契约、入集流程、为什么 gold 必须人工补。
+- `tests/test_draft_case.py` **9 条**：默认不出答案数值、schema 只给列名与形状、
+  `--raw` 打警告、错误 id / 用户消息 id / 非 👎 的拒绝、编号递增、只读连接写不进去、
+  以脚本方式运行时 schema 必须在。
+
+### 两个实测发现（都不是规格里写的）
+
+1. **真实记录的 `dataset` 是绝对路径**（`C:/Users/<用户名>/AppData/.../datasets/<id>`）。
+   原样写进草稿等于把用户名和安装路径带进仓库。改成只留 basename；同一条理由见
+   EV-B10 出境审计 ④。这是"默认脱敏"里最容易漏的一项——它不是数据值，但也是隐私。
+2. **`ROOT` 多上溯了一层**（`scripts/` 只有两层，我按 `scripts/eval/` 的三层写了），
+   `from app.tools.dataset import ...` 直接 ImportError，而它被 `except Exception: return None`
+   吞掉 → **schema 静默缺席**。修 ROOT，并把 `ImportError/ModuleNotFoundError` 从兜底
+   except 里摘出来直接抛：环境/路径坏了不是"数据不在本机"，静默吞会把 bug 藏起来。
+   补了一条 subprocess 回归测试（`test_runs_as_script_with_schema`）——import 进来测不出来，
+   只有真以脚本跑才会暴露。
+
+### 现状（必须写清楚）
+
+本机库 **42 条消息 / 0 条反馈**，没有真实 👎 可喂。用 `--any-rating` 拿真实消息冒烟：
+
+- 问题原文正确抽出（"能做成多图嘛"）；
+- `dataset` 只留数据集 id（`3f2df923…`），路径零泄漏；
+- `schema` 给出 4 张表的列名与形状（北京地区信息 19×10 / 天津 16×10 / 运动员 179×8 /
+  风景名胜区 230×4）；
+- 答案正文与数值零出现。
+
+也就是说：**工具链通了，但"从真实差评到新题"这条闭环还没有一条真实样本**。
+第一条 👎 出现时才会知道这条路的摩擦点在哪。
