@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "_note": "题集生命周期（EV-D3）。未登记的题一律 active，这里只记偏离默认的题。用 scripts/eval/registry.py --set 修改，不要手改 history 的顺序。",
+  "cases": {}
+}

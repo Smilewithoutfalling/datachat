@@ -6281,3 +6281,53 @@ m10 归 F06_REFUSAL，s04/m09（ReAct 超步数）进 infra 桶；`outputs/pertu
 - `code_all`：`a0a364828700` → **`6fd171947775`**（schema.py 在 A 组，改它必然变）；
 - 渲染指纹 `set_sha12`：`48f3ca603eab` → **`1a50b22a141a`**（题集 201 条未变，变的是
   prompt 渲染——schema 文本进 prompt）。**新读数与 11-06 的三档/扰动读数不可直接比**。
+
+## [135] EV-D3 题集生命周期（2026-11-07）
+
+### 落地
+
+- `docs/eval/registry.json`（真源；**未登记 = active**，只记偏离默认的题）
+  + `docs/eval/registry.md`（状态机、规则、release 口径、理由栏）
+- `app/eval/registry.py`：`state_of / counts / split / uniform / problems`，
+  以及三个纯函数 `group_releases / propose_transitions / flip_candidates`（提议规则可单测）
+- `scripts/eval/registry.py`：`--check`（非法非 0）/ `--propose`（只打印）/ `--flip`（只打印）
+  / `--set`（**唯一写入口**，必须带 `--reason`）
+- 报告消费：`EvalReport.summary().lifecycle` 给 capability / regression / retired 三分
+  + counts + `uniform`；`fingerprints.registry_sha12` 只记录、**不进 GATE_KEYS**；
+  `print_summary` 仅在非 uniform 时多打一行（老输出逐字节不变）。
+
+### 一个被实测打回来的设计（重要）
+
+初版 `--propose` 把"一份报告"当"一个 release"。拿 2026-10-09 的三份同配置报告一试，
+**立刻吐出 21 条毕业提议**——那三份是同一天、同一版代码的重复跑，一题都没跨过版本。
+改成：
+
+- 连续且同配置（`agent / memory_mode / rewrite / use_dictionary / code_sha12 / evalset_sha12`）
+  折成**一个 release**；release 内跑多次必须**全对**才算这轮对；
+- 折完不足 2 个 release → 拒绝出提议（批内稳定性用 `--flip`）；
+- 报告缺 `code_sha12`（2026-10 之前的老报告）→ 拒绝：分不清"重复跑"和"换代码"；
+- **第二次实测**：三份 off/state/full 消融报告又被当成 3 个 release，**仍然吐 17 条提议**
+  ——只警告不够（警告浮在 17 条提议上面没人看），改成直接拒绝并退出 1。
+
+两条教训通用：①"提示"挡不住误用，会产出错误结果的输入要直接拒；
+②提议类脚本的默认行为必须是最保守的那个，宁可不出提议。
+
+### 验收
+
+- `tests/test_registry.py` **32 条**：状态机边（candidate 不能跳级）、幽灵条目、
+  缺理由 / 坏日期 / 倒序日期、文档同步、三分分类、提议（三连对 / 两连错 / 退役优先 /
+  None 不算对 / 已迁移跳过）、release 折叠（同配置 / 不同配置 / 混合判定 / 回滚 a→b→a）、
+  flip 对称性、报告接线、CLI 退出码。
+- 相关面：`test_registry + test_fingerprint + test_eval_runner` = **81 passed**；
+  `test_chart_slot / test_holdout / test_memory_cases / test_multi_cases` = **72 passed**；
+  `--check` 退出 0（**202 题全 active**，`uniform=True`，`registry_sha12=44136fa355b3`）；
+  oracle 子集 9/9，报告里 `lifecycle.capability` 与 `overall` 等值、`uniform=true`。
+- `--flip` 真实数据实测：`docs/eval/eval_react_20261009_163700_run1..3`（50 题 × 3 跑）
+  → 7 题 `flip_rate=0.67`（ts_009 / ts_002 / corr_005/007/009/010 / agg_012）。
+  这 7 条是**真实不稳定题**，但当时配置是老版本，先不退役——等一版新代码的重复跑再判。
+
+### 口径
+
+`overall.correctness_rate` 分母仍是"跑了的全部题"（老报告语义不动）；能力口径看
+`lifecycle.capability`。毕业/退役后 `uniform=False`，此时**不能与历史读数直接比**，
+即使 fingerprints 判可比（题面没变 → `evalset_sha12` 不变）。

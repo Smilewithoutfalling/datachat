@@ -92,6 +92,10 @@ _EXEMPT = {
     "app/eval/report_md.py": "报告渲染，纯输出",
     "app/eval/rescore.py": "离线重打分工具",
     "app/eval/chart_smoke.py": "图表统计，只看已产出的图",
+    # 题集生命周期（EV-D3）：只回答"这道题还算不算能力集"，不产生判定、不进模型输入。
+    # 它确实会改变报告里的 capability 分母，但那属于读数口径，不是"同一份回答判错变判对"。
+    # 状态本身另记在 fingerprints.registry_sha12（不进 GATE_KEYS），变化可追溯。
+    "app/eval/registry.py": "生命周期状态读取与校验，不改输入也不改判分",
     "app/eval/fingerprint.py": "本文件",
     # canary 只是十条题的 id 列表 + 题面哈希，不参与判分、不进模型输入。
     # 它决定"跑哪十条"，与 run_eval.py 的 --case 同级；那类选题目前不在扫描范围内（缺口 4）。

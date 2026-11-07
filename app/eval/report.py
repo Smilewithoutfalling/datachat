@@ -331,7 +331,8 @@ def load_obj(d):
 
 class EvalReport:
     def __init__(self, results: list, meta: dict | None = None, datasets: dict | None = None,
-                 baseline: dict | None = None, rendered_cases: list | None = None):
+                 baseline: dict | None = None, rendered_cases: list | None = None,
+                 registry=None):
         """results: list[dict] from EvalRunner.run_all()；meta: run_metadata() 的结果；
         datasets: 本轮实际用的数据表（runner.datasets），用于算渲染指纹；None 时用默认 DATASETS。
         baseline: 基准报告的 fingerprints 块（run_eval.py --baseline）。None = 没给基准，
@@ -340,12 +341,15 @@ class EvalReport:
         （rendered_fingerprints 内部回落到 ALL_CASES）。只有数据集不是标准 DATASETS 的调用方
         （留出集）才需要传——它回落到 ALL_CASES 时会去查 datasets['orders']，在自定义数据集上
         直接 KeyError。看见这个参数不要顺手删：它在默认路径上什么都不做。
+        registry: 题集生命周期（EV-D3）。None = 读 docs/eval/registry.json；文件不存在时
+        全 active，行为与加这个参数之前逐字节相同。测试传一个 Registry 就完全不碰磁盘。
         """
         self.results = results
         self.meta = meta or {}
         self.datasets = datasets
         self.baseline = baseline
         self.rendered_cases = rendered_cases
+        self._registry = registry
         self.total = len(results)
         self._fingerprint = None
         self.by_category = {}
@@ -388,6 +392,47 @@ class EvalReport:
         vals = [r[key] for r in self._items(items) if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else None
 
+    @property
+    def registry(self):
+        """题集生命周期（EV-D3）。惰性加载：不碰 lifecycle 的调用不读磁盘。"""
+        if self._registry is None:
+            from app.eval.registry import load_registry
+            self._registry = load_registry()
+        return self._registry
+
+    def lifecycle_block(self) -> dict:
+        """能力集 / 回归集 / 退役的分层读数（EV-D3）。
+
+        为什么必须在报告里分：**毕业会改准确率分母**。同一个模型、同一套题，某题从 active
+        变 graduated 之后 `capability.correctness_rate` 的分母就少 1，和历史读数直接比是错的。
+        `overall` 刻意保持"跑了的全部题"这个口径不变（老报告语义不能动），能力口径看这里。
+
+        `uniform=False` 就是"这轮分母与全量题库不同"的机器可读信号；`registry_sha12` 另在
+        fingerprints 里记一份，用来回查是哪一版状态文件。
+        """
+        ids = [r["case"].id for r in self.results]
+        reg = self.registry
+        split = reg.split(ids)
+        by_id = {r["case"].id: r for r in self.results}
+
+        def block(sub_ids):
+            items = [by_id[i] for i in sub_ids if i in by_id]
+            return {
+                "n": len(items),
+                "correct": sum(1 for r in items if r.get("correct")),
+                "correctness_rate": self.correctness_rate(items),
+                "execution_success_rate": self.execution_success_rate(items),
+            }
+
+        return {
+            "registry_sha12": reg.sha12,
+            "counts": reg.counts(ids),
+            "uniform": reg.uniform(ids),
+            "capability": block(split["capability"]),
+            "regression": block(split["regression"]),
+            "retired": block(split["retired"]),
+        }
+
     def fingerprint(self, evalset_sha12: str | None = None) -> dict:
         """本轮的可比性指纹（EV-A3），算一次缓存住——summary() 会被 to_json / print_summary 各调一次。
 
@@ -429,6 +474,11 @@ class EvalReport:
                 # 缺口 4：入口脚本（run_eval.py）不在 app/ 下，code_sha12 扫不到。
                 # **只记录，不进 GATE_KEYS** —— 加门禁会让所有历史基线判不可比。
                 "entry_sha12": entry["sha12"],
+                # EV-D3：题集生命周期状态文件的哈希。**只记录，不进 GATE_KEYS** —— 它不改
+                # 题面（evalset_sha12 不变），但会改能力集的**分母**：某题从 active 变
+                # graduated 后 capability.correctness_rate 的分母就少 1。两个数直接比是错的，
+                # 所以必须留一个可追溯的标记，让读报告的人能发现"分母变过"。
+                "registry_sha12": self.registry.sha12,
                 "rendered_set_sha12": rendered.get("set_sha12"),
                 "rendered": rendered,
             }
@@ -495,6 +545,9 @@ class EvalReport:
             "overall": block(self.results),
             "by_category": {k: block(v) for k, v in self.by_category.items()},
             "by_dataset": {k: block(v) for k, v in self.by_dataset.items()},
+            # EV-D3：能力集/回归集分层。全 active 时 uniform=True、capability 与 overall 等值，
+            # 老消费者读 overall 不受影响；毕业/退役之后必须看这里的能力口径。
+            "lifecycle": self.lifecycle_block(),
             "memory": self.memory_block(),
             "multi_turn": self.multi_turn_block(),
             "evidence": self.evidence_block(),
@@ -692,6 +745,14 @@ class EvalReport:
                 print(f"  与基准: ✓ 可比（{cmp_.get('basis')}）")
             else:
                 print(f"  与基准: ✗ 不可比   差异项: {', '.join(cmp_.get('diffs') or [])}")
+        lc = s.get("lifecycle") or {}
+        if not lc.get("uniform", True):
+            cap, reg_, ret = lc["capability"], lc["regression"], lc["retired"]
+            c = lc["counts"]
+            print(f"  题集生命周期: 能力 {cap['n']} 题 {self._pct(cap['correctness_rate'])}"
+                  f"   回归 {reg_['n']} 题 {self._pct(reg_['correctness_rate'])}"
+                  f"   退役 {c['retired']} 题（不计任何口径）"
+                  f"   ⚠ 分母与全量题库不同，不能与历史读数直接比")
         mem = s.get("memory") or {}
         if mem.get("modes"):
             modes = " / ".join(f"{k}:{v}" for k, v in mem["modes"].items())
