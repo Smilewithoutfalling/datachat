@@ -62,16 +62,33 @@ def make_fixture(base, kind):
     return dirty_path, clean_path
 
 
-def main():
-    bases = pick_bases()
-    assert len(bases) == 20, f"基线凑不齐 20 条（实际 {len(bases)}）"
-    print("基线 20 条:", " ".join(c.id for c in bases), flush=True)
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description="扰动全量或子集")
+    ap.add_argument("--kind", default=",".join(KINDS), help="逗号分隔，默认全部 4 种")
+    ap.add_argument("--case", default="", help="只跑这些基线题 id（逗号分隔），默认全部 20 条")
+    ap.add_argument("--out", default=os.path.join(REPO, "outputs", "perturb_full_react.json"))
+    ap.add_argument("--no-base", action="store_true", help="不跑基线原题（只看变体）")
+    args = ap.parse_args(argv)
+
+    kinds = [k.strip() for k in args.kind.split(",") if k.strip()]
+    bad = [k for k in kinds if k not in KINDS]
+    assert not bad, f"未知变体：{bad}，可选 {KINDS}"
+    want = {c.strip() for c in args.case.split(",") if c.strip()}
+
+    bases = [b for b in pick_bases() if not want or b.id in want]
+    assert bases, f"没有匹配的基线题（--case {args.case}）"
+    if not want:
+        assert len(bases) == 20, f"基线凑不齐 20 条（实际 {len(bases)}）"
+    print(f"基线 {len(bases)} 条:", " ".join(c.id for c in bases), flush=True)
+    print("变体:", kinds, flush=True)
 
     from app.eval.case_model import EvalCase
     cases = []
     for b in bases:
-        cases.append(b)                       # 基线原题进报告（decay 的 base_rate 用）
-        for k in KINDS:
+        if not args.no_base:
+            cases.append(b)                   # 基线原题进报告（decay 的 base_rate 用）
+        for k in kinds:
             dirty, clean = make_fixture(b, k)
             cases.append(EvalCase(
                 id=f"pf_{b.id}.{k}", category=b.category,
@@ -95,9 +112,10 @@ def main():
                      "answer": str(r.get("answer") or "")[:200],
                      "error": str(r.get("error") or "") or None,
                      "duration_s": round(time.time() - t0, 1)})
-    out = os.path.join(REPO, "outputs", "perturb_full_react.json")
+    out = args.out
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"agent": "react", "kinds": list(KINDS),
+        json.dump({"agent": "react", "kinds": kinds,
                    "bases": [b.id for b in bases],
                    "total_s": round(time.time() - t_all, 1), "cases": rows},
                   f, ensure_ascii=False, indent=2)

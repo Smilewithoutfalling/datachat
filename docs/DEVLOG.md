@@ -6222,3 +6222,62 @@ evalset 因 +mem_007 变化；code 因 B3 变化。跑批报告用新指纹，�
 - full：trimmed_any=0 但 correct=True —— M4 遮罩后不丢轮，按 context.py 的语义
   "只遮罩不丢轮不算裁剪（get_turn 能取回）"，行为与设计一致。
 - mem 三档读数更新：state/full 均 **6/7**（85.7%），唯一 ⚠️ 仍是 mem_006 长历史回放。
+
+## [134] A04 尾部统计行修复（schema 层）+ EV-D2 失败归因（2026-11-07）
+
+### 一、total_row -25pp 的根因与修复
+
+昨天扰动全量把 total_row 记成"模型没剔除合计行"，今天查细了，机制是**行级 off-by-one**：
+
+- `pf_emp_001` 报"在职 204 人"（真值 203）——统计行 `leave_date` 为空，被当成一名在职员工；
+- `pf_agg_003` 报 61 条（真值 60）、`pf_ord_001` 报 1201 笔（真值 1200）——统计行被计成一条明细。
+
+根因不在提示词：`describe_df` 只渲染 `df.head(n)`，**模型从头到尾看不到尾行**，它只知道"表共有
+241 行"这个数字，无从判断其中一行是统计行。所以修在 `app/tools/schema.py`：
+
+- `summary_rows(df)`：末尾 2 行内、文本单元格**整格**命中统计标签（合计/总计/小计/共计/总额/
+  total/subtotal…）**且**该行至少一个数值单元格 == 其上方各行在该列之和（rtol 1e-6 / atol 0.01）。
+  两个条件缺一不判，宁可漏报：中间某行 region 恰好叫"合计"是数据，不是统计行。
+- `_summary_note(df)` 渲染一行注解：**只写位置与算术事实，不引用任何单元格原文**。
+  这是被出境审计（EV-B10）逼出来的设计——审计按"任一文本列取值命中 ≤ 3"计数，
+  把尾行标签写进 prompt 会让该列命中数从 3 变 4，直接撞红线。注解还带**碰撞守卫**：
+  先试中文措辞，若与表内某取值子串相撞就退 ASCII 版，两版都撞则不写（宁缺勿破审计）。
+- **只注解、不删除**：报表类 CSV 里"合计"可能正是用户要算的东西，静默丢弃会制造新 bug。
+
+验证（离线，全部本机跑）：
+
+| 检查 | 结果 |
+|---|---|
+| 20 条 total_row fixture 检出 | **20/20**，无漏报 |
+| 原始 sales/orders/employees/inventory 误报 | **0**（四表全空） |
+| `test_schema` 新增 6 条（检测/中间行/算术不符/行数不足/碰撞回退/egress 合同） | 通过 |
+| 真实 prompt 抓取（egress capture） | 注解在 prompt 里，**尾行标签"合计"零出现** |
+| `test_egress` + `test_multitable` + `test_dictionary` | 31 passed |
+
+真模型复验**未完成**：`grg-aikits-test.grgbanking.com:443` 不通（不在公司内网），20 题全
+`连不上模型服务`，读数作废；回来后用一条命令复跑：
+`python scripts/perturb_full.py --kind total_row --no-base --out outputs/perturb_total_row_fix.json`。
+
+### 二、EV-D2 失败归因落地
+
+- `app/eval/failure_classes.py`：码表（闸门 6 类 `F01..F06` + 自动证据 3 码 `A01..A03` +
+  本轮新增 `A04_TOTAL_ROW_COUNTED`），每条带**落点模块 / 首个修复方向 / 历史案例 / 关键词**；
+  `match()` 支持整数（闸门编号）、自由文本（取最长关键词命中）、认不出返回 None。
+  扰动变体另有 `PERTURB_CODES`：`variant_kind` 本身就是确定性归因信号。
+- `docs/eval/failure-map.md`：同一张表的文档版，**与代码码集合逐字相等**，测试钉住。
+- `scripts/eval/triage.py`：读闸门报告与评测报告，输出"码 → 模块 + 首修 + 题号"；
+  未映射条目打印并**非 0 退出**；`error`/llm/cancelled/interrupted 归 `infra` 桶；
+  判错但无任何码的题单列"归因缺口"；报告没有失败字段时明说"没带失败信息"而不是报 0。
+- `tests/test_failure_map.py` 9 条：码集合一致、闸门 1–6 全覆盖且落点文件真实存在、
+  match 三种形态、triage 端到端（闸门/评测/扰动/未映射退出码/空报告）。
+
+真实报告实测：闸门 `gate_20261012_104407` → s02 归 F02_SCHEMA、s15 归 F05_CONTRACT、
+m10 归 F06_REFUSAL，s04/m09（ReAct 超步数）进 infra 桶；`outputs/perturb_full_react.json`
+的 5 条 total_row 失败**原本没有任何码**（归因缺口），接上 `variant_kind` 后
+全部归到 `A04_TOTAL_ROW_COUNTED → app/tools/schema.py`，与上面的修复同一落点。
+
+### 三、指纹
+
+- `code_all`：`a0a364828700` → **`6fd171947775`**（schema.py 在 A 组，改它必然变）；
+- 渲染指纹 `set_sha12`：`48f3ca603eab` → **`1a50b22a141a`**（题集 201 条未变，变的是
+  prompt 渲染——schema 文本进 prompt）。**新读数与 11-06 的三档/扰动读数不可直接比**。

@@ -113,6 +113,10 @@ _EXEMPT = {
     # **只读 res，不碰执行路径**——runner 在打分之后才调它，failures 只作 warnings 展示、
     # 升级门槛（130 题误报率 <10%）达成前不改 correct。改它不会改变任何一次运行的输入与结果。
     "app/eval/consistency.py": "证据一致性，只读 res 的 warnings 检查，不改判分",
+    # 失败归因常量表（EV-D2）：码 → 模块/修复方向的映射，只被离线 triage 脚本读。
+    # **不进模型输入、不参与判分、不写报告字段**——改它不会让任何一题从错变对。
+    # 但它是"归因口径"的一部分：triage 的结论会变，所以改动要在 DEVLOG 里留痕。
+    "app/eval/failure_classes.py": "失败归因常量表，只被离线 triage 读取，不改判分",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

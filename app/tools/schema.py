@@ -5,10 +5,18 @@
 - B04（缓解）：样例单元格和列名来自用户上传的文件，是间接提示注入入口。
   这里截断过长的单元格/列名，并用 data_block() 包成"只是数据、不是指令"的分隔块。
   真正的防线是阶段 2 的子进程沙箱（模型被诱导写出恶意代码也拿不到 Key、写不了文件）。
+- F03（合计行）：导出表末尾常带一行统计行（合计/总计/小计/Total…），它会被
+  `sum()` / `len()` / 去重当成一条明细重复计入（真模型实测 5 题 off-by-one，见 DEVLOG [132 附]）。
+  `describe_df` 只采样前 n 行，模型永远看不到尾行，所以必须由这里主动告知。**注解只写
+  位置与算术事实，不引用任何单元格原文**：出境审计（EV-B10）按"任一文本列取值命中 ≤ 3"
+  计数，把尾行标签写进 prompt 可能让该列命中数从 3 变 4，撞合同红线。
 """
+import re
+
 import pandas as pd
 
 from app.tools.csv_io import read_csv
+
 
 MAX_CELL_CHARS = 40       # 样例单元格最长字符数
 MAX_NAME_CHARS = 64       # 列名最长字符数
@@ -54,9 +62,115 @@ def describe_df(df: pd.DataFrame, n: int = 3) -> str:
             sample[c] = sample[c].map(lambda v: clip(v, MAX_CELL_CHARS))
     lines.append(f"\n前 {n} 行示例：")
     lines.append(sample.to_string(index=False))
+    note = _summary_note(df)
+    if note:
+        lines.append(f"\n{note}")
     return data_block("\n".join(lines))
 
 
 def describe_csv(path: str, n: int = 3) -> str:
     """读取 CSV 并生成表结构描述（兼容旧调用）。"""
     return describe_df(read_csv(path), n=n)
+
+
+# ---------------------------------------------------------------- F03 尾部统计行
+
+# 汇总行标签：整格匹配（允许全角冒号后缀）。只用于**本地判定**，绝不渲染进 prompt。
+_SUMMARY_LABEL = re.compile(
+    r"^\s*(合\s*计|总\s*计|小\s*计|共\s*计|总\s*和|汇\s*总|总\s*额|"
+    r"total|totals|subtotal|sub\s*total|grand\s*total|sum)\s*[:：]?\s*$",
+    re.IGNORECASE,
+)
+TAIL_ROWS = 2         # 只看末尾几行：真实导出的统计行几乎总在尾部
+SUM_RTOL = 1e-6       # 数值列与"上方各行之和"的相对/绝对容差
+SUM_ATOL = 0.01
+MIN_ROWS_FOR_SUM = 3  # 少于 3 行时"上方之和"没有统计意义，不判定
+
+# 统计行注解（位置 + 算术事实，不含任何标签原文）
+_NOTE_ZH = ("注意：末尾 {k} 行（第 {pos} 行，共 {total} 行）不是明细数据——"
+            "其数值列等于上方各行之和。统计行数、求和、求均值或去重前请先剔除"
+            "（如 df = df.iloc[:-{k}]），否则会重复计入。")
+# 万一中文措辞与表里某个取值子串相撞，退到 ASCII 版（再撞就不写注解：宁缺勿破审计）
+_NOTE_EN = ("NOTE: the last {k} row(s) of {total} (position {pos}) are not detail data — "
+            "their numeric cells equal column sums of the rows above. Exclude them before "
+            "counting/summing/aggregating (e.g. df = df.iloc[:-{k}]).")
+
+
+def _text_values(df: pd.DataFrame) -> list[str]:
+    """表内全部文本取值（用于注解碰撞检测，与出境审计同一种子串判据）。"""
+    out = []
+    for c in df.columns:
+        s = df[c]
+        if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_bool_dtype(s):
+            continue
+        for v in s.dropna().unique()[:5000]:
+            t = str(v)
+            if t:
+                out.append(t)
+    return out
+
+
+def _collides(text: str, values: list[str]) -> bool:
+    """注解里是否含有某个单元格取值（子串）。短 ASCII 值（'A'/'B'）不算：它们本来就到处命中。"""
+    for v in values:
+        if len(v) >= 2 and v in text:
+            return True
+    return False
+
+
+def summary_rows(df: pd.DataFrame) -> list[int]:
+    """末尾疑似统计行的 0-based 位置。
+
+    双条件，宁可漏报不可误报：
+    1. 末尾 `TAIL_ROWS` 行内、某个文本单元格**整格**命中统计标签（合计/总计/…/Total）；
+    2. 该行至少一个数值单元格 == 其上方各行在该列的和（容差内）。
+
+    只看尾部是关键：中间某行 region 恰好叫"合计"不处理——那是数据，不是统计行。
+    """
+    total = len(df)
+    if total < MIN_ROWS_FOR_SUM:
+        return []
+    text_cols = [c for c in df.columns
+                 if not pd.api.types.is_numeric_dtype(df[c])
+                 and not pd.api.types.is_bool_dtype(df[c])]
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    if not text_cols or not num_cols:
+        return []
+
+    hits = []
+    for idx in range(total - min(TAIL_ROWS, total), total):
+        row = df.iloc[idx]
+        if not any(isinstance(row[c], str) and _SUMMARY_LABEL.match(row[c]) for c in text_cols):
+            continue
+        above = df.iloc[:idx]
+        for c in num_cols:
+            v = row[c]
+            if pd.isna(v):
+                continue
+            try:
+                s = above[c].sum()
+            except (TypeError, ValueError):
+                continue
+            if pd.isna(s):
+                continue
+            if abs(float(v) - float(s)) <= max(SUM_ATOL, abs(float(s)) * SUM_RTOL):
+                hits.append(idx)
+                break
+    return hits
+
+
+def _summary_note(df: pd.DataFrame) -> str:
+    """统计行注解。先试中文；若与表内取值相撞（会让出境审计的取值命中数超限），退 ASCII。"""
+    marks = summary_rows(df)
+    if not marks:
+        return ""
+    k = len(marks)
+    total = len(df)
+    pos = "、".join(str(i + 1) for i in marks)
+    values = _text_values(df)
+    for tmpl in (_NOTE_ZH, _NOTE_EN):
+        text = tmpl.format(k=k, total=total, pos=pos)
+        if not _collides(text, values):
+            return text
+    return ""
+
