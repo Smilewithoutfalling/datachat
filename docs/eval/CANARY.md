@@ -68,9 +68,16 @@ python run_eval.py --canary --oracle
 
 ## 判读规则
 
-前提：**`canary_sha12` 与 `code_sha12` 都必须和基线一致**，否则不是漂移，是换了卷子
+前提：**`canary_sha12` 与 `judge_sha12` 都必须和基线一致**，否则不是漂移，是换了卷子
 （`incomparable`）或换了尺子（`stale_baseline`）。这两种由 `scripts/eval/canary.py` 直接判，
 退出码 2，动作是「改题单」或「重立基线」，不是「查权重」。
+
+`judge_sha12` 只覆盖**判分器**（`app/eval/comparator.py`、`app/eval/negative.py`）与
+**数据表内容**（`DATASETS` 全部 CSV + 各表字典），不覆盖 `app/**/*.py` 全量。
+旧判据是 `code_sha12` 全同，2026-11-09 收窄 —— 它含 prompt / 工具 / 记忆编排，
+一周改好几次，要求它全同等于让哨兵永远停在"该重立基线"（10 题 × 6 跑），
+而没人会为改一行 prompt 重跑六轮，于是它静默失效。失效方式不是报错，是被无视。
+产品代码改过时 `code_sha12` 仍会写进 reason 提示归因方向，但**不阻断比对**。
 
 基线（2026-11-04 09:40，6 跑 / 60 题次，`docs/eval/canary/baseline.json`）：
 
@@ -80,7 +87,14 @@ python run_eval.py --canary --oracle
 | 逐题翻转 | 2（`ord_013`、`ord_017`，各掉一轮） |
 | 两次掉题的形态 | **都是「答对了没交卷」**：`no_assign`，答案正文与 gold 逐字相同（660 / 0.3665） |
 | usage 比例 | in 94.4% / out 5.6%；`cache_read` / `reasoning` 网关恒不回（None） |
-| 指纹 | `canary_sha12 = 592b9f3baa7e`、`code_sha12 = 4b58e8b9fd80` |
+| 指纹 | `canary_sha12 = 592b9f3baa7e`、`code_sha12 = 4b58e8b9fd80`、`judge_sha12` **缺** |
+
+> ⚠️ **这份基线已经不可用（2026-11-09 起）。** 当前 `code_sha12 = a2ca51b11273`
+> （C-001 改字典、C-002 改题面），且基线里**没有 `judge_sha12` 字段**。
+> `scripts/eval/canary.py` 会判 `stale_baseline`（退出码 2）并提示重立 —— 这是正确行为。
+> 重立命令：`python scripts/eval/canary.py "<那批报告>" --init --force`，成本 10 题 × 6 跑
+> ≈ 26 万 tokens_in / 1.6 万 tokens_out（按本基线自己记的 `usage_total`）。
+> 重立之前，漂移哨兵处于失效状态；打开 `DATACHAT_CANARY_ENABLED` 只会得到退出码 2。
 
 判读按**机制**分，不按条数分：
 
@@ -157,10 +171,14 @@ python run_eval.py --canary --oracle
 
 1. **只锁十条。** 权重漂移如果在别的能力面上（比如长链推理），这十条可能全过。
    它是**探针不是体检**：探针绿了只说明「这十个点没动」。
-2. **依赖 `code_sha12` 不变。** 只要 A 组代码动过，就分不清读数变化来自代码还是权重。
-   canary 的价值在「代码没动的那些天」，日常回归别用它。
-3. **`canary_sha12` 覆盖题面与判分字段，不覆盖数据文件。** 数据换了而题没换，指纹不会变。
-   数据指纹走报告里的 `data_sha256` / `datasets`。
+2. ~~**依赖 `code_sha12` 不变。**~~ **已解除（2026-11-09）。** 判据改成 `judge_sha12`
+   （判分器 + 数据表），产品代码改动不再阻断比对 —— 代价是"改了 prompt 导致掉题"会被
+   判成 `drift`，reason 里会附 `code_sha12` 差异提示先归因到自己的改动。
+   日常回归仍然别用 canary：它是探针不是回归套件。
+3. **`canary_sha12` 覆盖题面与判分字段，不覆盖数据文件** —— 数据这部分由 `judge_sha12`
+   补上了（2026-11-09）。两个指纹合起来才是完整的"同一件事"：题面 + 判分器 + 数据表。
+   仍不覆盖的是**执行器**（`runner.py` 怎么取 `result`）和**记忆编排**，它们变了会被归到
+   模型侧 —— 那是可接受的误报方向（宁可让你去查，而不是让哨兵闭嘴）。
 4. **拒答题只有 2 条。** 拒答边界是最容易随权重游移的地方，两条偏少；等有更死板的拒答题
    再加。目前 `inv_021`（销售额）与 `emp_022`（离职原因）都因为允许近似回答而没进清单。
 5. **逐题读数不归档。** `outputs/` 在 `.gitignore` 里，台账只留一行汇总（正确率 + 翻转数），
