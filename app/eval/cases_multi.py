@@ -100,9 +100,12 @@ MULTI_CASES = [
              keywords=["groupby", "region", "max", "min"],
              expect_turns=["exec", "exec"]),
     EvalCase(id="mul_008", category="multi_turn", dataset="inventory", gold_kind="scalar",
+             # 「有记录的天数」在单门店表里等价于行数，但 inventory 是 5 门店 × 92 天，
+             # 行数(460) 是 天数(92) 的 5 倍 —— 模型 4 次里 3 次按行数算。补一句消歧，
+             # 不改 gold。见 docs/eval/CHANGES.md C-002。
              turns=["K100 这个 SKU 的期末库存合计是多少件？",
-                    "把它按有记录的天数平均，每天是多少件？保留两位小数。"],
-             question="把它按有记录的天数平均，每天是多少件？保留两位小数。",
+                    "把它按有记录的天数平均（同一日期多条记录只算一天），每天是多少件？保留两位小数。"],
+             question="把它按有记录的天数平均（同一日期多条记录只算一天），每天是多少件？保留两位小数。",
              ground_truth="k = df[df['sku'] == 'K100']; "
                           "result = round(float(k['closing_stock'].sum() / k['date'].nunique()), 2)",
              keywords=["sku", "closing_stock", "nunique"],
