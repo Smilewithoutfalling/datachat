@@ -199,6 +199,9 @@ SSE 事件类型以 `app/core/events.py` 为准：plan、code、exec、error（f
 
 ## 12. 评测与闸门
 - 评测集在 `docs/eval/`，`run_eval.py` 跑；`--rescore` 不调模型，按当前比较器重新打分；`--oracle` 不需要 Key。
+- **改过题面 / 数据字典 / prompt / 判分之后，先看 `docs/eval/CHANGES.md`。** `LEDGER.md` 只按
+  `code_sha12` + `evalset_sha12` 分批记读数，说不出「哪次改动换了尺子、换完值多少」；
+  CHANGES 是那份因果台账（含已否决的建议和它的理由）。两处都改完再重建 `python eval_ledger.py`。
 - 阶段 3.5 外部验证闸门：25 题（UCI Online Retail 改造的中文 GBK 脏表 15 题，Olist 8 张表 10 题），标准答案由独立脚本在原始数据上算出。工具在 `scripts/gate/`，门槛在 `docs/gate/thresholds.json`（有哈希）。
 - A1：错题自动复跑（m13r、`--rerun`、退出码 0/1/2/3、`--only` + `--reason` 留痕），细则在 phase5「A1」。
 - 流程：S 用真实 Key 跑，把报告推上来 → agent 离线重新打分、对照门槛判定 → 写进 DEVLOG。
