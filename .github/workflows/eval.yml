@@ -119,8 +119,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements*.txt
+      # 装 dev 组而不是 runtime 组：闸门数据生成（scripts/gate/build_gate_data.py:122）
+      # 要 `pd.read_excel(engine="openpyxl")`，而 openpyxl 只锁在 requirements-dev.txt。
+      # 闸门数据走 Actions cache，**首次必然 miss** → 一定会走到生成那步 → 少装就是 ImportError。
+      # 不写死 `openpyxl==3.1.5` 是为了让版本只锁在 requirements-dev.txt 一处。
       - name: 安装依赖
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements-dev.txt
 
       # nightly 的意义就是真模型：没有 Key 不是"跳过"，是配置错了。
       - name: 有没有 secret
@@ -230,8 +234,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements*.txt
+      # 同 nightly：release 也要跑 build_gate_data.py，openpyxl 只在 dev 组里。
       - name: 安装依赖
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements-dev.txt
       - name: 有没有 secret
         id: key
         run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
