@@ -12,9 +12,19 @@
 | 情况 | 结论 | 退出码 |
 |---|---|---|
 | `canary_sha12` 与基线不同 | `incomparable`：换了卷子，读数不是同一件事 | 2 |
-| `code_sha12` 与基线不同 | `stale_baseline`：尺子动过，**不能**把差异算到权重头上 | 2 |
+| `judge_sha12` 与基线不同 | `stale_baseline`：判分器或数据表动过，**不能**把差异算到权重头上 | 2 |
 | 任何一轮判对数 < 基线，或 usage 比例移动 > 20% | `drift`：这才叫漂移 | 1 |
 | 以上都不是 | `clean` | 0 |
+
+**为什么可比性判据是 `judge_sha12` 而不是 `code_sha12`（2026-11-09 收窄）。**
+旧判据要求 `code_sha12` 全同，而它覆盖 `app/**/*.py` 的全部 A 组文件 —— 含
+`react_agent.py`、`app/tools/**`、`app/memory/**`，一周要改好几次。后果是哨兵永远停在
+"该重立基线"（10 题 × 6 跑 ≈ 26 万 token），而没人会为了改一行 prompt 去重跑六轮，
+于是它静默失效 —— 失效方式不是报错，是被无视。
+
+收窄后的边界：**同一份模型输出，判成什么变了没。** 判分器（`comparator` / `negative`）
+与数据表（模型输入）算进来，产品代码不算。改过产品代码时 `code_sha12` 仍然不同，
+`_compare()` 会把它写进 reason 提示归因方向 —— 是"提示你从哪儿查"，不是"挡住比对"。
 
 `incomparable` / `stale_baseline` 单独给退出码，是为了让 CI 的动作不同：前者要改题单，
 后者要**重立基线**（`--init`）。把这两种混进 `drift`，等于天天误报权重变化。
@@ -133,6 +143,9 @@ def load_run(path: str) -> dict:
         "run": data.get("run"),
         "canary_sha12": data.get("canary_sha12") or fps.get("canary_sha12"),
         "code_sha12": fps.get("code_sha12"),
+        # EV-D5 收窄（2026-11-09）：判分器 + 数据表。缺字段的是 11-09 之前的报告，
+        # 保持 None 而不是现算 —— 现算会把"现在这把尺子"冒名成"当时那把"。
+        "judge_sha12": fps.get("judge_sha12"),
         "model": data.get("model"),
         "agent": data.get("agent"),
         "n": len(CANARY_IDS),
@@ -186,6 +199,7 @@ def summarize(runs: list[dict]) -> dict:
         "agent": runs[-1]["agent"],
         "canary_sha12": runs[-1]["canary_sha12"],
         "code_sha12": runs[-1]["code_sha12"],
+        "judge_sha12": runs[-1]["judge_sha12"],
         "correct_per_run": corrects,
         # 判对数取**最少的那一轮**：三跑里有一跑掉题就是不稳定，用均值会把它摊平。
         "min_correct": min(corrects),
@@ -243,7 +257,12 @@ def compare(base: dict, cur: dict) -> dict:
             f"canary_sha12 不同：基线 `{base.get('canary_sha12')}`，本次 `{cur.get('canary_sha12')}`"
             " —— 换了卷子，读数不是同一件事"]}
 
-    stale = base.get("code_sha12") != cur.get("code_sha12")
+    # EV-D5 收窄（2026-11-09）：可比性看 judge_sha12（判分器 + 数据表），不看 code_sha12。
+    # 旧判据要求 code_sha12 全同 —— 它含 prompt / 工具 / 记忆编排，一周改好几次，结果是
+    # 哨兵永远停在"该重立基线"（10 题 × 6 跑），而没人会为改一行 prompt 重跑六轮，于是
+    # 静默失效。产品代码改动仍记进 reason：出问题时它是最可能的解释，但那不构成"不可比"。
+    judge_changed = base.get("judge_sha12") != cur.get("judge_sha12")
+    code_changed = base.get("code_sha12") != cur.get("code_sha12")
 
     # 基线里判对的题、本次有哪几轮掉过。只比"基线全对"的题：基线自己就不稳的题
     # 拿来做判据，等于用晃的尺子量晃的东西。
@@ -278,25 +297,40 @@ def compare(base: dict, cur: dict) -> dict:
             usage_notes.append(f"usage 比例 `{k}` 移动 {rel:+.1%}（基线 {b:.4f} → 本次 {c:.4f}，"
                                f"容忍 ±{RATIO_TOL:.0%}）")
 
-    if stale:
-        reasons.append(f"code_sha12 不同：基线 `{base.get('code_sha12')}`，本次 "
-                       f"`{cur.get('code_sha12')}` —— 尺子动过，差异不能算到权重头上；"
-                       "确认改动与判分无关后 `--init --force` 重立基线")
+    if judge_changed:
+        base_j = base.get("judge_sha12")
+        if base_j is None:
+            reasons.append("基线缺 `judge_sha12` 字段（11-09 之前立的基线），无法确认判分口径"
+                           "是不是同一把；`--init --force` 重立一次即可")
+        else:
+            reasons.append(f"`judge_sha12` 不同：基线 `{base_j}`，本次 `{cur.get('judge_sha12')}`"
+                           " —— 判分器或数据表动过，差异不能算到权重头上；"
+                           "确认后 `--init --force` 重立基线")
         if changed or usage_notes:
             reasons.append("（本次仍然观察到：" + "；".join(changed + usage_notes) + "）")
         return {"verdict": "stale_baseline", "reasons": reasons}
 
     # usage 动了就是动了：它不看判定，是网关回包本身的形状，跟"没交卷"没关系。
     if wrong or usage_notes:
-        return {"verdict": "drift", "reasons": changed + usage_notes}
+        extra = changed + usage_notes
+        if code_changed:
+            # 不把 code_changed 单独当 drift 条件：改了 prompt 但十条读数没动，那是"改动
+            # 对这些探针无影响"，报 drift 就等于每周一必红，红到最后没人看。
+            extra.append(f"产品代码不同：基线 `{base.get('code_sha12')}` → 本次 "
+                         f"`{cur.get('code_sha12')}`（判分口径未变，所以仍判 drift；"
+                         "若本次改过 prompt / 工具，先归因到改动，再怀疑网关）")
+        return {"verdict": "drift", "reasons": extra}
     if contract:
         # 不算漂移，但也不许静默：3.3% 的题次挂在这上面，是真实的输出契约数字。
         return {"verdict": "contract", "reasons": changed + [
             "这批掉题都是「算对了没交卷」，不指向权重；但它是真实的输出契约问题，"
             "别当没发生 —— 需要时去看 outputs/ 里那几轮的 code"]}
-    return {"verdict": "clean", "reasons": [
-        f"{cur['runs']} 跑全 {cur['n']}/{cur['n']}，翻转 {cur['flips']}，"
-        f"usage 比例在 ±{RATIO_TOL:.0%} 内"]}
+    tail = [f"{cur['runs']} 跑全 {cur['n']}/{cur['n']}，翻转 {cur['flips']}，"
+            f"usage 比例在 ±{RATIO_TOL:.0%} 内"]
+    if code_changed:
+        tail.append(f"产品代码不同（`{base.get('code_sha12')}` → `{cur.get('code_sha12')}`）"
+                    "但判分口径与十条读数都没动 —— 这批改动对这些探针无影响")
+    return {"verdict": "clean", "reasons": tail}
 
 
 _EXIT = {"clean": 0, "contract": 0, "drift": 1, "stale_baseline": 2, "incomparable": 2}
@@ -338,6 +372,7 @@ def main(argv=None) -> int:
             print(f"基线已写入：{base_path}")
             print(f"  {payload['runs']} 跑，判对数 {payload['correct_per_run']}/{payload['n']}，"
                   f"翻转 {payload['flips']}，canary_sha12 `{payload['canary_sha12']}`，"
+                  f"judge_sha12 `{payload['judge_sha12']}`，"
                   f"code_sha12 `{payload['code_sha12']}`")
         return 0
 

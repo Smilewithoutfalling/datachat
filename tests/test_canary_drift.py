@@ -25,9 +25,10 @@ _spec.loader.exec_module(drift)
 
 C_OK = "c" * 12
 K_OK = "k" * 12
+J_OK = "j" * 12
 
 
-def _report(tmp_path, name="r.json", *, wrong=(), code=K_OK, canary=C_OK,
+def _report(tmp_path, name="r.json", *, wrong=(), code=K_OK, canary=C_OK, judge=J_OK,
             usage=None, answers=None, ids=None, run=1, missing=None, expected="42"):
     ids = list(ids or CANARY_IDS)
     rows = []
@@ -37,8 +38,11 @@ def _report(tmp_path, name="r.json", *, wrong=(), code=K_OK, canary=C_OK,
                      "answer": (answers or {}).get(i, f"{i}:{expected}"),
                      "expected": expected,
                      "result_missing": (missing or {}).get(i), **u})
+    fps = {"code_sha12": code}
+    if judge is not None:
+        fps["judge_sha12"] = judge
     data = {"canary": canary is not None, "canary_sha12": canary,
-            "fingerprints": {"code_sha12": code}, "model": "m", "agent": "react",
+            "fingerprints": fps, "model": "m", "agent": "react",
             "run": run, "cases": rows}
     p = tmp_path / name
     p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -198,15 +202,49 @@ def test_answer_changed_alone_is_not_drift(tmp_path):
     assert drift.compare(base, cur)["verdict"] == "clean"
 
 
-def test_code_change_makes_the_baseline_stale_not_drift(tmp_path):
-    """尺子动过，读数变化不能算到权重头上 —— 先重立基线，再谈漂移。"""
+def test_judge_change_makes_the_baseline_stale_not_drift(tmp_path):
+    """判分器或数据表动过，读数变化不能算到权重头上 —— 先重立基线，再谈漂移。"""
     base = drift.summarize(_runs(tmp_path))
-    cur = drift.summarize(_runs(tmp_path, code="9" * 12, wrong=("ord_013",)))
+    cur = drift.summarize(_runs(tmp_path, judge="9" * 12, wrong=("ord_013",)))
     v = drift.compare(base, cur)
     assert v["verdict"] == "stale_baseline"
     assert drift._EXIT[v["verdict"]] == 2
     # 仍然要说清观察到了什么，只是不下结论。
     assert any("ord_013" in r for r in v["reasons"])
+
+
+def test_old_baseline_without_judge_sha_is_stale(tmp_path):
+    """11-09 之前立的基线没有 judge_sha12：不能默认"同一把尺子"，要明说该重立。"""
+    base = drift.summarize(_runs(tmp_path, judge=None))
+    cur = drift.summarize(_runs(tmp_path))
+    v = drift.compare(base, cur)
+    assert v["verdict"] == "stale_baseline"
+    assert any("judge_sha12" in r and "重立" in r for r in v["reasons"])
+
+
+def test_product_code_change_alone_does_not_block_comparison(tmp_path):
+    """2026-11-09 收窄：改 prompt / 工具不该让哨兵永久失效。
+
+    code_sha12 覆盖 A 组全部源文件，一周改好几次。拿它当可比性判据，结果是每周一都是
+    "该重立基线"（10 题 × 6 跑），而没人会为改一行 prompt 重跑六轮 —— 哨兵的失效方式
+    不是报错，是被无视。所以只有 judge_sha12 变才 stale。
+    """
+    base = drift.summarize(_runs(tmp_path))
+    cur = drift.summarize(_runs(tmp_path, code="9" * 12))
+    v = drift.compare(base, cur)
+    assert v["verdict"] == "clean"
+    # 不拦，但必须留痕：出问题时这是最可能的解释。
+    assert any("9" * 12 in r or "产品代码不同" in r for r in v["reasons"])
+
+
+def test_product_code_change_still_surfaces_drift(tmp_path):
+    """代码变了 + 读数掉了 → 仍判 drift（不是 stale），并把代码差异写进归因提示。"""
+    base = drift.summarize(_runs(tmp_path))
+    cur = drift.summarize(_runs(tmp_path, code="9" * 12, wrong=("ord_013",)))
+    v = drift.compare(base, cur)
+    assert v["verdict"] == "drift"
+    assert any("ord_013" in r for r in v["reasons"])
+    assert any("产品代码不同" in r for r in v["reasons"])
 
 
 def test_canary_fingerprint_change_is_incomparable(tmp_path):
@@ -220,6 +258,21 @@ def test_canary_fingerprint_change_is_incomparable(tmp_path):
 
 
 # ---------------------------------------------------------------- 命令行接线
+
+
+def test_init_records_judge_sha12(tmp_path):
+    """基线必须记下判分口径，否则下次比对只能得到"缺字段"。
+
+    这是 11-09 收窄判据的配套设施：`_compare` 用 `judge_sha12` 判 stale，
+    基线里没有它就是每次都 stale，等于哨兵刚装上就又废了。
+    """
+    paths = [_report(tmp_path, name=f"r{k}.json", run=k) for k in (1, 2, 3)]
+    base = tmp_path / "baseline.json"
+    assert drift.main(paths + ["--init", "--baseline", str(base)]) == 0
+    saved = json.loads(base.read_text(encoding="utf-8"))
+    assert saved["judge_sha12"] == J_OK
+    assert saved["code_sha12"] == K_OK
+    assert saved["canary_sha12"] == C_OK
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path, capsys):

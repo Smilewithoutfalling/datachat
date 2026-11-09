@@ -193,6 +193,68 @@ def code_fingerprint() -> dict:
             "files": parts}
 
 
+# ------------------------------------------------- 打分口径子指纹（EV-D5 漂移哨兵用）
+
+# **为什么不能直接拿 code_sha12 当 canary 的可比性判据。**
+# `affects_results_sha256` 覆盖 A 组全部源文件，含 `app/react_agent.py`、`app/tools/**`、
+# `app/nodes/**`、`app/memory/**` —— 那是一周要改好几次的东西。结果是：只要动过任何产品代码，
+# 漂移哨兵就判 `stale_baseline`、退出码 2、要求重立基线（10 题 × 6 跑）。
+# 这个失效模式不报错，它只是让哨兵永远处于"该重立"状态，最后没人重立 —— 等于没装。
+#
+# 哨兵要回答的问题只有一个：**同一份模型输出，判成什么变了没。**
+# 所以可比性判据收敛到三样，任一不同就不是同一件事：
+#   1. 题面        → `canary_fingerprint()`（app/eval/canary.py），不同 → `incomparable`
+#   2. 判分口径    → `JUDGE_FILES`，不同 → `stale_baseline`
+#   3. 数据内容    → `DATASETS` 全部表 + 各自字典，不同 → `stale_baseline`
+# 产品代码（prompt / 工具 / 执行器 / 记忆编排）不同**不算不可比**：那是已知变量，报告里
+# 仍记着 `code_sha12`，`_compare()` 会把它写进 reason 提示归因方向。
+JUDGE_FILES = ("app/eval/comparator.py", "app/eval/negative.py")
+
+
+def judge_fingerprint(datasets: dict | None = None) -> dict:
+    """打分口径子指纹：判分器 + 数据表内容。
+
+    边界是"同一份输出判成什么"。`runner.py` 决定怎么取 result、`stats.py` 决定怎么聚合，
+    都不改变单题判定，所以不进来；它们变了会让读数变化被归到模型侧，那是可接受的误报方向
+    （宁可让你去查，而不是让哨兵闭嘴）。
+
+    数据表一定要算进来：它是模型的输入。不算的话，改了 `orders.csv` 会让 canary 把
+    "输入变了"判成"权重换了"，那是最坏的一种误报 —— 指向完全错误的方向。
+    数据表是 `scripts/gen_eval_data.py` 的产物，改动频率跟代码不是一个量级，不会把判据撑宽。
+    """
+    h = hashlib.sha256()
+    parts = {}
+    for rel in JUDGE_FILES:
+        with open(os.path.join(_REPO, rel), "rb") as fh:
+            data = fh.read().replace(b"\r\n", b"\n")
+        parts[rel] = _sha12(data)
+        h.update(rel.encode() + b"\0" + data + b"\0")
+
+    if datasets is None:
+        from app.eval.cases import DATASETS
+        datasets = DATASETS
+    from app.eval.report import _dataset_files
+    from app.tools.dataset import is_dict_file
+    from app.tools.dictionary import dict_path_for
+    files: list[str] = []
+    for path in datasets.values():
+        tables = _dataset_files(path, is_dict_file)
+        if tables is None:
+            files += [path, dict_path_for(path)]
+        else:
+            for f in tables:
+                files += [f, dict_path_for(f)]
+    for f in sorted(set(files)):
+        if not os.path.exists(f):
+            continue
+        data = open(f, "rb").read().replace(b"\r\n", b"\n")
+        rel = os.path.relpath(f, _REPO).replace(os.sep, "/")
+        parts[rel] = _sha12(data)
+        h.update(rel.encode() + b"\0" + data + b"\0")
+
+    return {"sha12": h.hexdigest()[:12], "files": parts}
+
+
 # ------------------------------------------------------------------ 启动快照（缺口 15）
 
 # `EvalReport.fingerprint()` 是惰性的，且缓存挂在**实例**上。`--repeat 3` 每轮新建一个

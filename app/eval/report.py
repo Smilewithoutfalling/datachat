@@ -449,7 +449,8 @@ class EvalReport:
         memory_mode 取不到就记 unknown——comparable 遇到 unknown 一律判不可比。
         """
         if self._fingerprint is None:
-            from app.eval.fingerprint import (entry_fingerprint, report_code_fingerprint,
+            from app.eval.fingerprint import (entry_fingerprint, judge_fingerprint,
+                                              report_code_fingerprint,
                                               rendered_fingerprints, runtime_config)
             # 缺口 15：走 report_code_fingerprint() 而不是 code_fingerprint()。
             # `--repeat 3` 每轮新建一个 EvalReport，各自重算会把"跑完之后"的代码
@@ -471,6 +472,10 @@ class EvalReport:
                 "evalset_sha12": evalset_sha12 or evalset_fingerprint()["sha256"],
                 "code_sha12": code["affects_results_sha256"],
                 "code_all_sha12": code["sha256"],
+                # EV-D5：判分器 + 数据表内容。canary 的可比性判据用它而不是 code_sha12 ——
+                # 后者含 prompt/工具/记忆编排，一周改几次，拿它当判据会让哨兵永远"该重立"。
+                # **只记录，不进 GATE_KEYS**：加进去等于宣布所有历史报告不可比。
+                "judge_sha12": judge_fingerprint()["sha12"],
                 # 缺口 4：入口脚本（run_eval.py）不在 app/ 下，code_sha12 扫不到。
                 # **只记录，不进 GATE_KEYS** —— 加门禁会让所有历史基线判不可比。
                 "entry_sha12": entry["sha12"],
