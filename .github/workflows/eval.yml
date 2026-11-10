@@ -63,9 +63,12 @@ jobs:
       # --oracle 用假模型：输出 = 标准答案。它不测模型，只测「判分链路 + 执行器 + 报告」还通不通。
       - name: oracle 全量（不调模型）
         run: python run_eval.py --oracle --agent react --out outputs/pr_oracle.json
+      # 期望题数必须镜像运行器的口径：oracle / 真模型默认 memory off，
+      # run_eval 会跳过 7 条 requires_memory 题（mem_001–007），报告实际是 195 条。
+      # 上一版写 len(ALL_CASES)=202，tier_check 因「195 ≠ 202」结构性红灯，永远不可能绿。
       - name: 题集规模
         id: n
-        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(len(ALL_CASES))')" >> "$GITHUB_OUTPUT"
+        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(sum(1 for c in ALL_CASES if not getattr(c, "requires_memory", "")))')" >> "$GITHUB_OUTPUT"
       - name: oracle 必须全过（判错 = 判分链路坏了，这是本档唯一的红灯）
         run: >
           python scripts/eval/tier_check.py outputs/pr_oracle.json
@@ -249,9 +252,11 @@ jobs:
       # 先自检判分链路：如果 oracle 都过不了，后面的真模型读数没有意义。
       - name: oracle 自检
         run: python run_eval.py --oracle --agent react --out outputs/rel_oracle.json
+      # 同 pr 档：期望题数镜像运行器口径（memory off 跳过 7 条 mem_* 题，实际 195）。
+      # oracle 自检与全量真模型都不带 --memory，两次报告都是 195 条，共用一个数。
       - name: 题集规模
         id: n
-        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(len(ALL_CASES))')" >> "$GITHUB_OUTPUT"
+        run: echo "n=$(python -c 'from app.eval.cases import ALL_CASES; print(sum(1 for c in ALL_CASES if not getattr(c, "requires_memory", "")))')" >> "$GITHUB_OUTPUT"
       - name: oracle 必须全过
         run: >
           python scripts/eval/tier_check.py outputs/rel_oracle.json
