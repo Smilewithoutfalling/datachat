@@ -7422,3 +7422,36 @@ s02「一共有多少个不同的客户？」是唯一自动判错项，**查证
 CI 报告此前只活在 artifact（默认 90 天）。本次起手动回流：`pr_oracle`/`pr_smoke`
 （run 42784008920）与 nightly 报告已落 `outputs/`，`eval_ledger.py` 重建（134 份 /
 96 进表不变）。CI→仓库仍是手动链路，自动化需再改 workflow。
+
+## [151] 修两条遗留：openpyxl 路径验到、CI 报告自动回流跑通（2026-11-10）
+
+**[150] 的两个遗留都关掉了，且都带实证。**
+
+**① openpyxl 修复终于被验证到。** 删掉 10-28 建的 Linux 闸门数据缓存（`gate-data-v2-Linux-*`，
+DELETE 204），下次跑必然 miss。run 42822886501：第 8 步「生成闸门数据（仅缓存未命中）」
+从 skipped 变成 **success**，第 10 步存了新缓存。这条链路（dev 组装 openpyxl →
+`build_gate_data.py` 读 Excel）第一次真的走通。
+
+**② nightly 报告自动回流仓库。** 以前报告只活在 artifact（30 天过期），现在在 nightly job
+里加了「报告回流仓库」步骤（`contents: write`）：
+- 只回本次新产出的 `gate_*.json`，`human_correct` 留空等人工复核；
+- **刻意不跑 `eval_ledger.py`** —— CI 的 `outputs/` 只有本次一份报告，重建会用 40 份
+  覆盖本地 135 份的 LEDGER，历史批次全丢。台账只能在全量 outputs 的机器上重建。
+- 只在一个条件下跑：`gate` 步骤成功 + `refs/heads/master`；`GITHUB_TOKEN` 提交不触发其它 workflow。
+
+run 42822886501 第 18 步 success，远端多出 `5e35ef1 chore(eval): 回流 nightly 报告 run 42822886501`
+（+1370 行 gate 报告），`git pull --ff-only` 已同步。**从此 nightly 的逐题数据不会随 artifact 过期消失。**
+
+**同批两次 gate 读数的差异是有意义的**：
+| run | 执行 | 自动正确 | 错题 |
+|---|---|---|---|
+| 42820363080（13:06） | 25/25 | 24 | s02 |
+| 42822886501（13:22） | 25/25 | 23 | s02、s04 |
+
+`s02`（未登记）两跑都错 → 稳定陷阱，模型确实不识别占位符；`s04`（合计行）一跑对一跑错 →
+模型抖动。门禁题的用途就是这个：只看结构不判红，人工复核时优先看翻转项。
+
+### 踩坑记录
+模拟回流脚本时在 worktree 里跑了 `git config user.name github-actions[bot]`，
+**worktree 共享仓库配置**，导致随后的 `4d7ce14` 被署名成 bot。已把仓库身份改回
+`Smile <2685544252@qq.com>`；已推的提交不改写（变基会破坏 CI run 的引用，不值）。
