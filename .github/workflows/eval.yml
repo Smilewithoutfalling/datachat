@@ -85,7 +85,7 @@ jobs:
           DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
         run: >
-          python run_eval.py --agent react
+          python run_eval.py --agent react --no-fail
           --case ord_007,agg_013,ord_012,emp_015,ts_010,ord_026,ord_027,mul_005
           --out outputs/pr_smoke.json
       - name: 冒烟只产出不判红（8 题测不出小差异）
@@ -188,7 +188,7 @@ jobs:
           DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
         run: >
-          python run_eval.py --agent react
+          python run_eval.py --agent react --no-fail
           --case ord_007,agg_013,ord_012,emp_015,ts_010,ord_026,ord_027,mul_005
           --out outputs/nightly_smoke.json
       - name: 冒烟只产出不判红
@@ -311,7 +311,8 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
           DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
-        run: python run_eval.py --agent react --canary --repeat 3
+        # --no-fail：canary 掉题是真实读数不是 bug（注释见上），退出码不该把它当回归。
+        run: python run_eval.py --agent react --no-fail --canary --repeat 3
 
       # 归档只做 artifact，不自动 commit 回 master：
       # 自动 push 会绕过 PR 流程，与本仓库"一个 PR 一个问题"的纪律冲突。

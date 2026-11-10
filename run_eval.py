@@ -103,6 +103,9 @@ def main():
     parser.add_argument("--oracle", action="store_true", help="离线自检：用标准答案代替模型输出")
     parser.add_argument("--out", default=None, help="JSON 报告路径（默认 outputs/eval_<agent>_<时间>.json）")
     parser.add_argument("--repeat", type=int, default=1, help="同一配置连跑几次（默认 1）")
+    parser.add_argument("--no-fail", action="store_true",
+                        help="有题判错也退出 0。CI 冒烟用：准确率不进退出码（红灯只判跑得完与结构），"
+                             "真崩溃走异常路径退出码仍非零，tier_check 靠报告兜底")
     parser.add_argument("--rescore", default=None, metavar="REPORT", help="离线重新打分一份已有报告，不调用模型")
     parser.add_argument("--memory", default=None, choices=["off", "state", "full"],
                         help="记忆档位（批 4 三档读数）。默认 None = analyze 自己解析（env DATACHAT_MEMORY → off）。"
@@ -193,8 +196,9 @@ def main():
         # 给了 --out 时 compare 写在同一目录，测试不会往真实 outputs/ 里落文件（B42）
         out_dir = os.path.dirname(os.path.abspath(args.out)) if args.out else OUTPUT_DIR
         _print_compare(compare, os.path.join(out_dir, f"eval_compare{'_oracle' if args.oracle else ''}_{stamp}.json"))
-    # 返回码：全部正确为0，否则为1
-    sys.exit(0 if all_correct else 1)
+    # 返回码：全部正确为0，否则为1。--no-fail 时判错不算红：CI 冒烟/哨兵的准确率
+    # 本来就不判红（eval.yml 头部注释），工作流要的是「报告产出且结构完整」这个信号。
+    sys.exit(0 if (all_correct or args.no_fail) else 1)
 
 
 def _run_agent(agent, cases, args, llm_config, stamp):
