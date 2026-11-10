@@ -7455,3 +7455,34 @@ run 42822886501 第 18 步 success，远端多出 `5e35ef1 chore(eval): 回流 n
 模拟回流脚本时在 worktree 里跑了 `git config user.name github-actions[bot]`，
 **worktree 共享仓库配置**，导致随后的 `4d7ce14` 被署名成 bot。已把仓库身份改回
 `Smile <2685544252@qq.com>`；已推的提交不改写（变基会破坏 CI run 的引用，不值）。
+
+## [152] canary 基线重立：GLM-5.2 / 6 跑 60/60 / flips 0（2026-11-10）
+
+**旧基线是三重过期，不是单点过期**：`docs/eval/canary/baseline.json` 建于 11-04，
+model 是 `Qwen3.5-397B-A17B`（现在跑 GLM-5.2）、`code_sha12 = 4b58e8b9fd80`（现在
+`a2ca51b11273`）、没有 `judge_sha12`（C-009 新判据）。任何一重都足以让周常 drift 退 2。
+
+**先解一个死锁**：drift.yml 的 job 级 `if` 只看 `vars.DATACHAT_CANARY_ENABLED`，
+开关没开 → 手动 dispatch 也 skip → 永远立不了基线。改成
+`开关 == '1' || event_name == 'workflow_dispatch'`：周常仍守着，手动放行。
+并给 workflow_dispatch 加 `init`（boolean）与 `repeat`（3/6）两个输入，init 时
+跑 N 次 → `canary.py --init --force` → **把 baseline.json 提交回 master**，
+用 `contents: write`，提交用 GITHUB_TOKEN，不触发其它 workflow。
+
+**run 42825136948（6 跑 × 10 题）结果**：
+
+| 字段 | 值 |
+|---|---|
+| created | 2026-11-10T13:39:06 |
+| model / agent | GLM-5.2 / react |
+| correct_per_run | [10,10,10,10,10,10] |
+| accuracy / flips | 1.0 / 0 |
+| code_sha12 / judge_sha12 | `a2ca51b11273` / `18c5e432eff2` |
+| canary_sha12 | `592b9f3baa7e`（题单未动） |
+
+对比旧基线（58/60、flips 2）：**GLM-5.2 在这十条上明显更稳**，不是「差不多」。
+本地用 artifact 复核 `canary.py` → `CLEAN`、退出码 0。
+
+**唯一剩余动作不在代码里**：变量 `DATACHAT_CANARY_ENABLED = 1` 必须人工在
+Settings → Secrets and variables → Actions → Variables 新建。本地 PAT 只有读权限
+（GET 200 / PATCH 404），实测确认。建完下周一 09:00（北京）drift 才会真的跑。
