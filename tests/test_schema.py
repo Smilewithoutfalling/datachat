@@ -1,5 +1,6 @@
 """schema 文本（B19 类型名归一、B04 注入缓解）与结果预览（B07）。"""
 import pandas as pd
+import pytest
 
 from app.core.result import format_result
 from app.tools.dictionary import format_notes, retrieve_notes
@@ -59,9 +60,22 @@ def _with_total(label: str = "合计", sum_cols=("amount",)) -> pd.DataFrame:
 def test_summary_row_detected_and_annotated_without_label_text():
     df = _with_total("合计")
     note = describe_df(df)
-    assert "末尾 1 行" in note and "第 4 行" in note and "df.iloc[:-1]" in note
+    assert "表格末尾有一行不是明细数据" in note
+    assert "上方各行之和" in note
     # 注解里绝不能出现标签原文：出境审计按列取值命中计数，多一个就撞红线
     assert "合计" not in note.split(DATA_BLOCK_START)[1]
+
+
+def test_summary_note_has_no_arabic_digits():
+    """措辞不含阿拉伯数字/负号：脏表里数字列算「文本列」，注解里的 1、-1、总行数
+    都会被出境审计当成该列的取值出境（DEVLOG [154] 实测把数量列从 11 顶到 13）。"""
+    import re
+
+    note = describe_df(_with_total("合计"))
+    body = note.split("前 3 行示例：")[1]   # 只看注解段，样例行本来就有数字
+    annotation = body.split("\n\n")[-1]
+    assert not re.search(r"\d", annotation), annotation
+    assert annotation.startswith("注意：")
 
 
 def test_summary_row_in_middle_is_data_not_stats():
@@ -69,7 +83,7 @@ def test_summary_row_in_middle_is_data_not_stats():
     df = pd.DataFrame({"region": ["华东", "合计", "华南", "西南"],
                        "amount": [10.0, 20.0, 30.0, 40.0]})
     assert summary_rows(df) == []
-    assert "df.iloc[:-" not in describe_df(df)
+    assert "注意：表格末尾有" not in describe_df(df)
 
 
 def test_summary_label_without_arithmetic_is_not_annotated():
@@ -89,13 +103,14 @@ def test_summary_note_falls_back_to_ascii_on_collision():
     df = _with_total("合计")
     df.loc[0, "region"] = "不是明细数据"          # 与中文注解里的措辞相撞
     note = describe_df(df)
-    assert "NOTE: the last 1 row(s)" in note
-    assert "末尾 1 行" not in note
+    assert "NOTE: the last row(s)" in note
+    assert "不是明细数据——" not in note
 
     # 两版都撞：再把 ASCII 注解里的词也塞进数据 → 不写注解
     df2 = df.copy()
     df2.loc[1, "region"] = "detail data"
-    assert "df.iloc[:-" not in describe_df(df2)
+    out = describe_df(df2)
+    assert "注意：表格末尾有" not in out and "NOTE: the last row(s)" not in out
 
 
 def test_summary_note_keeps_egress_contracts():
@@ -106,3 +121,42 @@ def test_summary_note_keeps_egress_contracts():
     text = describe_df(df)
     assert check_column_values(df, text) == []
     assert check_sample_rows(df, text) == []
+
+
+# ---------------------------------------------------------------- 脏表上的统计行（DEVLOG [154]）
+
+def _two_row_header_df() -> pd.DataFrame:
+    """导出报表的典型形态：第 1 行分组行，第 2 行才是真列名，末尾合计行。
+
+    读进来后所有列都是 object —— 旧实现用 `is_numeric_dtype` 挑数值列，
+    `num_cols` 恒空 → `summary_rows` 直接 return []，注解通道静默失效。
+    """
+    return pd.DataFrame({
+        "订单信息": ["发票号", "1001", "1002", "合计"],
+        "商品信息": ["商品编码", "A1", "A2", None],
+        # 列名行是字符串、明细是数字 → 整列 object，正是 csv 读入后 pandas 的处理结果
+        "Unnamed: 3": ["数量", 3, 4, 7],
+    })
+
+
+def test_summary_row_detected_when_no_column_is_numeric_dtype():
+    df = _two_row_header_df()
+    assert all(not pd.api.types.is_numeric_dtype(df[c]) for c in df.columns)   # 前提：全 object
+    assert summary_rows(df) == [3]
+    assert "表格末尾有一行不是明细数据" in describe_df(df)
+
+
+def test_object_column_sum_does_not_raise():
+    """object 列上 `Series.sum()` 是字符串拼接，混数字会抛 TypeError；判定不能靠它。"""
+    df = _two_row_header_df()
+    with pytest.raises(TypeError):
+        df["Unnamed: 3"].iloc[:3].sum()
+    assert summary_rows(df) == [3]
+
+
+def test_bool_column_is_not_arithmetic_evidence():
+    """布尔列不能当数值：True/False 能 float 成 1/0，末行凑巧相等就会误判成统计行。"""
+    df = pd.DataFrame({"region": ["甲", "乙", "丙", "合计"],
+                       "flag": [True, False, False, True]})
+    assert df["flag"].iloc[:3].sum() == 1        # 不排除布尔的话，末行 True == 1 就误判
+    assert summary_rows(df) == []

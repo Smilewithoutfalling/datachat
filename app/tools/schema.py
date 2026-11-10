@@ -10,6 +10,14 @@
   `describe_df` 只采样前 n 行，模型永远看不到尾行，所以必须由这里主动告知。**注解只写
   位置与算术事实，不引用任何单元格原文**：出境审计（EV-B10）按"任一文本列取值命中 ≤ 3"
   计数，把尾行标签写进 prompt 可能让该列命中数从 3 变 4，撞合同红线。
+- F03 修正（DEVLOG [154]）：注解判定**不能依赖列的 pandas dtype**。脏表（双行表头、
+  千分位、尾部备注）读进来后所有列都是 object，`is_numeric_dtype` 恒假 —— 旧实现在这类
+  表上直接 `return []`，注解通道静默失效，而模型依旧看不到尾行（devlog 实测
+  `零售报表.csv`：数量列上方之和 5176450 == 尾行值，但注解从未生成）。
+  现在改成按**算术等式**判定：尾行某格能转成数值、且等于该列上方各行数值之和。
+  这里刻意**不去**自动合并表头来"治好"脏表 —— `scripts/perturb.py` 的
+  `merged_header` / `two_row_header` 是故意喂给模型的扰动项（EV-B6，归 F01_PARSE），
+  读取层若自动洗掉，那批评测就测不到"表头识别"了。注解只补"模型物理上看不到尾行"这一条。
 """
 import re
 
@@ -87,13 +95,26 @@ SUM_ATOL = 0.01
 MIN_ROWS_FOR_SUM = 3  # 少于 3 行时"上方之和"没有统计意义，不判定
 
 # 统计行注解（位置 + 算术事实，不含任何标签原文）
-_NOTE_ZH = ("注意：末尾 {k} 行（第 {pos} 行，共 {total} 行）不是明细数据——"
-            "其数值列等于上方各行之和。统计行数、求和、求均值或去重前请先剔除"
-            "（如 df = df.iloc[:-{k}]），否则会重复计入。")
+#
+# 措辞里**刻意不出现阿拉伯数字、负号、代码示例**：脏表（双行表头等）读进来后所有列
+# 都是 object，数量列这类数字列在出境审计口径下算「文本列」，此时注解里的 `1`、`-1`、
+# `541911` 都会作为该列的「取值出境」被计数。实测零售报表：带数字的旧版注解让数量列
+# 命中数从 11 增到 13，`_collides` 因此弃用注解，注解通道再次失效。
+# 用中文数字后，同一张表上「零新增命中」（两种判据都验过，见 DEVLOG [154]）。
+# 位置信息本身没损失：`describe_df` 开头已经写了总行数，模型也从不按行号切数据。
+_NOTE_ZH = ("注意：表格末尾有{cn}行不是明细数据——其数值列等于上方各行之和。"
+            "统计行数、求和、求均值或去重前请先剔除，否则会重复计入。")
 # 万一中文措辞与表里某个取值子串相撞，退到 ASCII 版（再撞就不写注解：宁缺勿破审计）
-_NOTE_EN = ("NOTE: the last {k} row(s) of {total} (position {pos}) are not detail data — "
-            "their numeric cells equal column sums of the rows above. Exclude them before "
-            "counting/summing/aggregating (e.g. df = df.iloc[:-{k}]).")
+_NOTE_EN = ("NOTE: the last row(s) of the table are not detail data — their numeric cells equal "
+            "column sums of the rows above. Exclude them before any aggregation, otherwise the "
+            "totals are inflated.")
+
+_CN_NUM = ("零", "一", "两", "三", "四", "五")
+
+
+def _cn_num(k: int) -> str:
+    """1/2 → 一/两。只用于注解措辞，超出范围退「若干」而不是数字（数字会撞出境审计）。"""
+    return _CN_NUM[k] if 0 <= k < len(_CN_NUM) else "若干"
 
 
 def _text_values(df: pd.DataFrame) -> list[str]:
@@ -118,42 +139,76 @@ def _collides(text: str, values: list[str]) -> bool:
     return False
 
 
+def _as_number(v):
+    """单元格转数值；转不了返回 None。
+
+    只认数字与数字字符串。布尔不算（`True` 能 float 成 1.0，会把布尔列的尾行误判成统计行）。
+    """
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _column_sum(df: pd.DataFrame, col, upto: int):
+    """前 `upto` 行该列的数值之和；列里没有任何数值时返回 None。
+
+    不直接用 `Series.sum()`：object 列上它是**字符串拼接**，混了数字就抛
+    `TypeError: can only concatenate str (not "int") to str`（脏表的常态）。
+    `errors="coerce"` 把非数值格当缺失，正好符合"合计行 = 明细行之和"的口径 ——
+    明细里个别脏格（如双行表头混进来的列名行）不应该让整列判不出来。
+    """
+    head = df[col].iloc[:upto]
+    if not len(head):
+        return None
+    if pd.api.types.is_bool_dtype(head):
+        return None
+    if pd.api.types.is_numeric_dtype(head):
+        s = head.sum()
+    else:
+        s = pd.to_numeric(head, errors="coerce").sum()
+    try:
+        if pd.isna(s):
+            return None
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
 def summary_rows(df: pd.DataFrame) -> list[int]:
     """末尾疑似统计行的 0-based 位置。
 
     双条件，宁可漏报不可误报：
     1. 末尾 `TAIL_ROWS` 行内、某个文本单元格**整格**命中统计标签（合计/总计/…/Total）；
-    2. 该行至少一个数值单元格 == 其上方各行在该列的和（容差内）。
+    2. 该行至少一个单元格能转成数值，且 == 其上方各行在该列的数值之和（容差内）。
 
     只看尾部是关键：中间某行 region 恰好叫"合计"不处理——那是数据，不是统计行。
+    条件 2 不预设"哪几列是数值列"：脏表所有列都是 object，预设会把整张表判成无数值列。
     """
     total = len(df)
     if total < MIN_ROWS_FOR_SUM:
-        return []
-    text_cols = [c for c in df.columns
-                 if not pd.api.types.is_numeric_dtype(df[c])
-                 and not pd.api.types.is_bool_dtype(df[c])]
-    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    if not text_cols or not num_cols:
         return []
 
     hits = []
     for idx in range(total - min(TAIL_ROWS, total), total):
         row = df.iloc[idx]
-        if not any(isinstance(row[c], str) and _SUMMARY_LABEL.match(row[c]) for c in text_cols):
+        if not any(isinstance(row[c], str) and _SUMMARY_LABEL.match(row[c]) for c in df.columns):
             continue
-        above = df.iloc[:idx]
-        for c in num_cols:
-            v = row[c]
-            if pd.isna(v):
+        for c in df.columns:
+            v = _as_number(row[c])
+            if v is None:
                 continue
-            try:
-                s = above[c].sum()
-            except (TypeError, ValueError):
+            s = _column_sum(df, c, idx)
+            if s is None:
                 continue
-            if pd.isna(s):
-                continue
-            if abs(float(v) - float(s)) <= max(SUM_ATOL, abs(float(s)) * SUM_RTOL):
+            if abs(v - s) <= max(SUM_ATOL, abs(s) * SUM_RTOL):
                 hits.append(idx)
                 break
     return hits
@@ -164,12 +219,9 @@ def _summary_note(df: pd.DataFrame) -> str:
     marks = summary_rows(df)
     if not marks:
         return ""
-    k = len(marks)
-    total = len(df)
-    pos = "、".join(str(i + 1) for i in marks)
     values = _text_values(df)
-    for tmpl in (_NOTE_ZH, _NOTE_EN):
-        text = tmpl.format(k=k, total=total, pos=pos)
+    candidates = (_NOTE_ZH.format(cn=_cn_num(len(marks))), _NOTE_EN)
+    for text in candidates:
         if not _collides(text, values):
             return text
     return ""
