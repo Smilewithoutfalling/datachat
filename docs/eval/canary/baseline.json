@@ -1,42 +1,49 @@
 {
- "created": "2026-11-04T09:40:26",
+ "created": "2026-11-10T13:39:06",
  "runs": 6,
  "n": 10,
  "files": [
-  "eval_react_canary_b2_run1.json",
-  "eval_react_canary_b2_run2.json",
-  "eval_react_canary_b2_run3.json",
-  "eval_react_canary_c2_run1.json",
-  "eval_react_canary_c2_run2.json",
-  "eval_react_canary_c2_run3.json"
+  "eval_react_canary_20261110_133110_run1.json",
+  "eval_react_canary_20261110_133110_run2.json",
+  "eval_react_canary_20261110_133110_run3.json",
+  "eval_react_canary_20261110_133110_run4.json",
+  "eval_react_canary_20261110_133110_run5.json",
+  "eval_react_canary_20261110_133110_run6.json"
  ],
- "model": "Qwen3.5-397B-A17B",
+ "model": "GLM-5.2",
  "agent": "react",
  "canary_sha12": "592b9f3baa7e",
- "code_sha12": "4b58e8b9fd80",
+ "code_sha12": "a2ca51b11273",
+ "judge_sha12": "18c5e432eff2",
  "correct_per_run": [
-  9,
   10,
   10,
-  9,
+  10,
+  10,
   10,
   10
  ],
- "min_correct": 9,
- "accuracy": 0.9667,
- "flips": 2,
+ "min_correct": 10,
+ "accuracy": 1.0,
+ "flips": 0,
  "answer_varied": 10,
  "usage_components": [
   "tokens_in",
-  "tokens_out"
+  "tokens_out",
+  "tokens_cache_read",
+  "tokens_reasoning"
  ],
  "usage_total": {
-  "tokens_in": 261363,
-  "tokens_out": 16438
+  "tokens_in": 210210,
+  "tokens_out": 21093,
+  "tokens_cache_read": 184576,
+  "tokens_reasoning": 7775
  },
  "usage_ratio": {
-  "tokens_in": 0.9408,
-  "tokens_out": 0.0592
+  "tokens_in": 0.4962,
+  "tokens_out": 0.0498,
+  "tokens_cache_read": 0.4357,
+  "tokens_reasoning": 0.0184
  },
  "cases": {
   "ord_007": {
@@ -48,7 +55,7 @@
     true,
     true
    ],
-   "answer_sha12": "a560623f8560",
+   "answer_sha12": "1fe8caa71d64",
    "result_missing": [
     null,
     null,
@@ -75,7 +82,7 @@
     true,
     true
    ],
-   "answer_sha12": "7e9bc94ef11a",
+   "answer_sha12": "ee36196d0579",
    "result_missing": [
     null,
     null,
@@ -95,16 +102,16 @@
   },
   "ord_013": {
    "passes": [
-    false,
+    true,
     true,
     true,
     true,
     true,
     true
    ],
-   "answer_sha12": "e660c6cd12f1",
+   "answer_sha12": "5e6dd565c925",
    "result_missing": [
-    "no_assign",
+    null,
     null,
     null,
     null,
@@ -129,7 +136,7 @@
     true,
     true
    ],
-   "answer_sha12": "9e4e887dd231",
+   "answer_sha12": "b345c4fc2928",
    "result_missing": [
     null,
     null,
@@ -140,11 +147,11 @@
    ],
    "answer_has_gold": [
     false,
-    true,
-    true,
-    true,
-    true,
-    true
+    false,
+    false,
+    false,
+    false,
+    false
    ]
   },
   "ord_017": {
@@ -152,16 +159,16 @@
     true,
     true,
     true,
-    false,
+    true,
     true,
     true
    ],
-   "answer_sha12": "f92fd19f4242",
+   "answer_sha12": "3101fd8e7cab",
    "result_missing": [
     null,
     null,
     null,
-    "no_assign",
+    null,
     null,
     null
    ],
@@ -183,7 +190,7 @@
     true,
     true
    ],
-   "answer_sha12": "2318051d599e",
+   "answer_sha12": "6a1723e9f6be",
    "result_missing": [
     null,
     null,
@@ -210,7 +217,7 @@
     true,
     true
    ],
-   "answer_sha12": "3de7600880fe",
+   "answer_sha12": "b90e91c9bed9",
    "result_missing": [
     null,
     null,
@@ -237,7 +244,7 @@
     true,
     true
    ],
-   "answer_sha12": "898b08f54e83",
+   "answer_sha12": "2f63c22655fb",
    "result_missing": [
     null,
     null,
@@ -264,7 +271,7 @@
     true,
     true
    ],
-   "answer_sha12": "4e95bc55b6e0",
+   "answer_sha12": "bbfb29e391bb",
    "result_missing": [
     null,
     null,
@@ -291,7 +298,7 @@
     true,
     true
    ],
-   "answer_sha12": "9e6d65e46085",
+   "answer_sha12": "47e1c313b665",
    "result_missing": [
     null,
     null,
