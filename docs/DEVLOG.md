@@ -7584,3 +7584,18 @@ C-008 的「优先改题面」建立在「信息进不了 prompt，只能靠题�
 **三条都不是题面的问题。** 改题面（evalset）只让评测里的模型「被告知答案」，
 用户上传同样的两行表头报表时问题原样存在。所以 C-008 的「改题面」是次优解，
 成本还更高（`evalset_sha12` 变，三档基线作废）。
+
+### 六、变量开关：存在已确认，但**这次跑不能证明它生效**
+
+`DATACHAT_CANARY_ENABLED = 1`（`updated_at 2026-11-10T13:55:19Z`，API 可读）。
+
+手动 dispatch 一次（run 42830136884）：8 步全 success，步骤 6「与冻结基线比」success，
+`drift.json` 读数 **clean / 1 跑 10/10 / flips 0 / usage 比例在 ±20% 内**。
+
+**但这不能当成「开关验证通过」**：`drift.yml` 的 job `if` 是
+`vars.DATACHAT_CANARY_ENABLED == '1' || github.event_name == 'workflow_dispatch'`，
+手动触发走第二个分支，**绕过了开关**。真正的开关验证只能等周一 01:00 UTC 的 schedule ——
+那时 `event_name` 是 `schedule`，若开关没生效，job 会 skip。
+
+顺带：本次 `code_sha12` 与基线相同（改的都是 `docs/` 与 workflow，不在 `app/`），
+所以 C-009 的「code 变也照常比对」这条新语义**没有被这次跑覆盖**，仍是未验证状态。
