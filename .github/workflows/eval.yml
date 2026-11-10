@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write   # 报告回流要往 docs/eval 提交
       issues: write
     steps:
       - uses: actions/checkout@v5
@@ -203,6 +203,31 @@ jobs:
             outputs/nightly_smoke.json
           retention-days: 30
           if-no-files-found: warn
+
+      # 报告回流：artifact 到期（30 天）就只剩一张「成功/失败」的脸，逐题数据必须进 git。
+      # **只回 gate 报告，不重算台账**：CI 里 outputs/ 只有本次这一份，跑 eval_ledger.py
+      # 会拿 40 份覆盖本地 135 份的 LEDGER（历史批次全部消失）。台账只能在全量 outputs 的
+      # 机器上重建，这是刻意的分工。8 题冒烟不值钱（n<10 不进趋势），只留 artifact。
+      # 用 GITHUB_TOKEN 提交的 commit 不会触发其它 workflow，不会自激。
+      - name: 报告回流仓库
+        if: always() && steps.gate.outcome == 'success' && github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          FILES="${{ steps.gate.outputs.files }}"
+          if [ -z "$FILES" ]; then echo "::notice::本次没有新产出的闸门报告，跳过回流。"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $FILES
+          if git diff --cached --quiet; then echo "::notice::无新增内容，跳过提交。"; exit 0; fi
+          git commit -m "chore(eval): 回流 nightly 报告 run ${GITHUB_RUN_ID}"
+          for i in 1 2 3; do
+            git fetch origin master
+            git rebase origin/master
+            if git push origin HEAD:master; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::报告回流推送失败（重试 3 次）"
+          exit 1
 
       - name: 失败开 issue
         if: failure() && github.event_name == 'schedule'
