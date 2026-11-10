@@ -7344,3 +7344,48 @@ BM25 分数：status 1.128（唯一命中）｜ pay_amount 0.000 ｜ order_id 0.
 口径但没命中 golden"，就会想补 alt。判据应该是：**这个口径在数据字典里被明确排除过吗。**
 本例里排除得非常清楚，而且是设计者刻意注入的脏数据。先查字典和数据生成脚本，再谈 alt。
 
+
+---
+
+## [149] CI 首次通电：三连修把 pr 档跑到全绿，京东网关落地（2026-11-10）
+
+5 项 GitHub 配置齐了（key 是 H 自己贴的——密钥不进对话；两个 variable 他网页填的，
+本地 PAT 缺 Variables 写权限实测 404；environment release 还没建，打 tag 前再说）。
+通道从公司内网 `grg-aikits-test`（10.62.27.32 私有段，runner 永远够不着）换成
+`agentrs.jd.com`（公网 111.13.146.9，OpenAI 兼容面 POST 路由实证存在）。
+
+### 三轮派发，各修一个真问题
+
+**第一轮 · 期望题数口径错（结构性永红）**
+`eval.yml` 的 `--expect-n` 写 `len(ALL_CASES)`=202，但 oracle/真模型默认 memory off，
+`run_eval.py:166` 按设计跳过 7 条 `requires_memory` 题（`mem_001`–`007`）→ 报告 195 条
+→ `195 ≠ 202` 永红。修：期望值改 `sum(1 for c in ALL_CASES if not getattr(c,'requires_memory',''))`，
+与运行器同一条规则。**这不是新引入的回归，是这行检查第一次真的跑。**
+
+**本地复核**：`run_eval --oracle` 195/195 全对（6 条 clarify 按预期未执行），
+`tier_check --expect-n 195` ✅。判分链路没坏。
+
+**第二轮 · 退出码语义与设计打架**
+冒烟真跑通了：**8/8 执行成功、0 基础设施失败、7/8 正确**（唯一错的 `ord_027`
+正是 C-008 定性的题面遗漏，网关无嫌疑；GLM-5.2 平均 9.6s/题、4752 token）。
+但 `run_eval.py:197`「有错题 exit 1」把 job 打红，没轮到「冒烟只产出不判红」的
+tier_check——而 eval.yml 头部明写「红灯只判跑得完与结构，不判准确率」。
+修：加 `--no-fail`（判错不算红，真崩溃走异常路径仍非零，tier_check 靠报告兜底），
+接线 pr 冒烟、nightly 冒烟、release canary 三处。`run_eval.py` 不在指纹组，基线不动。
+
+**第三轮 · 全绿**：run 42784008920，14 步全 success。
+
+### 顺手
+- 关 #98（11-06 自动开的「nightly 评测失败」，带根因与验证链接）。
+- 今晚 03:00 schedule 自动跑 nightly：25 闸门题 + openpyxl 修复首验。
+- `DATACHAT_CANARY_ENABLED` **先别开**：canary 基线还是 `stale_baseline`
+  （judge_sha12 是新的，基线没有该字段），开着下周一 drift 必红。要先 `--init --force`
+  重立基线（10 题 × 6 跑）再开开关。
+- PAT 权限缺口备忘：当前 token 有 Contents/Actions/Issues 写，缺 **Variables 写**（404）
+  和 secrets 不可读写（正常，write-only）。要补就去 Settings → Developer settings
+  → Fine-grained tokens 加 "Variables: Read and write"。
+
+### 教训
+「CI 从来没跑过的检查 = 没人知道它是坏的」。`--expect-n` 这行要是没有 key 就永远
+停在「缺 Key」那步，口径 bug 会一直睡着。第一次通电连爆两个 bug 是正常成本，
+不是意外。
