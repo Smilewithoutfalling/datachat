@@ -231,3 +231,39 @@ def test_fourth_real_value_still_turns_red():
     text = "".join(f"| {v} | 1 |\n" for v in _SAMPLE_VALUES + [_FOURTH_VALUE])
     details = egress.check_column_values(_catalog_df(), text)
     assert details and "4 个取值" in details[0], details
+
+
+# ---------------------------------------------------------------- ③ 的多表切分
+
+def _two_table_data():
+    """两张表有同名列，各 4 个取值 —— 各露 3 行，合起来是 6 个"命中"。"""
+    return {"a": pd.DataFrame({"category": ["a1", "a2", "a3", "a4"]}),
+            "b": pd.DataFrame({"category": ["b1", "b2", "b3", "b4"]})}
+
+
+def test_multi_table_shared_column_does_not_cross_count():
+    """A 的样例行里出现的值不算 B 那一列在出境：olist 的 category 两张表都有。"""
+    data = _two_table_data()
+    text = "\n".join(schema_mod.describe_df(df, n=3) for df in data.values())
+    assert egress.check_column_values(data, text) == []
+
+
+def test_multi_table_leak_outside_blocks_still_turns_red():
+    """块外的通道（结果回灌）不参与抹除：第 4 个取值回灌进来必须报。"""
+    data = _two_table_data()
+    text = "\n".join([schema_mod.describe_df(df, n=3) for df in data.values()] + ["结果：a4"])
+    details = egress.check_column_values(data, text)
+    assert details and "表 a.category" in details[0] and "4 个取值" in details[0], details
+
+
+def test_unique_text_dedupes_after_stringifying():
+    """'2.55' 与 2.55 是两个唯一值、一个字符串：转完必须去重，否则同一个值数两次。"""
+    s = pd.Series(["2.55", 2.55, "3.39", None])
+    assert egress._unique_text(s) == ["2.55", "3.39"]
+
+
+def test_value_and_its_trimmed_twin_count_once():
+    """'家居' 与 '家居 ' 抹完空白是同一个取值：渲染里分不出来，只能算一条。"""
+    text = "| 数码 | 服饰 | 家居 | 3C |"
+    kept = egress._drop_nested_hits(["数码", "服饰", "家居", "家居 "], text)
+    assert kept == ["数码", "服饰", "家居"]

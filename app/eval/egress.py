@@ -114,8 +114,7 @@ def check_sample_rows(data, text: str) -> list[str]:
     混在一起会把设计取舍报成 sample_rows 的问题，归因就错了（该由 ③ 报）。
     """
     problems = []
-    for label, df in _frames(data):
-        block = describe_df(df, n=EGRESS_MAX_SAMPLE_ROWS)
+    for label, block in _blocks(data).items():
         if block not in text:
             problems.append(
                 f"{label} 的结构段与 describe_df(n={EGRESS_MAX_SAMPLE_ROWS}) 的渲染不是逐字相同"
@@ -144,15 +143,25 @@ def check_cell_chars(data, text: str) -> list[str]:
 
 
 def check_column_values(data, text: str) -> list[str]:
-    """3）任一文本列的取值命中 ≤ 3（含数据字典的命中文本）。"""
+    """3）任一文本列的取值命中 ≤ 3（含数据字典的命中文本）。
+
+    多表时**按表切分文本再数**：某列的值出现在**别的表的样例行**里，不是这一列在出境。
+    `olist` 里 `category_translation` 与 `products` 都有 `product_category_name`，
+    各露 3 行就是 6 个"命中"，审计会把两张表各 3 行的正常渲染报成 6 个取值出境。
+    切分后这个数回到 3。别的表的块被抹掉，本表的块和块外的通道（结果回灌、字典、
+    summarizer）都保留 —— 真泄漏仍然在块外被抓到。
+    """
     problems = []
+    blocks = _blocks(data)
+    multi = len(blocks) > 1
     for label, df in _frames(data):
+        own = _without_other_blocks(text, blocks, label) if multi else text
         for col in df.columns:
             s = df[col]
             if not _is_text_column(s):
                 continue
             values = _unique_text(s)
-            hits = _drop_nested_hits([v for v in values if _appears(v, text)], text)
+            hits = _drop_nested_hits([v for v in values if _appears(v, own)], own)
             if len(hits) > EGRESS_MAX_COLUMN_HITS:
                 preview = "、".join(repr(v) for v in hits[:5])
                 problems.append(
@@ -215,6 +224,22 @@ def _frames(data):
     return [("表", data)]
 
 
+def _blocks(data) -> dict[str, str]:
+    """每张表在 prompt 里那段结构描述的**逐字渲染**（样本行数 = 合同值）。"""
+    return {label: describe_df(df, n=EGRESS_MAX_SAMPLE_ROWS) for label, df in _frames(data)}
+
+
+def _without_other_blocks(text: str, blocks: dict[str, str], label: str) -> str:
+    """抹掉别的表的结构段，留下本表的段和段外通道。
+
+    只删块、不删块外内容：结果回灌 / 字典 / summarizer 的文本原样保留，真泄漏照样抓得到。
+    """
+    for other, block in blocks.items():
+        if other != label and block:
+            text = text.replace(block, "")
+    return text
+
+
 def _row_unique_col(df: pd.DataFrame):
     """找一列"每行都不同、且取值够独特"的文本列，用来数"第几行出境了"。
 
@@ -248,10 +273,18 @@ def _is_text_column(s: pd.Series) -> bool:
 
 
 def _unique_text(s: pd.Series) -> list[str]:
-    values = []
+    """取值转字符串后**再去一次重**。
+
+    先 `unique()` 再 `str()` 会漏掉转完才撞车的：`零售报表` 的 `商品信息.1` 里
+    `'2.55'`（字符串）与 `2.55`（浮点）是两个唯一值，转完都是 `'2.55'`，
+    于是同一个值被数了两次，3 个真取值报成 5 个。
+    """
+    seen: set[str] = set()
+    values: list[str] = []
     for v in s.dropna().unique()[:MAX_SCAN_VALUES]:
         text = str(v)
-        if text:
+        if text and text not in seen:
+            seen.add(text)
             values.append(text)
     return values
 
@@ -291,6 +324,15 @@ def _drop_nested_hits(hits: list[str], text: str) -> list[str]:
     if len(hits) <= 1 or len(hits) > _NEST_SCAN_LIMIT:
         return hits
     core = {v: (v.strip() or v) for v in hits}
+    # 抹完空白撞车的先合并：'家居' 与 '家居 ' 在渲染里分不出来，是同一个取值
+    collapsed: list[str] = []
+    seen_core: set[str] = set()
+    for value in hits:
+        if core[value] in seen_core:
+            continue
+        seen_core.add(core[value])
+        collapsed.append(value)
+    hits = collapsed
     spans: dict[str, list[tuple[int, int]]] = {}
 
     def occurrences(value: str) -> list[tuple[int, int]]:
