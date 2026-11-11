@@ -300,3 +300,16 @@ def test_no_history_truth_actually_differs_from_gold():
         elif results_equal(naive, gold):
             bad.append(f"{c.id}: 无历史答案与 gold 相同（{gold!r}），这道题测不出记忆")
     assert not bad, "\n".join(bad)
+
+
+def test_recall_turn_cases_are_known_and_multiturn():
+    """改动 recall 断言的证据源，影响面必须当场可数（11-11）。
+
+    断言只在这两件事同时成立时进入：`case.recall_turn` 为真、`case.turns` 非空。
+    因此"改了 runner 那段代码会不会动到别的题"有一个可执行的答案 —— 就这两道。
+    新增 recall 题时这条会红，改的人得先想清楚要不要重跑对应分片，而不是凭印象。
+    """
+    from app.eval.cases import ALL_CASES
+
+    rec = [(c.id, c.recall_turn, bool(c.turns)) for c in ALL_CASES if getattr(c, "recall_turn", 0)]
+    assert rec == [("mul_034", 1, True), ("mem_006", 1, True)]

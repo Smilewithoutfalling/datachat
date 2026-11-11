@@ -14,11 +14,12 @@ from app.eval.runner import EvalRunner
 
 
 def _res(question, *, answer=None, code="", executed=True, result="x",
-         error_kind=None, total=1.0, tokens=10):
+         error_kind=None, total=1.0, tokens=10, result_text=""):
     return AnalysisResult(
         agent="react", dataset="d.csv", question=question,
         answer=answer if answer is not None else f"答{question}",
         code=code, executed=executed, result=result if executed else None,
+        result_text=result_text,
         error=None if error_kind is None else "boom", error_kind=error_kind,
         timings={"total": total},
         usage=TokenUsage(calls=1, total_tokens=tokens, reported=True),
@@ -179,3 +180,65 @@ def test_memory_block_flags_mixed_modes():
     assert mem["avg_history_tokens"] == 450.0
     assert mem["notes_used"] == []          # 没跑口径题 → 空，当场能核对"口径没进 prompt"
 
+
+
+# ---------------------------------------------------- 跨轮数字断言（recall_turn）
+def _recall_runner(monkeypatch, turns_answers, turns_texts, *, recall_turn=1, last_answer):
+    """多轮跑一遍 recall 断言：判分只看末轮，断言扫末轮 answer 里的数字能否追溯到前几轮。"""
+    answers = list(turns_answers)
+    answers[-1] = last_answer        # 末轮以 last_answer 为准，调用点不必再抄一遍
+    it = iter(zip(answers, turns_texts))
+
+    def fake_analyze(path, question, **kw):
+        a, t = next(it)
+        return _res(question, answer=a, code="result = 1", result_text=t)
+
+    monkeypatch.setattr(runner_mod, "analyze", fake_analyze)
+    case = _multi(id="tmp_recall", recall_turn=recall_turn,
+                  ground_truth="result = 'x'",      # 与 _res 的 result 对齐，先让数值层判对
+                  turns=["先算明细", "回到最初那个问题，再报一遍"],
+                  expect_turns=["exec", "exec"])
+    return EvalRunner(agent="react").run_single(case)
+
+
+def test_recall_counts_prior_answer_as_evidence(monkeypatch):
+    """派生数字只出现在前一轮 answer 里，也算有据 —— mem_006 三跑全挂的现场。
+
+    第 1 轮 result_text 只有逐地区明细（模型 print 的东西），合计 952 / 49286 是它
+    在 answer 里补的。末轮把这些一起复述，是"一致复述"，不是编造。
+    """
+    r = _recall_runner(
+        monkeypatch,
+        turns_answers=[
+            "各地区明细如上；合计 952 件、49286 元",     # 第 1 轮 answer（派生值在这里）
+            "回到最初：合计 952 件、49286 元",           # 末轮复述同一份
+        ],
+        turns_texts=["region\n华东 9480\n华中 12906", ""],
+        last_answer="合计 952 件、49286 元",
+    )
+    assert r["correct"] is True
+    assert r["recall_why"] == ""
+
+
+def test_recall_still_catches_misremembered_number(monkeypatch):
+    """反向：末轮把合计记成前几轮谁都没说过的值 → 照样抓得住。放宽只放宽"出处"，不放过"对不上"。"""
+    r = _recall_runner(
+        monkeypatch,
+        turns_answers=["各地区明细如上；合计 952 件、49286 元", ""],
+        turns_texts=["region\n华东 9480\n华中 12906", ""],
+        last_answer="合计 962 件、49286 元",          # 952 → 962
+    )
+    assert r["correct"] is False
+    assert "962" in r["recall_why"]
+
+
+def test_recall_evidence_scope_is_prior_turns_only(monkeypatch):
+    """末轮自己的 answer 不能当证据 —— 否则这断言恒真（自己证明自己）。"""
+    r = _recall_runner(
+        monkeypatch,
+        turns_answers=["第一轮没提过任何合计", ""],
+        turns_texts=["region\n华东 9480", ""],
+        last_answer="合计 49286 元",                  # 只出现在末轮自己嘴里
+    )
+    assert r["correct"] is False
+    assert "49,286" in r["recall_why"] or "49286" in r["recall_why"]

@@ -333,9 +333,20 @@ class EvalRunner:
         # 几个轮次的数（"合计 X，其中 6 月 Y"），只认第 n 轮会把这些误判成编造；
         # 而幻觉了旧数字的失败样样都抓得到。这与规格字面（"∈ 第 1 轮"）的偏差记在
         # memory.md。没有 result_text 的轮次（执行失败）等于没有证据，此时不断言。
+        #
+        # 证据源还要加**前几轮的 answer**（11-11）：`result_text` 只有模型 print 出来的东西，
+        # 派生值天然不在里面。mem_006 三跑全挂的现场是这行的代价 —— 题要「1 月各地区明细
+        # （含件数与销售额）」，模型第 1 轮 print 了逐地区两列、answer 里补了一行「合计 952 /
+        # 49,286」，第 8 轮复述时连合计一起复述。5 个明细销售额逐项相等（比对已通过），
+        # 唯独合计被判成「编造」—— 因为合计从来没进过 result_text。那不是幻觉，是同一份
+        # 回答的一致复述，而"复述一致性"恰好是这道题要考的东西。
+        # 放宽不损判别力：记错数字时末轮的值与前几轮 answer 也不一致，照样挂；
+        # 而第 1 轮就编的数由 answer↔result 一致性（EV-B4 warnings）负责，不是这条断言的职责。
         if getattr(case, "recall_turn", 0) and multi and out["correct"]:
             from app.core.grounding import unverified_numbers
-            src = "\n".join(t for t in turn_result_texts[:len(turn_result_texts) - 1] if t)
+            prior = list(turn_result_texts[:len(turn_result_texts) - 1]) + \
+                list(turn_answers[:len(turn_answers) - 1])
+            src = "\n".join(t for t in prior if t)
             missing = unverified_numbers(res.answer or "", [src]) if src else []
             if missing:
                 out["correct"], out["match"] = False, None

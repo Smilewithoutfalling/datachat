@@ -70,10 +70,15 @@ def shard_done(shard: str, expect: int) -> tuple[bool, str]:
             d = json.load(open(path, encoding="utf-8"))
         except Exception as e:
             return False, f"{os.path.basename(path)} 读不了：{type(e).__name__}"
-        n = d.get("n") or len(d.get("per_case") or {})
+        # 字段在 `overall` 里，不在顶层 —— `docs/eval/runs/` 里历史文件顶层的
+        # `n`/`per_case` 是 `eval_ledger.py` 归一化之后的形态，`run_eval.py` 的
+        # 原始输出不是那样。按归一化形态读会恒得 0，把跑完的片判成失败再跑一遍
+        # （11-11 第一片就是这么白跑了 68 分钟）。
+        overall = d.get("overall") or {}
+        n = overall.get("n") or len(d.get("cases") or [])
         if n != expect:
             return False, f"{os.path.basename(path)} 题数 {n} ≠ {expect}"
-        rate = d.get("execution_success_rate")
+        rate = overall.get("execution_success_rate")
         if isinstance(rate, (int, float)) and rate <= 0:
             return False, f"{os.path.basename(path)} 执行成功率 {rate}（整批没跑通）"
     return True, "已完成"
@@ -93,8 +98,9 @@ def summarize(shard: str) -> str:
         except Exception:
             rows.append("—")
             continue
-        rows.append(f"{d.get('correct')}/{d.get('n')}"
-                    f" ({100 * (d.get('correctness_rate') or 0):.1f}%)")
+        overall = d.get("overall") or {}
+        rows.append(f"{overall.get('correct')}/{overall.get('n')}"
+                    f" ({overall.get('correctness_rate') or 0:.1f}%)")
     return "  ".join(rows)
 
 
