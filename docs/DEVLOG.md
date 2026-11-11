@@ -7818,6 +7818,22 @@ system prompt。实测：
 648 题次 / 约 105 分钟 / 6.11M token（v5 实测）。25 题闸门不依赖 `baselines.json`
 （它按 `questions_sha256` 认题），重跑一次即可。
 
+**补记（同日实测，把代价说准）**：把 `data/` 下全部 20 个数据集（含 olist 8 表、
+biz 5 表、employees / inventory / orders、各 `.dict.csv`）扫了一遍，`mixed_shape_columns`
+只在两个零售表上命中 —— 450 题用的 5 个数据集**零命中**。所以：
+
+```
+改动前 set_sha12 = 54dbd79a809a
+改动后 set_sha12 = 54dbd79a809a      ← 逐字节相同
+```
+
+**450 题的 system prompt 一个字节都没变。** `code_sha12` 变纯粹是文件哈希，
+不是渲染差异；`set_sha12` 也**早就**不等于台账（54dbd79a809a vs 6b23655c28a6 /
+42cc3caace7a / 80a028f7c254 / 6bf0d1c623c8），即断档在 [156] 之前就已经发生。
+这不能让基线重新可比（`GATE_KEYS` 刻意不豁免 `code_sha12`，理由见 fingerprint.py:426
+那段注释——判分器改过而渲染串不变的先例），但它说明**重建基线是为了让台账认得出，
+不是为了修正分数**。
+
 ### 六、测试与本地验证
 
 `tests/test_schema.py` 新增 7 条，21 项全绿；`test_egress.py` + `test_fingerprint.py` +
