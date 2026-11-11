@@ -1,0 +1,85 @@
+{
+ "file": "eval_v6_mem_state_run3.json",
+ "time": "2026-11-11T16:37:34",
+ "git_sha": "46164dd-dirty",
+ "agent": "react",
+ "model": "Qwen3.5-397B-A17B",
+ "n": 7,
+ "correct": 7,
+ "correctness_rate": 100.0,
+ "execution_success_rate": 100.0,
+ "avg_duration_s": 16.55597142857143,
+ "avg_tokens": 22558.428571428572,
+ "memory_mode": "state",
+ "fingerprints": {
+  "code_sha12": "8e1aed9a0007",
+  "code_all_sha12": "6e422cb13ec5",
+  "evalset_sha12": "5748a13bdefc",
+  "rendered_set_sha12": "54dbd79a809a"
+ },
+ "per_case": [
+  {
+   "id": "mem_001",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 3547,
+   "duration_s": 2.6547,
+   "attempts": 0
+  },
+  {
+   "id": "mem_002",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 5680,
+   "duration_s": 5.7216,
+   "attempts": 0
+  },
+  {
+   "id": "mem_003",
+   "category": "memory",
+   "correct": true,
+   "match": "impossible",
+   "tokens": 3715,
+   "duration_s": 2.8579,
+   "attempts": 0
+  },
+  {
+   "id": "mem_004",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 8046,
+   "duration_s": 7.588,
+   "attempts": 0
+  },
+  {
+   "id": "mem_005",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 20390,
+   "duration_s": 16.7111,
+   "attempts": 0
+  },
+  {
+   "id": "mem_006",
+   "category": "memory",
+   "correct": true,
+   "match": "relaxed",
+   "tokens": 75193,
+   "duration_s": 69.9103,
+   "attempts": 0
+  },
+  {
+   "id": "mem_007",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 41338,
+   "duration_s": 10.4482,
+   "attempts": 0
+  }
+ ]
+}

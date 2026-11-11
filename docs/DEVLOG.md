@@ -8183,3 +8183,187 @@ biz              绿
 `app/eval/egress.py` 在 `fingerprint._EXEMPT`（B 组），`affects_results_sha256` 仍是
 `b2c333fd5a93`。测试 `test_egress.py` **42 项**（本轮新增 25：12 条不可判参数化 +
 2 条可判参数化 + 4 条集成），加 fingerprint/consistency 合计 86 项全绿。
+
+## [162] 跨轮数字断言把派生值判成编造（recall 证据源补前轮 answer）（2026-11-11）
+
+`eval-v6` 重建跑到 `mem_state` 片时，7 题里 `mem_006` 三跑全错、零翻转 —— 稳定挂，
+说明不是运气。查下来**模型的数值是对的，判错的是断言本身**。
+
+### 一、现场
+
+题（8 轮里的末轮）：「回到最开始的那个问题——2024 年 1 月各地区的销量明细，把那张表再报一遍」。
+
+| 层 | 内容 |
+|---|---|
+| `expected_obj` | `series`，index=[华东,华中,华北,华南,西南]，values=[9480,12906,8065,11745,7090] |
+| `actual_obj` | `frame`，两列 `[销量, 销售额]`，同样 5 个地区（顺序按销量降序） |
+| 比对结果 | **通过**（多列允许、乱序允许 → `match=relaxed`） |
+| 判错原因 | `recall_why = "答案里的数字 ['952', '49,286'] 在前几轮的 result_text 里都找不到"` |
+
+952 和 49,286 是模型在末尾补的一行**合计**（销量合计 / 销售额合计）。第 1 轮它就在
+answer 里写过同一行；第 8 轮复述时连合计一起复述。它没记错，是在**一致复述**。
+
+### 二、根因：证据源只认 `result_text`，而派生值天然不在里面
+
+`result_text` 是模型 `print()` 出来的东西。mem_006 第 1 轮 print 的是逐地区明细，
+合计是它在 answer 里心算后补的 —— 于是合计永远进不了证据源。断言把「本轮新算的
+派生值」一律当成「没出处的编造」。
+
+这不是 recall 要抓的东西。recall 要抓的是**把旧数记错**：末轮说的数与前几轮说的不一样。
+
+### 三、改法：证据源加前几轮的 answer
+
+```python
+prior = list(turn_result_texts[:len(turn_result_texts) - 1]) + \
+    list(turn_answers[:len(turn_answers) - 1])
+src = "\n".join(t for t in prior if t)
+missing = unverified_numbers(res.answer or "", [src]) if src else []
+```
+
+判别力不损，三条都用测试钉住：
+
+| 场景 | 结果 |
+|---|---|
+| 末轮复述前轮 answer 里的合计 952 / 49,286 | 通过（`test_recall_counts_prior_answer_as_evidence`） |
+| 末轮把 952 记成 962 | 仍判错，`recall_why` 点名 962（`test_recall_still_catches_misremembered_number`） |
+| 数字只出现在末轮自己 answer 里 | 仍判错 —— 末轮不给自己作证（`test_recall_evidence_scope_is_prior_turns_only`） |
+
+第三条是这次改动的边界：`turn_answers[:len-1]` 明确排除末轮，否则断言恒真。
+
+### 四、影响面是可数的，不是"应该没事"
+
+断言只在 `case.recall_turn` 为真且 `case.turns` 非空时进入。全库 202 题里只有两道：
+
+```
+mul_034  recall_turn=1   （复述第 1 轮的全渠道总额，数字本来就在 result_text 里 → 判定不变）
+mem_006  recall_turn=1   （本节修的就是它）
+```
+
+新增断言 `test_recall_turn_cases_are_known_and_multiturn` 把这个集合钉成 `[("mul_034",1,True),
+("mem_006",1,True)]`。以后再加 recall 题会红，改的人必须当场决定要不要重跑对应分片。
+
+### 五、代价
+
+`app/eval/runner.py` 在 A 组，`code_sha12` 由 `b2c333fd5a93` → `8e1aed9a0007`。
+四片 × 3 跑全部重来（708 题次 / 43.9 分钟）—— 不重跑的话，台账里四片会是两个指纹，
+`GATE_KEYS` 判不可比，等于白跑。
+
+`tests/test_eval_runner.py` 加 3 条（20 项全绿），`tests/test_multi_cases.py` 加 1 条（18 项全绿）。
+
+## [163] eval-v6：202 题四片重建，以及 `off` 一直被读错（2026-11-11）
+
+### 一、为什么要重立，不能"恢复 v5"
+
+`GATE_KEYS = (agent, memory_mode, rewrite, use_dictionary, evalset_sha12, code_sha12)`。
+本轮之前已经有两条断了：题集 183 → 202（`4270d57adf72` → `5748a13bdefc`，多 11 道单轮 + 7 道记忆专项），
+`app/tools/schema.py` 被 [154] 与 [156] 各改一次。再加上 [162] 改 `app/eval/runner.py`，
+`code_sha12` 从 `b2c333fd5a93` 变为 `8e1aed9a0007`。四条里有三条变了 —— 这不是"恢复"，是换尺子。
+
+### 二、读数
+
+708 题次（4 片 × 3 跑），114 分钟。
+
+| 分片 | 题数 | 三跑 | 均值 | `pass^3` | 全错 | 翻转 |
+|---|---|---|---|---|---|---|
+| `single_off` | 161 | 149 / 151 / 149 | **93.0%** | 146/161 = **90.7%** | 8 | 7 |
+| `mul_off` | 34 | 16 / 14 / 18 | **47.1%** | 11/34 = 32.4% | 14 | 9 |
+| `mul_state` | 34 | 31 / 31 / 31 | **91.2%** | 29/34 = **85.3%** | 1 | 4 |
+| `mem_state` | 7 | 6 / 7 / 7 | **95.2%** | 6/7 = 85.7% | 0 | 1 |
+
+四片加权 `pass^3` = 192/236 = **81.4%**。
+
+`single_off` 的 8 道全错：`neg_001`–`neg_006`（六道歧义题，模型全部直接给确定答案、不反问）、
+`ord_027`、`biz_020`。前七道与上一批一致，`biz_020` 见第五节。
+
+`mul_state` 三跑 `31/31/31` 是巧合 —— 34 题里 29 道稳定对、1 道稳定错（`mul_020`）、
+4 道翻转，翻转题的分布恰好每跑都是 2 对 2 错。
+
+### 三、我读错了 `off`，这不是小错
+
+做这批之前我在会话里说过「`mul_off` 是多轮题但没有上下文」，并据此把 47.1% 解释成
+"没有记忆时代的蒙对率"。**错了。**
+
+`app/memory/context.py:43` 的 `off_context`：
+
+```python
+msgs = history_messages(history) if history else []
+return MemoryContext(mode="off", prompt_history=history, followup=bool(history),
+                     history_tokens=B.estimate_tokens("".join(t for _, t in msgs)))
+```
+
+`prompt_history=history` —— 历史以**对话消息**回灌。`state_context` 才是 `prompt_history=None`
++ `state_block`。四类证据都对得上：
+
+| 证据 | `off` 档实测 |
+|---|---|
+| `history_tokens` 非零 | `mul_009`=20、`mul_020`=158、`mul_021`=128 |
+| 末轮代码带着只有上文才知道的口径 | `mul_009` 写着 `df.dept == '研发'`（上文只说"研发部"） |
+| 同上 | `mul_020` 写着 `2024-03-01`（上文只说"2024 年 3 月"） |
+| `service.py` 注释 | 「`off` 时 prompt 与阶段 6.6 之前逐字节一致」—— 是"记忆模块关"，不是"历史不喂" |
+
+所以 `mul_off` 47.1% 与 `mul_state` 91.2% 那 44pp，量的是**两种历史呈现方式**
+（对话消息 vs 结构化状态块），**不是"有记忆 vs 没记忆"**。这个错误一旦写进台账，
+后面所有人都会把 44pp 当成"记忆系统的收益"，那是把口径差当成能力差。
+
+已改：`baselines.json` 的 `eval-v6.note` 专门写了一段，`docs/eval/README.md` 的
+「什么算回归」也加了同一条，LEDGER 的手写结论区同。
+
+### 四、`mem_006` 的修复验证
+
+[162] 改完跑到 `mem_state` 片，run2/run3 转正，run1 仍挂 —— 查了，run1 挂的是另一回事
+（`recall_why` 已清空，`match=relaxed`）。三份合起来看：`6/7/7`，全错 0。
+`match=relaxed` 说明靠放宽层判对（列名 `units`/`revenue` vs 中文列名 + index 顺序不同），
+5 个销售额已逐项核对相等 —— 这道题从"判据冤枉"变成"放宽层放行"，属于可接受状态。
+
+### 五、跨批噪声：1.9pp，`biz_020` 不是回归
+
+同一份代码（只差 recall 段，而 recall 段只在 `case.recall_turn` 为真时进入，
+`biz_020` 没有 `recall_turn`）跑两批，`single_off` 94.4% → 92.5%。逐题 diff 后：
+
+```
+run1 变错 5：biz_013 biz_020 emp_022 inv_016 ord_030     变对 2：biz_014 biz_018
+run2 变错 2：biz_014 biz_020                              变对 0
+run3 变错 3：biz_003 biz_016 biz_020                      变对 0
+```
+
+`biz_020` 三跑全翻，是唯一的稳定变化。查现场：
+
+| 批 | run | `result_origin` | actual |
+|---|---|---|---|
+| 旧（`b2c333fd5a93`） | 1 / 2 | `computed` | 数码商品26（对） |
+| 旧 | 3 | **`literal_text`** | 数码商品26（对，写死的） |
+| 新（`8e1aed9a0007`） | 1 / 2 / 3 | `computed` | 数码商品11（错） |
+
+旧批 run3 是 `result = '数码商品26'` 直接写字面量；新批三跑各自写了完整的多表 join，
+**三次都算出 11**。DEVLOG [90] 记过这道题的成因：模型漏清洗（`sku` 大小写 / `status` 空格）。
+新批是老实算但漏清洗，旧批前两跑算对、第三跑背答案。**这是模型在"多表 join + 清洗"上的抖动，
+不是评测代码引入的回归。** 佐证：两批平均 token 8951 vs 8944、平均耗时 8.6s vs 8.8s，网关侧没有变化。
+
+结论进台账：**1.9pp 以内不当信号**。
+
+### 六、`mul_020`：`state` 档被自造约束绊倒
+
+同一题，`off` 档对（34），`state` 档错（28），三跑稳定。末轮代码：
+
+```python
+d = df.drop_duplicates()
+m = d[(d['order_date'] >= '2024-03-01') & (d['order_date'] <= '2024-03-31') & (d['status'] == '已完成')]
+result = int((m['city'] == '广州').sum())
+```
+
+题面从没要求"只看已完成"。`off` 档的同一题没加这条。**`state` 档反而多了一条自造约束。**
+至于是状态块把它上一轮自己说的「有效订单（状态=已完成）230 笔」固化成前提，还是模型自发，
+**无法判定 —— 报告没存 `state_block`**。这是下一轮要补的观测项：`state_block` 进报告（B 组，
+不影响判分），否则"状态块误导模型"这类问题永远只能猜。
+
+`mul_020` 不是孤例：`mul_028` 在 10-30 那批也出现过「`state` 自己加了状态过滤」，
+当时记成"题面留了默认值让模型猜"。两次同向，值得单独立项查。
+
+### 七、产物
+
+- `docs/eval/runs/eval_v6_*.json`（12 份精简判定记录，`eval_ledger.py` 重写）
+- `outputs/v6raw/`（12 份原始报告，含 code / answer / actual_obj，可 rescore）
+- `docs/eval/baselines.json` 新增 `eval-v6`
+- `eval_ledger.py`：`n < 10` 不再一律当调试 —— 基线声明过的 `(evalset, 题数)` 组合进趋势表
+  （否则 7 题的记忆片整片掉进"单题调试"）
+- `tests/test_eval_runner.py` +3、`tests/test_multi_cases.py` +1

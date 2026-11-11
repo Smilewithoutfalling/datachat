@@ -35,7 +35,47 @@ BASELINES = os.path.join(ROOT, "docs", "eval", "baselines.json")
 
 NOTES_BEGIN = "<!-- NOTES:BEGIN -->"
 NOTES_END = "<!-- NOTES:END -->"
-DEBUG_N = 10  # 少于这么多题的报告当单题调试，不进趋势表
+DEBUG_N = 10  # 少于这么多题的报告当单题调试，不进趋势表（基线声明过的组合除外）
+
+_SHAPE_CACHE: dict[str, set] = {}
+
+
+def _baseline_shapes(baselines_path: str | None = None) -> set:
+    """基线声明过的 `(evalset_sha12, 题数)` 组合。
+
+    为什么不能只看题数：`mem_state` 片只有 7 道题，`n < DEBUG_N` 会把它当单题调试；
+    而 7 道题的探针（`eval_flip_probe_*`）确实该当调试。区分两者的是题集指纹 ——
+    同一个 evalset 下 7 题是正式分片，探针集下的 7 题不是。
+
+    baselines.json 改了要重启进程（本函数进程内缓存），跑批脚本本来就是新进程，无影响。
+    """
+    path = baselines_path or BASELINES
+    key = os.path.abspath(path)
+    if key in _SHAPE_CACHE:
+        return _SHAPE_CACHE[key]
+    shapes: set = set()
+    try:
+        raw = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        raw = {}
+    for name, v in raw.items():
+        if name.startswith("_") or not isinstance(v, dict):
+            continue
+        sha = v.get("evalset_sha12") or (v.get("evalset") or {}).get("sha256")
+        if not sha:
+            continue
+        ns = v.get("n")
+        if isinstance(ns, int):      # 早期基线 `n` 是整数（eval-v0..v4），v5 起才是列表
+            ns = [ns]
+        for n in (ns or []):
+            if isinstance(n, int):
+                shapes.add((sha, n))
+    _SHAPE_CACHE[key] = shapes
+    return shapes
+
+
+def _is_baseline_shape(n: int, evalset_sha12) -> bool:
+    return bool(evalset_sha12) and (evalset_sha12, n) in _baseline_shapes()
 
 # 报告里 code_sha12 与**实际执行**的指纹不符的批次：{报告文件名: 实际指纹}。
 # 成因是"跑批期间改了 A 组文件"——旧版指纹在每轮落盘时采样，不是启动快照。
@@ -127,7 +167,11 @@ def normalize(path, data):
         kind = "oracle"
     elif data.get("canary"):
         kind = "canary"
-    elif n < DEBUG_N:
+    elif n < DEBUG_N and not _is_baseline_shape(n, fps.get("evalset_sha12")):
+        # 题数少不等于调试。记忆专项只有 7 道（`mem_state` 片），它和同批 161 道单轮题
+        # 一样是正式基线的一片 —— 按 n < 10 判会把它整片丢进"单题调试"，台账里只剩
+        # 一堆零散探针，pass^3 无从算起。判据改成"基线声明过的 (题集, 题数) 组合"
+        # （见 `_baseline_shapes`）：7 题配 5748a13bdefc 是基线，7 题配探针题集不是。
         kind = "debug"
     else:
         kind = "gated" if fps.get("code_sha12") else "legacy"

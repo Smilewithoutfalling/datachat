@@ -1,0 +1,85 @@
+{
+ "file": "eval_v6_mem_state_run1.json",
+ "time": "2026-11-11T16:33:23",
+ "git_sha": "46164dd-dirty",
+ "agent": "react",
+ "model": "Qwen3.5-397B-A17B",
+ "n": 7,
+ "correct": 6,
+ "correctness_rate": 85.71428571428571,
+ "execution_success_rate": 100.0,
+ "avg_duration_s": 17.514514285714288,
+ "avg_tokens": 22605.428571428572,
+ "memory_mode": "state",
+ "fingerprints": {
+  "code_sha12": "8e1aed9a0007",
+  "code_all_sha12": "6e422cb13ec5",
+  "evalset_sha12": "5748a13bdefc",
+  "rendered_set_sha12": "54dbd79a809a"
+ },
+ "per_case": [
+  {
+   "id": "mem_001",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 3564,
+   "duration_s": 12.1197,
+   "attempts": 0
+  },
+  {
+   "id": "mem_002",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 5683,
+   "duration_s": 5.8839,
+   "attempts": 0
+  },
+  {
+   "id": "mem_003",
+   "category": "memory",
+   "correct": true,
+   "match": "impossible",
+   "tokens": 5768,
+   "duration_s": 5.9266,
+   "attempts": 0
+  },
+  {
+   "id": "mem_004",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 7919,
+   "duration_s": 8.5986,
+   "attempts": 0
+  },
+  {
+   "id": "mem_005",
+   "category": "memory",
+   "correct": false,
+   "match": null,
+   "tokens": 23712,
+   "duration_s": 18.2844,
+   "attempts": 0
+  },
+  {
+   "id": "mem_006",
+   "category": "memory",
+   "correct": true,
+   "match": "relaxed",
+   "tokens": 70536,
+   "duration_s": 61.3153,
+   "attempts": 0
+  },
+  {
+   "id": "mem_007",
+   "category": "memory",
+   "correct": true,
+   "match": "strict",
+   "tokens": 41056,
+   "duration_s": 10.4731,
+   "attempts": 0
+  }
+ ]
+}
