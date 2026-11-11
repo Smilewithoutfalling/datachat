@@ -47,9 +47,12 @@ def _print_one(a: egress.Audit, verbose: bool) -> None:
             print(f"    call {p.call}: {len(p.text)} 字")
     if a.ok:
         print("  ✓ 四条断言全过")
-        return
-    for f in a.findings:
-        print(f"  ✗ {_RULE_NAMES.get(f.rule, f.rule)}  {f.detail}")
+    else:
+        for f in a.findings:
+            print(f"  ✗ {_RULE_NAMES.get(f.rule, f.rule)}  {f.detail}")
+    # 「我没能判」单独列，不混进 ✗ —— 它既不违反合同，也不等于没问题
+    for note in a.notes:
+        print(f"  · ③ 未覆盖：{note}")
 
 
 def main(argv=None) -> int:
@@ -94,6 +97,7 @@ def main(argv=None) -> int:
                     "executed": a.executed,
                     "error": a.error,
                     "findings": [{"rule": f.rule, "detail": f.detail} for f in a.findings],
+                    "notes": a.notes,
                 } for a in audits],
             }, fh, ensure_ascii=False, indent=2)
         print(f"JSON 写到 {args.json_out}")

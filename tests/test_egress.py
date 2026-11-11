@@ -267,3 +267,57 @@ def test_value_and_its_trimmed_twin_count_once():
     text = "| 数码 | 服饰 | 家居 | 3C |"
     kept = egress._drop_nested_hits(["数码", "服饰", "家居", "家居 "], text)
     assert kept == ["数码", "服饰", "家居"]
+
+
+# ---------------------------------------------------------------- ③ 的取值形态判据
+
+# 纯数字/标点且 ≤3 字符：在 prompt 里必然处处命中，命中了也不说明出境。
+_UNTESTABLE_VALUES = ["10", "01", "00", "5", " ", "-", ",", "## ", " 4 ", "12", "39", ""]
+# 有可辨识内容的：标识符、CJK、≥4 字符的数字（手机号/身份证）。
+_TESTABLE_VALUES = ["S01", "K100", "Top", "服饰", "运营", "数量",
+                    "2.55", "13800138000", "110101199001011234"]
+
+
+@pytest.mark.parametrize("value", _UNTESTABLE_VALUES)
+def test_testable_rejects_characterless_short_values(value):
+    """不可判的是"不含可辨识字符"，不是"短"：'10' 会命中 review_id 哈希与日期。"""
+    assert not egress._testable(value)
+
+
+@pytest.mark.parametrize("value", _TESTABLE_VALUES)
+def test_testable_keeps_values_with_recognizable_content(value):
+    """'S01' 是门店码，'13800138000' 是手机号 —— 与 _distinctive 的关键分歧。"""
+    assert egress._testable(value)
+
+
+def test_short_store_codes_still_count_as_egress():
+    """3 字符 ASCII 的 S01 必须报：套 _distinctive 会把它一起豁免掉，那是真泄漏。"""
+    df = pd.DataFrame({"store": ["S01", "S02", "S03", "S04", "S05"]})
+    details = egress.check_column_values(df, "store：S01、S02、S03、S04、S05")
+    assert details and "5 个取值" in details[0], details
+
+
+def test_phone_numbers_are_not_exempted_as_a_numeric_column():
+    """纯数字但 ≥4 字符仍然计数：数字型文本列豁免会让手机号/身份证整列失去保护。"""
+    phones = ["13800138001", "13800138002", "13800138003", "13800138004"]
+    df = pd.DataFrame({"phone": phones})
+    details = egress.check_column_values(df, "客户电话：" + "、".join(phones))
+    assert details and "4 个取值" in details[0], details
+
+
+def test_untestable_hits_are_reported_as_notes_not_findings():
+    """跳过必须留痕：静默跳过等于把"我没能判"伪装成"这里没问题"。"""
+    df = pd.DataFrame({"title": ["10", "01", "5", " ", ",", "## "]})
+    text = "## 表 dfs 2018-03-10 , 5 01"
+    notes = []
+    assert egress.check_column_values(df, text, notes) == []
+    assert notes and "无法用子串法判定" in notes[0] and "6 个" in notes[0], notes
+
+
+def test_real_olist_shape_goes_green_but_keeps_a_note():
+    """olist 的形态：标题列前 3 行全 nan，命中全是模板/日期/哈希 —— 该绿，但要有记录。"""
+    df = pd.DataFrame({"review_comment_title": [None, None, None, "10", "01", "## "]})
+    text = "## 表 dfs['order_reviews']  2018-03-10 00:00:00"
+    notes = []
+    assert egress.check_column_values(df, text, notes) == []
+    assert notes, notes

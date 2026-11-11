@@ -64,6 +64,9 @@ class Audit:
     agent: str = ""
     prompts: list[Prompt] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    # 不计入判定的旁路信息：哪些命中因为"取值形态不可判"被跳过。
+    # 单独放而不是塞进 findings —— 它是"我没能判"，不是"合同被违反"。
+    notes: list[str] = field(default_factory=list)
     executed: bool = False
     error: str | None = None
 
@@ -142,7 +145,7 @@ def check_cell_chars(data, text: str) -> list[str]:
     return problems
 
 
-def check_column_values(data, text: str) -> list[str]:
+def check_column_values(data, text: str, notes: list[str] | None = None) -> list[str]:
     """3）任一文本列的取值命中 ≤ 3（含数据字典的命中文本）。
 
     多表时**按表切分文本再数**：某列的值出现在**别的表的样例行**里，不是这一列在出境。
@@ -150,6 +153,9 @@ def check_column_values(data, text: str) -> list[str]:
     各露 3 行就是 6 个"命中"，审计会把两张表各 3 行的正常渲染报成 6 个取值出境。
     切分后这个数回到 3。别的表的块被抹掉，本表的块和块外的通道（结果回灌、字典、
     summarizer）都保留 —— 真泄漏仍然在块外被抓到。
+
+    `notes` 收集**测不出来**的命中（见 `_testable`）：它们不计入上限，但必须留下记录。
+    静默跳过等于把"我没能判"伪装成"这里没问题"。
     """
     problems = []
     blocks = _blocks(data)
@@ -161,7 +167,13 @@ def check_column_values(data, text: str) -> list[str]:
             if not _is_text_column(s):
                 continue
             values = _unique_text(s)
-            hits = _drop_nested_hits([v for v in values if _appears(v, own)], own)
+            hits = _drop_nested_hits([v for v in values if _testable(v) and _appears(v, own)], own)
+            if notes is not None:
+                skipped = len([v for v in values if not _testable(v) and _appears(v, own)])
+                if skipped:
+                    notes.append(
+                        f"{label}.{col} 另有 {skipped} 个命中无法用子串法判定"
+                        f"（纯数字/标点且不超过 3 字符），未计入上限")
             if len(hits) > EGRESS_MAX_COLUMN_HITS:
                 preview = "、".join(repr(v) for v in hits[:5])
                 problems.append(
@@ -209,7 +221,8 @@ def audit(dataset, question: str, *, agent: str = "workflow", code: str | None =
     data, _desc = load_data(dataset)
     out.findings += [Finding("sample_rows", p) for p in check_sample_rows(data, text)]
     out.findings += [Finding("cell_chars", p) for p in check_cell_chars(data, text)]
-    out.findings += [Finding("column_values", p) for p in check_column_values(data, text)]
+    out.findings += [Finding("column_values", p)
+                     for p in check_column_values(data, text, out.notes)]
     out.findings += [Finding("local_path", p)
                      for p in check_local_path(text, [*own_paths(dataset), *forbidden])]
     return out
@@ -262,8 +275,42 @@ def _row_unique_col(df: pd.DataFrame):
 
 
 def _distinctive(value: str) -> bool:
-    """这个值能不能用子串法判定"出没出境"。"""
+    """这个值能不能用子串法判定"出没出境"。
+
+    **只给 `_row_unique_col` 用**（在候选列里挑一列来数第几行出境）：那是"挑工具"，
+    挑错了只是换个列，不影响结论。
+
+    不要拿它当 ③ 的过滤器：它把 `S01`（门店码）、`Top` 一起判成不可判，
+    而 `S01` 是真实标识符，整列出境必须报。③ 用 `_testable`。
+    """
     return bool(value) and (not _ASCII.match(value) or len(value) >= 4)
+
+
+# 子串法测不出来的取值形态：不超过 3 字符，且全部由 ASCII 数字 / 空白 / 标点组成。
+_UNTESTABLE = re.compile(r"[0-9\s!-/:-@\[-`{-~]{1,3}")
+
+
+def _testable(value: str) -> bool:
+    """这个值能不能用子串法判定"出没出境"（③ 的过滤器）。
+
+    真正让子串法失效的不是"短"，是"**不含任何可辨识字符**"：
+
+    - `'10'` 命中 `review_id` 哈希（`7bc2406110b9…`）和日期（`2018-03-10`）
+    - `'## '` 命中 prompt 自己的 markdown 标题（`## 表 dfs['customers']`）
+    - `','` 命中模板里的函数签名（`chart(kind, df, x=列名, …)`）
+    - `' '` 命中 1791 处空格
+
+    olist 的 `review_comment_title` 前 3 行全是 nan、一个真实取值都没出境，
+    却因为上面这些字符串被判成"17 个取值出境"。这类值在任何文本里都必然出现，
+    命中了也不说明任何事，只能判为不可测。
+
+    边界：`'S01'`/`'K100'`（有字母）保留；`'服饰'`/`'运营'`（CJK）保留；
+    `'13800138000'`/`'110101199001011234'`（≥4 字符纯数字）保留 —— 手机号、
+    身份证正是最该守的东西，不能因为"是数字"就放过。
+    """
+    if not value:
+        return False
+    return _UNTESTABLE.fullmatch(value) is None
 
 
 def _is_text_column(s: pd.Series) -> bool:
