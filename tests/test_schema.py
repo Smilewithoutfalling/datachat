@@ -5,7 +5,7 @@ import pytest
 from app.core.result import format_result
 from app.tools.dictionary import format_notes, retrieve_notes
 from app.tools.schema import (DATA_BLOCK_END, DATA_BLOCK_START, describe_df, dtype_name,
-                              summary_rows)
+                              mixed_shape_columns, summary_rows)
 
 
 def test_dtype_names_stable_across_string_backends():
@@ -160,3 +160,77 @@ def test_bool_column_is_not_arithmetic_evidence():
                        "flag": [True, False, False, True]})
     assert df["flag"].iloc[:3].sum() == 1        # 不排除布尔的话，末行 True == 1 就误判
     assert summary_rows(df) == []
+
+
+# ---------------------------------------------------------------- B65 列形态（缺失哨兵）
+
+def _retail_like_df(sentinel: str = "未登记", sentinel_rows: int = 300) -> pd.DataFrame:
+    """零售明细的形态：客户编号绝大多数是数字，缺失用哨兵词填（而不是留空）。
+
+    前 3 行刻意是同一个客户：真实数据里前 3 行都是 17850，样例行最多只让 1 个取值出境。
+    """
+    ids = ["17850"] * 3 + [str(10000 + i) for i in range(200)]
+    rows = [{"customer_id": v, "amount": 1.0} for v in ids]
+    rows += [{"customer_id": sentinel, "amount": 1.0}] * sentinel_rows
+    return pd.DataFrame(rows)
+
+
+def test_mixed_shape_column_detected_and_annotated_without_values():
+    df = _retail_like_df()
+    assert mixed_shape_columns(df) == ["customer_id"]
+    text = describe_df(df)
+    assert "绝大多数是数字" in text
+    assert "未登记" not in text          # 取值原文绝不进 prompt（出境审计）
+    assert "缺失标记" in text
+
+
+def test_mixed_shape_judged_by_kind_share_not_row_share():
+    """按唯一值种类判，不按行数判：哨兵占 60% 的行，这一列仍然"本该是编号"。"""
+    df = _retail_like_df(sentinel_rows=300)
+    assert df["customer_id"].eq("未登记").mean() > 0.5      # 行数上哨兵才是多数
+    assert df["customer_id"].nunique() == 202               # 201 种编号 + 哨兵
+    assert mixed_shape_columns(df) == ["customer_id"]        # 种类上 201/202 是数字
+
+
+def test_plain_text_column_is_not_flagged():
+    """地区、状态这类真文本列不该被当成"混入了哨兵"。"""
+    df = pd.DataFrame({"country": ["United Kingdom"] * 50 + ["France"] * 50,
+                       "note": [f"第{i}单" for i in range(100)]})
+    assert mixed_shape_columns(df) == []
+    assert "绝大多数是数字" not in describe_df(df)
+
+
+def test_numeric_dtype_column_is_not_flagged():
+    """真数值列（int/float）不判：它们本来就没有"非数字取值"这回事。"""
+    df = pd.DataFrame({"qty": list(range(50)), "price": [1.5] * 50})
+    assert mixed_shape_columns(df) == []
+
+
+def test_text_column_with_a_few_digit_values_is_not_flagged():
+    """反向不命中：一列本来是文本，偶尔混几个纯数字（如年份），不该标注。"""
+    df = pd.DataFrame({"note": [f"订单{i}" for i in range(100)] + ["2024"] * 5})
+    assert mixed_shape_columns(df) == []
+
+
+def test_shape_note_has_no_arabic_digits_and_keeps_egress_contracts():
+    """注解不含阿拉伯数字、不含取值原文；两条出境合同仍在。"""
+    import re
+
+    from app.eval.egress import check_column_values, check_sample_rows
+
+    df = _retail_like_df()
+    text = describe_df(df)
+    annotation = text.split("前 3 行示例：")[1].split("\n\n")[-1]
+    assert not re.search(r"\d", annotation), annotation
+    assert check_column_values(df, text) == []
+    assert check_sample_rows(df, text) == []
+
+
+def test_shape_note_falls_back_to_ascii_on_collision():
+    """表里某个取值恰好含注解措辞 → 退 ASCII 版，不破审计。"""
+    df = _retail_like_df()
+    df["note"] = "绝大多数是数字"        # 唯一值只有 1 种，不会被当成形态混入列
+    assert mixed_shape_columns(df) == ["customer_id"]
+    text = describe_df(df)
+    assert "NOTE: column(s)" in text
+    assert "绝大多数是数字的取值" not in text

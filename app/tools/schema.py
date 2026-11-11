@@ -18,6 +18,12 @@
   这里刻意**不去**自动合并表头来"治好"脏表 —— `scripts/perturb.py` 的
   `merged_header` / `two_row_header` 是故意喂给模型的扰动项（EV-B6，归 F01_PARSE），
   读取层若自动洗掉，那批评测就测不到"表头识别"了。注解只补"模型物理上看不到尾行"这一条。
+- B65（缺失哨兵）：表里用「未登记」这类词填缺失，`nunique()` 会把它算成一个独立对象
+  （s02 实测 4373 vs 4372）。同样看不见 —— 前 3 行的编号都是真编号。`mixed_shape_columns`
+  按**唯一值种类**的比例判定"这一列本该是数字/编号但混了非数字值"，注解只说形态与后果，
+  **不引用取值原文**（出境审计口径）。**不做重复行提示**：零售明细天然有 5268 行完全
+  重复的真实业务记录，报出来会诱导模型 `drop_duplicates()`，把单表 9 道聚合题一起赔掉；
+  `ord_027` 的 18 行重复归字典检索（DEVLOG [148]），不走这条通道。
 """
 import re
 
@@ -70,6 +76,9 @@ def describe_df(df: pd.DataFrame, n: int = 3) -> str:
             sample[c] = sample[c].map(lambda v: clip(v, MAX_CELL_CHARS))
     lines.append(f"\n前 {n} 行示例：")
     lines.append(sample.to_string(index=False))
+    shape = _shape_note(df)
+    if shape:
+        lines.append(f"\n{shape}")
     note = _summary_note(df)
     if note:
         lines.append(f"\n{note}")
@@ -79,6 +88,70 @@ def describe_df(df: pd.DataFrame, n: int = 3) -> str:
 def describe_csv(path: str, n: int = 3) -> str:
     """读取 CSV 并生成表结构描述（兼容旧调用）。"""
     return describe_df(read_csv(path), n=n)
+
+
+# ---------------------------------------------------------------- B65 列形态（缺失哨兵）
+
+# "数字形态"：整格就是一个数（允许正负号、小数点、千分位）。**不用 `float()` 判**：
+# `float("nan")` / `float("inf")` / `float("1_0")` 都能过，会把哨兵词当成数字放过去。
+_NUMERIC_TEXT = re.compile(r"^[+-]?\d+(\.\d+)?$|^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$")
+NUMERIC_SHARE = 0.9        # 唯一值里"数字形态"到这个占比，才认为该列本该是数字/编号
+MAX_PROFILE_VALUES = 5000  # 与出境审计同一个扫描上限，判定不扫全表
+
+# 列形态注解。措辞同样不含阿拉伯数字、不引用任何取值原文（出境审计口径，见文件头）。
+_SHAPE_ZH = ("注意：{cols}列的取值绝大多数是数字，但混有不是数字的取值。"
+             "统计不同取值的个数、求和或去重之前，请先确认这些取值是不是缺失标记 —— "
+             "否则它会被当成一个独立的对象多算一份。")
+_SHAPE_EN = ("NOTE: column(s) {cols} are almost entirely numeric, but contain non-numeric "
+             "values. Before counting distinct values, summing or de-duplicating, check "
+             "whether those values are missing-value markers — otherwise each is counted "
+             "as one more real object.")
+
+
+def mixed_shape_columns(df: pd.DataFrame) -> list:
+    """取值形态混入的文本列：绝大多数取值是数字形态，却混进少数不是数字的。
+
+    这是 s02 那一类失败的入口：表里用「未登记」表示缺失，`nunique()` 把它算成一个客户。
+    模型看不到 —— `describe_df` 只采样前 n 行，头几行的编号都是真编号。
+
+    **按"唯一值种类"的比例判，不按行数比例**：零售明细的 `客户编号` 有 4373 种取值，
+    「未登记」一种却占 135080 行（25%），按行数算连 90% 都够不上；而"这一列本该是编号"
+    这个事实，按种类算是 4372/4373。行数比例测的是"缺失有多严重"，种类比例测的是
+    "这是不是一列编号"，后者才是本判据要问的。
+
+    宁可漏报：少于 10 种取值的列不判（3 种里 2 种是数字只有 67%，天然够不上阈值，
+    这条只是省掉无谓的计算）。
+    """
+    out = []
+    for c in df.columns:
+        s = df[c]
+        if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_bool_dtype(s):
+            continue
+        try:
+            vals = s.dropna().unique()[:MAX_PROFILE_VALUES]
+        except (TypeError, ValueError):
+            continue
+        if len(vals) < 10:
+            continue
+        numeric = sum(1 for v in vals if _NUMERIC_TEXT.match(str(v).strip()))
+        if numeric and numeric < len(vals) and numeric >= len(vals) * NUMERIC_SHARE:
+            out.append(c)
+    return out
+
+
+def _shape_note(df: pd.DataFrame) -> str:
+    """列形态注解。与表内取值相撞时退 ASCII；再撞就不写（宁缺勿破审计）。"""
+    cols = mixed_shape_columns(df)
+    if not cols:
+        return ""
+    values = _text_values(df)
+    names = [clip(c, MAX_NAME_CHARS) for c in cols]
+    zh_cols = "".join(f"「{n}」" for n in names)
+    en_cols = ", ".join(repr(n) for n in names)
+    for text in (_SHAPE_ZH.format(cols=zh_cols), _SHAPE_EN.format(cols=en_cols)):
+        if not _collides(text, values):
+            return text
+    return ""
 
 
 # ---------------------------------------------------------------- F03 尾部统计行
