@@ -7971,3 +7971,76 @@ env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy -u ALL_PROXY -u al
 
 另：本地失败的 `--only s02` 会写一份 `n=1 / execution_success=0 / git_sha 带 -dirty` 的
 报告进 `docs/eval/`，今天删了两份。跑单题前要想到这一点。
+
+## [159] 出境审计 ③ 的假阳性：嵌套值被算成第二条出境（2026-11-11）
+
+[158] 末尾记了一条「`egress_audit.py` 在零售明细上改动前后都是红的」。查清楚了：
+不是 [156] 引入的，是 ③ 的判据本身有假阳性。
+
+### 一、实测形态
+
+```
+表.商品描述 有 5 个取值出境（上限 3）：
+'WHITE HANGING HEART T-LIGHT HOLDER'、'WHITE METAL LANTERN'、'CREAM CUPID HEARTS COAT HANGER'
+'HEART T-LIGHT HOLDER '、'HEART T-LIGHT HOLDER'
+```
+
+样本 3 行就是前三行，后两个从来没有作为独立取值进过 prompt。两种嵌套：
+
+1. **纯子串**：`'HEART T-LIGHT HOLDER'` ⊂ `'WHITE HANGING HEART T-LIGHT HOLDER'`，
+   两次出现都落在长值内部。`_appears` 是纯子串判据，于是一条长值算成了两条。
+2. **尾空格变体**：`'HEART T-LIGHT HOLDER '` 是数据集里真实存在的脏值（该列共 **757** 个
+   带尾空格的取值）。在 prompt 里它由「长值 + 一个列分隔空格」拼出，区间恰好比长值多
+   一个字符 —— 覆盖判据差一个字符就不认，所以第一版修完还剩 4 条。
+   那一个空格在渲染里既可能是取值的一部分、也可能是 `to_string` 的列间距，判不了，只能抹掉再比。
+
+### 二、判据改成「覆盖」，不是「子串」
+
+```python
+longer = [core[v] for v in kept if core[v] != bare and bare in core[v]]
+if longer and all(any(lo <= s and e <= hi for v in longer for lo, hi in occurrences(v))
+                  for s, e in occurrences(bare)):
+    continue          # 每一次出现都被更长的命中值包住 → 它没有独立出境
+```
+
+两个要点：
+- **按长度降序**处理，长值先进入 `kept`，短值才找得到覆盖者；覆盖关系可传递。
+- **首尾空白抹掉再比**（`core = value.strip() or value`）。不抹的话第 2 类永远差一个字符。
+
+判据是「全部出现都被覆盖」，不是「是子串」：`'巴黎'` 既藏在 `'巴黎春天'` 里、又单独出现过
+一次时，那一次独立出现不被任何长值区间覆盖 → 保留。这是真多出境了一个值。
+
+### 三、前后对照（`agent=workflow`，默认 `result = len(df)`）
+
+| 数据集 | 旧 | 新 |
+|---|---|---|
+| `gate/retail/零售明细.csv` | 5 值 / 1 列 | **0 / 0** |
+| `gate/retail_report/零售报表.csv` | 35 值 / 3 列 | 30 值 / 2 列 |
+| `gate/olist`（8 表） | 103 值 / 16 列 | 97 值 / 15 列 |
+| `eval/orders.csv` | 5 值 / 1 列 | 5 / 1（字典） |
+| `eval/employees.csv` | 6 值 / 1 列 | 6 / 1（字典） |
+| `eval/inventory.csv` | 9 值 / 2 列 | 9 / 2（字典） |
+| `eval/biz/orders.csv` | 0 / 0 | 0 / 0 |
+
+红没被滤掉：把 `--code` 换成 `result = df.head(200)`（整表回灌）后，
+零售明细照报 `商品编码 29 个`、`商品描述 27 个`。
+
+### 四、剩下的红分三类，都**没修**
+
+| 类 | 证据 | 为什么没顺手改 |
+|---|---|---|
+| **字典枚举取值** | `eval/orders.csv` / `employees` / `inventory` 的红，`use_dictionary=False` 后**全部归零** | 设计内的红。docstring 明写「字典也是用户上传的文件，一条 'region：华东、华北…' 就是五个值出境」。测试 `test_egress_catches_full_column_in_dictionary` 就是钉这个 |
+| **短值命中无关长串** | olist `customers.customer_city` 的 `'mari'`（4 字符 ASCII）命中 products 表里的某个串 | 要改 `_appears`：现在只有 ASCII 且 <4 字符才卡词边界，≥4 字符走纯子串。放宽到全部取值需要「单元格边界」判据，CJK 没有空格，边界怎么定是设计决定 |
+| **同名列跨表串味** | `customers.customer_city` 的 8 个命中里，`'sao paulo'`、`'rio de janeiro'` 同时出现在 `sellers.seller_city` 的样例行 | 审计按「整段 prompt 里出现过」计数，分不清是哪个表的列在出境。修法要按表切分文本区间，是架构改动 |
+| **数字型文本列** | `零售报表.Unnamed: 3`（双行表头混进来的数量列）25 个值，全是 `'12'`/`'39'`/`'26'` 这类 | 「文本列」的合同要不要豁免纯数字列，是合同变更，不是 bug 修复 |
+
+这四条任何一条都可能值得另立一条，但混进来做会把「③ 的假阳性」这一条搅成四合一。
+
+### 五、代价：零
+
+`app/eval/egress.py` 在 `fingerprint._EXEMPT`（B 组，只读、不进模型输入）。
+实测 `affects_results_sha256` 仍是 `b2c333fd5a93`，与 [156] 记录一致 → 450 题基线不受影响，
+不需要重建。
+
+测试：`tests/test_egress.py` 13 项（新增 4 项：嵌套不算、独立出现要算、尾空格变体不算、
+第 4 个真值必须红）；加 `test_fingerprint` + `test_consistency` 合计 57 项全绿。

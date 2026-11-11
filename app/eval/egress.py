@@ -152,7 +152,7 @@ def check_column_values(data, text: str) -> list[str]:
             if not _is_text_column(s):
                 continue
             values = _unique_text(s)
-            hits = [v for v in values if _appears(v, text)]
+            hits = _drop_nested_hits([v for v in values if _appears(v, text)], text)
             if len(hits) > EGRESS_MAX_COLUMN_HITS:
                 preview = "、".join(repr(v) for v in hits[:5])
                 problems.append(
@@ -263,6 +263,51 @@ def _text_values(df: pd.DataFrame, all_columns: bool = False) -> list[str]:
         if all_columns or _is_text_column(s):
             out.extend(_unique_text(s))
     return out
+
+
+_NEST_SCAN_LIMIT = 256      # 命中数超过这个就不再逐对拆嵌套：已远超上限，精度没有意义
+
+
+def _drop_nested_hits(hits: list[str], text: str) -> list[str]:
+    """去掉"每一次出现都被更长的命中值包住"的命中。
+
+    子串判据会把嵌套值算成独立命中：`'HEART T-LIGHT HOLDER'` 是
+    `'WHITE HANGING HEART T-LIGHT HOLDER'` 的子串，零售明细的商品名里两者都在，
+    于是 3 行样本被判成 5 个取值出境 —— 假红。假红的代价不是多报一条，
+    是这条断言在真实数据上永远红，看的人就会开始忽略它。
+
+    判据是"全部出现都被覆盖"，不是"是子串"：
+    - 只被子串关系命中的 → 每一次出现都落在长值的出现区间里 → 它没有独立出境；
+    - 长值之外还独立出现过的 → 保留，那才是真的多出境了一个值。
+
+    `hits` 按长度降序处理，保证长值先进入 `kept`；被丢弃的值即使自身被更长的值
+    覆盖，也不影响它作为别人的覆盖者 —— 覆盖关系可传递。
+
+    首尾空白在这里必须抹掉再比：`pandas` 渲染时列的左右会补空格，于是
+    `'HEART T-LIGHT HOLDER '`（数据里确实存在 757 个这种带尾空格的脏值）会由
+    "长值 + 一个分隔空格"拼出来，区间恰好比长值多一个字符，不算覆盖。那一个空格
+    在 prompt 里没有信息量，它既可能是取值的一部分、也可能是列间距，判不了，只能抹。
+    """
+    if len(hits) <= 1 or len(hits) > _NEST_SCAN_LIMIT:
+        return hits
+    core = {v: (v.strip() or v) for v in hits}
+    spans: dict[str, list[tuple[int, int]]] = {}
+
+    def occurrences(value: str) -> list[tuple[int, int]]:
+        if value not in spans:
+            spans[value] = [(m.start(), m.end()) for m in re.finditer(re.escape(value), text)]
+        return spans[value]
+
+    kept: list[str] = []
+    for value in sorted(hits, key=lambda v: len(core[v]), reverse=True):
+        bare = core[value]
+        longer = [core[v] for v in kept if core[v] != bare and bare in core[v]]
+        if longer and all(any(lo <= start and end <= hi
+                              for v in longer for lo, hi in occurrences(v))
+                          for start, end in occurrences(bare)):
+            continue
+        kept.append(value)
+    return kept
 
 
 def _appears(value: str, text: str) -> bool:

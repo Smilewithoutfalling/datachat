@@ -186,3 +186,48 @@ def test_egress_covers_both_agents(captured):
         assert a.ok, (agent, a.findings)
     assert captured["audits"]["workflow"].executed
     assert captured["audits"]["react"].executed
+
+
+# ---------------------------------------------------------------- ③ 的嵌套判据
+
+# 零售明细的真实形态：前 3 行就是这三个长值；数据集里另有 757 个带尾空格的脏值，
+# 其中 "HEART T-LIGHT HOLDER " 恰好是第一个长值的后缀 + 一个列分隔空格。
+_SAMPLE_VALUES = ["WHITE HANGING HEART T-LIGHT HOLDER",
+                  "WHITE METAL LANTERN",
+                  "CREAM CUPID HEARTS COAT HANGER"]
+_NESTED_VALUES = ["HEART T-LIGHT HOLDER", "HEART T-LIGHT HOLDER "]
+_FOURTH_VALUE = "REGENCY CAKESTAND 3 TIER"     # 列里存在但样本不外露的第 4 个真值
+
+
+def _catalog_df():
+    return pd.DataFrame({"商品描述": _SAMPLE_VALUES + _NESTED_VALUES + [_FOURTH_VALUE]})
+
+
+def test_nested_value_is_not_a_separate_egress():
+    """子串不等于独立出境：长值出境时，作为它子串的短值不算多一条。
+
+    假红的代价不是多报一条，是这条断言在真实数据上永远红 —— 看的人就开始忽略它。
+    """
+    text = "".join(f"| {v} | 1 |\n" for v in _SAMPLE_VALUES)
+    assert egress.check_column_values(_catalog_df(), text) == []
+
+
+def test_nested_filter_keeps_value_that_also_appears_alone():
+    """短值除了藏在长值里，还独立出现过一次 —— 那才是真的多出境了一个值。"""
+    text = "| WHITE HANGING HEART T-LIGHT HOLDER |\nHEART T-LIGHT HOLDER"
+    kept = egress._drop_nested_hits(["WHITE HANGING HEART T-LIGHT HOLDER", "HEART T-LIGHT HOLDER"], text)
+    assert kept == ["WHITE HANGING HEART T-LIGHT HOLDER", "HEART T-LIGHT HOLDER"]
+
+
+def test_trailing_space_variant_is_not_a_separate_egress():
+    """pandas 渲染时列右补空格，"长值 + 空格"会拼出带尾空格的脏值；那一个空格判不了，抹掉。"""
+    text = "| WHITE HANGING HEART T-LIGHT HOLDER |\n"
+    assert egress._drop_nested_hits(["WHITE HANGING HEART T-LIGHT HOLDER",
+                                     "HEART T-LIGHT HOLDER "], text) == ["WHITE HANGING HEART T-LIGHT HOLDER"]
+
+
+def test_fourth_real_value_still_turns_red():
+    """去掉嵌套之后仍然超额才叫真发现：第 4 个真实取值一旦出境必须报。"""
+    text = "".join(f"| {v} | 1 |\n" for v in _SAMPLE_VALUES + [_FOURTH_VALUE])
+    details = egress.check_column_values(_catalog_df(), text)
+    assert details and "4 个取值" in details[0], details
