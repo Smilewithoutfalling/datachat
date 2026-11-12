@@ -28,7 +28,7 @@ on:
       tier:
         description: "跑哪一档"
         type: choice
-        options: [pr, nightly, release]
+        options: [pr, nightly, release, inject]
         default: pr
       # A1 定向复跑入口（[167]）。rerun_report 为空时这条路径完全不存在 —— 三个 tier 的
       # 行为一个字都没变；非空时下面的 pr/nightly/release 全部被 if 挡掉，只跑 rerun job。
@@ -267,6 +267,55 @@ jobs:
           红灯只可能来自「跑不完」或「报告结构不完整」——准确率不判红（理由见 docs/eval/tiers.md）。
           先看 artifact 里那份报告缺了什么，再决定是补数据还是修流水线。"
 
+  # ---------------------------------------------------------------- inject：录 B9 注入基线（EV-B9）
+  # 单独一档的理由：release 首跑要人工审批且带 130 题真模型，录 9 条注入语料的基线不该占那个窗口。
+  # 用与 release 完全相同的 secret/variable（DATACHAT_LLM_KEY + DATACHAT_LLM_BASE_URL/MODEL），
+  # 保证基线的模型和以后门禁判的模型是同一个 —— 不同模型之间的命中数不可比。
+  # 产物 docs/eval/inject_baseline.json 由人复核后提交（和 release 报告一样不自动 push）。
+  inject:
+    if: >
+      github.event_name == 'workflow_dispatch' && inputs.tier == 'inject' &&
+      (inputs.rerun_report || '') == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements-dev.txt
+      - name: 有没有 secret
+        id: key
+        run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - name: 缺 Key 直接报错
+        if: steps.key.outputs.has != 'true'
+        run: |
+          echo "::error::录基线需要 secret DATACHAT_LLM_KEY。"
+          exit 1
+      - name: 注入基线（真模型固定语料）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: >
+          python scripts/inject_check.py --spawn --write-baseline
+          --out outputs/inject_baseline_run.json
+      - name: 打印基线文件（日志里直接可读，供核对）
+        if: always()
+        run: cat docs/eval/inject_baseline.json 2>/dev/null || echo "::warning::没有产出基线文件"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: inject-baseline-${{ github.run_id }}
+          path: |
+            docs/eval/inject_baseline.json
+            outputs/inject_baseline_run.json
+          retention-days: 90
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------- rerun：对历史报告定向复跑（A1）
   # 为什么单开 job 而不是塞进 nightly：nightly 有 8 个步骤只在"整批跑"时成立（找新产出的报告、
   # 题数、结构校验、8 题冒烟、回流），塞进去得给每一步加 if，漏一个就会出现 rerun 模式下又跑了整批。
@@ -485,6 +534,20 @@ jobs:
         # --no-fail：canary 掉题是真实读数不是 bug（注释见上），退出码不该把它当回归。
         run: python run_eval.py --agent react --no-fail --canary --repeat 3
 
+      # EV-B9 注入门禁：固定语料 9 条走 HTTP API 真模型（THREAT_MODEL §2.3 尾注；
+      # 语料 tests/fixtures/injection/payloads.json，判定与门禁 scripts/inject_check.py）。
+      # --spawn 自起后端（127.0.0.1 随机端口随机 token，读 stdout 第一行 JSON），跑完即杀不留状态；
+      # 命中数超 docs/eval/inject_baseline.json 基线（按类记）时 exit 2 直接挡下 release。
+      - name: 注入门禁（真模型固定语料）
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+        run: >
+          python scripts/inject_check.py --spawn
+          --baseline docs/eval/inject_baseline.json
+          --out outputs/inject_release.json
+
       # 归档只做 artifact，不自动 commit 回 master：
       # 自动 push 会绕过 PR 流程，与本仓库"一个 PR 一个问题"的纪律冲突。
       - uses: actions/upload-artifact@v7
@@ -495,6 +558,7 @@ jobs:
             outputs/rel_*.json
             outputs/eval_react_canary_*_run*.json
             docs/eval/gate_*.json
+            outputs/inject_release.json
           retention-days: 90
           if-no-files-found: warn
       - name: 归档说明

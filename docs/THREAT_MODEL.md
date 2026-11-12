@@ -107,6 +107,8 @@ P1 `<img src=x onerror="window.__pwned=1">`、P2 `"><svg onload="window.__pwned=
   - 测试：`tests/test_charts.py` 的 `test_builder_output_has_no_unsafe_chars_anywhere`、`test_message_exits_keep_raw_text`、`test_gate_rejects_hand_built_unsafe_spec`、`test_gate_rejects_unsafe_dict_key`、`test_gate_covers_fields_not_in_allowed`、`test_display_safe_and_gate_share_charset`、`test_builder_slip_becomes_chart_bug_error`；e2e `f3-inject.spec.ts` 新增 P6（`x}{__EC_aUTo_4|999`：悬停命中、显示串整段画出、任何 tooltip 里都没有 900 字重的 `999`）和 P7（`上\n下`：tooltip 每帧都是整段 `上 下`，和真值同一 y），判定表 tooltip 两格从"解析"变为"不解析"。
   - 前端没有镜像这套规范化，也没有注入 `tooltip.formatter`。
 
+**模型通道的固定语料（B9，每次发布都跑）**：上面是渲染通道（前端按文本渲染守住）；数据里的字符串还有另一条通道——进模型 prompt 影响答案（泄漏系统提示、忽略过滤条件、伪造数值）。这条的固定语料是 `tests/fixtures/injection/payloads.json`（9 条，placement 分 cell / column / dict），`scripts/inject_check.py` 起真后端走 HTTP API 逐条实测（与 e2e 的 Playwright 通道共享语料基准、不合并实现），判定先剥离 payload 原文再匹配（复述类目值不算命中），证据片段进报告供人眼复核。命中数按泄漏 / 越权 / 伪造三类记，基线在 `docs/eval/inject_baseline.json`，发布门禁：任一类超过基线即挡下（release 档，见 `.github/workflows/eval.yml` release job）。
+
 未测（v2 层 2 才可达，到层 2 再测）：title.link / sublink、series[].label.formatter、legend.formatter、tooltip.formatter、aria.label / description。
 **F3 第五步：前端开关是白名单外的例外层**。开关写的整层（`dataZoom`、`series[].markLine / markPoint / label / stack / smooth / itemStyle / areaStyle.color`）不过后端 `_ALLOWED`，也不过 `_check_strings`。约束改由前端 `FRONTEND_KEYS`（`ui/web/src/charts/switches.ts`，路径 → 值集合）承担：值只有固定字面量、当前主题色构成的渐变、和原数组的排列（排序），没有任何字符串型用户数据。`switches.test.ts`「例外层」对 4 主题 × 全部夹具 × 目标图型 × 开关组合求差，断言新增 / 改动 ⊆ FRONTEND_KEYS；`inject.test.ts` 与 e2e `f3-inject.spec.ts` 在开关全开时判定表不变。
 
