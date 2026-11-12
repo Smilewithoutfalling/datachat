@@ -1367,11 +1367,15 @@
   },
   "execution_success": "25/25",
   "guessing": "1/25",
-  "profile": "m13",
+  "profile": "m13r",
   "thresholds": {
    "kind": "regression",
-   "source": "DEVLOG [24] 预登记，[25] 修正（S 2026-10-14 复核）：阶段 5 改 CHART_GUIDE 后的回归",
-   "rule": "错题必须全部落在 allowed_fail 里，否则逐题列为回归；allowed_fail 里的题若答对，列为意外答对，记录但不改门槛",
+   "source": "DEVLOG [49] A1 方案（S 2026-10-20 三轮评审定）：m13 门槛 + 名单外错题复跑",
+   "rule": "agents 与 m13 完全相同（tests 钉住）；名单外错题复跑 times 次（无效的最多补 max_makeup 次），有效复跑人工全签 true 记波动，有一次 false 记回归；比较器 match 只决定人工先看哪几行",
+   "rerun": {
+    "times": 3,
+    "max_makeup": 1
+   },
    "agents": {
     "react": {
      "single": {
@@ -1416,9 +1420,7 @@
   "thresholds_sha256": "7ba4b9a81f49",
   "labeled_by": "",
   "single_min": "14/15",
-  "single_regressions": [
-   "s09"
-  ],
+  "single_regressions": [],
   "single_unexpected_pass": [
    "s02"
   ],
@@ -1427,10 +1429,34 @@
   "multi_unexpected_pass": [
    "m10"
   ],
-  "regression_verdict": "有回归：先看是否与本次改动有关，再下结论",
+  "regression_verdict": "无法判定：有题待签字、待复跑或有效复跑次数不足（见 *_pending_review / *_rerun_invalid）",
   "allowed_fail_warnings": [
    "没有 repeat 跑（k<2）：无法判断 allowed_fail 里的题稳不稳，这一项只核了名单长度"
   ],
+  "rerun_rule": "名单外错题复跑 3 次（无效的补跑，最多 4 次），有效复跑人工全签 true 记波动，有一次 false 记回归",
+  "rerun_false_negative": {
+   "p=0.5": "12.5%",
+   "p=0.7": "34.3%"
+  },
+  "rerun_false_negative_note": "真实单次答对率为 p 的回归题，3 次全对被误记为波动的概率 p^3",
+  "single_rerun_candidates": [
+   "s09"
+  ],
+  "single_flaky": [],
+  "single_pending_review": [],
+  "single_rerun_invalid": [
+   {
+    "id": "s09",
+    "valid": 0,
+    "total": 4,
+    "observed_pass_rate": "0/1"
+   }
+  ],
+  "multi_rerun_candidates": [],
+  "multi_flaky": [],
+  "multi_pending_review": [],
+  "multi_rerun_invalid": [],
+  "exit_code": 2,
   "chart_smoke": {
    "出图率": {
     "drew": 4,
@@ -1447,5 +1473,254 @@
    },
    "internal_errors": []
   }
+ },
+ "reruns": [
+  {
+   "id": "s09",
+   "group": "single",
+   "category": "排序",
+   "dataset": "data/gate/retail/零售明细.csv",
+   "question": "实际卖出数量最多的商品是哪个？",
+   "expect_refusal": false,
+   "gold": {
+    "kind": "label",
+    "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+   },
+   "alts": [
+    {
+     "kind": "label",
+     "value": "22197",
+     "why": "按商品编码汇总（同一编码有多个描述）"
+    },
+    {
+     "kind": "label",
+     "value": "POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    },
+    {
+     "kind": "label",
+     "value": "SMALL POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    }
+   ],
+   "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+   "executed": true,
+   "error_kind": null,
+   "error": null,
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
+   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+   "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+   "attempts": 0,
+   "duration_s": 19.73,
+   "tokens": 8033,
+   "auto_correct": false,
+   "match": null,
+   "warnings": [],
+   "unverified_numbers": [],
+   "chart": {
+    "chart_calls": 0,
+    "used_plt": false,
+    "drew": false,
+    "options": 0,
+    "pngs": 0,
+    "chart_errors": [],
+    "chart_internal_errors": [],
+    "charts_discarded": 0
+   },
+   "human_correct": null,
+   "failure_class": null,
+   "reason": "",
+   "guessing": null,
+   "infra": null,
+   "attempt": 1,
+   "valid": false
+  },
+  {
+   "id": "s09",
+   "group": "single",
+   "category": "排序",
+   "dataset": "data/gate/retail/零售明细.csv",
+   "question": "实际卖出数量最多的商品是哪个？",
+   "expect_refusal": false,
+   "gold": {
+    "kind": "label",
+    "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+   },
+   "alts": [
+    {
+     "kind": "label",
+     "value": "22197",
+     "why": "按商品编码汇总（同一编码有多个描述）"
+    },
+    {
+     "kind": "label",
+     "value": "POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    },
+    {
+     "kind": "label",
+     "value": "SMALL POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    }
+   ],
+   "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+   "executed": true,
+   "error_kind": null,
+   "error": null,
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。排名第二的是 MEDIUM CERAMIC TOP STORAGE JAR（78,033 件）。",
+   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+   "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+   "attempts": 0,
+   "duration_s": 16.61,
+   "tokens": 8001,
+   "auto_correct": false,
+   "match": null,
+   "warnings": [],
+   "unverified_numbers": [],
+   "chart": {
+    "chart_calls": 0,
+    "used_plt": false,
+    "drew": false,
+    "options": 0,
+    "pngs": 0,
+    "chart_errors": [],
+    "chart_internal_errors": [],
+    "charts_discarded": 0
+   },
+   "human_correct": null,
+   "failure_class": null,
+   "reason": "",
+   "guessing": null,
+   "infra": null,
+   "attempt": 2,
+   "valid": false
+  },
+  {
+   "id": "s09",
+   "group": "single",
+   "category": "排序",
+   "dataset": "data/gate/retail/零售明细.csv",
+   "question": "实际卖出数量最多的商品是哪个？",
+   "expect_refusal": false,
+   "gold": {
+    "kind": "label",
+    "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+   },
+   "alts": [
+    {
+     "kind": "label",
+     "value": "22197",
+     "why": "按商品编码汇总（同一编码有多个描述）"
+    },
+    {
+     "kind": "label",
+     "value": "POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    },
+    {
+     "kind": "label",
+     "value": "SMALL POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    }
+   ],
+   "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+   "executed": true,
+   "error_kind": null,
+   "error": null,
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。排名第二的是 MEDIUM CERAMIC TOP STORAGE JAR（78,033 件）。",
+   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+   "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+   "attempts": 0,
+   "duration_s": 16.99,
+   "tokens": 8010,
+   "auto_correct": false,
+   "match": null,
+   "warnings": [],
+   "unverified_numbers": [],
+   "chart": {
+    "chart_calls": 0,
+    "used_plt": false,
+    "drew": false,
+    "options": 0,
+    "pngs": 0,
+    "chart_errors": [],
+    "chart_internal_errors": [],
+    "charts_discarded": 0
+   },
+   "human_correct": null,
+   "failure_class": null,
+   "reason": "",
+   "guessing": null,
+   "infra": null,
+   "attempt": 3,
+   "valid": false
+  },
+  {
+   "id": "s09",
+   "group": "single",
+   "category": "排序",
+   "dataset": "data/gate/retail/零售明细.csv",
+   "question": "实际卖出数量最多的商品是哪个？",
+   "expect_refusal": false,
+   "gold": {
+    "kind": "label",
+    "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+   },
+   "alts": [
+    {
+     "kind": "label",
+     "value": "22197",
+     "why": "按商品编码汇总（同一编码有多个描述）"
+    },
+    {
+     "kind": "label",
+     "value": "POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    },
+    {
+     "kind": "label",
+     "value": "SMALL POPCORN HOLDER",
+     "why": "按商品编码汇总后报该编码的描述"
+    }
+   ],
+   "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+   "executed": true,
+   "error_kind": null,
+   "error": null,
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
+   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+   "code": "\n# \"实际卖出数量\"：只统计数量为正（实际销售）的记录，排除退货（负值）\nsales = df[df['数量'] > 0]\ntop = sales.groupby(['商品编码', '商品描述'])['数量'].sum().sort_values(ascending=False)\nprint(top.head(10))\n\n# 取出最多的商品\ntop_code, top_desc = top.index[0]\nresult = top_desc\n",
+   "attempts": 0,
+   "duration_s": 13.04,
+   "tokens": 5740,
+   "auto_correct": false,
+   "match": null,
+   "warnings": [],
+   "unverified_numbers": [],
+   "chart": {
+    "chart_calls": 0,
+    "used_plt": false,
+    "drew": false,
+    "options": 0,
+    "pngs": 0,
+    "chart_errors": [],
+    "chart_internal_errors": [],
+    "charts_discarded": 0
+   },
+   "human_correct": null,
+   "failure_class": null,
+   "reason": "",
+   "guessing": null,
+   "infra": null,
+   "attempt": 4,
+   "valid": false
+  }
+ ],
+ "rerun_meta": {
+  "time": "2026-11-12T06:44:35",
+  "profile": "m13r",
+  "git_sha": "b8170aa",
+  "sha_verified": true,
+  "report_git_sha": "ec7c790"
  }
 }
