@@ -8813,3 +8813,97 @@ EVAL_TREE_PATHS = ("app/", "scripts/", "tests/", "requirements.txt", "requiremen
 
 s09 的定性只能走新报告：推完 → 触发 nightly → 新报告 → 人工判定（提交只含 docs）→ rerun。
 判定那一步提交必须只有 `docs/`，一旦顺手改了 `scripts/`，新报告也作废。
+
+## [169] 复跑入口第一次真跑：三个坑，以及 m13r 只能判到"无法判定"（2026-11-12）
+
+`[168]` 把入口加好之后连着跑了四次 CI，才把链路走通。记下来，省得下次重踩。
+
+### 一、坑一：shallow clone 读不到主报告那个 commit
+
+`actions/checkout@v5` 默认 `fetch-depth: 1`，仓里只有 HEAD。`_eval_tree_sig("ec7c790")` 在 CI 上
+`rev-parse ec7c790:app` 直接失败 → 返回 None → 拒绝：
+
+```
+复跑前提不一致，拒绝复跑：
+  git_sha: 报告 'ec7c790' ≠ 现在 'd4c7540'，且评测代码（app/ scripts/ tests/ requirements*.txt）不一致或读不到
+```
+
+修法是 rerun job 单独 `fetch-depth: 0`。nightly 不需要（它不读历史对象），没动。
+**这条错误信息把"读不到"和"不一致"写在了一起，是这次多花一轮的原因** —— 下次要拆成两句，
+现在改就等于让 `gate_20261112_063919` 这份报告作废（改 `scripts/` 会改 tree 指纹），留着下轮一起改。
+
+### 二、坑二：GitHub 的 `run:` 是 `bash -e`
+
+```bash
+python scripts/gate/run_gate.py "${ARGS[@]}"
+code=$?                                    # ← 永远执行不到
+```
+
+`run_gate` 返回 2（待签字）时脚本当场终止，整步红。日志里只有一行
+`##[error]Process completed with exit code 2`，我写的 `case` 分支一次都没进。
+`set -uo pipefail` 关不掉外层的 `-e`（那是调用方的选项）。改成：
+
+```bash
+code=0
+python scripts/gate/run_gate.py "${ARGS[@]}" || code=$?
+```
+
+### 三、链路验证：全通
+
+`run 43170623347`（eval #29）rerun job **success**，报告里：
+
+```json
+"rerun_meta": {"time": "2026-11-12T06:48:10", "profile": "m13r", "git_sha": "942e73e",
+               "sha_verified": true, "report_git_sha": "ec7c790"}
+"reruns": 4 行（全 valid=false）
+"rerun_history": 1 条（上一组 4 行被替换，保留了）
+```
+
+`sha_verified: true` + `report_git_sha: ec7c790` 说明"跨 docs 提交复跑"这条设计真的成立了：
+主报告出自 `ec7c790`，复跑跑在 `942e73e`，中间的 `d4c7540`/`b8170aa` 只改了 `docs/` 和 `.github/`。
+
+### 四、s09：7 次连续，全是同一个错
+
+| 时间 | 来源 | attempts | code | 答案 |
+|---|---|---|---|---|
+| 01:28 | nightly #24 | 1 | `df['数量']>0` | PAPER CRAFT |
+| 06:30 | nightly #25 | 0 | 空 | PAPER CRAFT |
+| 06:39 | nightly #26 | 0 | 47 字符 | PAPER CRAFT |
+| 06:48 ×4 | rerun #29 | 0 | 40–202 字符 | PAPER CRAFT ×4 |
+
+复跑那 4 次 `attempts` 全是 0 —— **一次代码都没执行**，直接写死 `result`。
+而 11-10 到 11-11 的五份报告里，s09 也是 attempts=0 + 直接写死，只是那时候写的是
+`WORLD WAR 2 GLIDERS ASSTD DESIGNS`（对）。
+
+也就是说：**这道题模型从头到尾就没真正算过，一直在猜；猜对了 12 次，11-12 开始连续猜错。**
+`temperature=0.0` 下同题两次行为不同（01:28 写了代码、06:30 没写），说明网关侧不保证确定性。
+这不是"代码改坏了"，也不是"抽样波动"，是模型在这个题上的行为整体变了。
+
+### 五、m13r 判不出来（设计边界，不是 bug）
+
+verdict 的最后一段：
+
+```json
+"single_regressions": [],
+"single_rerun_invalid": [{"id": "s09", "valid": 0, "total": 4, "observed_pass_rate": "0/1"}],
+"regression_verdict": "无法判定：有题待签字、待复跑或有效复跑次数不足",
+"exit_code": 2
+```
+
+`s09` 4 次全答错，却被记成"有效复跑 0 次"。原因在 `rerun_valid`：
+
+```python
+def rerun_valid(row):
+    if row.get("error_kind") not in RERUN_VALID_KINDS: return False
+    return not (row.get("executed") and row.get("match") is None)   # ← 答错 → 无效
+```
+
+注释写的是"跑了但比较器判不了"，但 `score_detail` 的约定是**判错返回 None**（靠返回值区分
+对错的层级，不是区分"判不了"）。于是"答错"被当成"没判"，复跑全错的题永远进 `*_rerun_invalid`，
+`_verdict_rerun` 的 `else: regress` 分支永远走不到 —— **m13r 结构上只能判出"波动"，判不出"回归"**。
+
+`tests/test_gate.py:659` 把这条行为钉死了（`all(... not r["valid"])`），说明是刻意写的，
+不是漏写。**改它等于改预登记规则**（`[49]` 定的 A1 方案），要 H 拍，我没动。
+
+不改的后果：s09 这种"复跑 N 次全错"的题，m13r 的结论永远是"无法判定"，只能靠人看 `reruns` 段。
+不改的好处：不会因为比较器一次抖动就把题判成回归。
