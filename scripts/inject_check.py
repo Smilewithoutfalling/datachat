@@ -198,10 +198,16 @@ def _sse_answer(client, base_url: str, token: str, session_id: str, question: st
     """POST 一条消息并消费 SSE 到 done，返回 (status, answer_text, model)。
 
     done 事件的 result.meta 带 model（app/server/app.py stream() 里注入）；status 是
-    ok/error（r.ok）。流断掉没等到 done 也按 error 处理，探针继续。
+    ok/error（r.ok）。
+
+    **没等到 done 一律抛异常，不返回空答案**：server 的 stream() 只有在分析正常收尾时才发 done，
+    异常路径直接断开（app/server/app.py 的 except 分支 re-raise）。把"没拿到答案"记成"没命中"
+    等于把 unknown 当 pass —— 2026-11-12 首轮基线就是这么被 9 条空答案骗过去的（status=error、
+    model 空、答案摘录空，68 秒跑完 10 个问题，根本没有一次真实模型调用）。
     """
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base_url}/sessions/{session_id}/messages"
+    seen, last = 0, None
     with client.stream("POST", url, headers=headers, json={"content": question},
                        timeout=timeout) as resp:
         if resp.status_code != 200:
@@ -210,6 +216,8 @@ def _sse_answer(client, base_url: str, token: str, session_id: str, question: st
         for line in resp.iter_lines():
             if line.startswith("event: "):
                 ev_type, data = line[7:].strip(), None
+                seen += 1
+                last = ev_type
             elif line.startswith("data: ") and ev_type is not None:
                 data = line[6:]
             elif line == "" and ev_type is not None:
@@ -220,7 +228,7 @@ def _sse_answer(client, base_url: str, token: str, session_id: str, question: st
                     meta = (result.get("meta") or {}).get("model") or ""
                     return status, answer, meta
                 ev_type, data = None, None
-    return "error", "", ""
+    raise RuntimeError(f"SSE 没等到 done（收到 {seen} 个事件，最后类型 {last!r}）")
 
 
 def run_probe(client, base_url: str, token: str, payload: dict, agent: str,
@@ -245,6 +253,8 @@ def run_probe(client, base_url: str, token: str, payload: dict, agent: str,
     for q in PROBES[payload["id"]]["questions"]:
         status, answer, model = _sse_answer(client, base_url, token, session_id, q, timeout)
     hit, ev = detect_payload(payload, answer)
+    if status != "ok":
+        hit, ev = False, []       # 没答案不判命中：由 main 当 unknown 挡门禁，不记成"没命中"
     return {"id": payload["id"], "placement": payload["placement"],
             "category": PROBES[payload["id"]]["category"], "hit": hit, "evidence": ev,
             "status": status, "model": model,
@@ -252,26 +262,58 @@ def run_probe(client, base_url: str, token: str, payload: dict, agent: str,
 
 
 def _spawn_server(home: str, timeout_s: float = 60.0):
-    """起后端子进程，返回 (proc, base_url, token)。stdout 第一行是 JSON：{"port","token","home"}。"""
+    """起后端子进程，返回 (proc, base_url, token, log_path)。
+
+    启动 JSON 写在 stdout 第一行，所以这里把 stdout/stderr 合并写进 ``<home>/server.log``
+    再从文件里轮询那一行 —— 不用 PIPE 是因为没人一直读管道：服务端一旦往 stdout 打超过
+    管道缓冲区的内容就会自己阻塞，而且出错时那些日志全丢（首轮基线 9 条空答案就是这么
+    连一条 traceback 都没留下）。
+    """
     env = dict(os.environ)
     env.setdefault("DATACHAT_LLM_TIMEOUT", "180")
+    log_path = os.path.join(home, "server.log")
+    log = open(log_path, "w", encoding="utf-8", buffering=1)
     proc = subprocess.Popen([sys.executable, "-m", "app.server", "--port", "0", "--home", home],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            stdout=log, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", cwd=REPO, env=env)
-    line = None
     t0 = time.monotonic()
     while True:
-        line = proc.stdout.readline()          # 阻塞直到 JSON 就绪或进程退出
-        s = (line or "").strip()
-        if s.startswith("{"):
-            break
+        info = _startup_line(log_path)
+        if info is not None:
+            return proc, f"http://127.0.0.1:{info['port']}", info["token"], log_path
         if proc.poll() is not None:
-            raise RuntimeError(f"server 进程提前退出，没有输出启动 JSON（最后一行：{s!r}）")
+            raise RuntimeError(f"server 进程提前退出（退出码 {proc.returncode}）。日志尾：\n{_tail(log_path)}")
         if time.monotonic() - t0 > timeout_s:
             proc.kill()
-            raise RuntimeError(f"等 server 启动 JSON 超时（最后一行：{s!r}）")
-    info = json.loads(s)
-    return proc, f"http://127.0.0.1:{info['port']}", info["token"]
+            raise RuntimeError(f"等 server 启动 JSON 超时（{timeout_s:.0f}s）。日志尾：\n{_tail(log_path)}")
+        time.sleep(0.05)
+
+
+def _startup_line(log_path: str) -> dict | None:
+    """从 server.log 里找启动 JSON（{"port","token",...}）；还没有就返回 None。"""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("{"):
+                    try:
+                        info = json.loads(s)
+                    except json.JSONDecodeError:
+                        continue
+                    if "port" in info and "token" in info:
+                        return info
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def _tail(log_path: str | None, n: int = 100) -> str:
+    """日志尾 n 行；文件不存在返回空串。失败时打出来用于定位，别让错误只剩一句 status=error。"""
+    if not log_path or not os.path.exists(log_path):
+        return ""
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    return "\n".join(lines[-n:])
 
 
 def load_env_file() -> None:
@@ -289,13 +331,15 @@ def load_env_file() -> None:
 
 
 def summarize(results: list[dict]) -> dict:
+    """按类别数命中。unknown 单列：没拿到答案的探针既不是命中也不是通过，不能混进分母装干净。"""
     by_cat = {}
     for r in results:
         c = by_cat.setdefault(r["category"], {"total": 0, "hits": 0})
         c["total"] += 1
         c["hits"] += 1 if r["hit"] else 0
     return {"by_category": by_cat,
-            "total": len(results), "hits": sum(1 for r in results if r["hit"])}
+            "total": len(results), "hits": sum(1 for r in results if r["hit"]),
+            "unknown": sum(1 for r in results if r.get("status", "ok") != "ok")}
 
 
 def gate(summary: dict, baseline_path: str) -> tuple[bool, str]:
@@ -330,6 +374,7 @@ def main(argv=None) -> int:
     import httpx
 
     proc = None
+    log_path = None
     if args.spawn:
         if args.base_url or args.token:
             ap.error("--spawn 不能和 --base-url/--token 同用")
@@ -339,39 +384,60 @@ def main(argv=None) -> int:
             return 1
         home = tempfile.mkdtemp(prefix="inject-home-")
         try:
-            proc, base_url, token = _spawn_server(home)
+            proc, base_url, token, log_path = _spawn_server(home)
             results = _run_all(httpx.Client(), base_url, token, payloads, args)
         finally:
             if proc is not None:
                 proc.kill()
+            if log_path and args.out:
+                # 失败时 server.log 随 artifact 一起留下：没有它，出错只剩一句 status=error。
+                try:
+                    shutil.copyfile(log_path, os.path.splitext(args.out)[0] + ".server.log")
+                except OSError:
+                    pass
             shutil.rmtree(home, ignore_errors=True)
     else:
         if not (args.base_url and args.token):
             ap.error("--base-url 与 --token 必须成对，或改用 --spawn")
         results = _run_all(httpx.Client(), args.base_url, args.token, payloads, args)
     summary = summarize(results)
+    unknown = [r for r in results if r["status"] != "ok"]
     ok, msg = gate(summary, args.baseline)
+    if unknown:
+        ok, msg = False, f"{len(unknown)} 条探针没拿到答案，门禁不判（unknown ≠ 通过）"
     report = {"results": results, "summary": summary, "gate": {"ok": ok, "msg": msg}}
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
     if args.write_baseline:
-        with open(args.baseline, "w", encoding="utf-8") as f:
-            json.dump({"by_category": summary["by_category"],
-                       "note": "B9 首轮基线（真模型固定语料，scripts/inject_check.py --write-baseline）"},
-                      f, ensure_ascii=False, indent=2)
-        print(f"基线已写入 {args.baseline}")
+        if unknown:
+            print("::error::有探针没拿到答案，基线不写（空答案得出的基线会把门禁变成永久绿灯）",
+                  file=sys.stderr)
+        else:
+            with open(args.baseline, "w", encoding="utf-8") as f:
+                json.dump({"by_category": summary["by_category"],
+                           "note": "B9 首轮基线（真模型固定语料，scripts/inject_check.py --write-baseline）"},
+                          f, ensure_ascii=False, indent=2)
+            print(f"基线已写入 {args.baseline}")
 
-    # 逐条人读表：id / placement / 类别 / 命中 / 证据
+    # 逐条人读表：id / placement / 类别 / 状态 / 证据
     for r in results:
-        mark = "HIT " if r["hit"] else "ok  "
+        mark = "??  " if r["status"] != "ok" else ("HIT " if r["hit"] else "ok  ")
         ev = "; ".join(e["token"] for e in r["evidence"]) or "-"
-        print(f"[{mark}] {r['id']} {r['placement']:<6} {r['category']} {r['status']:<4} 证据: {ev}")
+        print(f"[{mark}] {r['id']} {r['placement']:<6} {r['category']} {r['status']:<8} 证据: {ev}")
         if r["hit"]:
             print(f"       答案摘录: {r['answer_excerpt'][:120]}")
     per = " / ".join(f"{c}={v['hits']}/{v['total']}" for c, v in summary["by_category"].items())
-    print(f"命中：{summary['hits']}/{summary['total']}（{per}）；{msg}")
+    print(f"命中：{summary['hits']}/{summary['total']}（{per}）；unknown={summary['unknown']}；{msg}")
+    if unknown:
+        for r in unknown:
+            detail = r.get("error") or r["answer_excerpt"][:120] or "空答案"
+            print(f"::error::探针 {r['id']} 没拿到可用答案（status={r['status']}）：{detail}", file=sys.stderr)
+        tail = _tail(log_path)
+        if tail:
+            print("---- server.log 尾 ----\n" + tail + "\n---- /server.log ----", file=sys.stderr)
+        return 1
     if not ok:
         print("::error::注入命中率超基线，release 门禁挡下；看报告里的证据片段逐条人眼确认。")
         return 2
@@ -379,6 +445,7 @@ def main(argv=None) -> int:
 
 
 def _run_all(client, base_url, token, payloads, args) -> list[dict]:
+    """逐条探针。异常记 probe-failed 不吞掉；是否挡门禁交给 main（它还要先把报告写进 artifact）。"""
     results = []
     for p in payloads:
         try:
@@ -390,10 +457,6 @@ def _run_all(client, base_url, token, payloads, args) -> list[dict]:
                             "error": f"{type(e).__name__}: {e}", "model": "",
                             "answer_excerpt": ""})
             print(f"::warning::探针 {p['id']} 执行失败：{e}", file=sys.stderr)
-    failed = [r for r in results if r["status"] == "probe-failed"]
-    if failed:
-        print(f"::error::{len(failed)} 条探针执行失败，门禁视为未通过", file=sys.stderr)
-        sys.exit(1)
     return results
 
 

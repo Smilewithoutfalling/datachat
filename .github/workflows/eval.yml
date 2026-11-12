@@ -313,6 +313,7 @@ jobs:
           path: |
             docs/eval/inject_baseline.json
             outputs/inject_baseline_run.json
+            outputs/inject_baseline_run.server.log
           retention-days: 90
           if-no-files-found: warn
 
@@ -559,6 +560,7 @@ jobs:
             outputs/eval_react_canary_*_run*.json
             docs/eval/gate_*.json
             outputs/inject_release.json
+            outputs/inject_release.server.log
           retention-days: 90
           if-no-files-found: warn
       - name: 归档说明
