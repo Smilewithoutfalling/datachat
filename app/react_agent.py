@@ -152,7 +152,8 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
                       llm_config=None, tracker=None, sleep=time.sleep, nudge_no_exec: bool = False,
                       out_system: dict | None = None,
                       memory_block: str = "", extra_tools: list | None = None,
-                      metrics_block: str = "", pairs_block: str = ""):
+                      metrics_block: str = "", pairs_block: str = "",
+                      run_suffix: str = ""):
     """构建一个绑定到指定数据文件的 ReAct 智能体。
 
     checkpointer: 传入 MemorySaver 可开启多轮记忆（配合 thread_id）。
@@ -176,6 +177,10 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
           （优先级：表结构 > 口径 > 字段说明）；非空时拒答规则后面另补一句「口径里的字段必须真实存在，否则照旧拒答」。
           为空时 system 一个字都不变。
     pairs_block: 记忆 M9 的参考写法块（app/memory/pairs.py，只在 full 档、有 👍 样本时非空）：插在 CHART_GUIDE 之前。
+    run_suffix: 追加在 system prompt 最末尾的一行无语义文本（E3：评测 --repeat 时传
+          "\\n\\nrun-id: <k>"，打破网关在 temperature 0 下的响应缓存）。渲染指纹
+          （app/eval/fingerprint.py 的 render_system）不传这个参数，所以 run-id 不进指纹——
+          k 次重复的报告仍然可比。为空时 system 与之前逐字节一致。
     """
     if df is None:
         df = load_data(df_path)[0]
@@ -261,6 +266,7 @@ def build_react_agent(df_path: str, checkpointer=None, sink=None, *, model=None,
         f"{CHART_GUIDE}\n\n"
         "最终用中文给出简洁、直接的结论；结论里的数字必须来自工具返回的 result 或 print 输出，不要估算或编造；"
         "若已生成图表，说明图表展示了什么。"
+        + run_suffix
     )
 
     if out_system is not None:

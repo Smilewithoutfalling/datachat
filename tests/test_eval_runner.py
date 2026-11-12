@@ -242,3 +242,65 @@ def test_recall_evidence_scope_is_prior_turns_only(monkeypatch):
     )
     assert r["correct"] is False
     assert "49,286" in r["recall_why"] or "49286" in r["recall_why"]
+
+
+# ------------------------------------------------------------------ E3 run-id（破缓存后缀）
+
+class _NoModel:
+    """只让 build_react_agent 走完构造流程，不会被调用（与 fingerprint.py 同款）。"""
+
+    def bind_tools(self, tools):
+        return self
+
+
+def test_run_suffix_appended_to_system_tail():
+    """E3：run_suffix 原样出现在 system 最末尾，且只出现一次。
+
+    位置必须是末尾：网关缓存按请求前缀命中，尾部的无语义行改的是缓存键的最后一截，
+    对模型则是不带信息的指令，不应改变它对任务的理解。
+    """
+    from app.react_agent import build_react_agent
+    from app.tools.dataset import load_data
+    data, _desc = load_data("data/sample_eval.csv")
+    cap = {}
+    build_react_agent("data/sample_eval.csv", model=_NoModel(), df=data,
+                      out_system=cap, run_suffix="\n\nrun-id: 2")
+    assert cap["system"].endswith("run-id: 2")
+    assert cap["system"].count("run-id") == 1
+
+
+def test_run_suffix_default_keeps_system_byte_identical():
+    """不传 run_suffix 与传空串的 system 逐字节一致，且串里不含 run-id 字样。
+
+    P8 风格：单轮评测、指纹渲染都不传这个参数，prompt 必须和 E3 之前完全一样。
+    渲染指纹（render_system）不传它，所以 run-id 不进指纹——k 轮报告仍然可比。
+    """
+    from app.react_agent import build_react_agent
+    from app.tools.dataset import load_data
+    data, _desc = load_data("data/sample_eval.csv")
+    cap_a, cap_b = {}, {}
+    build_react_agent("data/sample_eval.csv", model=_NoModel(), df=data, out_system=cap_a)
+    build_react_agent("data/sample_eval.csv", model=_NoModel(), df=data,
+                      out_system=cap_b, run_suffix="")
+    assert cap_a["system"] == cap_b["system"]
+    assert "run-id" not in cap_a["system"]
+
+
+def test_runner_run_suffix_reaches_analyze(monkeypatch):
+    """执行器把 run_suffix 透传给 analyze；默认显式 None，不让 analyze 侧靠猜。"""
+    seen = []
+
+    def fake_analyze(path, question, **kw):
+        seen.append(kw.get("run_suffix"))
+        return _res(question)
+
+    monkeypatch.setattr(runner_mod, "analyze", fake_analyze)
+    case = EvalCase(id="tmp_sfx", category="aggregation", question="q", ground_truth="result = 1")
+
+    runner = EvalRunner(agent="react", run_suffix="\n\nrun-id: 2")
+    runner._run_one(case, "q", None, None)
+    assert seen[-1] == "\n\nrun-id: 2"
+
+    runner_default = EvalRunner(agent="react")
+    runner_default._run_one(case, "q", None, None)
+    assert seen[-1] is None

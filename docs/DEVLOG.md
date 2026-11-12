@@ -8907,3 +8907,69 @@ def rerun_valid(row):
 
 不改的后果：s09 这种"复跑 N 次全错"的题，m13r 的结论永远是"无法判定"，只能靠人看 `reruns` 段。
 不改的好处：不会因为比较器一次抖动就把题判成回归。
+
+## [170] 批次 1 收官：E3 独立化实测通过 + B8 judge 校准达标 100%/κ=1.0（2026-11-12）
+
+H 拍板"尽快完成评测系统"、judge 模型定了 Qwen3.5-397B-A17B（tokenhub/网关同一把 key）。当天两项全落地。
+
+### 一、E3：run-id 破缓存（phase7 §E3）
+
+链路：`run_eval.py --repeat k` 时第 k 轮在 system 末尾加 `\n\nrun-id: <k>` + 按 `seed=20261112+k` 打乱题序。
+透传链：`run_eval` → `EvalRunner.run_suffix`（可写属性，每轮改）→ `analyze(run_suffix=)` →
+`_run_react` → `build_react_agent(run_suffix=)`。workflow 无单一 system prompt，忽略（nightly/rebuild 全是 react）。
+
+**指纹不受影响的理由**：`render_system()`（渲染指纹）不传 run_suffix，指纹路径的 system 与 E3 之前逐字节一致
+（`test_run_suffix_default_keeps_system_byte_identical` 钉住）；真实跑批的 system 含 run-id，是真实记录。
+
+**5 题实测（agg/filt/corr/ts/ord 各一 × 3 次，Qwen3.5-397B，本地网关）**：5/5 题的 k 次之间
+answer sha 与 token 全部不同——无缓存命中，独立化成功。不需要降级 temp 0.3。
+一个观察：ord_024 的 run1 与 run3 完全相同（sha、token 全同），同轮不同轮之间出现完全相同输出，
+说明网关即使有缓存也不稳定命中；这正是 pass^k 要配 run-id 的理由。
+
+**顺带推翻一条旧结论**：`grg-aikits-test.grgbanking.com` 现在 DNS 直连 200（[158]/[167] 记的
+"本地解析不了"已过时，公司网络状态变了）。本地网关 14 个模型：Qwen3.5-397B-A17B、deepseek-chat、
+kimi-k3 等多家——B8 的"第二家 Key"前置条件就地满足，不用等。
+
+### 二、B8：judge 校准达标（一致率 100%，κ 1.000）
+
+组件：`app/eval/judge.py`（契约见 docstring：二元、弃权单列、失败抛异常、rubric 只来自题面与 gold、
+order 一半一半防位置偏见、temperature 锁死 0）+ `scripts/eval/judge_calibrate.py`（手写 κ，不引 sklearn）
++ `scripts/eval/build_judge_gold.py` + `docs/eval/judge_gold.jsonl`（35 条）+ `tests/test_judge.py`（13 条）。
+
+**三轮校准的读数变化：82.1% → 97.1% → 100%。三轮改的全是校准集标签，judge prompt 一字未动。**
+
+| 轮 | 一致率 | κ | 错分根因 |
+|---|---|---|---|
+| v1 | 82.1% | 0.640 | 7 条错分全是标签问题 |
+| v2 | 97.1% | 0.941 | 1 FN + 1 弃权 |
+| v3 | 100% | 1.000 | 0 错分，1 条合规弃权 |
+
+四个标签侧根因（都修在 `build_judge_gold.py`，教训写进 judge.md §4）：
+1. **expected 字符串被报告截断 ~520 字符**——agg_005 的 25 行表只剩 20 行，judge 把截掉的行判成
+   "标准答案缺失"。series 一律改用 `expected_obj`（结构化完整）。
+2. **旧报告（10 月初）没有 match 字段、判分口径过期**——ord_027 数值差 0.9% 却标 True。
+   True 侧只收 match ∈ strict/rounded/refusal/impossible（含 alt: 前缀）；False 侧要求
+   人工背书或 match 非 None。
+3. **alt 答案没进 gold_summary**——emp_025 模型答 18580（登记的全员口径变体），judge 只见主 gold
+   18631.53 必误判。`match=alt:*` 的样本现算全部 alt 值列进标准答案。
+4. **拒答题契约没表达**——emp_022 拒答后又输出大段替代分析（label=False 是对的），rubric 对
+   "无法回答"类 gold 写明：拒答后续答算错。
+
+**样本量偏离规格**：规格写 20 对/20 错，实际 20/15——语义清晰的错样本就 15 条，凑数只能灌噪声，
+不凑（judge.md §4 有记录），跑批累积新错样本后补足。
+
+**v2→v3 之间也修过一次报告侧事实**：v2 的 FN emp_025 追进去发现不是 judge 错，是 alt 没进标准答案
+（见第 3 条）。judge 本体三轮零改动是本次校准最硬的证据。
+
+### 三、测试
+
+`tests/test_judge.py` 13 条 + `tests/test_eval_runner.py` 3 条（run_suffix 契约）+
+fingerprint 分区把 `app/eval/judge.py` 归 B（不在评测执行路径，理由写在分区表）。
+相关面全绿：judge 13 / eval_runner 23 / p8+fingerprint 32 / core_analyze+entrypoints 27。
+
+### 四、遗留
+
+- judge 的 CI 部署：需 H 在 GitHub 加 `DATACHAT_JUDGE_MODEL` variable + judge key secret（若 CI 网关
+  agentrs.jd.com 提供 Qwen 家族）。本地已用 tokenhub 同 key 打通。
+- release 档（130 题）首跑仍是 [167] 的老状态：等 H 配 release environment 的 Required reviewers。
+- rerun_valid 规则（[169] 的"m13r 判不出回归"）仍待 H 拍板，本次未动。

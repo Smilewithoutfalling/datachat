@@ -113,6 +113,10 @@ _EXEMPT = {
     # **只读**——不产生判定、不进模型输入、不写报告字段。改它不会让任何一题从错变对，
     # 也不会改变任何一次运行的输入；它连 analyze 的返回结果都只是拿来看 executed 的。
     "app/eval/egress.py": "出境审计，只读 prompt，不产生判定也不进模型输入",
+    # EV-B8 judge：LLM 裁判，只在离线校准与报告复核时被显式调用。
+    # **不在评测执行路径上**——runner.run_all 不 import 它，不改任何一题的对错与输入；
+    # 校准读数进 docs/eval/judge.md，换 judge 模型要重新校准并在 DEVLOG 留痕。
+    "app/eval/judge.py": "LLM 裁判（离线校准/复核用），不在评测执行路径，不改判分",
     # 证据一致性（EV-B4）：对 analyze 的返回结果做三条断言（答案↔结果/图↔结果/时间词↔代码）。
     # **只读 res，不碰执行路径**——runner 在打分之后才调它，failures 只作 warnings 展示、
     # 升级门槛（130 题误报率 <10%）达成前不改 correct。改它不会改变任何一次运行的输入与结果。

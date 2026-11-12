@@ -20,6 +20,7 @@
 """
 import argparse
 import os
+import random
 import sys
 from datetime import datetime
 
@@ -41,6 +42,10 @@ _CAT_ALIAS = {
     "agg": "aggregation", "filt": "filtering", "corr": "correlation", "ts": "timeseries",
     "ref": "refusal", "amb": "ambiguity", "mul": "multi_turn",
 }
+
+# E3：--repeat 的题序打乱 seed 基数。第 k 轮用 SHUFFLE_SEED_BASE + k，写进报告 meta。
+# 固定基数而不是每跑随机：同一个 evalset 想复现同一组顺序就复现得出来。
+SHUFFLE_SEED_BASE = 20261112
 
 
 def _select_cases(category: str = None, case_id: str = None, dataset: str = None,
@@ -232,10 +237,27 @@ def _run_agent(agent, cases, args, llm_config, stamp):
     # EV-C3：逐题跨轮的判定与签名。`runs` 里只有汇总数字，算不了 pass^k / flip_rate——
     # 那需要"同一题在第 1..k 次分别对没对"，必须在这层把逐题结果留下。
     per_case = {}
+    # E3（phase7 §E3）：repeat>1 时第 k 轮在 system 末尾加无语义 run-id 打破网关缓存，
+    # 同时用固定 seed 打乱题序（缓存是按请求前缀命中的，顺序本身也是缓存变量）。
+    # seed 写进 meta：顺序是读数的一部分，丢了就复现不出那 k 轮。
+    # 5 题实测见 DEVLOG：k 次之间答案 sha 或 token 数不同才算独立化成功；
+    # 若实测全同（缓存没破），降级方案是 temperature 0.3，届时这里加 --e3-temp 开关。
+    repeat_shuffled = args.repeat > 1
+    if repeat_shuffled:
+        meta["e3_runid"] = True
+        meta["e3_shuffle_seed_base"] = SHUFFLE_SEED_BASE
+        print(f"E3 独立化：run-id 进 system 末尾，题序按 seed {SHUFFLE_SEED_BASE}+k 打乱")
     for k in range(1, args.repeat + 1):
         if args.repeat > 1 or args.agent == "both":
             print(f"\n======== {agent} 第 {k}/{args.repeat} 次 ========")
-        results = runner.run_all(cases, verbose=True)
+        if repeat_shuffled:
+            runner.run_suffix = f"\n\nrun-id: {k}"
+            cases_k = list(cases)
+            random.Random(SHUFFLE_SEED_BASE + k).shuffle(cases_k)
+        else:
+            runner.run_suffix = None
+            cases_k = cases
+        results = runner.run_all(cases_k, verbose=True)
         report = EvalReport(results, meta={**meta, "run": k, "repeat": args.repeat},
                             datasets=runner.datasets, baseline=getattr(args, "baseline_fp", None))
         report.print_summary()

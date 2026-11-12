@@ -65,6 +65,7 @@ def analyze(
     today=None,
     dataset_notes=None,
     accepted_pairs=None,
+    run_suffix: str | None = None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -96,6 +97,9 @@ def analyze(
              （后端从 dataset_notes 表读；评测可直接传）。记忆模式不是 off 时生效：指标按检索取前 5 条、规则全部注入，
              上限 2000 token；进了 prompt 的记在 res.memory_notes（[{name, sha}]）。body 只是文本，永不执行。
     accepted_pairs：用户 👍 过的参考写法（M9，批 4b）：[{question, code}, ...]，后端每轮从库里现算。
+    run_suffix：追加在 system prompt 最末尾的无语义文本（E3：评测 --repeat 传 "\\n\\nrun-id: <k>" 破缓存）。
+             只透传给 react（workflow 无单一 system prompt，忽略）；指纹渲染不传它，不影响可比性判定。
+             None/空串时 prompt 与之前逐字节一致。
              只在 full 档、只给 ReAct；检索取前 3 条，只给问题和代码。
     """
     res = None
@@ -104,7 +108,8 @@ def analyze(
                              recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
                              trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today,
-                             dataset_notes=dataset_notes, accepted_pairs=accepted_pairs):
+                             dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
+                             run_suffix=run_suffix):
         if ev.type == "done":
             res = ev.result
     return res
@@ -133,6 +138,7 @@ def analyze_stream(
     today=None,
     dataset_notes=None,
     accepted_pairs=None,
+    run_suffix: str | None = None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -173,7 +179,8 @@ def analyze_stream(
                  chat_model=chat_model, max_attempts=max_attempts, exec_timeout=exec_timeout,
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                  memory=memory, thread_id=thread_id, history=history, encoding=encoding,
-                 rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs)
+                 rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
+                 run_suffix=run_suffix)
     try:
         for ev in inner:
             if cancelled():
@@ -202,7 +209,7 @@ def analyze_stream(
 
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
-         rewrite=None, today=None, dataset_notes=None, accepted_pairs=None):
+         rewrite=None, today=None, dataset_notes=None, accepted_pairs=None, run_suffix=None):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -252,7 +259,8 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
                       dataset, max_attempts, exec_timeout, mc.state_block, metrics_block)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
-                   recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block)
+                   recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block,
+                   run_suffix=run_suffix)
 
 
 def _memory_blocks(res, agent, question, dataset_notes, accepted_pairs):
@@ -498,7 +506,7 @@ def _final_text(messages):
 
 def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                recursion_limit, exec_timeout, memory, thread_id, history=None, mc=None,
-               metrics_block="", pairs_block=""):
+               metrics_block="", pairs_block="", run_suffix=None):
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     from langgraph.errors import GraphRecursionError
 
@@ -527,7 +535,8 @@ def _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, data
                                   **({"memory_block": mc.system_block} if mc.system_block else {}),
                                   **({"extra_tools": extra} if (extra := mc.tools()) else {}),
                                   **({"metrics_block": metrics_block} if metrics_block else {}),
-                                  **({"pairs_block": pairs_block} if pairs_block else {}))
+                                  **({"pairs_block": pairs_block} if pairs_block else {}),
+                                  **({"run_suffix": run_suffix} if run_suffix else {}))
         messages, rec_err = [], None
         res.error = res.error_kind = res.llm_kind = None
         out = {}

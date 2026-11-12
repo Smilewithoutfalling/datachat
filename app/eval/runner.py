@@ -73,12 +73,16 @@ def _merge_usage(usages: list):
 class EvalRunner:
     def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
                  model_factory=None, use_dictionary: bool = True, max_attempts: int = 3,
-                 datasets: dict | None = None, memory_mode: str | None = None):
+                 datasets: dict | None = None, memory_mode: str | None = None,
+                 run_suffix: str | None = None):
         """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
         为 None 时用真实模型（llm_config 或环境变量）。
         阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。
         memory_mode（批 4 三档读数）：None = 不传，analyze 自己解析（env DATACHAT_MEMORY → off）；
-        显式传 "off"/"state"/"full" 时每题都用这一档 —— 三档对照必须显式，靠 env 容易串档。"""
+        显式传 "off"/"state"/"full" 时每题都用这一档 —— 三档对照必须显式，靠 env 容易串档。
+        run_suffix（E3）：追加到每题 system prompt 末尾的无语义文本。--repeat>1 时 run_eval.py
+        每轮设 "\\n\\nrun-id: <k>"（可写属性，见 run_eval 主循环），打破网关在 temperature 0 下的
+        响应缓存；单轮评测不传，prompt 与之前逐字节一致。只对 react 生效。"""
         self.datasets = dict(DATASETS if datasets is None else datasets)
         if df_path:
             self.datasets["sales"] = df_path
@@ -90,6 +94,7 @@ class EvalRunner:
         self.use_dictionary = use_dictionary
         self.max_attempts = max_attempts
         self.memory_mode = memory_mode
+        self.run_suffix = run_suffix
 
     def path_for(self, case: EvalCase) -> str:
         if case.dataset in self.datasets:
@@ -170,7 +175,9 @@ class EvalRunner:
                        # rewrite：只在该题显式要求时传 True。False 不显式传 None —— env
                        # DATACHAT_REWRITE=1 时普通题也走全局改写（R9：env 优先于参数，
                        # 跑改写对照要显式设 env，光靠用例字段不够）。
-                       rewrite=True if getattr(case, "rewrite", False) else None)
+                       rewrite=True if getattr(case, "rewrite", False) else None,
+                       # E3：--repeat 破缓存的无语义后缀；None 时不传，prompt 与之前逐字节一致
+                       run_suffix=self.run_suffix or None)
 
     @staticmethod
     def _turn_status(res, expect: str) -> str:
