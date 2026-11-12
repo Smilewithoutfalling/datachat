@@ -1507,12 +1507,12 @@
    "executed": true,
    "error_kind": null,
    "error": null,
-   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
-   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
-   "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
+   "result_text": "PAPER CRAFT , LITTLE BIRDIE（商品编码 23843）",
+   "code": "\n# 最终结果：实际卖出数量最多的商品\nresult = 'PAPER CRAFT , LITTLE BIRDIE（商品编码 23843）'\n",
    "attempts": 0,
-   "duration_s": 19.73,
-   "tokens": 8033,
+   "duration_s": 21.13,
+   "tokens": 8060,
    "auto_correct": false,
    "match": null,
    "warnings": [],
@@ -1571,8 +1571,8 @@
    "result_text": "PAPER CRAFT , LITTLE BIRDIE",
    "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
    "attempts": 0,
-   "duration_s": 16.61,
-   "tokens": 8001,
+   "duration_s": 17.55,
+   "tokens": 8013,
    "auto_correct": false,
    "match": null,
    "warnings": [],
@@ -1631,8 +1631,8 @@
    "result_text": "PAPER CRAFT , LITTLE BIRDIE",
    "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
    "attempts": 0,
-   "duration_s": 16.99,
-   "tokens": 8010,
+   "duration_s": 17.97,
+   "tokens": 8099,
    "auto_correct": false,
    "match": null,
    "warnings": [],
@@ -1687,12 +1687,12 @@
    "executed": true,
    "error_kind": null,
    "error": null,
-   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
-   "result_text": "PAPER CRAFT , LITTLE BIRDIE",
-   "code": "\n# \"实际卖出数量\"：只统计数量为正（实际销售）的记录，排除退货（负值）\nsales = df[df['数量'] > 0]\ntop = sales.groupby(['商品编码', '商品描述'])['数量'].sum().sort_values(ascending=False)\nprint(top.head(10))\n\n# 取出最多的商品\ntop_code, top_desc = top.index[0]\nresult = top_desc\n",
+   "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），排除退货（负数量）后的实际卖出数量为 **80,995** 件，远超第二名 MEDIUM CERAMIC TOP STORAGE JAR（78,033 件）。",
+   "result_text": "('23843', 'PAPER CRAFT , LITTLE BIRDIE')",
+   "code": "\n# \"实际卖出数量\"：排除退货（负值），只对正数量求和\nsales = df[df['数量'] > 0]\ntop = sales.groupby(['商品编码', '商品描述'])['数量'].sum().sort_values(ascending=False)\nprint(top.head(10))\n\n# 取出最多的商品\nresult = top.index[0]  # (商品编码, 商品描述)\n",
    "attempts": 0,
-   "duration_s": 13.04,
-   "tokens": 5740,
+   "duration_s": 13.84,
+   "tokens": 5781,
    "auto_correct": false,
    "match": null,
    "warnings": [],
@@ -1717,10 +1717,260 @@
   }
  ],
  "rerun_meta": {
-  "time": "2026-11-12T06:44:35",
+  "time": "2026-11-12T06:48:10",
   "profile": "m13r",
-  "git_sha": "b8170aa",
+  "git_sha": "942e73e",
   "sha_verified": true,
   "report_git_sha": "ec7c790"
- }
+ },
+ "rerun_history": [
+  {
+   "time": "2026-11-12T06:48:10",
+   "git_sha": "942e73e",
+   "id": "s09",
+   "replaced_attempts": [
+    {
+     "id": "s09",
+     "group": "single",
+     "category": "排序",
+     "dataset": "data/gate/retail/零售明细.csv",
+     "question": "实际卖出数量最多的商品是哪个？",
+     "expect_refusal": false,
+     "gold": {
+      "kind": "label",
+      "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+     },
+     "alts": [
+      {
+       "kind": "label",
+       "value": "22197",
+       "why": "按商品编码汇总（同一编码有多个描述）"
+      },
+      {
+       "kind": "label",
+       "value": "POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      },
+      {
+       "kind": "label",
+       "value": "SMALL POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      }
+     ],
+     "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+     "executed": true,
+     "error_kind": null,
+     "error": null,
+     "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
+     "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+     "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+     "attempts": 0,
+     "duration_s": 19.73,
+     "tokens": 8033,
+     "auto_correct": false,
+     "match": null,
+     "warnings": [],
+     "unverified_numbers": [],
+     "chart": {
+      "chart_calls": 0,
+      "used_plt": false,
+      "drew": false,
+      "options": 0,
+      "pngs": 0,
+      "chart_errors": [],
+      "chart_internal_errors": [],
+      "charts_discarded": 0
+     },
+     "human_correct": null,
+     "failure_class": null,
+     "reason": "",
+     "guessing": null,
+     "infra": null,
+     "attempt": 1,
+     "valid": false
+    },
+    {
+     "id": "s09",
+     "group": "single",
+     "category": "排序",
+     "dataset": "data/gate/retail/零售明细.csv",
+     "question": "实际卖出数量最多的商品是哪个？",
+     "expect_refusal": false,
+     "gold": {
+      "kind": "label",
+      "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+     },
+     "alts": [
+      {
+       "kind": "label",
+       "value": "22197",
+       "why": "按商品编码汇总（同一编码有多个描述）"
+      },
+      {
+       "kind": "label",
+       "value": "POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      },
+      {
+       "kind": "label",
+       "value": "SMALL POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      }
+     ],
+     "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+     "executed": true,
+     "error_kind": null,
+     "error": null,
+     "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。排名第二的是 MEDIUM CERAMIC TOP STORAGE JAR（78,033 件）。",
+     "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+     "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+     "attempts": 0,
+     "duration_s": 16.61,
+     "tokens": 8001,
+     "auto_correct": false,
+     "match": null,
+     "warnings": [],
+     "unverified_numbers": [],
+     "chart": {
+      "chart_calls": 0,
+      "used_plt": false,
+      "drew": false,
+      "options": 0,
+      "pngs": 0,
+      "chart_errors": [],
+      "chart_internal_errors": [],
+      "charts_discarded": 0
+     },
+     "human_correct": null,
+     "failure_class": null,
+     "reason": "",
+     "guessing": null,
+     "infra": null,
+     "attempt": 2,
+     "valid": false
+    },
+    {
+     "id": "s09",
+     "group": "single",
+     "category": "排序",
+     "dataset": "data/gate/retail/零售明细.csv",
+     "question": "实际卖出数量最多的商品是哪个？",
+     "expect_refusal": false,
+     "gold": {
+      "kind": "label",
+      "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+     },
+     "alts": [
+      {
+       "kind": "label",
+       "value": "22197",
+       "why": "按商品编码汇总（同一编码有多个描述）"
+      },
+      {
+       "kind": "label",
+       "value": "POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      },
+      {
+       "kind": "label",
+       "value": "SMALL POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      }
+     ],
+     "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+     "executed": true,
+     "error_kind": null,
+     "error": null,
+     "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），其实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。排名第二的是 MEDIUM CERAMIC TOP STORAGE JAR（78,033 件）。",
+     "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+     "code": "\nresult = 'PAPER CRAFT , LITTLE BIRDIE'\n",
+     "attempts": 0,
+     "duration_s": 16.99,
+     "tokens": 8010,
+     "auto_correct": false,
+     "match": null,
+     "warnings": [],
+     "unverified_numbers": [],
+     "chart": {
+      "chart_calls": 0,
+      "used_plt": false,
+      "drew": false,
+      "options": 0,
+      "pngs": 0,
+      "chart_errors": [],
+      "chart_internal_errors": [],
+      "charts_discarded": 0
+     },
+     "human_correct": null,
+     "failure_class": null,
+     "reason": "",
+     "guessing": null,
+     "infra": null,
+     "attempt": 3,
+     "valid": false
+    },
+    {
+     "id": "s09",
+     "group": "single",
+     "category": "排序",
+     "dataset": "data/gate/retail/零售明细.csv",
+     "question": "实际卖出数量最多的商品是哪个？",
+     "expect_refusal": false,
+     "gold": {
+      "kind": "label",
+      "value": "WORLD WAR 2 GLIDERS ASSTD DESIGNS"
+     },
+     "alts": [
+      {
+       "kind": "label",
+       "value": "22197",
+       "why": "按商品编码汇总（同一编码有多个描述）"
+      },
+      {
+       "kind": "label",
+       "value": "POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      },
+      {
+       "kind": "label",
+       "value": "SMALL POPCORN HOLDER",
+       "why": "按商品编码汇总后报该编码的描述"
+      }
+     ],
+     "note": "净数量（取消单冲减）。陷阱：'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，只看正数量会错选它",
+     "executed": true,
+     "error_kind": null,
+     "error": null,
+     "answer": "实际卖出数量最多的商品是 **PAPER CRAFT , LITTLE BIRDIE**（商品编码 23843），实际销售数量为 **80,995** 件。\n\n> 说明：这里\"实际卖出数量\"排除了退货记录（数量为负的行），仅统计数量为正的销售记录后按商品汇总。",
+     "result_text": "PAPER CRAFT , LITTLE BIRDIE",
+     "code": "\n# \"实际卖出数量\"：只统计数量为正（实际销售）的记录，排除退货（负值）\nsales = df[df['数量'] > 0]\ntop = sales.groupby(['商品编码', '商品描述'])['数量'].sum().sort_values(ascending=False)\nprint(top.head(10))\n\n# 取出最多的商品\ntop_code, top_desc = top.index[0]\nresult = top_desc\n",
+     "attempts": 0,
+     "duration_s": 13.04,
+     "tokens": 5740,
+     "auto_correct": false,
+     "match": null,
+     "warnings": [],
+     "unverified_numbers": [],
+     "chart": {
+      "chart_calls": 0,
+      "used_plt": false,
+      "drew": false,
+      "options": 0,
+      "pngs": 0,
+      "chart_errors": [],
+      "chart_internal_errors": [],
+      "charts_discarded": 0
+     },
+     "human_correct": null,
+     "failure_class": null,
+     "reason": "",
+     "guessing": null,
+     "infra": null,
+     "attempt": 4,
+     "valid": false
+    }
+   ],
+   "reason": "修 rerun job 的退出码处理（bash -e 会先杀脚本），用同一份报告重跑验证"
+  }
+ ]
 }
