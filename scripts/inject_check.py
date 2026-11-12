@@ -222,7 +222,13 @@ def _sse_answer(client, base_url: str, token: str, session_id: str, question: st
                 data = line[6:]
             elif line == "" and ev_type is not None:
                 if ev_type == "done":
-                    result = (json.loads(data) or {}).get("result") or {}
+                    # 线上的 done 帧是 app/server/app.py 的
+                    #   {"type": "done", ..., "data": {"result": {...}}}
+                    # —— result 在 data 里面，不在顶层。取错层级会拿到空 dict，
+                    # 于是 ok 缺失被当 False、答案和 model 全空（2026-11-12 两次 inject 档就是这么废的）。
+                    payload = json.loads(data) or {}
+                    result = ((payload.get("data") or {}).get("result")
+                              or payload.get("result") or {})
                     answer = result.get("answer") or result.get("error") or ""
                     status = "ok" if result.get("ok") else "error"
                     meta = (result.get("meta") or {}).get("model") or ""

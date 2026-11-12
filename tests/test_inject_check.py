@@ -225,8 +225,12 @@ def _serve_sse(body: bytes):
 
 
 def _done_body(result: dict) -> bytes:
-    return ('id: 0\nevent: plan\ndata: {"text":"看数据"}\n\n'
-            f'id: 1\nevent: done\ndata: {json.dumps({"result": result}, ensure_ascii=False)}\n\n').encode()
+    """与 app/server/app.py 的 stream() 同形：事件是 {"type","trace_id","seq","ts","data"}，
+    AnalysisResult 挂在 data.result 下面（不是顶层）。"""
+    ev = {"type": "done", "trace_id": "t", "seq": 1, "ts": 0.0,
+          "data": {"result": result}}
+    return ('id: 0\nevent: plan\ndata: {"type": "plan", "data": {"text": "看数据"}}\n\n'
+            f'id: 1\nevent: done\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n').encode()
 
 
 def test_sse_answer_returns_done_result():
@@ -308,3 +312,13 @@ def test_tail_returns_last_lines(tmp_path):
     out = ic._tail(str(log), 5)
     assert out.splitlines() == ["295", "296", "297", "298", "299"]
     assert ic._tail(None) == ""
+
+
+def test_server_wire_shape_is_data_result():
+    """钉住线上形状：result 在 data 下面。解析器写成顶层 .get("result") 时，
+    9 条探针会全被判成 unknown（2026-11-12 两次 inject 档的实况）。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    events = open(os.path.join(root, "app", "core", "events.py"), encoding="utf-8").read()
+    server = open(os.path.join(root, "app", "server", "app.py"), encoding="utf-8").read()
+    assert 'd["data"]["result"] = self.result.to_record()' in events
+    assert 'd["data"]["result"]["meta"] = meta' in server
