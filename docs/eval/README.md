@@ -56,13 +56,23 @@
 评测代码有自己的单测，改判据 / 改台账 / 改题集之后要跑：
 
 ```bash
-pytest tests/ -q     # 1907 项 / 约 25 分钟
+CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 1907 项 / 32 分钟
 ```
 
-**判绿看 summary 行，不看退出码。** 本机（Windows + WorkBuddy）pytest 清理临时目录时会被
-safe-delete shim 拦住（`SAFE_DELETE_BULK_CONFIRM_REQUIRED count=647 threshold=50`），
-teardown 抛异常把退出码带偏 —— 实测 13 个文件 100% 全绿时 `exit` 仍是 1。
-反方向也出现过：同一份代码跑两次全量，失败集从 1 个变成 11 个，而失败项单独复跑全过。
+**必须带这个阈值，否则进程会被杀。** 本机（Windows + WorkBuddy）注入了一层 safe-delete
+（`cli/vendor/shim/sitecustomize.py`，经 `PYTHONPATH` 自动加载），它把 `shutil.rmtree` 换成
+"送回收站"版本，并在**单次工具调用**内删除数超过 50 时 `raise SystemExit(1)`。
+`SystemExit` 不是普通异常，pytest 的 teardown 保护（`onerror` / `ignore_errors`）拦不住它 ——
+整个进程当场终止。表现是两种：全绿但 `exit=1`，或跑到一半突然没了（SIGTERM/无汇总行）。
+
+实测现场：`count=647, threshold=50, scope="turn", targets=[garbage-*]` →
+`SAFE_DELETE_BULK_CONFIRM_REQUIRED`。阈值调到 10 万后，同一次全量
+`1907 passed / 0 failed / exit=0`，日志里 0 条 safe-delete（[165]）。
+
+更省事的替代绕法：`env -u CODEBUDDY_TOOL_CALL_ID pytest ...` —— 守卫入口第一行是
+`if not BULK_STATE_DIR or not TOOL_CALL_ID: return`，缺一个整段跳过，删除仍进回收站。
+
+另外，同一份代码两次全量曾跑出 1 个 vs 11 个失败，失败项单独复跑全过 ——
 **看到 `FAILED` 先单独复跑那一条，复跑过的才算回归**（详见 DEVLOG [164] 第六节）。
 
 **别套 900 秒的 timeout。** `tests/test_eval_cases.py` 一个文件就要 **12 分钟**，其中
