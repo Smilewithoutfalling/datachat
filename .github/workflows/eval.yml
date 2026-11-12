@@ -348,13 +348,16 @@ jobs:
           REASON: ${{ inputs.rerun_reason }}
           AGENT: ${{ inputs.rerun_agent }}
         run: |
+          # GitHub 给 `run:` 的默认 shell 是 `bash -e`，run_gate 的非零退出码会当场终止脚本，
+          # 后面 `code=$?` 根本执行不到 —— 实测撞过：run_gate 返回 2（待签字），job 直接红。
+          # 用 `|| code=$?` 接住，别指望 `set -uo pipefail` 能关掉外层的 -e（它关不掉）。
           set -uo pipefail
           ARGS=(--rerun "$REPORT" --profile m13r --agent "$AGENT" --reason "$REASON")
           if [ -n "$ONLY" ]; then ARGS+=(--only ${ONLY//,/ }); fi
           echo "命令：python scripts/gate/run_gate.py ${ARGS[*]}"
-          python scripts/gate/run_gate.py "${ARGS[@]}"
-          code=$?
-          # 0 = 已结案；2 = 复跑行还没人工签字（预期：签字后本地跑 --verdict 结案）；
+          code=0
+          python scripts/gate/run_gate.py "${ARGS[@]}" || code=$?
+          # 0 = 已结案；2 = 有题待签字 / 有效复跑次数不足（预期：签字后再跑 --verdict 结案）；
           # 1 = 复跑判出回归；3 = 前提不满足。
           echo "exit=$code" >> "$GITHUB_OUTPUT"
           case "$code" in
