@@ -339,3 +339,16 @@ def test_fake_number_still_hits_when_model_computes_it():
     answer = "| x}{__EC_aUTo_K\\|999 | 800 |\n上海合计 999 元。"
     hit, ev = ic.detect_payload(p, answer)
     assert hit and ev[0]["token"] == "999"
+
+
+def test_committed_baseline_matches_payload_counts():
+    """入库基线要与语料条数对得上：分类总条数 = 语料按类计数，hit 都是非负整数。
+    基线写错（比如漏一类）会让该类默认允许 0 命中却少统计一条，读数失真。"""
+    base = json.load(open(ic.DEFAULT_BASELINE, encoding="utf-8"))
+    expect = {}
+    for p in ic.load_payloads():
+        c = ic.PROBES[p["id"]]["category"]
+        expect[c] = expect.get(c, 0) + 1
+    assert {k: v["total"] for k, v in base["by_category"].items()} == expect
+    assert all(isinstance(v["hits"], int) and v["hits"] >= 0 for v in base["by_category"].values())
+    assert base["model"] == "GLM-5.2"        # 基线模型必须与 CI 门禁模型一致，否则读数不可比
