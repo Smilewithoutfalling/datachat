@@ -8594,3 +8594,77 @@ pytest 的 `garbage-*` 也在 `%TEMP%` 下，按 `_is_under_os_tmp_dir` 应该 b
 
 - `docs/eval/README.md`：全量命令改成带阈值，写清 `SystemExit` 机制与两种绕法
 - 更正 `[164]` 第六节的表述（"teardown 抛异常" → "进程被终止"）
+
+## [166] 推送通道恢复：`push` 挂的是 schannel 吊销检查，`--dry-run` 不能当证据（2026-11-12）
+
+`[164]`/`[165]` 那三个 commit 是走 Git Data API 推的（方法见 `[113]` 同名小节）。今天重试普通
+`git push`，把之前"时通时断"的成因查清了。
+
+### 一、三个出口的实测
+
+| 出口 | `curl https://github.com/` | 说明 |
+|---|---|---|
+| `127.0.0.1:57360`（WorkBuddy 注入的 `HTTPS_PROXY`） | `502` after CONNECT | 放行 `api.github.com`，不放行 `github.com:443` |
+| `127.0.0.1:7890`（本机 Clash，PID 4648 在听） | `schannel: 0x80092013` | CONNECT 通了，卡在证书吊销检查 |
+| 直连（`--noproxy '*'`） | 21s 超时 | 不通 |
+
+同一台机器上 `curl -x 7890 --ssl-no-revoke` → `200`。所以 7890 是通的，失败项就是**吊销检查**：
+`0x80092013` 是 Windows 的 `CRYPT_E_REVOCATION_OFFLINE` —— 拿不到证书吊销列表就判失败，
+而不是"代理不通"。区分这两者决定了完全不同的处理方式。
+
+顺带记：`[113]` 写的 `57967`、`[158]` 写的 `54077`、今天的 `57360`，三个端口都不同 ——
+WorkBuddy 每次启动换一个，抄旧端口没有意义，要看 `env | grep -i proxy` 的当场值。
+
+### 二、`fetch` 通、`push --dry-run` 报 up-to-date、真 `push` 挂
+
+```bash
+git -c http.proxy=http://127.0.0.1:7890 fetch origin master          # 成功：ef7a30c..c321eec
+git -c http.proxy=http://127.0.0.1:7890 push --dry-run origin master  # Everything up-to-date, exit 0
+git push origin HEAD:refs/heads/__push_probe__                        # schannel: failed to receive handshake, exit 128
+```
+
+**`--dry-run` 在 up-to-date 时会提前返回，没有真发 `git-receive-pack` 的 POST**，所以它绿了
+不代表写通道能用。要验证写，只能真推一个 ref —— 用临时分支 `HEAD:refs/heads/__push_probe__`
+推上去再 `--delete`，远端不留残留。
+
+`fetch` 那次能过，说明吊销检查不是每次都触发（CRL 有缓存窗口），**同一个后端会时通时断** ——
+这就是 `[113]` 那节"`git push` 和 `git fetch` 时通时断、`gh api` 反而稳定"的成因。
+
+### 三、解法（只写仓库 local config）
+
+```bash
+git config http.proxy http://127.0.0.1:7890
+git config http.schannelCheckRevoke false
+```
+
+- `http.proxy` 的优先级高于环境变量 `HTTPS_PROXY`，不用每次 `env -u` 一长串。
+- `~/.gitconfig` 的 `http.*` 现在是空的（`[113]` 记的那条 `http.https://github.com.proxy`
+  已不在），**本次没动全局**。
+- `schannelCheckRevoke=false` 的代价是不再判证书是否被吊销。本机经代理访问 github.com
+  这一个场景接受，但它不该进全局配置。
+
+### 四、对齐时发现的副作用：署名换了
+
+Data API 造 commit 时 author/committer 取自 token 账号，于是远端三个 commit 的作者是
+
+```
+H <91455578+Smilewithoutfalling@users.noreply.github.com>
+```
+
+本地原链是 `Smile <2685544252@qq.com>`。内容逐字节相同（tree 哈希一致），**署名换了**。
+`git reset --hard origin/master` 之后本地也变成前者。要统一只能重写历史 + force push，
+不值得，记在这里当已知状态。
+
+对齐时 `git diff HEAD origin/master` 只有一处：bot 的
+`docs/eval/gate_20261112_012832_react.json`（1363 行），无冲突。
+
+### 五、下次的最短路径
+
+```bash
+git fetch origin master
+git push origin <branch>        # local config 已配好，不需要额外参数
+```
+
+如果又见 `schannel: failed to receive handshake`，先用
+`curl -x <port> --ssl-no-revoke https://github.com/` 分词：`200` 是 CRL（本节的解），
+`502` 是代理不放行（换端口，先看 `env | grep -i proxy`）。
