@@ -8668,3 +8668,83 @@ git push origin <branch>        # local config 已配好，不需要额外参数
 如果又见 `schannel: failed to receive handshake`，先用
 `curl -x <port> --ssl-no-revoke https://github.com/` 分词：`200` 是 CRL（本节的解），
 `502` 是代理不放行（换端口，先看 `env | grep -i proxy`）。
+
+## [167] nightly #24 人工判定 24/25：s09 口径错，但"回归"定不了性（2026-11-12）
+
+上一轮 `[165]` 收尾时 `[164]` 里说"nightly 闸门 24/25，s09 掉了，判抽样波动"。那是**推断**，
+依据是"本次改动没碰 gate 路径"。今天补上了人工判定，也发现定性这一步卡在环境上。
+
+### 一、跑批本身是干净的
+
+CI run `43134018229`（workflow eval #24，schedule 触发，sha `ef7a30c`）：
+
+```
+n=25  execution_success=25  auto_correct=24  耗时 8 分钟
+model=GLM-5.2  base_url_host=agentrs.jd.com  temperature=0.0
+```
+
+25 题全部执行成功、无 infra 故障。报告由 bot 回流成 `docs/eval/gate_20261112_012832_react.json`，
+**`human_correct` 全是 null** —— 按报告自己的 note，`auto_correct` 只是比较器参考，结论必须以人工为准。
+所以"评测完成"这一步今天才补上。
+
+### 二、逐题核完：24/25，唯一错 s09（class 3 口径歧义）
+
+25 题按 gold vs `result_text` 逐条对（series 类的 m01/m03 拿 `docs/gate/answers.json` 的
+index/values 逐项比，m01 的 27 个州、m03 的 23 个州全部对上）。只有 s09 错：
+
+```
+问：实际卖出数量最多的商品是哪个？
+gold：WORLD WAR 2 GLIDERS ASSTD DESIGNS
+模型：PAPER CRAFT , LITTLE BIRDIE（80,995 件）
+代码：sales = df[df['数量'] > 0]           # 先过滤正数，-80,995 的整单取消被整体排除
+```
+
+题面 note 已经把这个陷阱写死了：「'PAPER CRAFT , LITTLE BIRDIE' 有 80995 件的单子被整单取消，
+只看正数量会错选它」。模型自己在 answer 里声明"仅统计数量为正的记录，排除退货"——
+是主动选了另一个口径，不是算错，所以填 `failure_class=3`，不是 4。
+
+### 三、m13 判"有回归"，但这个结论不能直接用
+
+```
+single 14/15   multi 10/10   failures 1   failure_distribution {"3": 1}
+single_regressions ["s09"]   single_unexpected_pass ["s02"]
+regression_verdict "有回归：先看是否与本次改动有关，再下结论"
+```
+
+14/15 刚好等于 `single_min`，但因为错的是**名单外的题**（react 的 `allowed_fail` 只有 `["s02"]`），
+按"看题号不看总分"的预登记规则记回归。这是设计如此，不是 bug。
+
+**历史数据说这是波动**：react 档 s09 在 13 份报告里答对 12 次，今天第一次错：
+
+| 日期 | react 档 s09 |
+|---|---|
+| 10-12 / 10-13 / 10-14（5 份） | 全对 |
+| 11-10（3 份） | 全对 |
+| 11-11（2 份） | 全对 |
+| 11-12 | **错** |
+
+但 m13 的规则不认"历史命中率"，只认 m13r 的**定向复跑 3 次**（有效复跑人工全签 true 才记波动）。
+这一步做不了，见下。
+
+### 四、复跑无处可跑（这次真正的卡点）
+
+- **本地**：`.env` 的 `DEEPSEEK_BASE_URL=https://grg-aikits-test.grgbanking.com/v1`，
+  `curl` 直接 `Could not resolve host` —— 公司内网域名，本机不在内网（`[158]` 记的同一现象）。
+- **CI**：`eval.yml` 的 nightly job 只有 `python scripts/gate/run_gate.py --agent react` 一条命令，
+  整批 25 题，没有 `--rerun` / `--only` 的入口。`workflow_dispatch` 也只能选 tier，传不进题号。
+
+所以当前状态是：**读数有了、判定有了、定性缺一步**。三条出路，都要 H 拍：
+
+1. 等明天 03:00 的 nightly 自然再跑一次。s09 若答对，等于拿到一次"波动"旁证，但**不是 m13r 的
+   合规复跑**（不在同一份报告的 reruns 段里，没有 `rerun_history`）。
+2. 给 `eval.yml` 加一个 `rerun_target` 输入（题号 + 报告路径），让 CI 能跑 `--rerun --only s09`。
+   这是新增能力，按项目规矩要先开 issue。
+3. 就这么留着，把"有回归"当未定性状态记着，不动门槛。
+
+**不能做的是把 s09 塞进 react 的 `allowed_fail`** —— 那等于用一次失败去改预登记名单，
+正好是 m13 设计要防的事（`[49]` 定的规矩）。要动名单，得先有"它反复错"的数据。
+
+### 五、顺带：s02 连续两次答对，但名单不动
+
+`s02` 在 11-11 01:26 和 11-12 01:28 两次都判 true（之前是 9 连错）。
+按 `[158]` 的处理，`unexpected_pass` 只记录不摘名单；摘名单要等它稳定更多次。
