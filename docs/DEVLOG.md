@@ -8542,9 +8542,19 @@ BASH_FUNC_rm%%             = () { "${CODEBUDDY_SAFE_DELETE_BIN_DIR}/rm" "$@" }
 ```
 
 `_exit_bulk_guard_control` 的实现只有六行，`finally` 里就是 `raise SystemExit(1)`
-（`sitecustomize.py:861`）。这就是为什么 `[164]` 那次"13 个文件 100% 全绿、exit 仍是 1"，
-以及第二次全量跑到一半出现 11 个失败 —— **不是测试失败，是进程在 teardown 清理
-`%TEMP%\pytest-of-HJH\garbage-*`（647 个文件）时被杀了**。
+（`sitecustomize.py:861`）。
+
+**它解释的是哪一次，要说准**（我第一版把两次混成一个原因，错了，这里按日志重核）：
+
+| 现场 | 汇总行 | `safe-delete` 条数 | 真实原因 |
+|---|---|---|---|
+| `t_repro.log`（13 文件串行） | **无**，`[100%]` 后直接接报错 | **1** | safe-delete 杀进程 |
+| `t_all2.log`（第二次全量） | `11 failed, 1896 passed, 28:16` | **0** | 跨用例状态污染，**真失败** |
+
+区别在汇总行：被 `SystemExit` 终止的进程跑不到 `pytest` 打印 summary 那一步，所以
+日志停在 `[100%]` 加一行 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`；而有 summary 的那次
+说明进程正常结束，11 个 `FAILED` 是真失败（那批失败项单独复跑又全过，属状态污染，
+与本条无关）。**判据：日志里搜 `safe-delete`，有就是被杀，没有就是真结果。**
 
 ### 三、绕法与验证
 
