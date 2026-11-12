@@ -51,6 +51,39 @@
 （`runner.expected_all` 只读 `ground_truth`）。它现在只起"逼出题人想一遍末轮能否独立回答"的作用，
 判分不用。删它会动 A 组指纹，留到下次换尺子时一起清。
 
+## 怎么验这套资产本身
+
+评测代码有自己的单测，改判据 / 改台账 / 改题集之后要跑：
+
+```bash
+pytest tests/ -q     # 1907 项 / 约 25 分钟
+```
+
+**判绿看 summary 行，不看退出码。** 本机（Windows + WorkBuddy）pytest 清理临时目录时会被
+safe-delete shim 拦住（`SAFE_DELETE_BULK_CONFIRM_REQUIRED count=647 threshold=50`），
+teardown 抛异常把退出码带偏 —— 实测 13 个文件 100% 全绿时 `exit` 仍是 1。
+反方向也出现过：同一份代码跑两次全量，失败集从 1 个变成 11 个，而失败项单独复跑全过。
+**看到 `FAILED` 先单独复跑那一条，复跑过的才算回归**（详见 DEVLOG [164] 第六节）。
+
+**别套 900 秒的 timeout。** `tests/test_eval_cases.py` 一个文件就要 **12 分钟**，其中
+`test_oracle_pipeline_all_correct[react]` 350.9s、`[workflow]` 336.7s —— 各跑一遍 202 题的
+完整 oracle 管线。套 900 秒去卡它几乎必然撞线，而且撞线时后面的文件还没开始跑，
+看起来像"卡死"。只想验改动面时按范围挑：
+
+| 改了什么 | 跑什么 | 规模 |
+|---|---|---|
+| `baselines.json` / `eval_ledger.py` | `test_ledger.py test_fingerprint.py test_replay.py test_report_adapter.py test_rescore_ledger.py test_tier_check.py` | 115 项 / 14s |
+| `app/eval/comparator.py` | `test_comparator.py` | — |
+| 题集 `app/eval/cases*.py` | `test_eval_cases.py` + `test_multi_cases.py test_memory_cases.py` | 12 分钟起 |
+| `app/eval/runner.py` | `test_eval_runner.py test_multi_cases.py test_memory_cases.py test_v2d.py` | 约 1 分钟 |
+
+改台账之后**必须复核 `code_sha12` 没变**（`baselines.json` / `LEDGER.md` 不在结果指纹覆盖范围内，
+但这一条要验，否则"修个字段"就把刚立的基线搞失效了）：
+
+```bash
+python -c "import sys;sys.path.insert(0,'.');from app.eval.fingerprint import code_fingerprint;print(code_fingerprint()['affects_results_sha256'])"
+```
+
 ## 阶段 7 的留出集
 
 `roadmap/phase7-accuracy.md` 的 H1（40 题新留出集）一件都没做。它的消费方是 A 系列改进，

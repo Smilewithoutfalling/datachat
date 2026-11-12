@@ -8367,3 +8367,135 @@ result = int((m['city'] == '广州').sum())
 - `eval_ledger.py`：`n < 10` 不再一律当调试 —— 基线声明过的 `(evalset, 题数)` 组合进趋势表
   （否则 7 题的记忆片整片掉进"单题调试"）
 - `tests/test_eval_runner.py` +3、`tests/test_multi_cases.py` +1
+
+## [164] 全量单测第一次跑完：1906/1，唯一失败是我自己写基线时漏的字段（2026-11-12）
+
+`eval-v6` 立完之后，全量单测一直没跑通过一次 —— 每次都在 `test_eval_cases.py` 上撞 timeout
+被 kill，于是「整套绿」这件事只有分文件的证据，没有一次性的。今天把它跑完了。
+
+### 一、耗时结构（25:14 / 1907 项）
+
+| 文件 | 项数 | 耗时 | 占比 |
+|---|---|---|---|
+| `tests/` 全量 | 1907 | **1514s** | — |
+| `test_eval_cases.py` | 230 | **707s** | 47% |
+| ↳ `test_oracle_pipeline_all_correct[react]` | 1 | 350.9s | — |
+| ↳ `test_oracle_pipeline_all_correct[workflow]` | 1 | 336.7s | — |
+| `test_v2d.py` | 20 | 33.8s | 2% |
+
+两个 oracle 管线用例各跑一遍 202 题的完整管线（`react` / `workflow` 两档），合起来 687 秒。
+**所以「跑不完」不是卡死，是这一个文件就要 12 分钟** —— 之前用 `timeout 900` 卡它，几乎必然撞线，
+而且撞线时它还串着另一个文件没开始。要跑它就别套 900 秒的壳。
+
+### 二、唯一的失败：`test_baselines_record_entry_sha12`
+
+```
+FAILED tests/test_ledger.py::test_baselines_record_entry_sha12
+```
+
+契约写在测试 docstring 里，两句话：
+
+1. 每个基线都要有 `entry_sha12`（缺口 4：否则「换没换 run_eval.py」只能单份报告里查）
+2. **补了 `entry_sha12` 就必须写 `entry_note`**，说清取自哪个 commit
+
+我昨天写 `eval-v6` 时第一条做到了、第二条漏了。根因很具体：我按「报告里有哪些指纹字段」
+抄了一遍（`code_sha12` / `evalset_sha12` / `rendered_set_sha12` / `entry_sha12` / `judge_sha12` /
+`registry_sha12`），**字段齐了，但没读这个字段的写入契约**。字段齐 ≠ 记录合格。
+
+### 三、修法
+
+补两条 note，并把 `commit` 从自由文本改成可核验的 sha：
+
+```json
+"commit": "7f23bf7",
+"commit_note": "跑批时该修复尚未提交（HEAD=46164dd、工作区带改动），事后落成 7f23bf7；code_sha12 由工作区内容算出，与该 sha 一一对应。",
+"entry_sha12": "dae60f515bfc",
+"entry_note": "取自 46164dd 的 run_eval.py（文件指纹 578c9a8163a0）。该文件最后一次改动是 4e97d87（`--no-fail` 开关），早于 46164dd，故四片共用这一个入口指纹。"
+```
+
+`entry_note` 里那句「早于 46164dd」不是措辞，是 `git merge-base --is-ancestor 4e97d87 46164dd`
+验过的 —— 否则四片共用同一个入口指纹这个结论就没有依据。
+
+原 `commit` 值 `"46164dd + recall 判据修复（同一工作区，见 DEVLOG [162]）"` 人能读懂，
+但脚本读不出 sha。换成 `7f23bf7` 之后，「这个基线对应哪个提交」从人肉可读变成机器可核验，
+而「跑批时还没提交」这件事挪进 `commit_note`，两个信息都不丢。
+
+### 四、验证（不是只看那一个用例）
+
+`baselines.json` 被 6 个测试文件读，只跑 `test_ledger.py` 不够：
+
+```
+tests/test_fingerprint.py tests/test_ledger.py tests/test_replay.py
+tests/test_report_adapter.py tests/test_rescore_ledger.py tests/test_tier_check.py
+→ 115 passed in 14.20s
+```
+
+`code_sha12` 复核仍为 `8e1aed9a0007` —— `baselines.json` 与 `LEDGER.md` 不在结果指纹覆盖范围内，
+改台账不会让 eval-v6 的读数作废。这一条必须验，否则「修个字段」就把刚立的基线搞失效。
+
+### 五、顺带核实的两件事，都不成立
+
+跑批读数里有 17/161 条 `result` 是字面量（`literal_text` 13 / `literal_scalar` 3 / `literal_container` 1），
+其中 15 条判对。看起来像「背答案也能过」，查完不是：
+
+- **6 道 refusal 题**（`ord_026` / `emp_021` / `emp_023` / `inv_021` / `neg_007` / `neg_008`）
+  的正确答案本身就是一句「数据里没有 XX 字段」，字面量是正确形态。
+- 剩下的抽查三道（`ts_010` / `ord_029` / `inv_007`）都是**先完整 groupby、再手写 `result = '值'`**，
+  是算完抄答案，不是凭空写。理论上仍有「算错但抄对」的空间（`biz_020` 旧批 run3 就是实证），
+  但 `provenance.py` 的 `result_origin` 已经把这件事单独记出来，`report.py:802` 会打印
+  「result 是字面量: N 条 — 只记录形态，不算错」。**观测项早就内建，不是新发现。**
+
+另一件：`ts_002` 的 `expected='2'` vs `actual='2024Q2'`、`ts_010` 的 `'5'` vs `'2024-05'` 判对，
+第一眼像子串误判。查 `comparator._scalar_eq` 走的不是子串，是**规则 11**：
+
+```python
+if _is_num(e) and not _is_num(a) and float(e).is_integer():
+    p = _period_part(a, int(e))     # 规则 11：月份/季度序号
+```
+
+`_period_part` 的 docstring 明写「期望是序号 n 时：x 能看作季度（Q2、2024Q2）→ 返回季度号；
+能看作月份（'2024-05'、'3月'）→ 返回月份号」。**这是设计意图，不是漏洞。** 撤回当时的判断。
+
+### 六、第二次跑出 11 个失败 —— 不可复现，别把它当回归，也别当它不存在
+
+修完 `entry_note` 之后又跑了一遍全量，结果不一样：
+
+| 次 | 结果 | 失败集 |
+|---|---|---|
+| 第一次 | 1906 passed / **1 failed** | `test_baselines_record_entry_sha12`（真失败，已修） |
+| 第二次 | 1896 passed / **11 failed** | `test_connections.py` ×10 + `test_gate.py` ×1 |
+
+两次之间**只改了 `docs/` 下三个文件**（`baselines.json` / `LEDGER.md` / `README.md`），代码零改动。
+而且 `test_connections.py` 单独跑 **31 项全过**；把 `test_connections.py` 之前那 12 个文件串起来跑，
+**13 个文件全过**；`.pytest_cache` 里残留的 4 个失败项重跑也全过。
+
+⇒ **这 11 个不是代码回归，是测试隔离问题。** 三次尝试都没复现，说明触发条件不在文件顺序上，
+更可能在跨进程的磁盘残留。
+
+现场有一行值得记的证据。串行复跑 13 个文件全绿时，日志尾部是：
+
+```
+....................................................  [100%]
+[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] count=647 threshold=50
+  targets=["\\?\C:\Users\HJH\AppData\Local\Temp\pytest-of-HJH\garbage-719f97cf-..."]
+```
+
+两件事：
+
+1. **pytest 的临时目录清理被 WorkBuddy 的 safe-delete shim 拦住了**（647 个文件 > 阈值 50）。
+   上一轮的 `pytest-of-HJH/garbage-*` 残留不会被删，下一轮某些用例可能读到它。
+   `test_connections.py` 里那批 `test_env_connection_test_and_probe_saved` /
+   `test_models_remote` / `test_models_timeout` 都在读写"连接配置 + 探测结果"这类**跨用例状态**，
+   正好是最容易被残留污染的形状。
+2. **本机 pytest 的退出码不可信**：那次 13 个文件 100% 全绿，`exit` 仍然是 **1** ——
+   safe-delete 在 teardown 阶段抛，把退出码带偏了。所以「`pytest` 返回 0」在本机不能当绿灯用，
+   得看 summary 行；反过来「返回 1」也不能直接当红灯，得看有没有 `FAILED`。
+
+**结论（写进 README 了）**：本机跑全量，判绿的标准是「summary 行是 `N passed` 且没有 `FAILED` 行」，
+不是退出码。要判回归，遇到失败项先单独复跑一次 —— 复跑过的才算数。
+
+### 七、产物
+
+- `docs/eval/baselines.json`：`eval-v6` 补 `commit_note` / `entry_note`，`commit` → `7f23bf7`
+- `docs/eval/LEDGER.md`：重新生成（仅生成时间行变化）
+- 提交 `ef7a30c`，远端 `master` 已对齐
