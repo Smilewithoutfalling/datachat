@@ -282,7 +282,12 @@ jobs:
     permissions:
       contents: write   # 复跑行要写回报告并提交
     steps:
+      # 复跑要读主报告那个 commit 的 tree 指纹（`_check_rerun_env` 比 app/scripts/tests/
+      # requirements 而不是比 sha），checkout 默认 fetch-depth: 1 会把那个对象留在远端 ——
+      # 实测撞过一次：`读不到 ec7c790 的 tree`，job 1 分钟就红。
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
