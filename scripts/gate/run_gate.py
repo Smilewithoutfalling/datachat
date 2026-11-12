@@ -499,12 +499,71 @@ def _current_env(agent: str, use_dictionary: bool) -> tuple:
     return cfg, {"git_sha": git_sha(), "agent": agent, "use_dictionary": use_dictionary, **run_metadata(cfg)}
 
 
+# 复跑要保证"跑的代码与出报告时是同一份"。用 commit sha 逐字比对做不到这件事 —— 见下。
+# 这里定义"评测代码"的边界：只有这些路径变了，复跑结果才不可比。docs/ 的变化（DEVLOG、
+# 报告本身、人工判定）不影响任何计算。
+EVAL_TREE_PATHS = ("app/", "scripts/", "tests/", "requirements.txt", "requirements-dev.txt")
+
+
+def _in_eval_path(path: str) -> bool:
+    return path in ("requirements.txt", "requirements-dev.txt") or path.startswith(("app/", "scripts/", "tests/"))
+
+
+def _eval_tree_sig(rev: str) -> str | None:
+    """某个 commit 上评测代码的 tree 指纹；rev 不存在或 git 不可用时返回 None。"""
+    from app.eval.report import _git
+    parts = []
+    for p in ("app", "scripts", "tests", "requirements.txt", "requirements-dev.txt"):
+        r = _git("rev-parse", f"{rev}:{p}")
+        if r.returncode != 0:
+            return None
+        parts.append(f"{p}={r.stdout.strip()}")
+    return "|".join(parts)
+
+
+def _dirty_eval_paths() -> list[str]:
+    """工作区里已跟踪、且落在评测代码边界内的改动（报告/日志不算）。"""
+    from app.eval.report import _git
+    r = _git("status", "--porcelain", "--untracked-files=no")
+    if r.returncode != 0:
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if _in_eval_path(path):
+            out.append(path)
+    return out
+
+
 def _check_rerun_env(data: dict, env: dict, require_sha: bool) -> bool:
-    """逐项比对主报告与本次环境，不一致就拒绝。返回 sha_verified。"""
+    """逐项比对主报告与本次环境，不一致就拒绝。返回 sha_verified。
+
+    **11-12 改（[167] 的死锁）**：commit sha 不再要求逐字相同，改比评测代码的 tree 指纹。
+    老写法下 A1 复跑永远跑不起来：人工判定必须改报告文件并提交，提交后 HEAD 就与报告里的
+    git_sha 不同 → 拒绝；回到报告那个 commit 跑 → human_correct 还是空的，_check_labels 拒绝；
+    带着判定结果回去又不提交 → 文件 dirty，sha 变 `<sha>-dirty` 还是拒绝。三条路全堵死。
+    tree 指纹保住的是复跑真正需要的东西：产生的数值能跟主报告比。
+    """
     diff = [f"{k}: 报告 {data.get(k)!r} ≠ 现在 {env.get(k)!r}" for k in RERUN_ENV_KEYS if data.get(k) != env.get(k)]
-    rep_sha, cur_sha = str(data.get("git_sha") or "unknown"), str(env.get("git_sha") or "unknown")
-    if rep_sha.rstrip("?") != cur_sha.rstrip("?") or "unknown" in (rep_sha, cur_sha):
-        diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}")
+    rep_sha = str(data.get("git_sha") or "unknown")
+    cur_sha = str(env.get("git_sha") or "unknown")
+    rep_base = rep_sha.rstrip("?").removesuffix("-dirty")
+    cur_base = cur_sha.rstrip("?").removesuffix("-dirty")
+    if "unknown" in (rep_base, cur_base):
+        diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}（有一侧读不到 commit）")
+    elif rep_base != cur_base:
+        a, b = _eval_tree_sig(rep_base), _eval_tree_sig(cur_base)
+        if a is None or b is None or a != b:
+            diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}，"
+                           f"且评测代码（app/ scripts/ tests/ requirements*.txt）不一致或读不到")
+    if cur_sha.endswith("-dirty"):
+        dirty = _dirty_eval_paths()
+        if dirty:
+            diff.insert(0, f"工作区有未提交的评测代码改动：{dirty}")
     if diff:
         _fail("复跑前提不一致，拒绝复跑：\n  " + "\n  ".join(diff))
     verified = not (rep_sha.endswith("?") or cur_sha.endswith("?"))
@@ -552,7 +611,12 @@ def rerun(path: str, profile: str, agent: str, use_dictionary: bool, only: list[
     answers = json.load(open(ANSWERS, encoding="utf-8"))["answers"]
     data["rerun_meta"] = {"time": datetime.now().isoformat(timespec="seconds"), "profile": profile,
                           "git_sha": env["git_sha"], "sha_verified": sha_verified,
-                          **({"git_sha_note": git_sha_note()} if not sha_verified else {})}
+                          **({"git_sha_note": git_sha_note()} if not sha_verified else {}),
+                          # 复跑跨了提交（典型场景：人工判定已入库，HEAD 已前移）：记下主报告出自哪个
+                          # commit，否则事后看报告只知道"复跑在 X 上跑的"，不知道"在比什么"。
+                          **({"report_git_sha": str(data.get("git_sha") or "")}
+                             if str(data.get("git_sha") or "").rstrip("?").removesuffix("-dirty")
+                             != str(env["git_sha"]).rstrip("?").removesuffix("-dirty") else {})}
     times, makeup = prof["rerun"]["times"], prof["rerun"]["max_makeup"]
     for qid in selected:
         old = [r for r in reruns if r["id"] == qid]

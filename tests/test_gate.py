@@ -731,6 +731,53 @@ def test_rerun_env_mismatch_refused(tmp_path, stub, key, value):
     assert _exit_code(e) == 3 and stub.calls == []
 
 
+@pytest.mark.parametrize("path,want", [("app/eval/runner.py", True), ("tests/test_gate.py", True),
+                                       ("scripts/gate/run_gate.py", True), ("requirements.txt", True),
+                                       ("requirements-dev.txt", True), ("docs/eval/gate_x.json", False),
+                                       ("README.md", False), ("appnotes/x.py", False)])
+def test_in_eval_path_boundary(path, want):
+    """复跑只对"评测代码"的改动敏感。前缀必须带 /，否则 appnotes/ 会被当成 app/。"""
+    assert run_gate._in_eval_path(path) is want
+
+
+def test_rerun_allows_docs_only_commit_drift(tmp_path, stub, monkeypatch):
+    """人工判定必然要改报告并提交，提交后 HEAD 前移但评测代码没变 —— 必须允许复跑。
+
+    [167] 实测过老写法的死锁：判定后 -> `ef7a30c` ≠ `ade3a86` -> exit 3；回报告那个 commit ->
+    human_correct 还是 null -> _check_labels 拒；带判定回去不提交 -> `-dirty` -> 还是 exit 3。
+    """
+    p = _rerun_report(tmp_path, {"s04"})
+    monkeypatch.setattr(run_gate, "_eval_tree_sig", lambda rev: "app=1|scripts=2|tests=3")
+    monkeypatch.setattr(run_gate, "_dirty_eval_paths", lambda: [])
+    stub.env["git_sha"] = "feedbee"
+    _rr(p, only=["s04"], reason="验证跨 docs 提交")
+    meta = _load_json(p)["rerun_meta"]
+    assert meta["sha_verified"] is True
+    assert meta["report_git_sha"] == ENV["git_sha"]      # 主报告出自 abc1234，复跑在 feedbee
+    assert stub.calls == ["s04"] * 3
+
+
+def test_rerun_refuses_when_eval_code_drifted(tmp_path, stub, monkeypatch):
+    """commit 不同**且**评测代码 tree 不同 = 真的换了代码，复跑数值不能跟主报告比。"""
+    p = _rerun_report(tmp_path, {"s04"})
+    monkeypatch.setattr(run_gate, "_eval_tree_sig", lambda rev: f"tree-of-{rev}")
+    stub.env["git_sha"] = "feedbee"
+    with pytest.raises(SystemExit) as e:
+        _rr(p)
+    assert _exit_code(e) == 3 and stub.calls == []
+
+
+def test_rerun_refuses_dirty_eval_code(tmp_path, stub, monkeypatch):
+    """报告被改（人工判定）不算数，但 app/scripts 有未提交改动就必须拒。"""
+    p = _rerun_report(tmp_path, {"s04"})
+    monkeypatch.setattr(run_gate, "_eval_tree_sig", lambda rev: "same")
+    monkeypatch.setattr(run_gate, "_dirty_eval_paths", lambda: ["app/eval/runner.py"])
+    stub.env["git_sha"] = ENV["git_sha"] + "-dirty"
+    with pytest.raises(SystemExit) as e:
+        _rr(p)
+    assert _exit_code(e) == 3 and stub.calls == []
+
+
 def test_rerun_dirty_sha(tmp_path, stub, capsys):
     p = _rerun_report(tmp_path, {"s04"})
     stub.env["git_sha"] = ENV["git_sha"] + "?"

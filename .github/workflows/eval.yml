@@ -30,11 +30,31 @@ on:
         type: choice
         options: [pr, nightly, release]
         default: pr
+      # A1 定向复跑入口（[167]）。rerun_report 为空时这条路径完全不存在 —— 三个 tier 的
+      # 行为一个字都没变；非空时下面的 pr/nightly/release 全部被 if 挡掉，只跑 rerun job。
+      rerun_report:
+        description: "（可选）定向复跑：主报告路径，如 docs/eval/gate_20261112_012832_react.json"
+        type: string
+        default: ""
+      rerun_only:
+        description: "（可选）复跑题号，逗号分隔，如 s09；不填则复跑全部名单外错题"
+        type: string
+        default: ""
+      rerun_reason:
+        description: "（可选）复跑理由，写进 rerun_history；填了 rerun_only 就必须填这个"
+        type: string
+        default: ""
+      rerun_agent:
+        description: "（可选）主报告出自哪个 agent"
+        type: choice
+        options: [react, workflow]
+        default: react
   push:
     tags: ["v*"]
 
 concurrency:
-  group: eval-${{ github.ref }}-${{ inputs.tier || 'auto' }}
+  # rerun 单独一个 group：它是"对历史报告的定向复跑"，不该被 pr 档挤掉，也不该挤掉 nightly。
+  group: eval-${{ github.ref }}-${{ inputs.rerun_report != '' && 'rerun' || inputs.tier || 'auto' }}
   cancel-in-progress: false      # nightly / release 不能被后到的跑打断
 
 env:
@@ -45,7 +65,7 @@ jobs:
   pr:
     if: >
       github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr')
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr' && (inputs.rerun_report || '') == '')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -109,7 +129,7 @@ jobs:
   nightly:
     if: >
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly')
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly' && (inputs.rerun_report || '') == '')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -247,11 +267,129 @@ jobs:
           红灯只可能来自「跑不完」或「报告结构不完整」——准确率不判红（理由见 docs/eval/tiers.md）。
           先看 artifact 里那份报告缺了什么，再决定是补数据还是修流水线。"
 
+  # ---------------------------------------------------------------- rerun：对历史报告定向复跑（A1）
+  # 为什么单开 job 而不是塞进 nightly：nightly 有 8 个步骤只在"整批跑"时成立（找新产出的报告、
+  # 题数、结构校验、8 题冒烟、回流），塞进去得给每一步加 if，漏一个就会出现 rerun 模式下又跑了整批。
+  # job 级 if 只有一处判断。
+  #
+  # 前提检查（scripts/gate/run_gate.py:_check_rerun_env）比的是 app/scripts/tests/requirements
+  # 的 tree 指纹，不是 commit sha —— 人工判定必然要改报告并提交，HEAD 一定会前移。
+  # 所以这里 checkout master HEAD 是安全的：只要没碰评测代码，复跑数值就与主报告可比。
+  rerun:
+    if: github.event_name == 'workflow_dispatch' && inputs.rerun_report != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write   # 复跑行要写回报告并提交
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      # 同 nightly：build_gate_data.py 要 openpyxl，只锁在 dev 组里。
+      - name: 安装依赖
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: 有没有 secret
+        id: key
+        run: echo "has=${{ secrets.DATACHAT_LLM_KEY != '' }}" >> "$GITHUB_OUTPUT"
+      - name: 缺 Key 直接报错
+        if: steps.key.outputs.has != 'true'
+        run: |
+          echo "::error::定向复跑要真模型，缺 secret DATACHAT_LLM_KEY。"
+          exit 1
+
+      - name: 恢复闸门数据缓存
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: data/gate
+          key: gate-data-v2-${{ runner.os }}-${{ hashFiles('scripts/gate/build_gate_data.py', 'scripts/gate/fingerprints.py', 'requirements.txt', 'requirements-dev.txt') }}
+      - name: 生成闸门数据（仅缓存未命中）
+        if: steps.restore.outputs.cache-hit != 'true'
+        run: python scripts/gate/build_gate_data.py
+      - name: 校验闸门数据现场
+        run: python scripts/gate/build_gate_data.py --check
+      - name: 保存闸门数据缓存
+        if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/gate
+          key: ${{ steps.restore.outputs.cache-primary-key }}
+
+      # workflow_dispatch 的输入是外部字符串，拼进命令行之前先钉死形状：只能指向 docs/eval 下的
+      # 闸门报告，不接受 ../ 或绝对路径。
+      - name: 报告路径必须落在 docs/eval
+        env:
+          REPORT: ${{ inputs.rerun_report }}
+        run: |
+          set -euo pipefail
+          case "$REPORT" in
+            docs/eval/gate_*.json) ;;
+            *) echo "::error::rerun_report 只接受 docs/eval/gate_*.json，收到：$REPORT"; exit 1 ;;
+          esac
+          if [ ! -f "$REPORT" ]; then echo "::error::报告不存在：$REPORT"; exit 1; fi
+
+      - name: 定向复跑（真模型）
+        id: rr
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+          REPORT: ${{ inputs.rerun_report }}
+          ONLY: ${{ inputs.rerun_only }}
+          REASON: ${{ inputs.rerun_reason }}
+          AGENT: ${{ inputs.rerun_agent }}
+        run: |
+          set -uo pipefail
+          ARGS=(--rerun "$REPORT" --profile m13r --agent "$AGENT" --reason "$REASON")
+          if [ -n "$ONLY" ]; then ARGS+=(--only ${ONLY//,/ }); fi
+          echo "命令：python scripts/gate/run_gate.py ${ARGS[*]}"
+          python scripts/gate/run_gate.py "${ARGS[@]}"
+          code=$?
+          # 0 = 已结案；2 = 复跑行还没人工签字（预期：签字后本地跑 --verdict 结案）；
+          # 1 = 复跑判出回归；3 = 前提不满足。
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0|2) echo "::notice::run_gate 退出码 $code（0=结案 / 2=待人工签字，均为预期）" ;;
+            *)   echo "::error::run_gate 退出码 $code"; exit "$code" ;;
+          esac
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-rerun-${{ github.run_id }}
+          path: docs/eval/gate_*.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      # 复跑数据必须进 git：artifact 30 天就没了，而"这题到底是波动还是回归"要靠它结案。
+      # 用 GITHUB_TOKEN 提交的 commit 不会触发其它 workflow，不会自激。
+      - name: 复跑结果写回仓库
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/eval
+          if git diff --cached --quiet; then echo "::notice::报告没有变化，跳过提交。"; exit 0; fi
+          git commit -m "chore(eval): 定向复跑 run ${GITHUB_RUN_ID}（待人工签字）"
+          for i in 1 2 3; do
+            git fetch origin master
+            git rebase origin/master
+            if git push origin HEAD:master; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::复跑报告写回推送失败（重试 3 次）"
+          exit 1
+
   # ---------------------------------------------------------------- release：人工确认，产出归档
   release:
     if: >
       startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' && inputs.tier == 'release')
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'release' && (inputs.rerun_report || '') == '')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     environment: release          # 需要 reviewer 批准才会真的开始跑

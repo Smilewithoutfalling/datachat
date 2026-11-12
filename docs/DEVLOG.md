@@ -8748,3 +8748,68 @@ regression_verdict "有回归：先看是否与本次改动有关，再下结论
 
 `s02` 在 11-11 01:26 和 11-12 01:28 两次都判 true（之前是 9 连错）。
 按 `[158]` 的处理，`unexpected_pass` 只记录不摘名单；摘名单要等它稳定更多次。
+
+## [168] A1 复跑跑不起来：判定入库就把 git_sha 顶掉了，改成比评测代码 tree（2026-11-12）
+
+`[167]` 定了给 CI 加 `--rerun` 入口。动手前先把现有前提检查跑了一遍，发现**入口加了也跑不起来**。
+
+### 一、先测出来的死锁
+
+`_check_rerun_env` 原来要求 `报告.git_sha` 与当前 `git_sha()` 逐字相同。三条路：
+
+| 跑在哪 | 结果 | 原因 |
+|---|---|---|
+| 当前 master `ade3a86` | exit 3 | `git_sha: 报告 'ef7a30c' ≠ 现在 'ade3a86'` |
+| 回到报告那个 commit `ef7a30c` | exit 3 | 报告里 `human_correct` 还是 null，`_check_labels` 拒 |
+| `ef7a30c` + 已判定的报告文件 | exit 3 | 报告被改 → `ef7a30c-dirty`，仍不等于 `ef7a30c` |
+
+前两条和 `-dirty` 那条都实测过（直接调 `_check_rerun_env`，不需要模型）：
+
+```
+当前 HEAD (ade3a86) 复跑 -> BLOCKED exit=3
+报告自身 sha (ef7a30c) -> PASS verified=True
+带 dirty 后缀 -> BLOCKED exit=3
+```
+
+根因不是哪一行写错，是**"sha 逐字相同"这个前提和"必须先人工判定"这个流程互斥**：判定必然改文件、
+必然要提交，提交后 HEAD 一定前移。只要还拿 commit sha 当唯一凭证，A1 就只在"判定之前"可跑，
+而那时 `human_correct` 是空的 —— `_check_labels` 又不让跑。两头堵死，这条路从写出来就没真正走通过
+（`docs/eval/` 下 20 份 gate 报告，`reruns` 段一份都没有）。
+
+### 二、改法：比评测代码的 tree 指纹
+
+```python
+EVAL_TREE_PATHS = ("app/", "scripts/", "tests/", "requirements.txt", "requirements-dev.txt")
+```
+
+`_eval_tree_sig(rev)` 取这 5 个路径的 `rev-parse rev:path` 拼成指纹；commit 不同时比指纹，相同就放行。
+补一条：`cur_sha` 带 `-dirty` 时只把**边界内**的改动算违规（`_dirty_eval_paths`），报告和日志的改动不算
+—— 那正是人工判定的产物。
+
+`.github/` 有意不在边界里：改 workflow 本身不该让历史报告失效。
+
+`rerun_meta` 新增 `report_git_sha`（仅跨提交时写）。事后看报告，只写"复跑在 X 上跑的"是不够的，
+得知道"在跟谁比"。
+
+### 三、CI 入口
+
+`eval.yml` 加 4 个 `workflow_dispatch` 输入（`rerun_report` / `rerun_only` / `rerun_reason` /
+`rerun_agent`）和独立 job `rerun`。`rerun_report` 为空时这条路径不存在 —— pr/nightly/release 的 `if`
+都补了 `(inputs.rerun_report || '') == ''`，三个 tier 的行为一个字没变。concurrency group 给 rerun
+单开一份，既不挤掉 nightly 也不被 pr 挤掉。
+
+退出码在 job 里分开处理：**0 = 已结案、2 = 复跑行待人工签字，都算预期**；1 = 判出回归，真红。
+复跑结果 `if: always()` 写回仓库（数据比 job 的绿脸重要）。
+
+### 四、测试
+
+`tests/test_gate.py` 新增 4 条：`test_in_eval_path_boundary`（8 个参数，钉住 `appnotes/` 不被当成
+`app/`）、跨 docs 提交允许、评测代码漂移拒绝、dirty 评测代码拒绝。整个文件 92 passed。
+
+### 五、今天这份报告救不回来
+
+`gate_20261112_012832_react.json`（`ef7a30c`）在推这次改动之后就真的不能复跑了 ——
+`scripts/gate/run_gate.py` 变了，tree 指纹对不上。这是**正确**行为：代码变了，复跑数值跟主报告不可比。
+
+s09 的定性只能走新报告：推完 → 触发 nightly → 新报告 → 人工判定（提交只含 docs）→ rerun。
+判定那一步提交必须只有 `docs/`，一旦顺手改了 `scripts/`，新报告也作废。
