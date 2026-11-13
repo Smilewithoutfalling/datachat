@@ -101,7 +101,8 @@ def oracle_factory(agent: str):
     193/193、测试跑 187/193，红灯看起来像判分坏了 —— 实际是两个入口的假模型不同。
 
     clarify 题的正确答案是一句反问，不是一段代码。照 gold 执行 `result = None`
-    会被 negative_verdict 判成"没问清口径就猜着算"，与它的本意正好相反。
+    会被 negative_verdict 判成没交答案也没反问（执行了但 result 是空的），
+    与它的本意正好相反。
     """
     clarify_say = "您是指哪个时间范围和口径？请确认后我再计算。"
 

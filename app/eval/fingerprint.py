@@ -125,6 +125,11 @@ _EXEMPT = {
     # **不进模型输入、不参与判分、不写报告字段**——改它不会让任何一题从错变对。
     # 但它是"归因口径"的一部分：triage 的结论会变，所以改动要在 DEVLOG 里留痕。
     "app/eval/failure_classes.py": "失败归因常量表，只被离线 triage 读取，不改判分",
+    # clarify 判据（EV-B7 补充）：把「这题缺什么口径」写成结构化字段并拿题面字面核对。
+    # **只在 validate（题集自检）与测试里被调用**——runner 不 import 它，
+    # 不进模型输入、不参与 score_detail。改它不会让任何一题从错变对，
+    # 只会让「判据与题面不符」的题目在校验时报错（那本来就该在跑评测之前发现）。
+    "app/eval/clarify_spec.py": "题集自检用的 clarify 判据，不进模型输入也不改判分",
     "app/sidecar.py": "桌面端 sidecar 入口",
 }
 _EXEMPT_PREFIXES = {

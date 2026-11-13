@@ -22,7 +22,8 @@ from app.core.result import is_refusal, refusal_from_answer
 # 「您是指哪个时间范围？」「哪种口径？」「请确认是要按订单数还是金额」。
 # 不追求穷举 —— 漏判的代价是这题记错（可见、可复核），误判的代价是逼模型
 # 在无关回答里塞问号。所以宁可窄一点。
-_CLARIFY_SIGNS = ("是指", "哪种", "哪一个", "请确认", "请明确", "需要确认")
+_CLARIFY_SIGNS = ("是指", "哪种", "哪一个", "请确认", "请明确", "需要确认",
+                  "确认一下", "您想", "请选", "请从上面")
 
 
 def refusal_text(res) -> str | None:
@@ -47,6 +48,32 @@ def _asks_back(answer: str) -> bool:
     if "？" in answer or "?" in answer:
         return True
     return any(s in answer for s in _CLARIFY_SIGNS)
+
+
+def _gave_answer(res) -> bool:
+    """用户是否拿到了一个具体答案 —— 判据是 result 有没有被赋值。
+
+    为什么不再看 `executed`（2026-11-13 实测改）：模型为了把口径问对，常常要先探一下
+    字段 —— `df.shape`、`df['status'].value_counts()` 看有哪些状态、确认日期范围。
+    这些探查是"为了问得准"，不是"猜着算"。旧判据把它们一律判成越界，等于逼模型在
+    不知道表里有什么的情况下反问，问出"您想看哪个字段？"这种废话。
+
+    真正的分界是**有没有交卷**：result 被赋值（哪怕是错的）= 它擅自选了口径算完了；
+    result 为空 = 它只查了没答，答案还在用户手里。
+    现场：neg_001 本轮探查了 shape/状态枚举/日期范围后 result 为空，回答里让用户在
+    「有效销售额 / 实付金额合计」×「趋势 / 结构 / 总量」里挑 —— 这是标准澄清。
+
+    残余盲区（明知而不拦）：探查后用 print 打了数、result 留空、answer 里既报数又问口径 ——
+    会判成澄清，而用户其实看到了数。不额外拦是因为「answer 里那个数算不算答案」需要语义理解，
+    判分器不能依赖模型；宁可漏判（可见、可复核）也不误杀 ——
+    「探查 + 反问」是确定该过的形态，实测出现过。
+    """
+    v = res.result
+    if v is None:
+        return False
+    if isinstance(v, str) and not v.strip():
+        return False
+    return True
 
 
 def negative_verdict(res, case) -> dict:
@@ -80,10 +107,10 @@ def negative_verdict(res, case) -> dict:
     if kind == "clarify":
         if text:
             return {"match": None, "why": "直接拒答了；这题该反问问清口径，不是拒答"}
-        if res.executed:
-            return {"match": None, "why": "执行了代码 —— 没问清口径就猜着算，用户拿到的是某个假设下的数"}
+        if _gave_answer(res):
+            return {"match": None, "why": "交给了 result —— 没问清口径就猜着算，用户拿到的是某个假设下的数"}
         if _asks_back(res.answer):
             return {"match": "clarify", "why": ""}
-        return {"match": None, "why": "既没执行代码也没反问（答案里没有问号，也没有「是指/哪种/请确认」）"}
+        return {"match": None, "why": "既没交答案也没反问（答案里没有问号，也没有「是指/哪种/请确认/您想」）"}
 
     return {"match": None, "why": f"未知 expect_kind={kind!r}"}

@@ -9696,5 +9696,107 @@ s10 的「39 万」这轮没出现（模型换了表述）。grounding 只核字
 - 本地 A/B 报告 `outputs/biz_local_old.json` / `outputs/biz_local_new.json`（gitignored）
 - 原始 CI 逐题 JSON 在 `outputs/eval_ci_20261113_release_43365123949_*.json` 等（gitignored）
 
+## [180] clarify 判据落地：三元组能分开 13/14 道题，但 prompt 改不动行为（2026-11-13）
 
+接 [179] 的剩余 9 道。本轮只做一件事：把「该澄清」从散文变成可执行判据，
+再用它去驱动模型行为。判据成了，驱动没成 —— 过程留在这里，免得下次重走。
 
+### 一、判据：一条问题能被直接算，要三件事同时落到字段上
+
+  object    算哪张表 / 按哪个维度分组
+  metric    算哪个量（字段、字段组合，或字典里已定义的派生指标）
+  operator  怎么聚合（求和 / 均值 / 计数 / 最大 / 占比 / 分布 / 排名…）
+
+三者齐全，挑一种口径算下去是合理的（口径分叉写进结论即可）。缺任何一个，合理答案有无穷多个。
+缺 metric 且数据里根本没有 → 不是 clarify 而是拒答：**clarify 缺「怎么算」，拒答缺「算什么」。**
+
+拿 14 道 Ambiguity 题对账，这条线干净分开 13 道：
+
+| 题 | object | metric | operator | 期望 | 一致 |
+|---|---|---|---|---|---|
+| neg_001 销售额怎么样 | ✓ | ✓ | ✗ | 问 | ✓ |
+| neg_002 最近的订单多吗 | ✓ | ✓(隐含) | ✗ | 问（缺窗口+基准） | ✓ |
+| neg_003 工资高不高 | ✓ | ✓ | ✗ | 问（缺基准） | ✓ |
+| neg_004 库存情况如何 | ✓ | ✓ | ✗ | 问 | ✓ |
+| neg_005 品类表现最好 | ✓ | ✗ | ✓ | 问 | ✓ |
+| neg_006 看看这批数据 | ✗ | ✗ | ✗ | 问 | ✓ |
+| ord_027 总销售额 | ✓ | ✓ | ✓ | 算 | ✓ |
+| ord_028 平均每单几件 | ✓ | ✓ | ✓ | 算 | ✓ |
+| **ord_029 品类卖得最好** | ✓ | **✗** | ✓ | **算（5 个 alt）** | **✗** |
+| ord_030 复购率 | ✓ | ✓ | ✓ | 算 | ✓ |
+| emp_024 多少员工 | ✓ | ✓ | ✓ | 算 | ✓ |
+| emp_025 平均工资 | ✓ | ✓ | ✓ | 算 | ✓ |
+| inv_024 平均库存 | ✓ | ✓ | ✓ | 算 | ✓ |
+| inv_025 平均每天卖多少件 | ✓ | ✓ | ✓ | 算 | ✓ |
+
+**ord_029 和 neg_005 是同一句话**（「哪个品类卖得最好」/「哪个品类表现最好」），
+一个给了 5 个备选答案、一个要求必须反问。这不是模型能解决的问题，也不是提示词能解决的问题 ——
+任何提示词都做不到对两句差两个词的话给出相反反应。已登记在
+`tests/test_clarify_spec.py::KNOWN_SHAPE_CONFLICTS`，等产品决策（改题面 / 降级 / 删题）。
+
+### 二、判据修正：`executed` 不等于「猜着算」
+
+旧判据（`negative.py`）：clarify 题只要 `res.executed` 就判越界。
+实测反例（neg_001，3 轮里的第 2 次）：
+
+```python
+print(df.shape)
+print(df['status'].value_counts())
+print("重复order_id数:", df['order_id'].duplicated().sum())
+print("日期范围:", df['order_date'].min(), df['order_date'].max())
+```
+
+`result` 没赋值，回答是：「金额口径要确认：有效销售额（只算已完成）还是实付金额合计？
+看哪个角度：按月趋势 / 按城市渠道品类 / 只看总量？请从上面各选一项。」
+
+这是标准澄清 —— 先探字段再问，问得具体。旧判据把它判成「猜着算」。
+
+改成看 **result 有没有被赋值**：交了 result（哪怕错）= 擅自选了口径算完了；result 为空 = 只查了没答。
+与 emp_022 的口径一致（H 2026-11-02：拒答后又做分析 = 越界）—— 边交数边问，用户已经看到那个数了。
+`_CLARIFY_SIGNS` 补「确认一下 / 您想 / 请选 / 请从上面」（只在 clarify 分支生效，不污染其他判定）。
+
+### 三、prompt 三轮实测：改不动
+
+在 `react_agent.py` 的 system 里加澄清规则（说明「缺指标或缺聚合方式 → 先反问，不调工具、不给数值」），
+3 轮共 18 次采样：
+
+| 轮 | 改动 | 6 道 clarify | 反例组 | token/题 | 秒/题 |
+|---|---|---|---|---|---|
+| 基线 [179] | — | 0/6 | — | 5779 | 10.84 |
+| 1 | 规则写在 result 契约段里 | 0/6 | ord_030 转红（result 装了 4 个口径的 dict） | 30136 | 30.79 |
+| 2 | 规则单独成段、加三条硬约束 | 0/6（neg_001 合格：探查+反问） | ord_030 修复，12 道反例 10 对 | — | ~17 |
+| 3 | 同上，重跑 | 0/6（neg_001 又交了一整组数） | — | — | ~12 |
+
+三次的模型行为各不相同：第 1 轮 neg_001 把澄清塞进「无法回答：」壳子，第 2 轮真的只探查，
+第 3 轮又直接算。**temperature=0 下仍未收敛。** 代价是确定的：token 5.2 倍、耗时 2.8 倍。
+
+prompt 已回滚（`git checkout app/react_agent.py`）。判断依据：18 次采样 1 次符合，不构成有效改动；
+而 195 题全量跑一次要 100 分钟（30 秒/题），CI 成本涨 3 倍换 0 收益。
+
+### 四、更要紧的事实：默认产品路径根本不经过这里
+
+`ui/web/src/views/DatasetView.tsx:25` 的默认 agent 是 **`workflow`**，而 workflow 的图
+（planner → codegen → executor → summarizer）**没有反问这条路** ——
+`tests/test_eval_cases.py::test_workflow_cannot_express_clarify` 就是钉这件事的：
+它在 clarify 题上准确率恒为 0，只会挑一个口径算。
+
+所以：改 react 的 prompt，影响的是评测（release 走 `--agent react`）和手动切 ReAct 的用户。
+**产品默认用户永远看不到这个改动。** 这正是 H 2026-11-13 追问的那件事，答案是「不会」。
+
+### 五、产物与状态
+
+- 新增 `app/eval/clarify_spec.py`：GAP_KINDS / 词表 / `missing_items` / `check_declared_gap` /
+  `superlative_without_metric`。词表**只用于验证声明，不做分类器** —— 实测拿它扫 202 题，
+  37 道「不可答」里 20 多道是正常题被误判（「销售总额」不含「销售额」这种）。
+- 新增 `EvalCase.clarify_gap`，6 道 clarify 题逐条声明缺什么；`validate.py` 接线，
+  202 题静态校验零错误（声明缺 metric 却在题面找到指标名词就报错）。
+- 新增 `tests/test_clarify_spec.py` 6 条：缺口合法性、取值封闭集、非 clarify 不得带字段、
+  同构对账（抓 ord_029）、登记项不许过期、词表能力边界。
+- 改 `app/eval/negative.py`：`_gave_answer` 取代 `res.executed`。
+- `app/eval/fingerprint.py` 把 clarify_spec 归到 B 组（不进模型输入、不改判分）。
+
+**下一步要产品定**（三条互斥）：
+  A. 改题集：neg_005 改成真正无指标的问法（保住判据，改 1 道题面，`set_sha12` 断代）
+  B. 改产品：workflow 加澄清分支（planner 输出 CLARIFY + 短路跳过 codegen/executor），
+     重写 `test_workflow_cannot_express_clarify`，影响所有默认用户
+  C. 只留判据不动行为：6 道题在报告里单列「已知不达标」

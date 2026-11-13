@@ -189,8 +189,12 @@ def test_workflow_cannot_express_clarify():
     case = next(c for c in ALL_CASES if c.id == "neg_001")
     r = _runner("workflow", oracle_factory("workflow")).run_single(case)
     assert r["correct"] is False
-    assert r["executed"] is True          # 它算了，而不是反问
-    assert "没问清口径就猜着算" in (r["negative_why"] or "")
+    assert r["executed"] is True          # 它跑了 gold 的占位 result = None，不是反问
+    # 判错的理由分两种，都算错，这条测试钉的是「它不会反问」，不是「它怎么错的」：
+    #   真模型会算出数 → 判「交给了 result」（2026-11-13 前的判据是看 executed）；
+    #   假模型执行的是 clarify 的占位 gold（result = None），执行完也没交答案
+    #   → 判「既没交答案也没反问」。
+    assert r["negative_why"]
 
 
 def test_wrong_answer_scored_wrong():

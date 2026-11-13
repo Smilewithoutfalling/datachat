@@ -65,6 +65,19 @@ class EvalCase:
     # （"数据"）要么太窄（把"成本或毛利"当成一个词）。出题人本来就知道缺什么，直接写。
     # validate 会强制每个词都出现在 gold 的拒答原因里 —— 字段与 gold 不许各说各话。
 
+    clarify_gap: list = field(default_factory=list)
+    # clarify 题缺哪一项，取值见 app/eval/clarify_spec.py 的 GAP_KINDS：
+    #   "object"   没有可指认的分析对象（哪张表 / 哪个维度）
+    #   "metric"   没有要算的量（不是字段、不是字段组合、也不是字典里已定义的派生指标）
+    #   "operator" 没说怎么聚合（总/平均/最大/计数/占比/分布…）
+    #   "scope"    没有范围（时间窗口、城市、品类等筛选条件）
+    #   "baseline" 要判断高低好坏，却没给比较基准
+    #
+    # 为什么要写成结构化字段而不是只写在注释里：注释是散文，谁都能说"这题缺口径"。
+    # 写进字段后 tests/test_clarify_spec.py 会拿题面字面去核 —— 声明缺什么，
+    # 题面里就真的不能有那个东西。判据因此可执行、可对账，而不是出题人的自述。
+    # 非 clarify 题带这个字段一律报错（validate 管）。
+
     # ---- 脏数据/扰动题（EV-B6） ----
     gold_dataset: str = ""
     # gold 执行时用的数据文件；空 = 与 dataset 相同。

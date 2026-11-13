@@ -93,7 +93,35 @@ def test_clarify_rejects_guessed_answer_with_code_executed():
 def test_clarify_rejects_silent_non_answer_without_question():
     """既不算也不问（"请提供更多信息"没有问号）不算通过：它没有把球踢回给用户。"""
     v = negative.negative_verdict(_res(answer="请提供更多信息。", executed=False), _case("clarify"))
-    assert v["match"] is None and "既没执行代码也没反问" in v["why"]
+    assert v["match"] is None and "既没交答案也没反问" in v["why"]
+
+
+def test_clarify_accepts_field_probe_without_result():
+    """查了字段再问 = 澄清，不是"猜着算"。
+
+    现场（neg_001，2026-11-13）：模型先跑 `df.shape` / `value_counts()` / 日期范围确认
+    表里有什么，result 留空，然后让用户在「有效销售额 or 实付金额合计」×
+    「趋势 / 结构 / 总量」里挑。这是为了问得准，不是擅自算了个数 ——
+    旧判据只看 executed，把这条判成了越界。
+    """
+    v = negative.negative_verdict(
+        _res(result=None, executed=True,
+             answer="数据里有金额字段，但口径要先确认：要「有效销售额」还是「实付金额合计」？"),
+        _case("clarify"))
+    assert v["match"] == "clarify", v
+
+
+def test_clarify_rejects_answer_that_lands_in_result_even_if_it_also_asks():
+    """result 里有值就不算澄清：一边交数一边问，用户拿到的是那个数。
+
+    与 emp_022 的口径一致（H 2026-11-02 拍板：拒答后又在正文里做分析 = 越界）。
+    先交卷再补一句"如果口径不对请告诉我"，不改变"用户已经看到一个数"这件事。
+    """
+    v = negative.negative_verdict(
+        _res(result=1021460.51, executed=True,
+             answer="按实付金额合计是 1021460.51 元。您是指这个口径吗？"),
+        _case("clarify"))
+    assert v["match"] is None and "交给了 result" in v["why"]
 
 
 def test_clarify_does_not_fire_on_empty_answer():

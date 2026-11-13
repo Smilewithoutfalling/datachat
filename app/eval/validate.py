@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 import re
 
+from app.eval.clarify_spec import check_declared_gap
+
 # 评测题号。闸门题号（s01…s15 / m01…m10）是另一套命名空间，存在 docs/gate/answers.json 里，
 # 以 dict 形式传给 run_gate.py，永远不经过这里——别把这个正则扩成包含 (s|m)，
 # 那个分支在评测集里恒不命中，是死条件。
@@ -125,6 +127,17 @@ def validate_cases(cases: list) -> list[str]:
             errors.append(f"{c.id}: expect_kind=impossible 必须同时 expect_refusal=True")
         if c.expect_kind == "clarify" and c.expect_refusal:
             errors.append(f"{c.id}: expect_kind=clarify 与 expect_refusal=True 矛盾（澄清不是拒答）")
+
+        # 6b. clarify 题的缺口必须是结构化字段，且与题面字面对得上。
+        #    只写在注释里等于没有判据：谁都能说"这题模糊"，谁也都能说"这不模糊"。
+        #    这里复用 app/eval/clarify_spec.py 的 check_declared_gap（测试用同一份实现，
+        #    两处各写一遍会漂）。非 clarify 题带上这个字段同样报错 —— 否则同一道题
+        #    既是"该反问"又是"该直接算"。
+        if c.expect_kind == "clarify":
+            errors.extend(check_declared_gap(c))
+        elif getattr(c, "clarify_gap", []):
+            errors.append(f"{c.id}: clarify_gap 只在 expect_kind=clarify 上有意义"
+                          f"（当前 {c.expect_kind!r}）")
 
         # 7. 负向题的缺失对象：字段与 gold 不许各说各话。
         #    impossible 的判据是"拒答原因里点名 missing_objects 之一"，所以
