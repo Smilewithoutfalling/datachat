@@ -9506,4 +9506,104 @@ C581484(-80995) 是两张正负对冲的发票，`quantity>0` 过滤会把 80995
 - 原始逐题 JSON（full 696KB / oracle 542KB / canary 3 份 / inject）在 `outputs/`，按既有惯例不入库，
   `outputs/` 已被 gitignore
 
+## [178] 多表字典检索：全局 top-k 被主键吃光，改按表分组（2026-11-13）
+
+### 规则不是"模型没照做"，是根本没送到
+
+[176]/[177] 把 biz 那 11 道错题归到"status / SKU / customer_id 未清洗"。我原本打算按 B65 的老路
+加 schema 注解，两条证据把它否了：
+
+1. `data/eval/biz/orders.dict.csv` 原文：「status，订单状态，取值有已完成、已退款、已取消；
+   **部分值前后带空格，需 strip 后再比较**」；`customers.dict.csv`：「customer_id…部分带前导空格，
+   **join 前需 strip**」；`order_items.dict.csv`：「sku…**部分写成小写，join 前需统一大写**」。
+   字典里早就写好了。
+2. 评测 `use_dictionary=True`，走的 `service.py:235` 与线上同一个入口。
+
+那就是"给了没照做"？按**产品真实调用方式**重测 —— `load_retriever('data/eval/biz')` 把 5 张表的
+字典合并成 23 个条目，`search(k=3)` 取全局前 3：
+
+| 规则 | 11 道错题的召回 |
+|---|---|
+| `orders.status` 需 strip | **0/11** |
+| `customers.customer_id` 需 strip | **0/11** |
+| `order_items.sku` 需统一大写 | **0/11** |
+
+一次都没进过 prompt。原因很直接：每个 biz 问题都在说「订单表」「退款表」，`orders.order_id` 与
+`refunds.order_id` 词面最像，恒定占据前两名，第 3 名才轮到别的 —— 有些题连第 3 名都被
+`refunds.refund_amount` 占了。而题面只提了"客户编号前后可能带空格"和"SKU 混小写"，
+**没提 status 带空格**，所以模型是真的不知道，不是不听。
+
+（我第一版实验按"每张表各取 3 条"测，召回全中，那是错的 —— 产品不是这么调的，
+逐表各 3 条等于把预算放大 5 倍。按真实调用重做才看见 0/11。）
+
+### 修法：按表分组 + 轮转合并
+
+`DictRetriever` 增加 `groups`，`load_retriever` 对多表按表建组。检索时每张表各自 BM25 打分，
+各取 `min(k, PER_TABLE_K)` 条，再**轮转合并**（所有表的第 1 条 → 所有表的第 2 条 → …），
+总数受 `TOTAL_CAP` 约束。单表、或只有一张表有字典时 `_groups = None`，走原来那段代码。
+
+`PER_TABLE_K=3` / `TOTAL_CAP=15` 是量出来的：
+
+| 方案 | status | cid | sku | price | cat | 字典段字符 |
+|---|---|---|---|---|---|---|
+| 改动前（全局 k=3） | 0/11 | 0/11 | 0/11 | 1/11 | 1/11 | 227 |
+| per=2 cap=10 | 9/11 | 11/11 | 9/11 | 8/11 | 9/11 | 600 |
+| per=3 cap=12 | 9/11 | 11/11 | 11/11 | 11/11 | 9/11 | 706 |
+| **per=3 cap=15** | **11/11** | **11/11** | **11/11** | **11/11** | 9/11 | 843 |
+
+cap 的下界被 `orders` 组钉死：`status` 在 biz_004 / biz_013 里组内排第 3
+（customer_id 10.257 / order_id 9.802 / status 7.154），per=2 取不到。cap=10 时只有前两张表
+能进第 3 轮，`products.category` 掉到 1/11；cap=6 时连第 2 轮都轮不到 status，直接 0/11。
+`cat` 停在 9/11 是合理的 —— 漏的两道（biz_013 / biz_019）题面跟品类无关。
+
+代价：字典段 227 → 843 字符（biz 22 题均值），总 prompt 4194 → 4440，涨 6%。
+
+### 实现里必须绕开的坑：`score > 0` 不能当相关性判据
+
+分组后每张表只有 3~6 条字典，query 词若出现在该组每条里，`df ≈ N` 会让
+`log((N-df+0.5)/(df+0.5))` 变负；`rank_bm25` 的 epsilon 兜底是"负 IDF 按平均 IDF 缩放"，
+而小组的平均 IDF 也是负的，于是整组分数全负、被 `s > 0` 全部丢掉 —— 分组等于白做。
+（单条字典的组直接算出来 −0.27。）
+
+分组路径因此改成**词面交集**判相关：`q & set(_tok(f"{f} {d}"))` 才保留，排序仍用 BM25 分数。
+单表路径保留原来的"先截前 k 再过滤零分"，与 B04 逐字节一致 —— 这两种写法在边界上不等价
+（top-k 里混进零分时条数不同），单表 prompt 不能动。
+
+### 影响面（实测，不是推断）
+
+- **单表 179 道题**：老实现逐条重算比对，**0 道不一致**。
+- **全量 202 题渲染后 prompt**：`set_sha12` `54dbd79a809a` → `e9a191058e77`，
+  变化的 **21 道全是 biz**，非 biz 零变化（biz 22 题里只有 neg_006「帮我看看这批数据」没变，
+  它本来就该澄清、不指向具体字段）。
+- **`code_sha12`**：`97c94c09a524` → `ce68be4ad5f1`（`app/tools/dictionary.py` 在
+  `_AFFECTS_RESULTS` 的 `app/tools/` 下）。这是真·换了尺子，176/195 不能与下一次直接比。
+- **oracle**：195/195，标准答案不受影响。
+
+### 边界：谁会受影响
+
+只有**提供了 `.dict.csv` 的数据字典 + 多张表**才会走到分组路径。单表用户、没带字典的用户
+（`load_retriever` 返回 None，`notes_text` 恒为 `""`）行为一个字节都没变。
+这不是为评测发明的场景 —— 主表 + 明细 + 客户/商品维表是 Excel 导出的常态，
+而 `data/eval/biz` 就是这个形态的样板。
+
+### 未验证的事
+
+**真模型下 biz 能转几道，现在还不知道。** 本机网关 `grg-aikits-test.grgbanking.com` DNS 解析
+失败（不在内网/VPN），跑不了；rerun 通道只接受 `docs/eval/gate_*.json`，biz 错题不在这 25 题里；
+nightly 只跑 25 闸门 + 8 冒烟。所以验证只能走 release 全量 195 题 —— 而那要用 GLM-5.2 重跑
+46 分钟，等人工批准。
+
+**"规则进了 prompt"和"模型照做"是两件事**，这一步只证明了前者。真模型读数出来之前，
+不许在台账里写"biz 修好了"。
+
+### 变更清单
+
+- `app/tools/dictionary.py`：`PER_TABLE_K` / `TOTAL_CAP` / `DictRetriever.groups` / 分组检索 /
+  `load_retriever` 建组
+- `tests/test_dictionary.py`：22 条（单表逐字节等价、分组轮转、per-table cap、total cap、
+  零分过滤、单表回退、biz 三条规则 11/11 全覆盖、字典段长度上限）
+- 探针脚本（未入库）：`outputs/_verify_dict_equiv.py`、`outputs/_prompt_sha.py`、
+  `outputs/_diff_sha.py`
+
+
 
