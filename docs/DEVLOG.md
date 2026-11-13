@@ -9181,3 +9181,65 @@ Qwen3.5-397B-A17B 在 10-12 的两份报告里 s09 都是 `strict` 通过（5384
 
 而"把取消单当销量"在真实业务里就是灾难级误判（把退款单算成爆款）。这条红灯不该被
 "修"掉——它是这套系统交付的第一个真实价值证据。
+
+## [174] rerun_valid 的死锁是 bug 不是策略：match=None 是"答错"，不是"判不了"（2026-11-13）
+
+### 一、证据链
+
+追查 s09 时顺手确证了 [169] 遗留的"m13r 判不出回归"。四步：
+
+1. `app/eval/runner.py:394` `score_detail` 的 docstring 原文：**"判错返回 None"**。
+   全仓库统一用 `out["correct"] = out["match"] is not None` 判对错 —— 所以
+   `match is None` 的语义就是**答错**。
+2. `scripts/gate/run_gate.py` 的 `auto_judge` 把比较器异常也吞成 `None`：
+   ```python
+   try:    return score_detail(...)
+   except: return None
+   ```
+   → "答错"和"比较器崩了"在报告里长得一模一样。
+3. `rerun_valid` 据此写了 `return not (executed and match is None)`，
+   译成人话是**"答对了才算有效观测"**。
+4. 实测代价（`gate_20261112_063919_react.json`）：s09 四次复跑全部
+   `executed=True / match=None / error_kind=None / valid=False` —— 它四次都真的答错了，
+   四次全被记成"无效观测"，`_verdict_rerun` 的 `else: regress` 永远走不到。
+   补跑也没用（补跑同样答错、同样判无效），所以那题从"待复跑"滑进 `*_rerun_invalid`，
+   verdict 恒为"无法判定"，exit 2。
+
+`rerun_valid` 的 docstring 自己写的是"排除跑了但**比较器判不了**"，和实现对不上。
+这是措辞与实现不一致的实现 bug，不是 [169] 当时猜的"设计选择"。
+
+### 二、改法
+
+- `auto_judge` **不再吞异常**（判错仍然返回 None，那是正常返回值；异常才往上抛）。
+- 新增 `judge_ok()` 包一层，返回 `(match, ok)`。
+- `_case_row` 用 `judge_ok`，新增字段 `judge_error: bool`（真报告里也能看出"这题判不了"，
+  人工判定时不会被误导成"模型答错"）。
+- `rerun_valid` 改为 `not row.get("judge_error")`；旧报告没有该字段 → `.get()` 为 None →
+  视为没崩 → 答错照样有效（向后兼容，历史 JSON 不用回填）。
+
+`_case_row` 故意经 `auto_judge` 这一层（而不是直接调 `score_detail`），
+因为测试对 `auto_judge` 打桩 —— 绕过它会让 3 条既有测试失去打桩点（第一次改法就是这么红的）。
+
+### 三、验证
+
+- 单元：真答错 → valid=True；`judge_error=True` → valid=False；旧报告无字段 → valid=True；
+  `error_kind="llm"` → valid=False。四条都进 `test_rerun_valid_distinguishes_wrong_answer_from_judge_crash`。
+- 端到端：三次 `match=None` 复跑必须判出回归（`test_rerun_wrong_answer_three_times_counts_as_regression`）。
+- 历史报告用新规则重算 s09 那份：
+  ```
+  改前  single_rerun_invalid = [{id: s09, valid: 0, total: 4}]
+  改后  single_pending_review = [{id: s09, priority: true, observed_pass_rate: "0/5", unsigned: [1,2,3,4]}]
+  ```
+  从"永远无法判定"变成"待签字即可判定"。**`verdict()` 读的是报告里已存的 `valid` 字段、
+  不重算**，所以已入库的历史报告不会被这次改动改写。
+
+### 四、对历史报告的副作用
+
+`_eval_tree_sig` 覆盖 `scripts/`，所以这次提交之后，对 11-13 之前的旧报告再跑 `--rerun`
+会被"评测代码不一致"挡下。这是**应该的**（比较规则变了，用新规则复跑旧报告结论不可比）。
+旧报告的 verdict 已定稿存档，不回填。
+
+### 五、s09 现在能判了
+
+主报告 1 次错 + 复跑 4 次错 = 0/5。人工签 `human_correct=False` → `single_regressions`
+→ "有回归"。这与 [173] 的事实一致：Qwen3.5 时代它对，GLM-5.2 时代它错，是模型退化。

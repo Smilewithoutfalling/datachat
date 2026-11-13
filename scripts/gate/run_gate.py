@@ -88,6 +88,11 @@ def to_obj(ans):
 
 
 def auto_judge(actual, q, ans):
+    """判一层：判对返回靠的哪一层（"strict"/"alt:strict"/…），判错返回 None。
+
+    **不吞异常**：比较器自身出错时抛出去，由 `judge_ok` 记成"判不了"。
+    这两件事以前都退化成 None，于是 `rerun_valid` 分不清"答错"和"判不了"，
+    把所有真错题的复跑都记成无效观测（[173]）。"""
     from app.eval.runner import score_detail
     case = SimpleNamespace(expect_refusal=bool(q.get("expect_refusal")),
                            ordered=ans["gold"].get("ordered") if ans["gold"]["kind"] == "list" else None,
@@ -96,10 +101,19 @@ def auto_judge(actual, q, ans):
         expected = [None]
     else:
         expected = [to_obj(ans["gold"])] + [to_obj(a) for a in ans["alts"]]
+    return score_detail(actual, case, expected)
+
+
+def judge_ok(actual, q, ans) -> tuple:
+    """返回 (match, ok)。ok=False 只表示比较器自己崩了，match 不可解释。
+
+    `score_detail` 的 docstring 写明"判错返回 None"，所以 `match is None` 只说明
+    "没对上 gold/alts"。真正的"判不了"只有这里捕获的异常。走 `auto_judge` 这层
+    而不是直接调 score_detail，是为了让测试对 auto_judge 的打桩继续生效。"""
     try:
-        return score_detail(actual, case, expected)
+        return auto_judge(actual, q, ans), True
     except Exception:
-        return None
+        return None, False
 
 
 def _analyze():
@@ -112,7 +126,7 @@ def _case_row(q: dict, ans: dict, res, duration: float) -> dict:
     """主报告和复跑共用的一行（复跑行与 cases 行同构，A1）。"""
     from app.core.result import format_result
     from app.eval.chart_smoke import chart_row
-    match = auto_judge(res.result, q, ans) if res.executed else None
+    match, judge_ok_ = (judge_ok(res.result, q, ans) if res.executed else (None, True))
     return {
         "id": q["id"], "group": q["group"], "category": q["category"], "dataset": q["dataset"],
         "question": q["question"], "expect_refusal": bool(q.get("expect_refusal")),
@@ -122,6 +136,9 @@ def _case_row(q: dict, ans: dict, res, duration: float) -> dict:
         "code": res.code, "attempts": res.attempts, "duration_s": round(duration, 2),
         "tokens": res.usage.total_tokens if res.usage.reported else None,
         "auto_correct": match is not None, "match": match,
+        # 比较器自己崩了（不是模型答错）。人工判定与复跑有效性都要看它，
+        # 否则"判不了"会被当成"答错"记进回归（[173]）。
+        "judge_error": not judge_ok_,
         "warnings": res.warnings, "unverified_numbers": res.unverified_numbers,
         "chart": chart_row(res),
         "human_correct": None, "failure_class": None, "reason": "", "guessing": None,
@@ -475,11 +492,16 @@ def rerun_candidates(prof: dict, agent: str, rows: list[dict]) -> list[str]:
 
 
 def rerun_valid(row: dict) -> bool:
-    """有效观测：error_kind 在白名单里，且不是"跑了但比较器判不了"（executed=True、match=None）。
-    executed=False 的行有效，记为答错（和主报告 auto_correct = match is not None 同口径）。"""
+    """有效观测：error_kind 在白名单里，且比较器本身没出错。
+
+    `match is None` **不**代表"判不了"——`score_detail` 判错就是返回 None（见它的 docstring），
+    真正的"判不了"只有比较器抛异常，由 `_case_row` 记进 `judge_error`。
+    旧实现用 `not (executed and match is None)` 排除，等价于"答对了才算有效"，
+    于是所有真错题的复跑全被吞成 *_rerun_invalid，m13r 只能判波动、判不出回归（[173]）。
+    """
     if row.get("error_kind") not in RERUN_VALID_KINDS:
         return False
-    return not (row.get("executed") and row.get("match") is None)
+    return not row.get("judge_error")
 
 
 def _row_correct(row: dict) -> bool:

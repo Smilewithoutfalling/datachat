@@ -919,3 +919,29 @@ def test_rerun_message_distinguishes_missing_tree_from_drift(tmp_path, stub, mon
     # 外层那句"复跑前提不一致"是统一的拒绝前缀，这里看的是 git_sha 那一行
     assert "指纹读不到" in err and "rev 'abc1234'" in err and "app 取不到" in err
     assert "评测代码（app/ scripts/ tests/ requirements*.txt）不一致" not in err
+
+
+# ---------- rerun_valid：真答错 ≠ 判不了（[173] 的 s09） ----------
+
+def test_rerun_valid_distinguishes_wrong_answer_from_judge_crash():
+    """`score_detail` 判错就是返回 None，所以 match=None 说明"没对上 gold"，不是"判不了"。
+    旧实现把 executed=True 且 match=None 全判无效 —— 等价于"只有答对的复跑才算有效"，
+    于是所有真错题的复跑都被吞进 *_rerun_invalid，m13r 永远判不出回归。
+    实测代价：s09 四次复跑 executed=True/match=None 全是真答错，全被记成无效。"""
+    wrong = {"executed": True, "match": None, "error_kind": None, "judge_error": False}
+    assert run_gate.rerun_valid(wrong) is True
+    assert run_gate.rerun_valid({**wrong, "judge_error": True}) is False     # 比较器崩了才是判不了
+    assert run_gate.rerun_valid({"executed": True, "match": None, "error_kind": None}) is True   # 旧报告无该字段
+    assert run_gate.rerun_valid({**wrong, "error_kind": "llm"}) is False    # 基础设施错仍无效
+
+
+def test_rerun_wrong_answer_three_times_counts_as_regression(tmp_path, stub):
+    """三次复跑都答错（match=None）必须判出回归，而不是"无法判定"。
+    这条是 [173] 的死锁回归测试：改之前三行全 valid=False → *_rerun_invalid → exit 2。"""
+    p = _rerun_report(tmp_path, {"s05"})
+    stub.queue["s05"] = [_res(None), _res(None), _res(None)]
+    _rr(p)
+    data = _load_json(p)
+    rows = [r for r in data["reruns"] if r["id"] == "s05"]
+    assert len(rows) == 3 and all(r["valid"] and r["match"] is None for r in rows)
+    assert not data["verdict"]["single_rerun_invalid"]
