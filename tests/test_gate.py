@@ -379,18 +379,32 @@ def _run_oracle_subprocess(tmp_path, require):
                         f"--junitxml={xml}"], cwd=ROOT, env=env, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=300)
     check_junit = _load("check_junit")
-    return r, check_junit.counts(str(xml))
+    return r, check_junit.counts(str(xml)), xml
 
 
-def test_g1_require_data_fails_with_plain_message(tmp_path):
-    r, n = _run_oracle_subprocess(tmp_path, require=True)
+def test_g1_require_data_fails_with_plain_message(tmp_path, monkeypatch):
+    # 曾经偶发红的判据是「r.stdout 里有那句话」。子进程的 stdout 是给人看的、会被输出量与
+    # 管道缓冲左右，不该当契约。这里把 stdout 直接抹掉，逼判据只能走 junit XML。
+    real_run = subprocess.run
+
+    def blinded(*args, **kwargs):
+        done = real_run(*args, **kwargs)
+        done.stdout = ""
+        return done
+
+    monkeypatch.setattr(subprocess, "run", blinded)
+    r, n, xml = _run_oracle_subprocess(tmp_path, require=True)
     assert r.returncode != 0
-    assert "闸门数据缺失" in r.stdout
+    # 先判结构：子进程崩了（collection error / 少收集）会在这里红，报错比"stdout 里没那句话"好读。
     assert n == {"tests": len(questions.QUESTIONS), "failures": len(questions.QUESTIONS), "errors": 0, "skipped": 0}
+    msgs = _load("check_junit").failure_messages(str(xml))
+    bad = [m for m in msgs if "闸门数据缺失" not in m]
+    assert len(msgs) == len(questions.QUESTIONS) and not bad, \
+        f"{len(bad)}/{len(msgs)} 条失败没给出人话提示，例：{bad[:1]!r}"
 
 
 def test_g1_without_require_still_skips(tmp_path):
-    r, n = _run_oracle_subprocess(tmp_path, require=False)
+    r, n, _ = _run_oracle_subprocess(tmp_path, require=False)
     assert r.returncode == 0, r.stdout[-2000:]
     assert n == {"tests": len(questions.QUESTIONS), "failures": 0, "errors": 0, "skipped": len(questions.QUESTIONS)}
 
@@ -453,6 +467,32 @@ def _junit(tmp_path, tests, failures=0, errors=0, skipped=0, wrapped=True):
     p = tmp_path / "j.xml"
     p.write_text(f"<testsuites>{suite}</testsuites>" if wrapped else suite, encoding="utf-8")
     return p
+
+
+def _junit_cases(tmp_path, cases):
+    """cases: [(kind, message|None, body|None)]，kind 取 None/failure/error。"""
+    items = []
+    for kind, msg, body in cases:
+        inner = "" if kind is None else (
+            f"<{kind}" + ("" if msg is None else f' message="{msg}"') + ">" + (body or "") + f"</{kind}>")
+        items.append(f'<testcase classname="t" name="n">{inner}</testcase>')
+    p = tmp_path / "jc.xml"
+    p.write_text(f'<testsuites><testsuite tests="{len(cases)}">{"".join(items)}</testsuite></testsuites>',
+                 encoding="utf-8")
+    return p
+
+
+def test_g1_failure_messages_reads_message_and_body(tmp_path):
+    p = _junit_cases(tmp_path, [
+        (None, None, None),                                    # 通过的那条不出现在结果里
+        ("failure", "闸门数据缺失：olist/x.csv", "traceback…"),
+        ("error", None, "正文里的说明"),                        # message 属性缺席时退回正文
+    ])
+    assert _load("check_junit").failure_messages(str(p)) == ["闸门数据缺失：olist/x.csv", "正文里的说明"]
+
+
+def test_g1_failure_messages_empty_when_all_passed(tmp_path):
+    assert _load("check_junit").failure_messages(str(_junit(tmp_path, len(questions.QUESTIONS)))) == []
 
 
 def _check_junit_cli(path):

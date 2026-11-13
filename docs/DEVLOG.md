@@ -9243,3 +9243,71 @@ Qwen3.5-397B-A17B 在 10-12 的两份报告里 s09 都是 `strict` 通过（5384
 
 主报告 1 次错 + 复跑 4 次错 = 0/5。人工签 `human_correct=False` → `single_regressions`
 → "有回归"。这与 [173] 的事实一致：Qwen3.5 时代它对，GLM-5.2 时代它错，是模型退化。
+
+## [175] G1 自检的判据换掉 stdout：那是个不该当契约的通道（2026-11-13）
+
+### 一、现象与前提
+
+`test_g1_require_data_fails_with_plain_message` 之前偶发红（约每两轮一次），
+红法固定：`assert "闸门数据缺失" in r.stdout` 不成立，而 junit 计数那条断言是过的。
+
+**先说清楚：这次没复现出来。** 在 `dc` 解释器（3.11.17 / pytest 9.1.1）下：
+
+| 跑法 | 次数 | 结果 |
+|---|---|---|
+| 单跑该测试（清 PYTHONPATH） | 8 | 8 passed |
+| 单跑该测试（带 WorkBuddy shim 的 PYTHONPATH） | 3 | 3 passed |
+| `test_gate.py + test_flip_rate.py` 全量 | 3 | 3 轮 114 passed |
+
+所以这不是「修一个已复现的 bug」，是**换掉一个本就不该当契约的判据**。判据本身有缺陷，
+不需要等它再红一次才动。
+
+（顺带排掉一条错线索：本机 `.venv` 是空壳，`D:\Anaconda3\python.exe`（3.9）缺
+`langchain_core`，真正的解释器是 `D:\Anaconda3\envs\dc\python.exe`。另外 WorkBuddy 的
+Bash 会往 `PYTHONPATH` 塞 `.../cli/vendor/shim`，里面有个 55KB 的 `sitecustomize.py`，
+在 3.9 上一 import 就 `SRE module mismatch` —— 排查时踩过一次，跑 pytest 要 `env -u PYTHONPATH`。）
+
+### 二、判据本身的毛病
+
+stdout 是给人看的，不是接口：
+
+1. 它的到达受输出量、`-q` 级别、pytest 版本、管道缓冲左右；这些都不该决定一个测试的红绿。
+2. 原断言只要求**整段输出里出现过一次**那句话。195 个参数化 case 里 194 条都变成别的错，
+   只要有一条带了那句话，测试照样绿 —— 断错了对象。
+3. 真红的时候，报错是「stdout 里没这句话」，读的人还得再猜是子进程崩了、还是输出被吞了。
+
+### 三、改法
+
+`scripts/gate/check_junit.py` 新增 `failure_messages(path)`：按 testcase 顺序取
+`failure` / `error` 元素的 `@message`（缺席就退回元素正文）。`_suite()` 抽出来给
+`counts()` 复用。
+
+`tests/test_gate.py`：
+
+- `_run_oracle_subprocess` 多返回一个 `xml` 路径（两个调用点都改）。
+- 断言顺序改成 **先结构后内容**：先 `counts == {tests:25, failures:25, errors:0, skipped:0}`
+  （子进程崩了会变 errors，收集掉了会变 tests，这两种红法各自可读），
+  再断言 `failure_messages` 里 **25 条每一条**都含「闸门数据缺失」。
+- 测试里把子进程 `stdout` 直接抹成 `""`（包一层 `subprocess.run`）。这样这条测试
+  **只能**走 XML 路径 —— 判据要是偷偷回退到 stdout，它会立刻红。
+- 新增两条单测：`test_g1_failure_messages_reads_message_and_body`（通过的不出现、
+  `@message` 缺席退回正文）、`test_g1_failure_messages_empty_when_all_passed`。
+
+### 四、变异验证
+
+把 `pytest.fail(f"闸门数据缺失：…")` 临时改成 `pytest.fail("boom-MUTANT")`：
+
+```
+E  AssertionError: 25/25 条失败没给出人话提示，例：['Failed: boom-MUTANT']
+1 failed in 16.94s
+```
+
+报的是「25/25 条」，不是「整段没出现」—— 说明新判据确实在逐条检查，而不是撞巧。
+复原后 `-k g1` 19 passed，全量 `test_gate + test_flip_rate` 116 passed（原 114 + 新增 2）。
+
+### 五、两套题集的数别混
+
+`ORACLE_NODE` 参数化的是 `questions.QUESTIONS` = **25 题（闸门集）**；
+release 全量评测跑的是 **195 题**（202 − 7 需 memory）。上面所有"25"都是闸门集，
+拿去和 `outputs/rel_*.json` 的 195 对不上号是正常的。
+

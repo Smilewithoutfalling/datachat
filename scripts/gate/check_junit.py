@@ -11,10 +11,30 @@ import xml.etree.ElementTree as ET
 import questions
 
 
-def counts(path: str) -> dict[str, int]:
+def _suite(path: str):
     root = ET.parse(path).getroot()
-    suite = root if root.tag == "testsuite" else root.find("testsuite")
+    return root if root.tag == "testsuite" else root.find("testsuite")
+
+
+def counts(path: str) -> dict[str, int]:
+    suite = _suite(path)
     return {k: int(suite.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+
+
+def failure_messages(path: str) -> list[str]:
+    """每条 testcase 的失败文本（failure / error 元素），按文件顺序。
+
+    从 XML 里读而不是从 pytest 的 stdout 里 grep：stdout 是给人看的，pytest 版本、
+    -q 级别、输出截断都会改变它；XML 的 message 是契约，pytest 一直写。
+    message 属性缺失时退回元素正文（--tb 会把断言消息放在正文里）。
+    """
+    out = []
+    for tc in _suite(path).iter("testcase"):
+        for tag in ("failure", "error"):
+            el = tc.find(tag)
+            if el is not None:
+                out.append(el.get("message") or (el.text or ""))
+    return out
 
 
 def main(argv: list[str]) -> int:
