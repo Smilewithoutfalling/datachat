@@ -483,12 +483,17 @@ jobs:
           python scripts/eval/tier_check.py outputs/rel_oracle.json
           --expect-n ${{ steps.n.outputs.n }} --require-all --label release-oracle
 
+      # --no-fail：release 全量测的是"跑得完 + 报告结构完整 + 闸门三件过"，准确率不进退出码
+      # （文件头：「红灯只判能不能跑完、报告结构完不完整，不判准确率」）。少这个开关时，
+      # 20 道错题就会让这一步 exit 1，把后面的闸门题 / pass^3 / 注入三道门禁一起跳过 ——
+      # run 43343327588 就是这么红的：195 题全跑完、报告也存了，却只做成了 oracle 那一件。
+      # 真崩溃仍走异常路径退出码非零（run_eval.py 的 --no-fail 只改 sys.exit 那一行）。
       - name: 全量评测（真模型）
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
           DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
-        run: python run_eval.py --agent react --out outputs/rel_full.json
+        run: python run_eval.py --agent react --no-fail --out outputs/rel_full.json
       - name: 全量报告结构完整
         run: >
           python scripts/eval/tier_check.py outputs/rel_full.json

@@ -9311,3 +9311,115 @@ E  AssertionError: 25/25 条失败没给出人话提示，例：['Failed: boom-M
 release 全量评测跑的是 **195 题**（202 − 7 需 memory）。上面所有"25"都是闸门集，
 拿去和 `outputs/rel_*.json` 的 195 对不上号是正常的。
 
+## [176] release 首跑：红在 workflow 少一个 --no-fail，不在评测；20 道错题归因完毕（2026-11-13）
+
+run `43343327588`（sha `63a86e5`，批准后 09:36 起跑，约 38 分钟）。
+
+### 一、红的不是评测，是退出码
+
+| 步骤 | 结果 |
+|---|---|
+| oracle 自检 / 题集规模 / oracle 必须全过 | ✅ |
+| **全量评测（真模型）** | **❌ exit 1** |
+| 全量报告结构完整、闸门数据、25 闸门题、pass^3、注入门禁 | **全部 skipped** |
+| upload-artifact | ✅（`if: always()`） |
+
+日志尾部：195 题**全部跑完**、`JSON 报告已保存：outputs/rel_full.json`，
+紧接着 `##[error]Process completed with exit code 1.` —— 没有异常栈、没有 traceback。
+
+`run_eval.py` 的退出码只有一行决定：
+
+```python
+sys.exit(0 if (all_correct or args.no_fail) else 1)
+```
+
+而 `eval.yml` 里三个档的调用是：
+
+| 行 | 档 | 调用 | 带 --no-fail？ |
+|---|---|---|---|
+| 108 | pr | `run_eval.py --agent react --no-fail` | ✅ |
+| 211 | nightly | `run_eval.py --agent react --no-fail` | ✅ |
+| 491 | **release 全量** | `run_eval.py --agent react --out outputs/rel_full.json` | **❌ 漏了** |
+| 536 | release pass^3 | `--no-fail --canary --repeat 3` | ✅ |
+
+文件头写得很清楚：「**红灯只判「能不能跑完、报告结构完不完整」，不判准确率**」。
+加 `--no-fail` 只改 `sys.exit` 那一行，真崩溃仍走异常路径非零；结构完整性由下一步
+`tier_check.py --expect-n 195 --label release-full` 与 `--require-all` 的 oracle 兜底。
+
+**后果**：release 的四道门禁只做成了 oracle 一件。闸门 25 题、pass^3、注入门禁
+全部没跑，所以这次 run 拿不出可用的 release 读数 —— 必须重跑。
+
+### 二、全量读数（报告本身是完整的）
+
+```
+输出正确率         89.7%  (175/195)
+代码执行成功率     100.0%  (195/195)
+条件正确率         89.7%  (175/195)
+Reviewer 修复率    100.0%  (初始报错 6 条)
+基础设施失败       0 条
+平均 10.84 秒/题   平均 5779 token
+多轮 34 题 76 轮   约束满足 95.6% (65/68)   跨轮数字 1/1
+记忆 off:195      历史 16.1 tokens/题  被裁 0 题
+```
+
+分类：聚合 97.7 / 过滤 96.4 / **关联 72.7** / 时序 96.6 / 应拒答 92.3 / **歧义 50.0** / 多轮 100.0。
+分表：sales 100 / orders 91.5 / employees 91.4 / inventory 96.9 / **biz 45.5**。
+
+**这是 GLM-5.2 在 195 题上的第一份全量读数，没有同模型同题集的历史对照可比。**
+`eval-v6`（93.0% 单轮 + 47.1% 多轮 off）的模型未记录在 baselines.json 里，
+且四片分开跑，与本次 195 题合跑不同构 —— 不拿它算回归，也不拿它算进步。
+
+### 三、20 道错题：逐题归因（有可复现的注入实验）
+
+方法：`outputs/_probe_biz_clean.py` —— **不改模型代码**，只在数据层注入
+`status.str.strip()` 与 `sku.str.upper()`，枚举 2×2，看哪一格让结果变成期望值。
+
+| 题号 | 注入后命中 | 根因 |
+|---|---|---|
+| biz_003 | strip=1 | status 未 strip |
+| biz_004 | strip=1 | status 未 strip（551→670 笔，深圳 113→144 精确命中） |
+| biz_005 | strip=1 | status 未 strip（1437469.65→1781831.59 精确命中） |
+| biz_006 | upper=1 | SKU 未统一大写 |
+| biz_013 | strip=1 **且** upper=1 | 两者都缺 |
+| biz_014 | strip=1 **且** cust_id strip=1 | 三处：status / customer_id / （member_level 它做对了） |
+| biz_016 | strip=1 | status 未 strip（193→208 精确命中） |
+| biz_017 | strip=1 **且** upper=1 | 两者（0.52488 ≈ 期望 0.5249） |
+| biz_018 | strip=1 **且** upper=1 | 两者（55→76 精确命中） |
+| biz_019 | strip=1 | status 未 strip |
+| biz_020 | upper=1 | SKU 未统一大写（数码商品11→数码商品26 精确命中） |
+| neg_001~006 | — | **执行了代码**。`expect_kind=clarify`，六道全在没问清口径的情况下算出了数 |
+| emp_022 | — | **执行了代码**。`refusal` 题要求 result 就是拒答串；它在 result 里放了一组离职率，正文补一句"数据里没有该字段"也不算 |
+| emp_018 | — | 数值全对（6/14/17），只有索引名与标签写法不同：期望 `leave_date` + `[2022,2023,2024]`，实际 `leave_year` + `['2022年',…]` |
+| ord_027 | — | 题面「总销售额是多少？」两种口径都说得通；期望 850854.16（仅已完成），它主答案给了全部订单 1029301.53，补充口径 858290.45 又差 7436 |
+
+数据侧的铁证（`data/eval/biz/orders.csv`，812 行）：
+
+```
+status 唯一值： '已完成' 560 | ' 已完成' 73 | '已完成  ' 48 | 已退款/已取消 各带空格变体
+== '已完成' 精确            560
+str.strip() == '已完成'     681     ← 漏掉 121 条，占 17.8%
+```
+
+派生的 18% 漏算，与 biz 类观测到的数值偏小比例（0.82）完全吻合。
+
+**结论：18 道是真实缺陷（模型在多表脏数据上漏清洗、在模糊问题上不澄清），
+1 道是评测口径局限（emp_018 索引标签写法），1 道是题面口径未定（ord_027）。**
+
+### 四、两处刻意不改的地方
+
+1. **emp_022 不判"它说了无法回答"**。`app/eval/negative.py:34` 明写：执行了但 result
+   不是拒答 → 直接判不拒答，不再看 answer。理由站得住（否则可以一边算数一边免责声明，
+   两头占）。这是设计，不是 bug。
+2. **emp_018 / ord_027 不改判分器**。改会动 `judge_sha12`，让 v0–v6 全部历史报告不可比；
+   为 1 道口径局限付这个代价不划算。记在这里，重跑时按"已知局限"读。
+
+### 五、下一步
+
+1. 已修 `eval.yml:491` 加 `--no-fail`（与 pr/nightly 对齐），重跑 release 才拿得到
+   闸门 25 题 / pass^3 / 注入三道读数。
+2. 重跑前不要动 `app/`、`scripts/`、`tests/` —— `_eval_tree_sig` 覆盖这几个目录，
+   动了以后旧报告复跑会被"评测代码不一致"挡下。
+3. 这份 `rel_full`（175/195）可作 GLM-5.2 的 release 首读，但**不入 baselines.json**：
+   它带 20 道错题归因未闭环（biz 类可修），且 code_sha12 会随后续改动变。
+
+
