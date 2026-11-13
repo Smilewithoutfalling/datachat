@@ -903,3 +903,19 @@ def test_repeat_1_has_no_runs_field(monkeypatch, tmp_path):
     data = json.load(open(path, encoding="utf-8"))
     assert data["repeat"] == 1
     assert "runs" not in data["cases"][0]
+
+
+def test_rerun_message_distinguishes_missing_tree_from_drift(tmp_path, stub, monkeypatch, capsys):
+    """「读不到」和「不一致」要分开报：前者是 shallow clone / 那个 commit 还没目录，
+    后者才是真换了评测代码。混成一句会把人往"代码被改过"的方向带（[169] 的坑）。"""
+    p = _rerun_report(tmp_path, {"s04"})
+    monkeypatch.setattr(run_gate, "_eval_tree_sig", lambda rev: None if rev != "feedbee" else "sig")
+    monkeypatch.setattr(run_gate, "_eval_tree_missing", lambda rev: "app")
+    stub.env["git_sha"] = "feedbee"
+    with pytest.raises(SystemExit) as e:
+        _rr(p)
+    assert _exit_code(e) == 3
+    err = capsys.readouterr().err
+    # 外层那句"复跑前提不一致"是统一的拒绝前缀，这里看的是 git_sha 那一行
+    assert "指纹读不到" in err and "rev 'abc1234'" in err and "app 取不到" in err
+    assert "评测代码（app/ scripts/ tests/ requirements*.txt）不一致" not in err

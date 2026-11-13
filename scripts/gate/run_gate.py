@@ -521,6 +521,19 @@ def _eval_tree_sig(rev: str) -> str | None:
     return "|".join(parts)
 
 
+def _eval_tree_missing(rev: str) -> str:
+    """该 commit 上取不到评测代码指纹的第一个路径。
+
+    用来把"读不到"和"不一致"分开报：两者在 `_eval_tree_sig` 眼里都是 None，但一个是
+    checkout 深度不够 / commit 还没有这个目录（环境问题），另一个是真换了代码（拒绝复跑的正经理由）。
+    """
+    from app.eval.report import _git
+    for p in ("app", "scripts", "tests", "requirements.txt", "requirements-dev.txt"):
+        if _git("rev-parse", f"{rev}:{p}").returncode != 0:
+            return p
+    return "（未知路径）"
+
+
 def _dirty_eval_paths() -> list[str]:
     """工作区里已跟踪、且落在评测代码边界内的改动（报告/日志不算）。"""
     from app.eval.report import _git
@@ -557,9 +570,16 @@ def _check_rerun_env(data: dict, env: dict, require_sha: bool) -> bool:
         diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}（有一侧读不到 commit）")
     elif rep_base != cur_base:
         a, b = _eval_tree_sig(rep_base), _eval_tree_sig(cur_base)
-        if a is None or b is None or a != b:
+        if a is None or b is None:
+            # 读不到 ≠ 不一致：前者多半是 shallow clone 或那个 commit 还没有该目录，
+            # 报"不一致"会把人引到"代码被改过"的错误方向（[169] 踩过）。
+            rev = rep_base if a is None else cur_base
+            diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}；评测代码指纹读不到"
+                           f"（rev {rev!r} 上的 {_eval_tree_missing(rev)} 取不到——"
+                           f"那个 commit 可能还没有这个目录，或 checkout 深度不够读不到历史）")
+        elif a != b:
             diff.insert(0, f"git_sha: 报告 {rep_sha!r} ≠ 现在 {cur_sha!r}，"
-                           f"且评测代码（app/ scripts/ tests/ requirements*.txt）不一致或读不到")
+                           f"且评测代码（app/ scripts/ tests/ requirements*.txt）不一致")
     if cur_sha.endswith("-dirty"):
         dirty = _dirty_eval_paths()
         if dirty:
