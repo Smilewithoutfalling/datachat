@@ -10000,3 +10000,46 @@ digest 仍是 `d4f7e82e2b41e9cf`）。
 
 这是 workflow 路线开工前就有的差异（历史全量只跑 react），不是这轮引入。修它要动 codegen
 的 prompt —— 那是产品行为变化，得先问，别夹带在这次提交里。
+
+### 十一、后账：clarify 在默认产品配置下是一条死路（未解决，等定）
+
+写完之后回头查产品路径，发现一件比 [181] 第二节更要紧的事 —— 前面那句「6/34 有产品含义」
+只说对了一半，另一半是：**反问出去以后，用户的回答回不来**。
+
+证据链（都是默认配置，不需要任何假设）：
+
+| 事实 | 位置 |
+|---|---|
+| 新建会话的 `agent` 默认 `workflow` | `app/server/app.py:111` |
+| 界面「模式」下拉默认「标准」= workflow | `ui/web/src/views/DatasetView.tsx:25` |
+| 记忆开关默认 `off`（无设置时 resolve 成 off） | `app/memory/config.py:52-54`、`SettingsView.tsx:27` |
+| off 档只给 react 传历史，workflow 拿 `None` | `app/server/app.py:774` |
+| `_run_workflow` 的签名里没有 `history`，只有 `state_block` | `app/core/service.py:309-312` |
+| off 档的 `state_block` 恒为 `""`（`off_context`） | `app/memory/context.py:43-47` |
+
+于是第 1 轮 planner 反问「您想按销售额还是件数看？」，第 2 轮用户答「按销售额」时，
+planner 收到的还是那句孤零零的「按销售额」：`followup` 是 False（没有历史），
+`memory_state` 没有（off 档），`may_clarify("按销售额")` 实测仍返回 **True**。
+
+我扫了 6 种最自然的回答方式，全部 `may_clarify=True`：
+
+```
+'按销售额'   True     '按销售额看'  True     '按金额'      True
+'那就看销售额吧' True   '品类'       True     '按件数'      True
+```
+
+也就是说：默认配置下每一次澄清都是一次**没有出口的往返**。这不是我这一轮新造的洞
+（workflow 单轮这件事从 `D6` 就记在 `docs/roadmap/memory-system-spec.md:81`），但澄清把它从
+「静默算错」变成了「问了却接不住」—— 后者对用户更明显，所以我把它记成这轮的**产品风险**，
+不是纯旧账。
+
+三条出路，互斥，选一条才能动代码：
+
+| # | 做法 | 代价 | 谁受影响 |
+|---|---|---|---|
+| A | 给 workflow 传历史并渲染成文本块（planner 至少要看得到上一问一答） | 破 P8 的 workflow 哈希（`off` 与 3ce6b77 逐字节一致这条基线作废）；`--agent workflow --memory off` 的历史读数全部断代 | 默认全部用户，收益最大 |
+| B | workflow 在「看不到历史」时禁止澄清（`may_clarify` 加一条：agent 无法续上文就别问，选主流口径并在结论里说明） | 不改 P8；但 eval 里 clarify 6/6 会回落 —— 那个 6/6 正是在这个配置下测的 | 默认用户（少一次无用往返） |
+| C | 产品默认 agent 改成 react | 一行；但改变所有新会话的默认路径，且 react 有它自己的成本 | 默认全部用户 |
+
+我倾向 **A**：clarify 的价值全在「下一轮能接上」，接不上就只剩打扰。但 A 是本轮提交里
+最贵的那个选项（P8 断代），所以停在这里不自己动。

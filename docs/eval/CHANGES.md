@@ -472,9 +472,18 @@
   | refusal | 11/13 | 13/13 |
   | multi_turn | 未测 | 6/34 |
 - **未验证**：
-  1. **multi_turn 这个 6/34 没有产品含义** —— `docs/eval/LEDGER.md:224` 已定：「workflow + off +
-     多轮」是评测器造出来的配置（产品里 `app/server/app.py` 只给 react 传 history）。要评
-     workflow 多轮得跑 `--memory state`，这一批**没跑**。
+  1. **multi_turn 6/34 的读法要分开**（2026-11-14 更正，原文写的是「没有产品含义」，过头了）：
+     `docs/eval/LEDGER.md` 那句「产品里不存在 workflow+off+多轮」是错的 ——
+     `app/server/app.py:111` + `DatasetView.tsx:25` + `resolve_memory_mode` 默认值三处合起来，
+     **默认产品配置就是 workflow + off**。所以 6/34 是「默认产品的多轮体验」的有效读数，
+     同时又不是「workflow 流水线的多轮能力」（off 档 `_run_workflow` 没有 history 输入这一路）。
+     要量能力得跑 `--memory state`，这一批**没跑**。
   2. 闸门 `may_clarify` 上线后的全量没跑成：2026-11-14 起公司网关不可达（本地代理 502 /
      直连 DNS 失败）。多轮从 6/34 能救回多少，待补。
   3. 只跑了 k=1，没有三跑，`flip_rate` 与 `pass^3` 都没有。
+  4. **clarify 在 workflow + off 下是死路（产品风险，未解决）**：反问出去以后，用户答
+     「按销售额」回到同一条路，`history` 还是 `None`（`app/server/app.py:774`）、
+     `may_clarify("按销售额")` 仍返回 `True` —— 模型手里没有任何上文可供继承，只能再问一次或硬猜。
+     实测 6 种自然答法（`按销售额` / `按金额` / `那就看销售额吧` / `按件数` …）全部 `may_clarify=True`。
+     影响面：默认配置下的每一个 clarify 都是一次没有出口的往返。三条出路（改产品/改默认/改闸门）
+     已写进 DEVLOG [181]，等定。

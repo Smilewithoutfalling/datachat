@@ -233,8 +233,18 @@ eval-v2 → eval-v3 再差 3.5pp，**两次跌幅都来自题集变化**（每�
   `app/server/app.py:526` 也明写着 `history = turn_history(...) if agent == "react" else None`，
   `turn_snapshots(...)` 那条路是给 `state` 模式折叠工作状态用的。
 
-**所以「workflow + off + 多轮」是评测器自己造出来的配置，产品里不存在**：runner 不区分 agent
-一律传 `history`，workflow 收下就丢，不报错也不警告。这个组合下的读数没有任何产品含义。
+**所以 runner 传给 workflow 的那份 `history` 在产品里没有对应物**：runner 不区分 agent 一律
+传，workflow 收下就丢，不报错也不警告。
+
+> **2026-11-14 更正（这句话原来写的是「产品里不存在这个配置」，错）**：
+> 产品默认配置**就是** `workflow + off + 多轮`。证据链——
+> `app/server/app.py:111` 的 `SessionIn.agent` 默认 `"workflow"`；`ui/web/src/views/DatasetView.tsx:25`
+> 的 `useState<Agent>("workflow")`（下拉第一项「标准」）；`app/memory/config.py:52-54`
+> `resolve_memory_mode` 无设置时返回 `"off"`，设置页 `SettingsView.tsx:27` 默认也是 `off`。
+> 也就是说，默认用户开的每一个会话都是 workflow + off。
+> 差别只在传不传：产品这条路上 `history=None`（`app/server/app.py:774`），评测器传了但被丢掉，
+> **两条路的模型输入一模一样，都是零上文**。所以 `wf_full_195*.json` 的多轮分项不是
+> 「评测器造出来的数」，它量的正是默认产品的多轮体验。原先那句「没有任何产品含义」是反的。
 
 对照批还留在台账里（workflow / 143 题 / off / 3 跑 = 91.1%），只用来说明两件事：
 
@@ -261,7 +271,14 @@ workflow 加了澄清短路（planner 出 `CLARIFY:` → 直接跳 summarizer）
 | aggregation / filtering / correlation / biz / timeseries | 44/44、28/28、33/33、22/22、28/29 | 能 |
 | refusal | 13/13（A 类措辞修完后） | 能 |
 | ambiguity | 12/14 | 能 |
-| multi_turn | 6/34 | **不能**，要评 workflow 多轮得 `--memory state` |
+| multi_turn | 6/34 | **能读，但读法变了**：这是默认产品配置的读数（workflow + off），不是「workflow 的多轮能力」 |
+
+多轮那行要再拆一次，别混：
+
+1. **作为「默认产品多轮体验」，6/34 有效** —— 产品默认就是 workflow + off（上面那节更正过），
+   用户说「那 S02 呢」时模型真的拿不到任何上文。这个数低，是真的低。
+2. **作为「workflow 这个流水线的多轮能力」，6/34 无效** —— off 档下 `_run_workflow` 根本没有
+   历史输入这一路（`app/core/service.py:309` 的签名里没有 `history`），它量的不是能力，是接线。
 
 要我给个数就说清楚代价：`--memory state` 下 react 是 mul 91.2%、off 是 47.1%（上文那张表），
 workflow + state **还没跑过**。跑它才是 workflow 多轮的第一个有效读数。
