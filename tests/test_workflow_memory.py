@@ -18,7 +18,7 @@ TODAY_REWRITE = json.dumps({"rewritten": "华北按产品拆开的销量", "need
                            ensure_ascii=False)
 
 
-def wf(code="result = df.groupby('product')['units'].sum()", rewrite_reply=None):
+def wf(code="result = df.groupby('product')['units'].sum()", rewrite_reply=None, plan="计划"):
     log = {"planner": [], "codegen": [], "summarizer": [], "rewrite": []}
 
     def respond(messages):
@@ -28,7 +28,7 @@ def wf(code="result = df.groupby('product')['units'].sum()", rewrite_reply=None)
             return rewrite_reply
         if "数据分析规划助手" in t:
             log["planner"].append(t)
-            return "计划"
+            return plan
         if "写一段 pandas 代码" in t:
             log["codegen"].append(t)
             return code
@@ -96,3 +96,47 @@ def test_workflow_planner_no_blank_line_when_empty():
     planner.plan({**base, "memory_state": "<<<状态>>>"}, cfg)
     assert seen[0] == seen[1] and "\n\n\n" not in seen[0]
     assert "\n\n<<<状态>>>\n\n相关字段说明" in seen[2] and "\n\n\n" not in seen[2]
+
+
+# ---------------------------------------------------------------- 反问的接线（2026-11-13 晚）
+#
+# 判据在 app/core/ambiguity.py，这里钉的是**接线**：service 得把「本轮之前有轮次」送进
+# workflow，否则 may_clarify 收到的永远是 False，闸门看着有、实际不生效。
+# 走 analyze() 而不是直接调图，因为 followup 是在 service 里从记忆上下文取的。
+
+CLARIFY_SAY = "CLARIFY: 您想按销售额还是订单数看？"
+
+
+def test_followup_blocks_clarify_even_when_off(sample_path):
+    """off 档没有状态块，追问仍不许反问 —— 这是全量读数里 28/31 处误伤的根。
+
+    off 下 `mc.state_block` 是空串，planner 的「有上文就放行」那句 prompt 进不去，
+    只剩 service 传的 followup 这一条路。不传 = 用户在追问，助手却把上一轮问过的话再问一遍。
+    """
+    m, log = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "那 S02 呢？", chat_model=m, llm_config=FAST, history=HISTORY)
+    assert r.ok and r.executed, "追问被反问拦住了，codegen 一步都没跑"
+    assert len(log["codegen"]) == 1, "反问应该被丢掉，回到正常链路"
+
+
+def test_first_turn_keeps_clarify_alive(sample_path):
+    """没有上文、又是评价式问题 → 反问照旧生效，别被闸门一刀切。
+
+    「这些订单的销售额怎么样」既没有上文、也没有前提词，是唯一该反问的形态。
+    """
+    m, log = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "这些订单的销售额怎么样？", chat_model=m, llm_config=FAST)
+    assert r.answer == CLARIFY_SAY[len("CLARIFY: "):]
+    assert log["codegen"] == [], "澄清短路后不该再写代码"
+    assert not r.executed
+
+
+def test_premise_imperative_is_not_clarified(sample_path):
+    """首轮祈使句在设前提（"只看 2024 年 3 月的订单"），不是提问，不许反问。
+
+    这四道是全量里第 1 轮就被拦下的题（mul_012/020/021/030）：用户下一句才说指标。
+    """
+    m, log = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "只看 2024 年 3 月的订单，重复录入的只算一次。",
+                chat_model=m, llm_config=FAST)
+    assert r.executed and len(log["codegen"]) == 1

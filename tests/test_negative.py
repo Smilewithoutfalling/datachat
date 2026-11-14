@@ -164,15 +164,18 @@ def test_impossible_rejects_number_even_if_answer_mentions_missing_field():
 
 def test_negative_cases_are_in_all_cases():
     """expect_kind 是负向题的注册表：neg_001..010 十条 + 记忆专项的反向回归 mem_003
-    （口径引用缺失字段仍拒答，批 4 起 expect_kind 也被 memory 类合法使用）。"""
+    （口径引用缺失字段仍拒答，批 4 起 expect_kind 也被 memory 类合法使用）
+    + ord_029（2026-11-13 从「带 5 个 alt 的歧义题」转成 clarify：它和 neg_005
+    题面同构，实测 5 个口径选出 3 个不同品类，没有默认口径）。"""
     from app.eval.cases import ALL_CASES
     ids = {c.id for c in ALL_CASES if c.expect_kind}
-    assert ids == {f"neg_{i:03d}" for i in range(1, 11)} | {"mem_003"}, sorted(ids)
+    assert ids == {f"neg_{i:03d}" for i in range(1, 11)} | {"mem_003", "ord_029"}, sorted(ids)
 
 
 def test_negative_mix_matches_the_spec():
     """6 澄清 + 4 不可能（neg_* 十条的比例写死：全做成 impossible 也能"通过"，
-    但那测不出"该反问却算了一个数"这件事）。mem_003 是记忆类的反向回归，不计入这个配比。"""
+    但那测不出"该反问却算了一个数"这件事）。mem_003 是记忆类的反向回归、
+    ord_029 是歧义类转来的，都不计入这个配比。"""
     from app.eval.cases import ALL_CASES
     kinds = [c.expect_kind for c in ALL_CASES if c.expect_kind and c.id.startswith("neg_")]
     assert kinds.count("clarify") == 6

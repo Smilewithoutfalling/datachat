@@ -63,7 +63,7 @@ def test_case_flags_consistent():
         assert bool(c.alt_ground_truths) <= (c.category == "ambiguity"), c.id
         # ambiguity 类现在有两条腿，判分方式不同：
         #   alt_ground_truths  有多种合理解法，算对任一即过（8 条）
-        #   expect_kind=clarify 题目模糊到无法作答，必须反问（6 条，EV-B7）
+        #   expect_kind=clarify 题目模糊到无法作答，必须反问（6 条 neg_* + ord_029，EV-B7）
         # 后者没有 alt 是对的 —— 给它写一个 gold 就等于承认"猜某个口径"及格。
         # 放宽这条时要保证"两种腿至少占一条"，否则 ambiguity 类会混进既无 alt
         # 也无 kind 的普通题，那一类的准确率就没人知道在量什么了。
@@ -161,12 +161,11 @@ def test_oracle_pipeline_all_correct(agent):
     用 oracle_factory 而不是自己拼 oracle_model：clarify 题的正确输出是反问、
     不是执行 gold，那个分叉只能在工厂里有一份（两处各写一遍已经漂过一次）。
 
-    workflow 路排除 clarify：它是固定线性图，没有反问分支（见
-    `test_workflow_cannot_express_clarify`）。让假模型在它上面"不执行"是做不到的，
-    硬做只会得到 SyntaxError —— 那不叫判分链路坏了。
+    两个 agent 都跑全量（2026-11-13 起）。此前 workflow 要排除 clarify —— 它没有反问
+    分支，假模型在它上面只能执行 gold、拿 SyntaxError。补了 planner → summarizer 短路后
+    这条路通了，排除条件反而会让 oracle 自检漏掉整整 6 道题的判分链路。
     """
-    cases = [c for c in ALL_CASES
-             if agent != "workflow" or c.expect_kind != "clarify"]
+    cases = ALL_CASES
     runner = _runner(agent, oracle_factory(agent))
     results = runner.run_all(cases)
     report = EvalReport(results)
@@ -176,25 +175,22 @@ def test_oracle_pipeline_all_correct(agent):
     assert all(r["tokens"] and r["duration_s"] is not None for r in results)
 
 
-def test_workflow_cannot_express_clarify():
-    """workflow agent 在 clarify 题上必然判错 —— 这是结构缺口，不是判分 bug。
+def test_workflow_can_express_clarify():
+    """workflow 现在能反问 —— 2026-11-13 补了 planner → summarizer 短路。
 
-    它的图是 planner → codegen → executor → summarizer，codegen 的契约只有
-    「算出来」或「数据里没有，拒答」，**没有"问题不清楚，先反问问清"这条路**。
-    所以 clarify 的 6 条题在 workflow 上的准确率恒为 0：它只会挑一个口径算下去。
+    旧名字是 `test_workflow_cannot_express_clarify`，钉的是结构缺口：图是
+    planner → codegen → executor → summarizer，codegen 的契约只有「算」或「拒答」，
+    它拿到一句「您想按哪个口径看？」只能当代码执行、报 SyntaxError，于是 clarify 题在
+    workflow 上恒为 0 分。那条测试的注释自己写了「哪天 workflow 加了澄清分支，这条
+    测试会红，那时应当改成'它也能反问'」—— 现在是那一天。
 
-    钉住这条不是为了记住"它不行"，而是让人知道这是已知缺口：
-    哪天 workflow 加了澄清分支，这条测试会红，那时应当改成"它也能反问"。
+    判据还是同一条线：**不执行代码**、answer 里是问句。区别只是它不再必然失败。
     """
     case = next(c for c in ALL_CASES if c.id == "neg_001")
     r = _runner("workflow", oracle_factory("workflow")).run_single(case)
-    assert r["correct"] is False
-    assert r["executed"] is True          # 它跑了 gold 的占位 result = None，不是反问
-    # 判错的理由分两种，都算错，这条测试钉的是「它不会反问」，不是「它怎么错的」：
-    #   真模型会算出数 → 判「交给了 result」（2026-11-13 前的判据是看 executed）；
-    #   假模型执行的是 clarify 的占位 gold（result = None），执行完也没交答案
-    #   → 判「既没交答案也没反问」。
-    assert r["negative_why"]
+    assert r["correct"] is True
+    assert r["executed"] is False          # 没执行代码，只是反问
+    assert r["match"] == "clarify"
 
 
 def test_wrong_answer_scored_wrong():

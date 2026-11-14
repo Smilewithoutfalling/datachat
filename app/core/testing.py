@@ -107,12 +107,21 @@ def oracle_factory(agent: str):
     clarify_say = "您是指哪个时间范围和口径？请确认后我再计算。"
 
     def make(case):
-        # 只有 react 能表达"不执行、只反问"。workflow 是固定线性图
-        # （planner → codegen → executor → summarizer），codegen 的契约只有
-        # 「算」或「拒答」，没有"反问问清"这条路 —— 硬把一句中文塞给它，
-        # 结果是 executor 拿它当代码跑，报 SyntaxError: invalid character '？'。
-        # 那个失败不是判分链路坏了，是这个 agent 结构上没有这条路。
-        say = clarify_say if (agent == "react" and getattr(case, "expect_kind", "") == "clarify") else None
+        # clarify 题的正确输出是一句反问，没有 gold 可执行；照 gold 跑 result = None
+        # 会被 negative_verdict 判成"没交答案也没反问"，与它的本意正好相反。
+        #
+        # 两个 agent 的表达方式不同，因为走的路不同：
+        #   workflow  planner 用 `CLARIFY: ` 前缀打标，图短路到 summarizer（2026-11-13 起支持）；
+        #   react     直接回一句话，不调工具。
+        # 给 workflow 少写这个前缀，它会当成分析步骤走 codegen，然后 executor 拿中文当代码跑，
+        # 报 SyntaxError —— 那个失败不是判分链路坏了。
+        clarify = getattr(case, "expect_kind", "") == "clarify"
+        if clarify and agent == "workflow":
+            say = "CLARIFY: " + clarify_say
+        elif clarify:
+            say = clarify_say
+        else:
+            say = None
         return oracle_model(case.ground_truth, agent, say=say)
     return make
 

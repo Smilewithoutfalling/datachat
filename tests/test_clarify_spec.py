@@ -21,6 +21,7 @@
 import re
 
 from app.eval.cases import ALL_CASES
+from app.core.ambiguity import answerable_by_terms, may_clarify
 from app.eval.clarify_spec import (
     GAP_KINDS,
     check_declared_gap,
@@ -30,13 +31,13 @@ from app.eval.clarify_spec import (
 
 # 题面与 clarify 题同构、却被期望「直接算」的题。键 = 题号，值 = 冲突说明。
 # 加进来的每一条都必须能回答「为什么它和 neg_005 不是同一件事」，否则就该改题而不是登记。
-KNOWN_SHAPE_CONFLICTS = {
-    "ord_029": (
-        "「哪个品类卖得最好」与 neg_005「哪个品类表现最好」同构：都是维度 + 最高级、"
-        "都没说按什么指标。ord_029 的 5 个 alt 恰恰说明出题人自己也认为有 5 种合法口径 —— "
-        "既然没有默认口径，正确行为就应该是反问。二者不能同时成立，待产品决策后改一边。"
-    ),
-}
+#
+# 2026-11-13 清空：原来只有 ord_029（「哪个品类卖得最好」，带 5 个备选答案）。
+# 它和 neg_005 是同一句话，改一边才能继续 —— 最后改的是 ord_029：转成 clarify。
+# 理由是实测那 5 个口径选出 3 个不同品类（数码 / 服饰 / 食品），
+# 「没有默认口径」这件事对两道题同时成立，不可能只对一边。
+# 保留这张表是因为将来还可能撞上同样的形态：登记过就不许悄悄放过。
+KNOWN_SHAPE_CONFLICTS: dict[str, str] = {}
 
 
 def _by_id(cid: str):
@@ -49,9 +50,10 @@ def _evaluative(question: str) -> bool:
 
 
 def test_every_clarify_case_declares_valid_gap():
-    """6 道 clarify 题都声明了缺口，且声明不是随口写的（题面字面要核得上）。"""
+    """clarify 题都声明了缺口，且声明不是随口写的（题面字面要核得上）。"""
     clarify = [c for c in ALL_CASES if c.expect_kind == "clarify"]
-    assert len(clarify) == 6, f"clarify 题数变了：{len(clarify)}"
+    # 6 道 neg_* + ord_029（2026-11-13 从「带 5 个 alt 的歧义题」转来，见 KNOWN_SHAPE_CONFLICTS 的注释）
+    assert len(clarify) == 7, f"clarify 题数变了：{len(clarify)}"
     problems = []
     for c in clarify:
         problems.extend(check_declared_gap(c))
@@ -137,3 +139,104 @@ def test_missing_items_is_a_validator_not_a_classifier():
         assert "metric" not in missing_items(c.question), (
             f"{cid} 明确点了指标，却被判缺 metric —— 词表太窄：{c.question}"
         )
+
+
+# ---------------------------------------------------------------- planner 的代码放行
+def test_answerable_by_terms_lets_clear_questions_through():
+    """题面同时有指标和聚合方式 → 放行，不给模型反问的机会。
+
+    这批是实测里真模型判错的（16 道明确可算的题有 5 道被反问，31%）：
+    它把「含不含退款」「期初还是期末」这类口径分歧都当成"该问"，而这些题的正确
+    行为是选主流口径算、分歧写进结论。
+    """
+    for q in ("总销售额是多少？", "平均库存是多少？", "产品A的月度销量变化情况",
+              "各地区的产品销量分布是怎样的？", "哪个地区的总销售额最高？",
+              "平均每单买几件？保留两位小数。", "产品A在华北地区的所有销售记录"):
+        assert answerable_by_terms(q), f"应放行却被拦下：{q}"
+
+
+def test_answerable_by_terms_does_not_gate_the_clarify_cases():
+    """6 道 clarify 题一个都不能被放行 —— 放行等于绕过判据，它们又会去算。"""
+    for c in ALL_CASES:
+        if c.expect_kind != "clarify":
+            continue
+        assert not answerable_by_terms(c.question), (
+            f"{c.id} 是 clarify 题，却被词表放行：{c.question} —— "
+            f"词表把维度词或评价词当成指标了"
+        )
+
+
+# ---------------------------------------------------------------- 第二道闸门（2026-11-13 晚）
+#
+# 第一版 clarify 上线后跑 195 题全量，31 处反问里有 28 处落在多轮题上。
+# 下面两段就是那份读数里的原题面，一个字没改 —— 它们是这条闸门的账本：
+# 判据改松了，clarify 题会被算掉；改紧了，这些题又会被反问回去。
+
+# 追问轮：本轮之前有轮次。这类半句天然缺指标，但上一轮定过口径，反问等于让用户复述。
+_FOLLOWUP_ASKS = [
+    "那 S02 呢？",
+    "不对，我看错了，应该是西南地区。",
+    "换成市场部，其他口径不变。",
+    "把已退款的也加进来，重新算一遍。",
+    "按职级拆开看呢？",
+    "我说反了，是已取消的，重新算。",
+    "刚才忘了说，离职的也要算进来，重新算。",
+    "再按地区拆一层呢？",
+    "只看华东地区呢？",
+    "再看已完成的。",
+    "其中 APP 渠道的。",
+]
+
+# 首轮祈使句：在设前提，用户下一句才说要看什么。这些是 followup=False 也要拦的。
+_PREMISE_ASKS = [
+    "只看 2024 年 3 月的订单，重复录入的只算一次。",
+    "只看 2024 年 2 月的订单，重复录入的只算一次。",
+    "只看数码类的已完成订单，重复录入的只算一次。",
+    "只看已完成的订单，重复录入的只算一次。",
+    "只看 APP 渠道的订单。",
+    "只看已完成订单。",
+]
+
+
+def test_may_clarify_rejects_followups():
+    """有上文就不许反问 —— 这一条单独成立，不依赖题面里有没有疑问词。"""
+    for q in _FOLLOWUP_ASKS:
+        assert not may_clarify(q, followup=True), f"追问被反问：{q}"
+
+
+def test_may_clarify_rejects_premise_setting_imperatives():
+    """没有疑问词的祈使句是在设前提，即使没有上文也不该反问。"""
+    for q in _PREMISE_ASKS:
+        assert not may_clarify(q, followup=False), f"设前提的祈使句被反问：{q}"
+
+
+def test_may_clarify_still_allows_every_clarify_case():
+    """闸门不能把该问的也拦掉：7 道 clarify 题必须都能反问。"""
+    for c in ALL_CASES:
+        if c.expect_kind != "clarify":
+            continue
+        assert may_clarify(c.question, followup=False), (
+            f"{c.id} 是 clarify 题，却被闸门拦下，只能硬算：{c.question}"
+        )
+
+
+def test_first_turn_of_multi_turn_cases_is_never_refused():
+    """多轮题的首轮要么能算（词表放行）、要么在设前提（闸门拦下），没有一道该在开场反问。
+
+    这条比逐个列题面更狠：它是结构性断言 —— 只要有人往题集里加一道「开场就问不出口径」
+    的多轮题，这里就红。理由是多轮的设计意图：第 1 轮建立范围，第 2 轮才要数。
+    注意两条闸门是串联的，所以判据是「或」：`answerable_by_terms` 先放行能算的，
+    剩下的 `may_clarify` 再拦设前提的，两者都不管才会真的反问回去。
+    """
+    bad = []
+    for c in ALL_CASES:
+        turns = getattr(c, "turns", None) or []
+        if not turns:
+            continue
+        q = turns[0]
+        if answerable_by_terms(q) or not may_clarify(q, followup=False):
+            continue
+        bad.append(f"{c.id}: {q}")
+    assert bad == [], (
+        "这些多轮题第 1 轮就会被反问，第 2 轮再问也没有上文可继承：\n" + "\n".join(bad)
+    )

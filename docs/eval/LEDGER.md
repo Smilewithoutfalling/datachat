@@ -247,6 +247,29 @@ eval-v2 → eval-v3 再差 3.5pp，**两次跌幅都来自题集变化**（每�
 **没改 `--agent` 的默认值**（那是评测入口的行为变化，要先说清楚），只在 `baselines.json` 里
 把 react 标成基线、workflow 标成对照。
 
+### 2026-11-13 又踩一次：多轮 6/34 是谁的锅，先别看这个数
+
+workflow 加了澄清短路（planner 出 `CLARIFY:` → 直接跳 summarizer）之后第一次跑 195 题全量，
+多轮 34 题只对 6 道（17.6%）。拆开看是 `inherit` 20 检查错 19 —— **和 10-29 那次 2/13 是同一件事**：
+`--agent workflow` + 默认 `off` 档，runner 传了 history、workflow 收下就丢，planner 看不到任何上文。
+上面那节写过的坑，这次是换个数字重演。
+
+所以 `wf_full_195.json` / `wf_full_195b.json` 的**多轮分项没有产品含义**，只有单轮分项能读：
+
+| 分项 | 读数 | 能不能读 |
+|---|---|---|
+| aggregation / filtering / correlation / biz / timeseries | 44/44、28/28、33/33、22/22、28/29 | 能 |
+| refusal | 13/13（A 类措辞修完后） | 能 |
+| ambiguity | 12/14 | 能 |
+| multi_turn | 6/34 | **不能**，要评 workflow 多轮得 `--memory state` |
+
+要我给个数就说清楚代价：`--memory state` 下 react 是 mul 91.2%、off 是 47.1%（上文那张表），
+workflow + state **还没跑过**。跑它才是 workflow 多轮的第一个有效读数。
+
+另外这次顺带确认了一件事：**clarify 判分改口径（C-010）让 `evalset_sha12` 变了**，`ord_029`
+的题面没改但期望从"带 5 个 alt 的算"变成"反问"，所以 `set_sha12` 看着稳定、行为已变 ——
+拿新旧读数对比时，`ord_029` 这一格必须单独看，不能当成模型退步。
+
 ### 判分器两条修复（打 eval-v2 之前）
 
 eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题，不是模型的**：

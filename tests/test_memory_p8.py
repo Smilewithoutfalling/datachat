@@ -2,6 +2,22 @@
 
 下面三个哈希是在 3ce6b77（阶段 6.6 之前的 master）上用同一段脚本算出来的：把每次模型调用收到的全部消息
 （类型 + 内容）序列化后取 sha256 前 16 位。改动任何会进 prompt 的文本都会让它变；off 下不许变。
+
+**2026-11-13 重立 workflow 三个哈希**（`c2139ed91836bb54` → `8fd780830946e2cc`，
+`3c241f4880db5e29` → `39274e0f04024ea3`）：planner 的 prompt 加了「口径不明就输出 CLARIFY」
+那段判断规则，workflow 每条题的第一个模型调用因此都变长。react 的哈希一个都没动 —— 变化
+只来自那条新分支，不是记忆功能偷改了 prompt。
+
+**2026-11-13 晚再重立一次**（`8fd780830946e2cc` → `d4f7e82e2b41e9cf`，
+`39274e0f04024ea3` → `7f38596168979aa0`）：同一天里改 planner prompt 的 A 类措辞
+（「不要追问，也不要给替代口径」那一句，为修 ord_024 / inv_021 被反问），改完忘了重立 ——
+这个 8fd7 从立的那一分钟起就没再被验证过。这次是补账，不是新变化：把闸门代码整段删掉
+重跑，digest 仍是 d4f7，可复现。
+
+两次重立的代价是同一个：这几个基线再也证明不了"与 3ce6b77 一致"，只能证明"与最后一次
+改 planner prompt 之后一致"。P8 的约束没有放宽（off 下仍然不许有任何记忆块），但比对的
+锚点从"阶段 6.6 之前"变成了"加澄清分支之后"。下次谁要再动 planner 的 prompt，先想清楚
+值不值这个价 —— 而且**改完当场重立**，别隔一轮再补。
 """
 import hashlib
 import json
@@ -15,11 +31,12 @@ from app.memory.config import resolve_memory_mode
 from tests.test_core_analyze import wf_model
 
 FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
-BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "167addb043be1eda", "workflow": "c2139ed91836bb54"}
+BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "167addb043be1eda", "workflow": "d4f7e82e2b41e9cf"}
 # 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
+# workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
 STATE_BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "a9c62ff882a7728a",
-                  "workflow": "c2139ed91836bb54", "workflow_history": "3c241f4880db5e29"}
+                  "workflow": "d4f7e82e2b41e9cf", "workflow_history": "7f38596168979aa0"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 

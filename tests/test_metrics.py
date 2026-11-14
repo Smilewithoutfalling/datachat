@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 from app.core import LLMConfig, analyze
 from app.core.testing import ScriptedChatModel, prompt_text
 from app.memory import metrics as M
+from app.nodes import planner as planner_mod
 from app.memory.budget import estimate_tokens
 from app.memory.snapshots import BLOCK_HEAD as HISTORY_HEAD
 from app.memory.working_state import STATE_HEAD
@@ -182,7 +183,14 @@ def test_planner_gets_notes_block(sample_path):
     p = seen["planner"]
     assert r.ok and M.BLOCK_HEAD in p and M.PLANNER_REFUSAL_LINE in p
     assert p.index(M.BLOCK_HEAD) < p.index(STATE_HEAD) < p.index("相关字段说明（来自数据字典）：")
-    assert p.endswith(M.PLANNER_REFUSAL_LINE)
+    # 拒答补句跟在那句字段说明之后、又在整个字段说明块之后（不是插在中间）。
+    assert p.index("相关字段说明（来自数据字典）：") < p.index(M.PLANNER_REFUSAL_LINE)
+    # 2026-11-13：`p.endswith(PLANNER_REFUSAL_LINE)` 这条断言改掉了。「利润是多少」同时命中了
+    # 指标词和聚合词，planner 会在末尾追加一句「已写清楚，直接写步骤，不要输出 CLARIFY」
+    # （app/core/ambiguity.py::answerable_by_terms）。断言改成「补句在放行句之前」，
+    # 顺序错了就是两段话抢同一个位置，那才是真问题。
+    assert M.PLANNER_REFUSAL_LINE in p and p.index(M.PLANNER_REFUSAL_LINE) < p.index(
+        planner_mod.ANSWERABLE_HINT)
     assert M.BLOCK_HEAD not in seen["codegen"]          # 只给 planner（规格陷阱：别一次把 codegen 都改了）
 
 
@@ -196,10 +204,15 @@ def test_planner_unchanged_without_notes():
     cfg = {"configurable": {"llm": Echo()}}
     plain = planner.plan(base, cfg)["plan"]
     assert planner.plan({**base, "metrics_block": ""}, cfg)["plan"] == plain
+    # 有工作状态就多一句「这是追问，别反问」（2026-11-13）。这句是状态块的既有用途之一，
+    # 和块本身绑在一起：`memory_state` 在的轮次就是追问轮，追问轮不该再问口径。
     with_state = planner.plan({**base, "memory_state": "ST"}, cfg)["plan"]
-    assert with_state == plain.replace("\n\n相关字段说明", "\n\nST\n\n相关字段说明", 1)
+    assert with_state == plain.replace("\n\n相关字段说明", "\n\nST\n\n相关字段说明", 1) + planner.FOLLOWUP_HINT
     both = planner.plan({**base, "memory_state": "ST", "metrics_block": "MB"}, cfg)["plan"]
-    assert both == plain.replace("\n\n相关字段说明", "\n\nMB\n\nST\n\n相关字段说明", 1) + "\n" + M.PLANNER_REFUSAL_LINE
+    # 顺序：块插在字段说明前 → 补句（PLANNER_REFUSAL_LINE）→ 追问放行句。
+    # 「Q」不含指标词，所以走的是 elif 那条（追问），不是 ANSWERABLE_HINT。
+    assert both == (plain.replace("\n\n相关字段说明", "\n\nMB\n\nST\n\n相关字段说明", 1)
+                    + "\n" + M.PLANNER_REFUSAL_LINE + planner.FOLLOWUP_HINT)
 
 
 def test_notes_not_injected_when_off(sample_path):
@@ -274,7 +287,10 @@ def test_refusal_still_holds_in_workflow_with_note(sample_path):
     r = analyze(sample_path, "各产品的利润分别是多少？", chat_model=m, llm_config=FAST, memory_mode="state",
                 dataset_notes=[PROFIT])
     p = seen["planner"]
-    assert "若表里没有回答问题所需的字段或信息，直接写明\"数据不足以回答\"以及缺少什么，不要用其他字段替代。" in p
+    # 2026-11-13：这条原来抄的是 prompt 里的一句原文（「若表里没有回答问题所需的字段或信息…」），
+    # 那句在加 A/B 分类时被扩写成了「数据里没有」那一整段，测试跟着假红。改成引用常量 ——
+    # 规则只有一份，测试只负责确认它进没进 prompt。
+    assert planner_mod.REFUSAL_RULE in p
     assert M.PLANNER_REFUSAL_LINE in p
     assert r.ok and r.result_text.startswith("无法回答") and r.memory_notes[0]["name"] == "利润"
 

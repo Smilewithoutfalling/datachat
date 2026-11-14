@@ -9800,3 +9800,203 @@ prompt 已回滚（`git checkout app/react_agent.py`）。判断依据：18 次�
   B. 改产品：workflow 加澄清分支（planner 输出 CLARIFY + 短路跳过 codegen/executor），
      重写 `test_workflow_cannot_express_clarify`，影响所有默认用户
   C. 只留判据不动行为：6 道题在报告里单列「已知不达标」
+
+## [181] workflow 澄清落地：6/6 到 6/6，但把多轮打穿了（2026-11-13～14）
+
+接 [180] 的产品决策 **B**：planner 出 `CLARIFY:` → 图短路跳过 codegen/executor → summarizer
+原样返回那句反问。这一条写完了，clarify 6 道从 0/6 到 6/6。然后第一次跑全量，暴露了两件
+比澄清本身更重要的事。
+
+### 一、落地：图的一条新边
+
+```
+planner ──┬─ clarify 非空 ──→ summarizer     （executed=False, result=None, 不过模型）
+          └─ 其余 ──────────→ codegen → executor → summarizer
+```
+
+- `app/nodes/planner.py::split_clarify` 拆 `(clarify, plan)`，标记在但内容为空时不算反问。
+- `app/graph.py::_route_after_plan` 走条件边；`app/state.py` 加 `clarify`。
+- `summarizer` 澄清时**不过模型**：让模型"润色"一句反问，它会把答案也补上（试过）。
+- `app/core/service.py` 的 `_workflow_step` 澄清时不发 plan 事件，避免界面出现空计划。
+- `tests/test_eval_cases.py::test_workflow_cannot_express_clarify` 改名并反转
+  → `test_workflow_can_express_clarify`。这条测试从「钉死 workflow 做不到」变成「钉死能做到」。
+
+判分侧一起改：clarify 的判据从 `res.executed` 改成 **`result` 有没有被赋值**。理由见 [180]：
+先探字段再问（`df.shape` / `value_counts` 后不赋值 result）是标准澄清，用 executed 判会把它
+当成"猜着算"。
+
+### 二、第一次全量：162/195 = 83.1%，多轮 6/34
+
+`outputs/wf_full_195.json`，5.45 秒/题、3124 token/题（比 react 的 10.8 秒 / 5779 token 便宜一半）。
+
+| 分类 | 正确 | 题数 |
+|---|---|---|
+| aggregation | 44 | 44 |
+| filtering | 28 | 28 |
+| correlation | 33 | 33 |
+| timeseries | 28 | 29 |
+| biz | 22 | 22 |
+| refusal | 11 | 13 |
+| ambiguity | 12 | 14 |
+| **multi_turn** | **6** | **34** |
+
+33 道错题里 **28 道是多轮**。多轮的三种检查拆开看：
+
+```
+exec     43 检查 / 7 失败
+inherit  20 检查 / 19 失败     ← 95%
+refusal   5 检查 / 0 失败
+```
+
+`inherit` 断言的是「这一轮的代码里有没有继承上一轮的约束」。19/20 失败不是"继承得不好"，
+是**根本没继承**：`_run_workflow` 在 `memory_mode=off`（评测默认档）下收到的 `state_block`
+是空串，state 里没有 `memory_state` 键，planner 看不到任何上文。react 在 off 下靠
+`(user, assistant)` 消息回灌历史，workflow 没有这条路 —— 设计文档
+（`docs/roadmap/memory-batch4.md` §3.2）明写「不给 workflow 传历史块（保持显式、可审计）」，
+且 `test_workflow_prompt_unchanged_when_off` 把这件事钉成了 P8 基线。
+
+**这不是第一次测 workflow 的全量 —— 我一开始写错了。** `docs/eval/LEDGER.md:224` 里
+2026-10-29 就记过同一个坑：143 题 workflow 基线、多轮 13 题只有 2/13（15.4%），而同样代码下
+单独跑 13 题是 41%。台账的结论比我这一节写得彻底：
+
+> `run_eval.py` 的 `--agent` 默认是 workflow，而所有历史基线都是 react。
+> `_run_workflow(...)` 只接收 `state_block`，没有 `history` 参数；`app/server/app.py:526` 明写
+> `history = turn_history(...) if agent == "react" else None`。
+> **所以「workflow + off + 多轮」是评测器自己造出来的配置，产品里不存在。**
+
+「产品里不存在」是指：产品的 workflow 收不到 history，多轮时每轮从零开始。runner 一律传
+history、workflow 收下就丢，不报错也不警告。
+
+那 6/34 该怎么读？两件事分开：
+
+1. **不是 workflow 的缺陷，是配置错配。** 要比多轮能力，得跑 `--memory state`
+   （台账里 react 的 `mul_state` = 91.2%，`mul_off` = 47.1%，差别全在历史有没有进去）。
+2. **但 off 档下这个数仍然有产品含义** —— 产品默认 `memory_mode=off`，workflow 多轮就是
+   每轮独立。用户说「那 S02 呢」，模型拿不到 S02 是什么，于是反问（本节第三条）。这不是
+   评测造出来的问题，是产品真会发生的。
+
+### 三、真正的回归：31 处反问，28 处落在多轮
+
+拿第一次全量扫所有非 clarify 题的回答，找澄清句式（您希望/请问/您想/请确认…）：**31 处**。
+
+其中 28 处是多轮题的中间轮：
+
+```
+mul_004 turn2  不对，我看错了，应该是西南地区。
+              → 您想查看西南地区的哪些具体指标？例如：总销售额、总销售数量…
+mul_009 turn2  按职级拆开看呢？
+              → 您希望按职级查看哪些具体指标？例如：1. 各职级的人数分布…
+mul_012 turn1  只看 2024 年 3 月的订单，重复录入的只算一次。
+              → 您希望统计 2024 年 3 月的哪些具体指标？例如：订单总数…
+```
+
+剩 3 处是单轮（`ts_010` / `ord_024` / `inv_021`），已由 prompt 的 A 类规则修掉。
+
+根因有两层，都不是词表能补的：
+
+1. **追问轮**（「那 S02 呢」「按职级拆开看呢」）天然只有半句话，缺 metric 是省略而非含糊。
+   而 off 档下 `memory_state` 是空串，planner prompt 里那句「这是追问，不要输出 CLARIFY」
+   **进不去 prompt** —— 判据靠的豁免在默认档位下不存在。
+2. **首轮祈使句**（「只看 2024 年 3 月的订单，去重」）在**设前提**，用户下一句才说要看什么。
+   三元组判据假设输入一定是个"要答案的问句"，这类输入根本不满足这个假设。
+
+### 四、第二道闸门：代码拦在路由之前，prompt 一个字不动
+
+`app/core/ambiguity.py::may_clarify(question, followup)`，顺序固定：
+
+| 序 | 判据 | 结论 | 拦住的典型 |
+|---|---|---|---|
+| 1 | 本轮之前有轮次（`followup`） | 不反问 | 「那 S02 呢」「换成市场部」 |
+| 2 | 可行性询问（`能算出…吗`） | 不反问，交拒答 | 「订单表里能算出毛利率吗」 |
+| 3 | 评价式（`怎么样/高不高/表现`） | 反问 | 「销售额怎么样」 |
+| 4 | 前提词（`只看/排除/换成/重新算`） | 不反问 | 「只看已完成的订单」 |
+| 5 | 其余 | 反问 | 「帮我看看这批数据」 |
+
+`followup` 由 `service._run_workflow` 从 `mc.followup` 传入。**它不进任何 prompt**，只在
+`plan()` 的 `llm.invoke` 之后起作用 —— 所以 P8 的 off 哈希不变（实测：把整段闸门删掉重跑，
+digest 仍是 `d4f7e82e2b41e9cf`）。
+
+**但要看清第 1 条的效力范围。** 产品的 workflow 收不到 history（`app/server/app.py` 明写
+`history = ... if agent == "react" else None`），所以产品里 `followup` 恒为 False，第 1 条
+**不生效**。它在评测里才生效（runner 一律传 history，workflow 收下就丢）。也就是说：
+
+- 第 1 条 = 对齐评测口径。产品里 workflow 多轮没有上文，这时候反问是诚实的 ——
+  用户说「那 S02 呢」，模型确实不知道 S02 是什么，问一句比猜一个数好。
+- 第 2~5 条 = 真实的产品行为改进。用户说「只看 2024 年 3 月的订单」，产品里也会被反问，
+  这是缺陷：他在设前提，下一句才说指标。
+
+这个区分不写清楚，后面读代码的人会以为 followup 是产品逻辑，进而以为"产品多轮已经修好了"。
+
+`OPERATOR_MARKERS` 顺手补了「最高 / 最低 / 最贵 / 最便宜 / 明细」—— `mul_027`「累计销量最高
+的门店是哪个」和 `mem_006`「销量明细」原来没被放行，是因为只收了「最大/最小」没收「最高/最低」。
+
+### 五、第二次全量：161/195，拒答 13/13
+
+`outputs/wf_full_195b.json`（修完三处拒答误判后）：
+
+- `refusal` 11/13 → **13/13**（`ts_010` / `ord_024` / `inv_021` 转绿，确认 A 类措辞有效）
+- 多轮仍是 6/34 —— 闸门还没上
+- 新错 4 道、转绿 3 道：`biz_009`（136 vs 137，去重差 1 人）、`corr_001`（问交叉表答成单列）、
+  `inv_003`（TypeError）、`ts_007`（返回 `{6,2}` 而不是 `'2024-06','2024-02'`）。都不是澄清相关。
+
+### 六、P8 补账：上一轮改完 prompt 忘了重立
+
+`test_memory_p8.py` 的 workflow 两个哈希从 `8fd780830946e2cc` / `39274e0f04024ea3`
+重立为 `d4f7e82e2b41e9cf` / `7f38596168979aa0`。
+
+**这不是这一轮的变化。** `8fd7…` 是 [180] 加澄清 prompt 那一刻算的，之后同一天又改了 A 类措辞
+（「不要追问，也不要给替代口径」，为修 `ord_024`/`inv_021`），改完没重立 —— 那个值从立起就没再
+被验证过。证据：把本轮的闸门代码整段删掉重跑，digest 仍是 `d4f7…`。react 的两个哈希一个没动，
+说明变化只来自 planner prompt。
+
+### 七、状态
+
+- 新增 `may_clarify` + `FEASIBILITY_MARKS` / `EVALUATIVE_MARKS` / `PREMISE_MARKS`。
+- 新增 9 条测试：`test_may_clarify_rejects_followups` / `..._premise_setting_imperatives` /
+  `..._still_allows_every_clarify_case` / `test_first_turn_of_multi_turn_cases_is_never_refused`
+  （结构性：任何多轮题第 1 轮都不许被反问），以及 `test_workflow_memory.py` 三条接线测试
+  （followup 真传进去了、首轮仍能澄清、祈使句不澄清）。
+- **未完成**：闸门上线后的全量没跑成 —— 公司网关 `grg-aikits-test.grgbanking.com` 从 11-14
+  起连不上（走本机代理 502，不走代理 DNS 解析失败，只有内网可达）。多轮 6/34 → ? 这个数
+  要等能连网关时补。
+- **仍未解决**：off 档下 workflow 没有多轮能力（本节第二条）。闸门只是让它在追问时「不反问、
+  硬算」，算出来的数仍然缺上文约束 —— `inherit` 那 19 道失败不会因此消失。要真解决得给
+  workflow 传历史块（改设计，破 P8）或强制 `memory_mode=state` 才能跑多轮（改评测口径）。
+
+### 八、离线自检：oracle 全量 2 passed（23 分 49 秒）
+
+网关不通但判分链路可以先验。`pytest tests/test_eval_cases.py::test_oracle_pipeline_all_correct`
+用脚本化模型把 195 题灌满分答案，两个 agent 各跑一遍：**100% 判对，0 基础设施错误**。
+
+这个测试要跑 **24 分钟**，原因不是卡死而是设计：沙箱每次执行都新起一个子进程，`import pandas`
+固定 ~4 秒，prewarm 的备用进程在"上一题刚跑完就下一题"的节奏里根本来不及预热。
+195 题 × 2 个 agent × 4 秒 ≈ 26 分钟，实测 23:49。**跑不起来的时候先看 CPU**：
+主进程 10 分钟只用 20 秒 CPU 是正常的（都在等子进程），别当成死锁去 kill。
+
+### 九、顺带修掉的三条假红灯（`tests/test_metrics.py`）
+
+加 A/B 分类时把 prompt 里那句「若表里没有回答问题所需的字段或信息…」扩写成了整段，
+`test_metrics.py` 有两条把这句话**原样抄在断言里**，于是红 —— 功能没坏，是字符串搬了家。
+
+处理方式不是改测试去迁就，而是把规则提成常量，测试引用常量：
+
+| 常量 | 位置 | 谁在用 |
+|---|---|---|
+| `REFUSAL_RULE` | `app/nodes/planner.py` | prompt 的 A 类整段；`test_refusal_still_holds_in_workflow_with_note` |
+| `ANSWERABLE_HINT` | 同上 | 「指标和聚合都写清楚了，别反问」；`test_planner_gets_notes_block` |
+| `FOLLOWUP_HINT` | 同上 | 「这是追问，别反问」；`test_planner_unchanged_without_notes` |
+
+第三条 `test_planner_gets_notes_block` 原来断言 `prompt.endswith(PLANNER_REFUSAL_LINE)`。
+「利润是多少」现在命中 `answerable_by_terms`，末尾会追加 `ANSWERABLE_HINT`，所以断言改成
+**顺序**（补句在放行句之前）—— 顺序错了才是真问题（两段话抢同一个位置）。
+
+提常量后重算 P8：`d4f7e82e2b41e9cf` / `7f38596168979aa0` 一字未变，证明重构没动 prompt 字节。
+
+### 十、两个与澄清无关的旧账（没修，先说清）
+
+`ord_028`（平均每单几件，实测 2.29 / 期望 2.26）与 `ord_030`（复购率，实测 70.85% / 期望 75.46%）
+在 workflow 上稳定红，两次全量都一样。原因是**没按 `order_id` 去重**：字典里写着
+「表中有少量整行重复的录入错误」，gold 一律 `drop_duplicates('order_id')` 再算。
+
+这是 workflow 路线开工前就有的差异（历史全量只跑 react），不是这轮引入。修它要动 codegen
+的 prompt —— 那是产品行为变化，得先问，别夹带在这次提交里。

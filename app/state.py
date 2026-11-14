@@ -12,6 +12,9 @@ class AgentState(TypedDict, total=False):
     memory_state: str    # 阶段 6.6 M1：会话工作状态块（已带数据标记），只给 planner；off 时没有这个键
     metrics_block: str   # 批 4b M2：数据口径块（已带数据标记），只给 planner；没有口径（含 off）时没有这个键
     plan: str            # Planner 产出的分析步骤
+    clarify: str         # 口径不明时 Planner 产出的反问（非空 = 跳过 codegen/executor，直接作答）
+    followup: bool       # 本轮之前已有轮次（service 从记忆上下文取；off 档下就是 bool(history)）。
+                         # 只给 planner 的 may_clarify 用，不进任何 prompt —— 追问不该反问
     code: str            # CodeGen / Reviewer 产出的 pandas 代码
     result: Any          # Executor 得到的结构化结果（DataFrame/Series/标量，不截断，B07）
     result_text: str     # 结果的文本预览（给 summarizer 看，截断时会标注）

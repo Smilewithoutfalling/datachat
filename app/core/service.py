@@ -256,7 +256,7 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     metrics_block, pairs_block = _memory_blocks(res, agent, question, dataset_notes, accepted_pairs)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
-                      dataset, max_attempts, exec_timeout, mc.state_block, metrics_block)
+                      dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block,
@@ -307,7 +307,7 @@ def _evidence_with_original(res, question, evidence):
 
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
-                  max_attempts, exec_timeout, state_block="", metrics_block=""):
+                  max_attempts, exec_timeout, state_block="", metrics_block="", followup=False):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
@@ -316,6 +316,9 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         "data_access": access_rule(df), "data_access_review": review_access_rule(df),
         "field_notes": notes_text, "attempts": 0, "max_attempts": max_attempts,
         "exec_timeout": exec_timeout,
+        # 本轮之前有没有轮次。只给 planner 决定「要不要反问」，不进 prompt：
+        # off 档下没有 memory_state，光靠状态块放行不了追问，这一位是那条路的替代。
+        "followup": bool(followup),
     }
     if state_block:            # 阶段 6.6 M1：工作流只吃工作状态（planner），不吃历史
         state["memory_state"] = state_block
@@ -396,7 +399,10 @@ def _chart_event_fields(e: dict) -> dict:
 def _workflow_step(node, upd, dt) -> Step:
     s = Step(node, duration_s=round(dt, 4))
     if node == "planner":
-        s.content = upd.get("plan", "")
+        # 口径不明时 planner 产出的是反问，plan 为空（CLARIFY: 是给图的协议，不该出现在计划里）。
+        # 这一步在报告里就展示反问本身 —— 否则会留一个空白的 planner 步骤，
+        # 看报告的人会以为模型什么都没想。
+        s.content = upd.get("clarify") or upd.get("plan", "")
     elif node in ("codegen", "reviewer"):
         s.code = upd.get("code", "")
     elif node == "executor":
@@ -409,6 +415,10 @@ def _workflow_step(node, upd, dt) -> Step:
 
 def _workflow_event(em, node, upd, dt, state) -> Event | None:
     if node == "planner":
+        # 澄清时不发 plan 事件：plan 为空，发出去就是前端一个空块。
+        # 用户会在下一步直接收到那句反问（summarizer 原样返回）。
+        if upd.get("clarify"):
+            return None
         return em.plan(upd.get("plan", ""))
     if node in ("codegen", "reviewer"):
         return em.code(upd.get("code", ""), source=node, attempt=state.get("attempts", 0))

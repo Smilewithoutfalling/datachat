@@ -20,6 +20,13 @@ _FAIL_PROMPT = """分析未能成功完成。
 
 
 def summarize(state, config=None):
+    clarify = state.get("clarify")
+    if clarify:
+        # 口径不明：planner 那句反问就是最终回答，原样返回。
+        # **不再过一次模型** —— 让 summarizer "润色"一句反问，它十有八九会顺手把答案也补上
+        # （ReAct 那边实测过三轮：模型只要有机会组织语言，就会给数值）。反问要短、要具体，
+        # 过模型只会变长变糊。
+        return {"answer": clarify, "answer_truncated": False}
     llm = node_llm(config)
     if state.get("error"):
         msg = _FAIL_PROMPT.format(question=state["question"], error=state["error"])

@@ -119,14 +119,17 @@ ORDER_CASES = [
              ground_truth=_D + "result = round(d['qty'].mean(), 2)",
              alt_ground_truths=[_DONE + "result = round(d['qty'].mean(), 2)",
                                 "result = round(df['qty'].mean(), 2)"]),
-    EvalCase(id="ord_029", category="ambiguity", dataset="orders",
+    # 2026-11-13 从「带 5 个 alt 的歧义题」改成 clarify。理由：
+    # 原设计给 5 个备选答案，等于承认「卖得最好」有 5 种合法口径；而 neg_005
+    # 「哪个品类表现最好」题面同构（维度 + 最高级、没有指标）、要求必须反问。
+    # 同一句话不能一边要求挑一个算、一边要求问清楚。实测这 5 个口径选出 3 个不同品类
+    # （金额→数码、件数→服饰、全状态件数→食品），「没有默认口径」对两道题同时成立 ——
+    # 所以正确答案是问。题面一个字没改，set_sha12 因此不变；但期望行为变了，
+    # 与本次之前的读数不可比（DEVLOG [181] / LEDGER 已记）。
+    EvalCase(id="ord_029", category="ambiguity", dataset="orders", expect_kind="clarify",
              question="哪个品类卖得最好？",
-             ground_truth=_DONE + "result = d.groupby('category')['pay_amount'].sum().idxmax()",   # 按销售额
-             alt_ground_truths=[_DONE + "result = d.groupby('category')['qty'].sum().idxmax()",   # 按件数
-                                _DONE + "result = d['category'].value_counts().idxmax()",         # 按订单数
-                                _D + "result = d.groupby('category')['pay_amount'].sum().idxmax()",
-                                _D + "result = d.groupby('category')['qty'].sum().idxmax()",
-                                _D + "result = d['category'].value_counts().idxmax()"]),
+             clarify_gap=["metric"],
+             ground_truth="result = None", keywords=[]),
     EvalCase(id="ord_030", category="ambiguity", dataset="orders", percent_equiv=True,
              question="复购率是多少？",
              ground_truth=_D + "n = d.groupby('user_id').size(); result = round((n >= 2).mean() * 100, 2)",

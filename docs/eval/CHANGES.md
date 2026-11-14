@@ -446,3 +446,35 @@
 | `eval_repeat3_rest_20261109` | react / off | 111 × 3 | 92.8 / 91.9 / 89.2% | 4.50% | 89.2% | ord/emp/inv/biz/neg/pert |
 | 合并 off 全量 | react / off | 195 × 3 | 87.2 / 86.7 / 86.7% | 7.52% | 81.0% | 翻转 22 题（占 11.28%） |
 | `perturb_total_row_fix` | react / off | 20 × 1 | 100% | — | — | A04 修复后复验，衰减从 -25pp 归零 |
+
+## C-010 · 2026-11-13 · clarify 判分从 `executed` 改为 `result` 是否赋值 · ord_029 转 clarify
+
+- **状态**：已生效（读数见 DEVLOG [181]），但 workflow 多轮读数受配置错配影响，**未验证**
+- **触发**：[DEVLOG 180](../DEVLOG.md) 第三节。neg_001 的合格澄清是「先 `df.shape` /
+  `value_counts` 探字段，不赋值 result，再反问」—— 旧判据只看 `res.executed`，把这种
+  标准澄清判成「猜着算」。同理 `ord_029`「哪个品类卖得最好」与 `neg_005`「哪个品类表现最好」
+  是同一句话，一个带 5 个 alt 期望算、一个期望问，判据自相矛盾。
+- **改动**：
+  1. `app/eval/negative.py`：新增 `_gave_answer(res)`，clarify 分支改看 **`result` 有没有被赋值**。
+     交了 result（哪怕错）= 擅自选口径算完了；result 为空 = 只查了没答。`_CLARIFY_SIGNS` 补
+     「确认一下 / 您想 / 请选 / 请从上面」。
+  2. `app/eval/cases_extra.py`：`ord_029` 从「带 5 个 alt 的 ambiguity 题」转 `expect_kind="clarify"`，
+     删掉 `alt_ground_truths`。devlog 实测那 5 个口径选出 3 个不同品类（数码/服饰/食品）。
+  3. `app/eval/cases_negative.py`：6 道 clarify 题逐条声明 `clarify_gap`。
+  4. `app/core/ambiguity.py`（新，进 `code_sha12`）：`answerable_by_terms` + `may_clarify`。
+- **覆盖范围**：`evalset_sha12` 变（ord_029 的 alt 与 expect_kind）→ **旧读数全部不可直接比**。
+  `code_sha12` 变（新文件 + negative.py + planner prompt）。
+- **改前 / 改后**（workflow + off，195 题，k=1）：
+  | 项 | 改前 | 改后 |
+  |---|---|---|
+  | 全量 | 未测 workflow | 162 → 161 / 195（83.1% → 82.6%） |
+  | clarify 6 道 | 0/6 | 6/6 |
+  | refusal | 11/13 | 13/13 |
+  | multi_turn | 未测 | 6/34 |
+- **未验证**：
+  1. **multi_turn 这个 6/34 没有产品含义** —— `docs/eval/LEDGER.md:224` 已定：「workflow + off +
+     多轮」是评测器造出来的配置（产品里 `app/server/app.py` 只给 react 传 history）。要评
+     workflow 多轮得跑 `--memory state`，这一批**没跑**。
+  2. 闸门 `may_clarify` 上线后的全量没跑成：2026-11-14 起公司网关不可达（本地代理 502 /
+     直连 DNS 失败）。多轮从 6/34 能救回多少，待补。
+  3. 只跑了 k=1，没有三跑，`flip_rate` 与 `pass^3` 都没有。
