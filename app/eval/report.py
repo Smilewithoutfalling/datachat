@@ -715,6 +715,9 @@ class EvalReport:
                 "turns": list(c.turns) if c.turns else [],
                 "turn_answers": [a[:800] for a in (r.get("turn_answers") or [])],
                 "turn_status": r.get("turn_status") or [],
+                # P11：clarify 出口信号（C-013）。老报告没这两个键，读时按 False / [] 处理。
+                "clarify": bool(r.get("clarify")),
+                "clarify_turns": list(r.get("clarify_turns") or []),
                 # 跨轮数字断言（EV-B5）：失败原因，非 recall 题恒为 ""
                 "recall_why": r.get("recall_why") or "",
                 # 证据一致性（EV-B4）：三条断言的判定，warnings-only

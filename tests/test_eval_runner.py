@@ -14,12 +14,12 @@ from app.eval.runner import EvalRunner
 
 
 def _res(question, *, answer=None, code="", executed=True, result="x",
-         error_kind=None, total=1.0, tokens=10, result_text=""):
+         error_kind=None, total=1.0, tokens=10, result_text="", clarify=False):
     return AnalysisResult(
         agent="react", dataset="d.csv", question=question,
         answer=answer if answer is not None else f"答{question}",
         code=code, executed=executed, result=result if executed else None,
-        result_text=result_text,
+        result_text=result_text, clarify=clarify,
         error=None if error_kind is None else "boom", error_kind=error_kind,
         timings={"total": total},
         usage=TokenUsage(calls=1, total_tokens=tokens, reported=True),
@@ -66,6 +66,37 @@ def test_single_turn_passes_none_not_empty_list(monkeypatch):
     r = EvalRunner(agent="react").run_single(case)
     assert seen == [None]                                # 不是 []：单轮不该被当成多轮首轮
     assert r["turn_answers"] == [] and r["turn_status"] == []
+
+
+def test_clarify_is_recorded_and_closes_the_next_turn(monkeypatch):
+    """P11：clarify 逐轮落进结果，且第一轮反问会作为 prev_clarify 传给第二轮。
+
+    这条不测就会重演 C-015 的盲点：报告里看不到 clarify，clarify 后仍被反问时
+    分不清「信号没传」还是「模型没输出 CLARIFY」。
+    """
+    seen = []
+
+    def fake_analyze(path, question, **kw):
+        seen.append((question, kw.get("prev_clarify")))
+        # 只有第一轮反问；第二轮的 clarify 由 stub 显式给 False
+        return _res(question, executed=(question != "第一轮"),
+                    clarify=(question == "第一轮"))
+
+    monkeypatch.setattr(runner_mod, "analyze", fake_analyze)
+    r = EvalRunner(agent="workflow").run_single(_multi())
+
+    assert seen == [("第一轮", False), ("第二轮", True)]   # 第二轮收到了出口信号
+    assert r["clarify"] is False                          # 末轮没反问
+    assert r["clarify_turns"] == [True, False]
+
+
+def test_single_turn_clarify_defaults_false(monkeypatch):
+    """单轮没有「逐轮」概念：clarify 记末轮，clarify_turns 恒空列表（不是 None）。"""
+    monkeypatch.setattr(runner_mod, "analyze", lambda p, q, **kw: _res(q))
+    case = EvalCase(id="tmp_003", category="ambiguity", question="这些订单的销售额怎么样？",
+                    ground_truth="result = len(df)")
+    r = EvalRunner(agent="workflow").run_single(case)
+    assert r["clarify"] is False and r["clarify_turns"] == []
 
 
 def test_turn_error_does_not_abort_final_turn(monkeypatch):

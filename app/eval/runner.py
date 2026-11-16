@@ -253,6 +253,7 @@ class EvalRunner:
         history = [] if multi else None
         turn_answers, turn_status, durations, usages = [], [], [], []
         turn_result_texts = []   # 每轮的 result_text（recall_turn 断言要用）
+        turn_clarify = []        # 每轮是否反问（C-013 的出口信号，P11 落进报告才能事后归因）
         memory_by_turn = []      # [(mode, history_tokens, [trimmed...]), ...]
         res = None
         prev_clarify = False    # 上一轮是否反问（clarify 出口，C-013）；首问没有「上一轮」
@@ -264,6 +265,7 @@ class EvalRunner:
             chat_model = self.model_factory(case) if self.model_factory else None
             res = self._run_one(case, q, history, chat_model, prev_clarify=prev_clarify)
             prev_clarify = bool(getattr(res, "clarify", False))
+            turn_clarify.append(prev_clarify)
             expect = case.expect_turns[i] if i < len(case.expect_turns) else ""
             turn_status.append(self._turn_status(res, expect))
             answer = res.answer or ""
@@ -300,6 +302,11 @@ class EvalRunner:
             **usage_fields(merged),
             "turn_answers": turn_answers if multi else [],
             "turn_status": turn_status if multi else [],
+            # P11：clarify 是 C-013 的出口信号，不进报告就只能靠「这轮有没有 executed」
+            # 反推——clarify 后用户回答仍被反问时，分不清是信号没传还是模型没输出 CLARIFY。
+            # 单轮记末轮（就是唯一那轮），多轮另存逐轮列表。**只记录，不参与判分。**
+            "clarify": turn_clarify[-1] if turn_clarify else False,
+            "clarify_turns": turn_clarify if multi else [],
             # 记忆：模式取最后一轮（同一进程里不该变），历史体积取最后一轮（多轮里它最大），
             # trimmed 取全轮并集（"这条用例被裁过没有"才是消融表要看的）；
             # notes（批 4b R10）取全轮并集 —— 每轮都注入同一份口径，但某轮没命中检索时

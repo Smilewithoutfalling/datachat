@@ -408,7 +408,7 @@ web-dist.zip                                       # 与上面重复
 再动一次 `evalset_sha12`，`multi_turn.rate` 的历史读数再断代一次。所以建议**攒着和
 P5/P0 的行为改动一起做**，一次断代把多件事都记进 `CHANGES.md`。
 
-## P11 报告缺 `clarify` 字段
+## P11 报告缺 `clarify` 字段 —— **已修（2026-11-16，C-017）**
 
 `AnalysisResult` 现在有 `clarify`，但 `app/eval/report.py` 的 case 记录里没落这个字段。
 后果：C-013 的 `prev_clarify` 信号在多轮读数里**完全不可见**，只能靠「这轮有没有
@@ -416,6 +416,10 @@ P5/P0 的行为改动一起做**，一次断代把多件事都记进 `CHANGES.md
 信号没传还是模型没输出 CLARIFY。
 
 修法：case 记录里加 `clarify: bool`。纯报告增强，不影响判分、不动 `evalset_sha12`。
+
+**已落地（C-017）**：`clarify`（末轮）+ `clarify_turns`（多轮逐轮）。注意 `runner.py`
+在指纹 A 组里，所以 `code_sha12` 会变 —— 但改的是记录不是喂给模型什么，判分路径零改动。
+oracle 三条题验过字段真的落地。
 
 ## P12 出口生效后，「把决定权推回来」的答法没有被处理
 

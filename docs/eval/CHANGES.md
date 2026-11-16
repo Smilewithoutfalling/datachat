@@ -682,3 +682,63 @@
 - **未验证**：k=1，配对只做了一轮；「行首反引号」形态需要专门的 inducement（让模型把示例
   单独占一行）才可能复现，本轮没做。ambiguity 档 14 题的单次读数不构成能力面基线
   （不进 LEDGER）。
+
+## C-017 · 2026-11-16 · 报告落 `clarify` 字段（P11，纯记录层）
+
+- **状态**：已生效并离线端到端验证（oracle，`outputs/oracle_p11_1116.json`）
+- **触发**：C-015 的盲点。`AnalysisResult.clarify` 从 C-013 起就有了，但 `report.py` 的
+  case 行没落这个字段 → clarify 在多轮读数里不可见，只能靠「这轮有没有 `executed`」反推；
+  clarify 后用户回答仍被反问时，分不清是信号没传还是模型没输出 `CLARIFY`。
+- **改动**：
+  1. `app/eval/runner.py`：轮次循环里收集 `turn_clarify`，结果新增
+     `clarify`（末轮，单轮即唯一那轮）与 `clarify_turns`（多轮逐轮列表，单轮为 `[]`）。
+  2. `app/eval/report.py`：case 行新增 `clarify: bool` / `clarify_turns: list`。
+     老报告没这两个键 → 读时按 `False` / `[]`。
+- **验证**：`oracle --case ord_027,neg_001,mul_012` →
+  `neg_001 clarify=True / executed=False`、`ord_027 clarify=False / executed=True`、
+  `mul_012 clarify_turns=[False, False]`。`tests/test_eval_runner.py` +2
+  （逐轮记录 + 出口信号确实传给了下一轮；单轮默认 `False` / `[]`），25 passed。
+- **指纹影响（必须看清楚）**：`report.py` 在 `_EXEMPT`（B 组），不动指纹；
+  **`runner.py` 在 A 组 → `code_sha12` 会变**。但这次改的是「记录」不是「喂给模型什么」：
+  prompt、history 组成、判分三样零改动。
+  ⚠️ 别把这条读成「P11 让历史读数作废」——**11-16 的读数早就因为 C-012 改题面
+  （`evalset 76142b06a8ab → 7c42591f7878`）和 C-013/C-014 改 `ambiguity.py` 断了代**，
+  P11 只是让新基线的指纹再往前走一格。判分路径未动，能力面数字可比。
+- **未验证**：没有真实模型跑（网关 11-16 14:05 起 `Qwen3.5-397B-A17B` 全线 503，
+  见 C-018），所以新字段在真实批次里的分布还没看到。
+
+## C-018 · 2026-11-16 · 网关模型面中断：`Qwen3.5-397B-A17B` 全线 503（不是代码问题）
+
+- **状态**：环境故障，未恢复（记录在案，防下一次把 503 当模型变笨）
+- **现象**：14:05 起 `POST /v1/chat/completions` 对 `Qwen3.5-397B-A17B` 稳定返回
+  ```json
+  {"error": {"message": "The selected model is no longer available. Refresh the authorized model selection.",
+             "type": "service_unavailable_error", "code": "gateway_execution_target_unavailable"}}
+  ```
+  连发 3/3 全 503（每次 1.5~1.9 s 就返回，不是超时）。同一个 key、同一个 base_url 在
+  13:45（多轮 state 34 题 `eval_wf_mul_state_1116b.json`）与 14:00（ambiguity 14 题
+  `eval_wf_amb_1116d.json`）都还正常，所以**不是 key 失效、不是代理、不是本机 DNS**
+  —— 这两个坑 11-14 已经排过（`HTTPS_PROXY=127.0.0.1:51569` 死代理 + 无尾点 FQDN 被
+  `.grgit.com` 搜索后缀污染）。
+- **现场证据**：`GET /v1/models` 仍列出 14 个模型、**`Qwen3.5-397B-A17B` 还在列表里** ——
+  列表里有、调用 503，说明是授权/路由侧的问题（报文自己写 "Refresh the authorized
+  model selection"），不是模型下架。
+- **逐个探测（各 1 次 8 token 请求）**：
+
+  | 模型 | 结果 |
+  |---|---|
+  | `Qwen3.5-397B-A17B` | 503 `gateway_execution_target_unavailable` |
+  | `active=auto` | OK，但实际落到 **`Qwen3-8B-Gateway-Test`**（8B 测试模型，不能当评测模型） |
+  | `Qwen3-235B-A22B-Thinking-2507` | 503 `Server Unavailable` |
+  | `deepseek-chat` | 500 `Internal Server Error` |
+  | `kimi-k3` | 429 `Upstream model rejected the request` |
+  | `grg-deepseek-v41-flash:stable` | 400 `HTTP 404` |
+  | `Qwen3` | OK |
+
+- **影响**：`outputs/eval_wf_full_off_1116c.json` 的全量 off 档**两次没跑完**：
+  第一次（13:43~13:56）跑到 118/195 被进程中断，第二次（14:01 起）跑到 32/195 后
+  从第 26 题起每题都是 503（`error_kind=llm`，规则上记 `turn_status=error`，不算模型错），
+  已在 14:06 主动 kill。**中断前的数字不能当读数用**，报告也没落盘（runner 只在跑完时写 JSON）。
+- **下一步**：等 `Qwen3.5-397B-A17B` 恢复后原样重跑，命令不变
+  （`run_eval.py --agent workflow --memory off --out outputs/eval_wf_full_off_1116c.json`）。
+  **不换模型凑一份读数** —— 换模型等于换被测对象，全量基线得重新立，那是产品决策不是修复。
