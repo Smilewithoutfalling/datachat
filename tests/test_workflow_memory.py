@@ -135,8 +135,11 @@ def test_premise_imperative_is_not_clarified(sample_path):
     """首轮祈使句在设前提（"只看 2024 年 3 月的订单"），不是提问，不许反问。
 
     这四道是全量里第 1 轮就被拦下的题（mul_012/020/021/030）：用户下一句才说指标。
+    拦下之后 codegen 必须拿到一条能执行的计划 —— 空计划会让它把「口径未定」翻成一句
+    没有候选、没有数字的拒答（实测 mul_021 首轮就这样，见 `VETO_PLAN` 的注释）。
     """
     m, log = wf(plan=CLARIFY_SAY)
     r = analyze(sample_path, "只看 2024 年 3 月的订单，重复录入的只算一次。",
                 chat_model=m, llm_config=FAST)
     assert r.executed and len(log["codegen"]) == 1
+    assert r.plan == planner.VETO_PLAN

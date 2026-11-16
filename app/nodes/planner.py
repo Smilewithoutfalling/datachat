@@ -74,7 +74,20 @@ B. **口径没定**：表里有数据，但问题没说清怎么算 → 第一�
 
 # 标记可能被模型加上 markdown 装饰（`**CLARIFY**:`、`- CLARIFY：`、代码块），前后都认。
 # 冒号全角半角都认：中文输出里全角更常见，只认半角会漏掉一半。
-_CLARIFY_RE = re.compile(r"^\s*[*_`#>\-\s]*CLARIFY[*_`\s]*[:：]\s*(.*)$", re.I | re.S)
+#
+# **必须逐行找，不能只认开头。** 原来用 `^` + re.S 只匹配整串第 0 位，实测模型经常先写一段
+# 「这题只给了筛选条件、没指明指标」的解释，再另起一行 `CLARIFY: …`。那种输出会整段被当成
+# 分析计划送进 codegen，codegen 读到「口径未定」就写 `result = '无法回答：…'` —— 用户看到一句
+# 没有候选、没有数字的拒答，程序还记成 executed=True（实测 mul_021 首轮）。加 re.M 让 ^ 匹配
+# 每个行首，标记在哪一行都能认出来。
+_CLARIFY_RE = re.compile(r"^[ \t]*[*_`#>\-]*[ \t]*CLARIFY[ \t]*[*_`]*[ \t]*[:：][ \t]*", re.I | re.M)
+
+# 闸门拦下反问后交给 codegen 的兜底计划。**不能留空**：空计划配一个只有筛选条件的问题，
+# codegen 会自由发挥（实测它把「口径未定」翻成一句拒答，而不是算一个数）。这段话把它按住：
+# 按题面条件算，指标没点明就取最主流的那个，并在结论里说明选了哪个口径。
+VETO_PLAN = ("按题面给出的条件筛选（含去重等约束）后直接计算。若问法没有点明指标，"
+             "取最能回答它的单一指标（优先数量，其次金额）算出结果，"
+             "并在结论里用一句话说明所选口径。")
 
 # 两条「别问，直接算」的追加指令。提成常量有两个用处：一是测试能断言它到底进没进 prompt
 # （而不是抄一份字符串在测试里，prompt 改一个字就假红灯）；二是这两句的分工要写在一处 ——
@@ -86,16 +99,21 @@ FOLLOWUP_HINT = "\n这是同一会话里的追问，上一轮已经定过口径�
 def split_clarify(text: str) -> tuple[str, str]:
     """把 planner 的输出拆成 (clarify, plan)。
 
-    clarify 非空 = 这是一句反问，图要短路；此时 plan 置空 —— `CLARIFY:` 是给图的协议，
-    不该出现在「分析计划」里让用户看到。标记在但内容为空时不算反问：那种半截输出当
-    分析步骤处理，走完整链路，由 codegen 自己决定算还是拒答。宁可多算一次，
-    也不要拿一句空话去答用户。
+    clarify 非空 = 这是一句反问，图要短路；此时 plan 取标记**之前**的文字（通常是模型
+    在反问前写的解释），标记本身不进 plan —— `CLARIFY:` 是给图的协议，不该出现在
+    「分析计划」里让用户看到。
+
+    标记在但内容为空时不算反问：那种半截输出当分析步骤处理，走完整链路，由 codegen
+    自己决定算还是拒答。宁可多算一次，也不要拿一句空话去答用户。
     """
-    m = _CLARIFY_RE.match(text or "")
+    text = text or ""
+    m = _CLARIFY_RE.search(text)
     if not m:
-        return "", text or ""
-    body = m.group(1).strip()
-    return (body, "") if body else ("", text)
+        return "", text
+    body = text[m.end():].strip()
+    if not body:
+        return "", text
+    return body, text[:m.start()].strip()
 
 
 def plan(state, config=None):
@@ -125,8 +143,12 @@ def plan(state, config=None):
     clarify, plan_text = split_clarify(text)
     # 第二道闸门（2026-11-13 晚）：模型判「该问」不等于真该问。两类场景它看不出来 ——
     # 追问（前半句被上一轮省掉了）和设前提的祈使句 —— 由代码拦在路由之前。
-    # 拦下时 plan 置空而不是塞回那句反问：反问是给图的协议，让 codegen 拿去做计划
-    # 只会把「您想按哪个口径看」当成分析步骤。
+    # 拦下时换成 VETO_PLAN 而不是把标记前的解释塞回去：反问是给图的协议，
+    # 那段解释是在讲「为什么问不出口径」，两者都不能当分析步骤。
     if clarify and not may_clarify(state["question"], bool(state.get("followup"))):
-        clarify, plan_text = "", ""
+        clarify = ""
+        # 丢掉反问之后必须给 codegen 一条能执行的计划。用 VETO_PLAN 而不是把标记前的
+        # 解释塞回去：那段话在讲「为什么问不出口径」，拿它当计划等于让 codegen 重走一遍
+        # 「口径未定 → 拒答」的老路。
+        plan_text = VETO_PLAN
     return {"plan": plan_text, "clarify": clarify}

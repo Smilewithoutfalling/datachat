@@ -86,6 +86,11 @@ def test_reviewer_prompt_has_plan_and_chart_guide(sample_path):
     ("CLARIFY:\n按金额还是件数？", "按金额还是件数？", ""),           # 内容在下一行
     ("CLARIFY:", "", "CLARIFY:"),                                   # 空内容 → 当普通计划，走完整链路
     ("1. 先筛选\n2. 求和", "", "1. 先筛选\n2. 求和"),
+    # 模型常先解释再另起一行打标（实测 mul_021 首轮）。漏掉这段标记会让整段解释被当成
+    # 计划送进 codegen，最后变成一句「无法回答：口径未定」。
+    ("仅描述筛选条件，没指明指标。\n\nCLARIFY: 要订单数还是金额？", "要订单数还是金额？",
+     "仅描述筛选条件，没指明指标。"),
+    ("解释一\n- CLARIFY：按哪个口径？", "按哪个口径？", "解释一"),
     ("", "", ""),
 ])
 def test_split_clarify(text, want_clarify, want_plan):
