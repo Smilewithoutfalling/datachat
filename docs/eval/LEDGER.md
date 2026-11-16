@@ -846,6 +846,19 @@ eval-v2 的 3 跑里有 9 题翻转，逐条查下来 **2 题是尺子的问题�
 | 2026-11-13 06:13:46 | `eval_react_canary_20261113_061218_run1.json` | react | 10 | 10 | 100.00 | 100.0 | 8.54 | 3937 | off | `ce68be4ad5f1` |
 | 2026-11-13 06:15:10 | `eval_react_canary_20261113_061218_run2.json` | react | 10 | 10 | 100.00 | 100.0 | 8.30 | 3962 | off | `ce68be4ad5f1` |
 | 2026-11-13 06:16:34 | `eval_react_canary_20261113_061218_run3.json` | react | 10 | 10 | 100.00 | 100.0 | 8.22 | 3936 | off | `ce68be4ad5f1` |
+| 2026-11-16 13:45 | `eval_wf_mul_state_1116b.json` | workflow | 34 | 26 | 76.47 | 100.0 | 10.74 | 5800 | state | `c013eca96a3d` |
+| 2026-11-16 13:59 | `eval_wf_amb_1116d.json` | workflow | 14 | 13 | 92.86 | 50.0 | 3.20 | 1761 | off | `c013eca96a3d` |
+| 2026-11-16 15:16 | `eval_wf_full_off_1116c.json` | workflow | 195 | 166 | 85.13 | 96.4 | 6.33 | 3330 | off | `98a91f766987` |
+| 2026-11-16 15:42 | `eval_wf_full_state_1116d.json` | workflow | 202 | 186 | 92.08 | 96.0 | 7.27 | 3583 | state | `98a91f766987` |
+
+> 2026-11-16 三行的两点注意：① `eval_wf_amb_1116d` 的执行成功率 **50.0% 是设计不是缺陷** ——
+> 那 7 道 ambiguity 题的正确行为就是反问、不跑代码（判据 `clarify`）。
+> ② 前两行 `code_sha12=c013eca96a3d` 与第三行 `98a91f766987` 不同，差在 C-017（P11）给
+> runner/report 加了 `clarify` / `clarify_turns` 两个**记录字段**；判分路径零改动，
+> 能力面可比。题集指纹三行相同：`7c42591f7878`。
+> ③ 11-16 之前的 off/state 全量（`wf_full_195c` / `wf_full_195_state`）是
+> `evalset 76142b06a8ab`，questions 与 gold 逐字未变（C-012 只改 `expect_turns`），
+> accuracy 可比、`turn_status` 不可比（见 C-019）。
 
 ## 翻转题
 
