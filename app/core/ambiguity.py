@@ -95,28 +95,39 @@ PREMISE_MARKS = re.compile(
 )
 
 
-def may_clarify(question: str, followup: bool = False) -> bool:
+def may_clarify(question: str, followup: bool = False, prev_clarify: bool = False) -> bool:
     """planner 这次反问算不算数。False 时把 CLARIFY 丢掉、照常走完整链路。
+
+    ## prev_clarify（2026-11-16）：上一轮已经在反问，这轮用户答的就是它要的口径
+
+    这是 clarify 的**出口**。改之前产品里 workflow 反问一次后，用户无论答什么（「按销售额」
+    /「看件数」/「就看 3 月」实测 7 种全 True），下一轮照样反问 —— followup 代理不了
+    「上一轮是反问」这件事。信号从上一条 assistant 消息的 result_json.clarify 来
+    （产品）或 runner 逐轮记录（评测），永远不进 prompt。
 
     ## followup 这一条的效力范围（别读错）
 
     `followup` 是「本轮之前有轮次」，由 service 从 `mc.followup` 取。**但产品的 workflow
     收不到 history** —— `app/server/app.py` 明写 `history = turn_history(...) if agent ==
-    "react" else None`，所以产品里 workflow 的 followup 恒为 False，这一条不生效。
+    "react" else None`，所以产品里 workflow（off 档）的 followup 恒为 False。state 档
+    `followup=bool(snaps)`：有上文时不反问，此时模型看得见工作状态块，指代轮能自己答。
 
-    它在评测里才生效：runner 一律传 history，workflow 收下就丢（见 docs/eval/LEDGER.md:224
-    记的坑）。所以第 1 条是**对齐评测口径**，不是产品行为改进 —— 产品里 workflow 多轮本来就
-    没有上文，这时候反问是对的（没有 S02 是什么，问一句「您想看 S02 的哪方面」是诚实的）。
+    它在评测里才主要生效：runner 一律传 history，workflow 收下就丢（见 docs/eval/LEDGER.md:224
+    记的坑）。所以这一条首先是**对齐评测口径** —— 多轮题的中间轮（「那 S02 呢？」）不反问。
 
     真正改变产品行为的是第 2~5 条：用户在产品里说「只看 2024 年 3 月的订单」，不该被反问。
 
     顺序是有讲究的，换了就错：
-      1. 有上文 → 不反问（评测口径；产品里恒不触发）
+      0. 上一轮在反问 → 不反问。用户答的是口径，再问就是死循环（2026-11-16 之前没有这条，
+         产品默认配置下每一个 clarify 都是一次没有出口的往返）
+      1. 有上文 → 不反问（评测口径；产品 off 档恒不触发）
       2. 可行性询问（"能算出…吗"）→ 不反问。先回答有没有，不是问你想怎么算
       3. 评价式（"怎么样 / 高不高"）→ 反问。即使给了范围也问，因为「怎么给」没定
       4. 有前提词（"只看 / 排除 / 换成"）→ 不反问。用户在立规矩，下一句才要数
       5. 其余（"帮我看看这批数据"）→ 反问，连对象都没指认
     """
+    if prev_clarify:
+        return False
     if followup:
         return False
     q = question or ""

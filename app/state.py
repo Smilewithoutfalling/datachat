@@ -15,6 +15,9 @@ class AgentState(TypedDict, total=False):
     clarify: str         # 口径不明时 Planner 产出的反问（非空 = 跳过 codegen/executor，直接作答）
     followup: bool       # 本轮之前已有轮次（service 从记忆上下文取；off 档下就是 bool(history)）。
                          # 只给 planner 的 may_clarify 用，不进任何 prompt —— 追问不该反问
+    prev_clarify: bool   # 上一轮是反问（service 从会话里上一条 assistant 消息取；评测里 runner
+                         # 逐轮记录）。clarify 的出口：用户这轮答的就是上一轮要的口径，不该再问。
+                         # 只给 planner 的 may_clarify 用，不进任何 prompt
     code: str            # CodeGen / Reviewer 产出的 pandas 代码
     result: Any          # Executor 得到的结构化结果（DataFrame/Series/标量，不截断，B07）
     result_text: str     # 结果的文本预览（给 summarizer 看，截断时会标注）

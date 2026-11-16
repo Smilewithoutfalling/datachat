@@ -157,12 +157,13 @@ class EvalRunner:
                 outs.append(r)
         return outs, first_err
 
-    def _run_one(self, case: EvalCase, question: str, history, chat_model):
+    def _run_one(self, case: EvalCase, question: str, history, chat_model, prev_clarify: bool = False):
         """跑一轮。单轮传 history=None；多轮传已有的 [(问, 答), ...]。
 
         单轮必须是 None 而不是 []：service.py 里 `nudge_no_exec = memory is None and not history`，
         两者对 nudge 的取值虽然一样，但"有没有历史"这件事在别处（如日志、轨迹）是要区分的，
         别让单轮看起来像"多轮的第一轮"。
+        prev_clarify：上一轮是反问（clarify 出口，C-013）。多轮循环里逐轮记录传递。
         """
         return analyze(self.path_for(case), question, agent=self.agent, llm_config=self.llm_config,
                        chat_model=chat_model, max_attempts=self.max_attempts,
@@ -172,6 +173,7 @@ class EvalRunner:
                        # 时注入（service 端保证），off 档传了也等于没传。
                        dataset_notes=getattr(case, "dataset_notes", None) or None,
                        today=getattr(case, "today", "") or None,
+                       prev_clarify=prev_clarify,
                        # rewrite：只在该题显式要求时传 True。False 不显式传 None —— env
                        # DATACHAT_REWRITE=1 时普通题也走全局改写（R9：env 优先于参数，
                        # 跑改写对照要显式设 env，光靠用例字段不够）。
@@ -253,13 +255,15 @@ class EvalRunner:
         turn_result_texts = []   # 每轮的 result_text（recall_turn 断言要用）
         memory_by_turn = []      # [(mode, history_tokens, [trimmed...]), ...]
         res = None
+        prev_clarify = False    # 上一轮是否反问（clarify 出口，C-013）；首问没有「上一轮」
         for i, q in enumerate(turns):
             # 每轮新建 chat_model，不在循环外建一次。注入的模型是"一轮 = 一个会话"的
             # 前提：oracle 桩靠 self.state["n"] 计数（第 1 次发工具调用、第 2 次给结论），
             # 共享一个实例会让第 2 轮起直接吐结论文本、不再执行代码，多轮题全部 executed=False。
             # 真实路径下 model_factory 是 None，这行恒为 None，不产生任何行为差异。
             chat_model = self.model_factory(case) if self.model_factory else None
-            res = self._run_one(case, q, history, chat_model)
+            res = self._run_one(case, q, history, chat_model, prev_clarify=prev_clarify)
+            prev_clarify = bool(getattr(res, "clarify", False))
             expect = case.expect_turns[i] if i < len(case.expect_turns) else ""
             turn_status.append(self._turn_status(res, expect))
             answer = res.answer or ""

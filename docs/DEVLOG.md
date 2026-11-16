@@ -10164,3 +10164,21 @@ state 档那 7 处 `inherit` 失败里还有假阴性：`mul_012/020/030` 写的
 
 D 是唯一「不动代码结构就拿到大部分收益」的。但它改的是产品默认行为（记忆默认开，
 意味着每轮多一次状态渲染、DB 多写快照），**得 H 定，我没动。**
+
+## [183] 2026-11-16 · 修尺子（C-012）与 clarify 出口（C-013/C-014）· commit <本次>
+
+### 本次完成（对照 [182]）
+
+| [182] 遗留 | 状态 | 证据 |
+|---|---|---|
+| `inherit:` 字面匹配误判（C-011 已知偏差） | **已修** | C-012：三道日期题换共享正则 `_IN_2024_03/_IN_2024_02`；oracle 七道 13 个受约束轮全 ok；离线重判 4 处假阴性全转 ok、mul_017 保持 fail。state 全量 7 处 inherit 失败定性 = 4 误判 + 1 真失败 + 2 网关 error ——「24/34 是下界」的说法作废（correct 从不看 turn_status） |
+| clarify 反问后没有出口（P6） | **已修** | C-013：`prev_clarify` 信号贯穿 result_json → 端点 → service → planner；`tests/test_web.py::test_clarify_then_answer_does_not_ask_again` 端到端：反问 → 用户答 → 直接算 |
+| （新发现）`_CLARIFY_RE` 反引号前缀误判 | **已修** | C-014：Echo 桩实测 C-011 的 re.M 正则把 prompt 里的引用示例行当协议标记，切走大半段输出；前缀类去掉反引号。此失败先于 [183] 存在（stash 复核），是 C-011 遗留回归 |
+| state 档 clarify 失效（followup=bool(snaps) 恒 True） | **随 C-013 解决** | prev_clarify 优先于 followup；首问模糊仍反问（snaps 空），用户答后出口放行 |
+| 真实重跑验证 C-012/C-013 | **未做** | 等网关窗口；`outputs/oracle_p4_fix7.json` / `eval_workflow_oracle_20261116_111339.json` 是桩验证 |
+
+### 当前已知问题
+
+- P0 未动：产品默认 workflow + off，中途指代轮（「那 S02 呢」）仍会反问 —— 架构缺口，需 H 定方案
+- P5 未动：默认 memory_mode 仍 off
+- mul_020 t1 / mul_030 t1 的修后判定是离线重判（报告只存最后一轮 code），严格确认要真实重跑

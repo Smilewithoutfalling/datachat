@@ -95,7 +95,7 @@ def test_runner_passes_code_to_later_turns():
     case = next(c for c in MULTI if c.id == "mul_013")       # 3 轮，前两轮都执行代码
 
     class Spy(EvalRunner):
-        def _run_one(self, case, question, history, chat_model):
+        def _run_one(self, case, question, history, chat_model, prev_clarify=False):
             captured.append(list(history or []))
             return super()._run_one(case, question, history, chat_model)
 
@@ -123,7 +123,7 @@ def test_runner_passes_empty_code_when_turn_not_executed():
     case = next(c for c in MULTI if c.id == "mul_013")
 
     class Spy(EvalRunner):
-        def _run_one(self, case, question, history, chat_model):
+        def _run_one(self, case, question, history, chat_model, prev_clarify=False):
             captured.append(list(history or []))
             return SimpleNamespace(
                 answer="a", code="result = 1", executed=False,   # 有代码但没执行成功

@@ -143,3 +143,39 @@ def test_premise_imperative_is_not_clarified(sample_path):
                 chat_model=m, llm_config=FAST)
     assert r.executed and len(log["codegen"]) == 1
     assert r.plan == planner.VETO_PLAN
+
+
+# ---------------------------------------------------------------- clarify 的出口（2026-11-16）
+#
+# P6：off 档产品里 workflow 反问一次后，用户无论答什么都还会被反问 —— followup 代理不了
+# 「上一轮是反问」。现在 prev_clarify 从上一条消息的 result_json.clarify 来，信号优先级最高。
+
+
+def test_prev_clarify_lets_the_answer_through(sample_path):
+    """上一轮在反问 → 这轮无论答什么都不再反问，codegen 照常跑、计划是 VETO_PLAN。
+
+    「按销售额算」在旧判据下 7 种答法全部 may_clarify=True（死循环）。出口修好后：
+    prev_clarify=True 直接放行，拿 VETO_PLAN 硬算 —— 算什么口径由计划兜底说明。
+    """
+    m, log = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "按销售额算", chat_model=m, llm_config=FAST, prev_clarify=True)
+    assert r.ok and r.executed, "用户答了反问还被继续反问，clarify 就没有出口"
+    assert len(log["codegen"]) == 1 and r.plan == planner.VETO_PLAN
+
+
+def test_prev_clarify_survives_word_table_judgements(sample_path):
+    """出口不受词表判定影响：用户答「按销售额算，但是高不高呢」虽然含评价式词，
+    仍是上一轮反问的回答，不许再反问 —— 死循环比一次口径猜测更伤产品。
+    """
+    m, log = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "就按销售额，高不高呢？", chat_model=m, llm_config=FAST, prev_clarify=True)
+    assert r.executed and len(log["codegen"]) == 1
+
+
+def test_clarify_result_records_the_flag(sample_path):
+    """反问轮的 res.clarify 必须为 True —— 产品靠 result_json.clarify 找「上一轮是反问」，
+    这个字段不落盘，出口信号就断在源头。"""
+    m, _ = wf(plan=CLARIFY_SAY)
+    r = analyze(sample_path, "帮我看看这批数据哪个表现最好？", chat_model=m, llm_config=FAST)
+    assert r.clarify is True and r.answer == CLARIFY_SAY[len("CLARIFY: "):]
+    assert "clarify" in r.to_record(), "to_record 必须带 clarify（result_json 全字段来自它）"

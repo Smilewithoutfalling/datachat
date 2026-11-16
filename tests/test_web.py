@@ -1,4 +1,5 @@
 """阶段 5 F0：前端静态托管的 auth 边界、CSP、--open；feedback 表（含旧库兼容）。全部用假模型。"""
+import json
 import os
 import sqlite3
 
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.server.app import CSP, create_app
 from tests.test_core_analyze import wf_model
-from tests.test_server import H, TOKEN, upload
+from tests.test_server import H, TOKEN, sse, upload
 
 INDEX = '<!doctype html><html><head><script type="module" src="/assets/index-abc.js"></script></head><body></body></html>'
 
@@ -181,3 +182,54 @@ def test_v1_database_gains_feedback_table_without_touching_old_tables(home, samp
     assert before["messages"][0] == 2 and before["events"][0] > 0
     assert c2.put(f"/messages/{mid}/feedback", json={"rating": "up"}, headers=H).status_code == 200
     assert c2.get(f"/sessions/{sid}", headers=H).json()["messages"][1]["feedback"]["rating"] == "up"
+
+
+# ---------------------------------------------------------------- clarify 的出口（2026-11-16）
+
+def test_clarify_then_answer_does_not_ask_again(home, sample_path):
+    """产品链路端到端：第一轮反问 → 用户答 → 第二轮直接算。
+
+    断言分两层：
+    1. 第一轮的 result_json 落了 clarify=True —— 端点靠它找「上一轮是反问」（P6 信号源）
+    2. 第二轮拿到的是结论不是又一句反问 —— 没有出口时这里 7 种答法全部死循环
+    """
+    from app.server.db import Message, make_sessionmaker
+
+    from app.core.testing import ScriptedChatModel
+    from tests.test_core_analyze import prompt_text
+    plans = iter(["CLARIFY: 您想按销售额还是订单数看？", "计划：按销售额汇总"])
+    def factory():
+        def respond(messages):
+            t = prompt_text(messages)
+            if "数据分析规划助手" in t:
+                return next(plans)
+            if "写一段 pandas 代码" in t:
+                return "result = int(df['units'].sum())"
+            return "销售额合计 1685"
+        return ScriptedChatModel(responder=respond, calls=[])
+
+    c = client(home, factory=factory)
+    ds = upload(c, sample_path)
+    s = c.post("/sessions", json={"dataset_id": ds["id"], "agent": "workflow"}, headers=H).json()
+
+    r1 = c.post(f"/sessions/{s['id']}/messages", json={"content": "帮我看看这批数据哪个表现最好"},
+                headers=H)
+    evs1 = sse(r1.text)
+    done1 = evs1[-1][1]["data"]["result"]
+    assert done1["answer"] == "您想按销售额还是订单数看？"
+    assert done1["clarify"] is True, "result_json 必须带 clarify=True（出口信号的落盘端）"
+
+    # 落盘端再从 DB 验一次：端点读的就是这张表
+    db = make_sessionmaker(os.path.join(home, "datachat.db"))()
+    try:
+        rows = [m for m in db.query(Message).all() if m.role == "assistant"]
+        rec = json.loads(rows[-1].result_json)
+        assert rec["clarify"] is True
+    finally:
+        db.close()
+
+    r2 = c.post(f"/sessions/{s['id']}/messages", json={"content": "按销售额算"}, headers=H)
+    evs2 = sse(r2.text)
+    done2 = evs2[-1][1]["data"]["result"]
+    assert done2["answer"] == "销售额合计 1685", f"用户答了还被反问：{done2['answer']}"
+    assert done2["clarify"] is False

@@ -240,3 +240,26 @@ def test_first_turn_of_multi_turn_cases_is_never_refused():
     assert bad == [], (
         "这些多轮题第 1 轮就会被反问，第 2 轮再问也没有上文可继承：\n" + "\n".join(bad)
     )
+
+
+# ---------------------------------------------------------------- prev_clarify（2026-11-16）
+
+def test_prev_clarify_lets_every_natural_answer_through():
+    """出口判据：上一轮在反问时，用户任何形式的回答都不许再反问。
+
+    这 7 种答法在 2026-11-16 之前（没有 prev_clarify 时）实测全部 may_clarify=True ——
+    产品默认配置（workflow + off）下，每个 clarify 都是一次没有出口的往返。
+    """
+    for a in ("按销售额算", "按销售额", "按销售额最高的", "用销售额这个指标",
+              "我想知道哪个产品卖得最多", "销售额", "就看销售额"):
+        assert not may_clarify(a, followup=False, prev_clarify=True), f"出口失效，仍被反问：{a}"
+
+
+def test_prev_clarify_overrides_word_table():
+    """prev_clarify 优先级最高：答话里带评价式词（「高不高呢」）也不许再反问。
+
+    死循环比一次口径猜测更伤。反问的代价是用户重复三轮后断定产品坏了。
+    """
+    assert may_clarify("销售额怎么样", followup=False, prev_clarify=False) is True   # 词表照常
+    assert not may_clarify("销售额怎么样", followup=False, prev_clarify=True)        # 出口压过词表
+    assert not may_clarify("能算出毛利吗", followup=False, prev_clarify=True)        # 与可行性询问一致

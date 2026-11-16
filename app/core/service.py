@@ -66,6 +66,7 @@ def analyze(
     dataset_notes=None,
     accepted_pairs=None,
     run_suffix: str | None = None,
+    prev_clarify: bool = False,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -101,6 +102,9 @@ def analyze(
              只透传给 react（workflow 无单一 system prompt，忽略）；指纹渲染不传它，不影响可比性判定。
              None/空串时 prompt 与之前逐字节一致。
              只在 full 档、只给 ReAct；检索取前 3 条，只给问题和代码。
+    prev_clarify：上一轮是反问（workflow 多轮的 clarify 出口，2026-11-16）。产品从上一条 assistant
+             消息的 result_json.clarify 取，评测里 runner 逐轮记录。只给 planner 的 may_clarify，
+             不进任何 prompt —— 用户这轮答的就是上一轮要的口径，不该再问。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
@@ -109,7 +113,7 @@ def analyze(
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
                              trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today,
                              dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                             run_suffix=run_suffix):
+                             run_suffix=run_suffix, prev_clarify=prev_clarify):
         if ev.type == "done":
             res = ev.result
     return res
@@ -139,6 +143,7 @@ def analyze_stream(
     dataset_notes=None,
     accepted_pairs=None,
     run_suffix: str | None = None,
+    prev_clarify: bool = False,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -180,7 +185,7 @@ def analyze_stream(
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                  memory=memory, thread_id=thread_id, history=history, encoding=encoding,
                  rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                 run_suffix=run_suffix)
+                 run_suffix=run_suffix, prev_clarify=prev_clarify)
     try:
         for ev in inner:
             if cancelled():
@@ -209,7 +214,8 @@ def analyze_stream(
 
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
-         rewrite=None, today=None, dataset_notes=None, accepted_pairs=None, run_suffix=None):
+         rewrite=None, today=None, dataset_notes=None, accepted_pairs=None, run_suffix=None,
+         prev_clarify=False):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -250,13 +256,14 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     notes_text = format_notes(notes) if notes else ""
     from app.memory import context as memctx
     mc = memctx.build(res.memory_mode, history, token_budget=tracker.usage.budget,
-                      history_messages=history_messages)
+                      history_messages=history_messages, prev_clarify=prev_clarify)
     res.history_tokens, res.memory_trimmed = mc.history_tokens, list(mc.trimmed)
     res.warnings += mc.warnings
     metrics_block, pairs_block = _memory_blocks(res, agent, question, dataset_notes, accepted_pairs)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
-                      dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup)
+                      dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup,
+                      mc.prev_clarify)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block,
@@ -307,7 +314,8 @@ def _evidence_with_original(res, question, evidence):
 
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
-                  max_attempts, exec_timeout, state_block="", metrics_block="", followup=False):
+                  max_attempts, exec_timeout, state_block="", metrics_block="", followup=False,
+                  prev_clarify=False):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
@@ -319,6 +327,9 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         # 本轮之前有没有轮次。只给 planner 决定「要不要反问」，不进 prompt：
         # off 档下没有 memory_state，光靠状态块放行不了追问，这一位是那条路的替代。
         "followup": bool(followup),
+        # 上一轮是反问 → 这轮用户答的就是上一轮要的口径，clarify 的出口（2026-11-16）。
+        # 同样只给 may_clarify，不进 prompt。
+        "prev_clarify": bool(prev_clarify),
     }
     if state_block:            # 阶段 6.6 M1：工作流只吃工作状态（planner），不吃历史
         state["memory_state"] = state_block
@@ -356,6 +367,7 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
 
     res.timings.update({k: round(v, 4) for k, v in node_time.items()})
     res.plan = state.get("plan", "")
+    res.clarify = bool(state.get("clarify"))
     res.code = state.get("code", "")
     res.attempts = state.get("attempts", 0)
     res.initial_error = state.get("initial_error") or None

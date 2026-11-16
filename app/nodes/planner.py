@@ -80,7 +80,14 @@ B. **口径没定**：表里有数据，但问题没说清怎么算 → 第一�
 # 分析计划送进 codegen，codegen 读到「口径未定」就写 `result = '无法回答：…'` —— 用户看到一句
 # 没有候选、没有数字的拒答，程序还记成 executed=True（实测 mul_021 首轮）。加 re.M 让 ^ 匹配
 # 每个行首，标记在哪一行都能认出来。
-_CLARIFY_RE = re.compile(r"^[ \t]*[*_`#>\-]*[ \t]*CLARIFY[ \t]*[*_`]*[ \t]*[:：][ \t]*", re.I | re.M)
+# 反问标记：行首（允许列表/引用/markdown 强调前缀）+ CLARIFY + 冒号。
+# **前缀类不含反引号**（2026-11-16）：`CLARIFY: …` 这种反引号包裹是「引用格式示例」的
+# 形态 —— prompt 自己的说明里就有（输出格式一节），模型复述格式时也会带。re.M 逐行匹配
+# 后（C-011 为修 mul_021），反引号在前缀类里会把这类引用整段误判成反问：实测 Echo 桩
+# 返回 prompt 原文时，第 19 行 `` `CLARIFY: <一句反问…>` `` 命中，标记之后的大半段
+# prompt（含 FOLLOWUP_HINT）被切走当「反问内容」。误判的代价（整段计划被当反问展示、
+# 分析全丢）远大于漏判（走完整链路），所以宁可收紧。
+_CLARIFY_RE = re.compile(r"^[ \t]*[*_#>\-]*[ \t]*CLARIFY[ \t]*[*_]*[ \t]*[:：][ \t]*", re.I | re.M)
 
 # 闸门拦下反问后交给 codegen 的兜底计划。**不能留空**：空计划配一个只有筛选条件的问题，
 # codegen 会自由发挥（实测它把「口径未定」翻成一句拒答，而不是算一个数）。这段话把它按住：
@@ -145,7 +152,8 @@ def plan(state, config=None):
     # 追问（前半句被上一轮省掉了）和设前提的祈使句 —— 由代码拦在路由之前。
     # 拦下时换成 VETO_PLAN 而不是把标记前的解释塞回去：反问是给图的协议，
     # 那段解释是在讲「为什么问不出口径」，两者都不能当分析步骤。
-    if clarify and not may_clarify(state["question"], bool(state.get("followup"))):
+    if clarify and not may_clarify(state["question"], bool(state.get("followup")),
+                                   bool(state.get("prev_clarify"))):
         clarify = ""
         # 丢掉反问之后必须给 codegen 一条能执行的计划。用 VETO_PLAN 而不是把标记前的
         # 解释塞回去：那段话在讲「为什么问不出口径」，拿它当计划等于让 codegen 重走一遍

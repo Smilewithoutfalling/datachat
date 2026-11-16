@@ -764,6 +764,18 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         rw_row = db.get(Setting, REWRITE_SETTING_KEY)
         rw_setting = normalize_flag(rw_row.value) if rw_row else None   # 批 4a：只读下传，改写在 service.py 里做
         mode = resolve_memory_mode(mem_setting)
+        # 上一轮是反问吗（clarify 的出口，2026-11-16）：从上一条 assistant 消息的
+        # result_json 读 AnalysisResult.clarify。不加 DB 列 —— result_json 本来就是
+        # to_record() 的全文（create_all 不会给旧表加列，加列等于强制迁移）。
+        # 旧消息没有这个键，.get 缺省 False；反问轮 status 是 ok，result_json 必有值。
+        prev_clarify = False
+        for x in reversed(s.messages):
+            if x.role == "assistant":
+                try:
+                    prev_clarify = bool((json.loads(x.result_json) if x.result_json else {}).get("clarify"))
+                except ValueError:
+                    prev_clarify = False
+                break
         notes, pairs = [], []
         if mode != "off":
             history = turn_snapshots(s.messages)          # 阶段 6.6：两种 agent 都带（workflow 只用来折叠工作状态）
@@ -782,6 +794,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         msg_id = a.id
 
         kwargs = dict(agent=agent, trace_id=msg_id, log=False, memory_mode=mem_setting, rewrite=rw_setting,
+                      prev_clarify=prev_clarify,
                       **(analyze_kwargs or {}))
         cfg, meta = llm_config_meta()     # 阶段 6.5：每条分析消息记下当时的连接名和模型（result.meta）
         if chat_model_factory is not None:

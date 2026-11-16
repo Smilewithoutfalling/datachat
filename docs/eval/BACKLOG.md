@@ -30,7 +30,7 @@
 | P3 | 高 | k=1，没有 pass^3 / flip_rate，「+14 是真增量还是抖动」答不了 | 否 | 3 小时机时 |
 | P4 | 中 | ~~`inherit:` 是字面匹配，workflow+state 的 24/34 是**下界**~~ **已修（C-012）**。注：原表述有误，correct 只看答案比对，24/34 从来不受 turn_status 影响；受污染的是 multi_turn.rate | — | 已完成 |
 | P5 | 中 | 产品默认 `memory_mode=off`，多轮白丢 14 题 | **是**（产品行为） | 一行 + 回归 |
-| P6 | 中 | workflow + off 下 clarify 反问后没有出口（用户被问死） | **是**（产品行为） | 半天 |
+| P6 | 中 | ~~workflow + off 下 clarify 反问后没有出口~~ **已修（C-013 prev_clarify）** | — | 已完成 |
 | P7 | 低 | `corr_001` 漏 product 维度、`ts_007` 输出缺年份 | 否 | 半天 |
 | P8 | 低 | 网关熔断靠人工补跑 | 否 | 2 小时 |
 | P9 | 低 | `ord_028` 对「去重」零判别力：三种口径都算 2.26 | 否 | 1 小时 |
@@ -275,44 +275,17 @@ if expect.startswith("inherit:"):
 
 ---
 
-## P6 clarify 反问后没有出口
+## P6 clarify 反问后没有出口 —— **已修（2026-11-16，C-013）**
 
-### 现象
+实际落地方案与下面写的「最小改动」一致，但**不需要会话侧边存储**：反问轮的
+`AnalysisResult.clarify=True` 落进 `result_json`（不加 DB 列，create_all 不给旧表
+加列），analyze 端点从上一条 assistant 消息现读。一位标记随消息表自然持久化，
+重启不丢，off 档也工作 —— 三个要求全部满足，且没有新增状态要管理。
 
-`app/nodes/planner.py:148`：
+端到端验证：`tests/test_web.py::test_clarify_then_answer_does_not_ask_again`。
 
-```python
-if clarify and not may_clarify(state["question"], bool(state.get("followup"))):
-```
-
-`followup` 来自 `state["followup"]`，而产品里它**恒为 False** ——
-`app/server/app.py:774`：
-
-```python
-history = turn_history(s.messages) if agent == "react" else None
-```
-
-workflow 拿不到 history，服务端无从知道上一轮反问过。`app/core/ambiguity.py:101-109`
-的注释把这个限制写清楚了，但注释不是解法。
-
-第一轮问「您要统计哪个指标？」，用户答「按销售额」，第二轮 `may_clarify("按销售额")`
-仍是 True → 再问一遍。**试过 6 种自然答法，全 True。**
-
-### 修法（需 H 定，因为新增会话状态）
-
-最小改动：**不依赖完整 history 的布尔标记**。
-
-- `analyze()` 加入参（如 `last_was_clarify: bool = False`），sidecar 在会话上存一位
-- 澄清发生时置 True，下一次请求读到就传给 workflow，随即清掉
-- 不走 memory 模块（off 档下也要工作）
-
-必须是「一位标记」而不是「读 history」—— 后者要求 memory 至少 state 档，等于把 P6
-绑在 P5 上，两个决策纠缠。
-
-### 备选
-
-把 clarify 限制在 ReAct（有 history 的模式），workflow 一律不提问 —— 等于 `e45b7da` 白做。
-不推荐，但如果 H 认为「产品默认配置下不该有 clarify」，那也是明确答案。
+**遗留**：off 档中途指代轮仍会反问（「那 S02 呢」）—— 那是 P0（workflow 收不到
+history），不是本条的范围。
 
 ---
 

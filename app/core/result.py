@@ -44,6 +44,9 @@ class AnalysisResult:
     chart_internal_errors: list = field(default_factory=list)  # 非 ChartError：我们的 bug，单列报警，必须清零
     charts_discarded: int = 0                   # exec 失败时丢弃的结构化图张数（[23]）
     plan: str = ""                              # 工作流版的分析计划
+    clarify: bool = False                       # 本轮是反问（planner 产出 CLARIFY、跳过 codegen）。
+                                                # 产品从上一条消息的 result_json 读它得到 prev_clarify，
+                                                # 评测里 runner 逐轮记录 —— clarify 的出口信号，见 may_clarify
     field_notes: list = field(default_factory=list)  # 数据字典命中的 (field, description)
     attempts: int = 0                           # 修复/重试次数（工作流：reviewer 次数；ReAct：报错的执行次数）
     initial_error: Optional[str] = None         # 第一次执行的报错（无则 None），用于修复率统计

@@ -556,3 +556,54 @@
 - **未验证**：mul_020 t1 / mul_030 t1 的 turn1 原代码没落盘（报告只存最后一轮 code），
   修后判定用的是最后一轮 code，严格说这两轮要真实重跑确认。按排除法推断成立
   （若 turn1 写了字面串旧断言就不会 fail，而 correct=True 说明约束语义对）。
+
+## C-013 · 2026-11-16 · clarify 的出口：prev_clarify 信号（P6）
+
+- **状态**：已生效并端到端实测（mocked 全链路 + 真实 oracle）
+- **问题**：off 档产品里 workflow 反问一次后，用户无论答什么都再被反问 —— `followup`
+  代理不了「上一轮是反问」（实测 7 种自然答法 `may_clarify=True`）。而 state 档
+  `followup=bool(snaps)` 恒 True，反问又永不发生。**clarify 在产品里没有可用配置**。
+- **改动**：
+  1. `app/core/ambiguity.py`：`may_clarify(question, followup, prev_clarify)` ——
+     prev_clarify 优先级最高：上一轮在反问时，用户任何回答都不再反问，codegen 拿
+     `VETO_PLAN` 硬算。死循环比一次口径猜测更伤，评价式答法（「按销售额，高不高呢」）
+     也被出口压过。
+  2. `app/core/result.py`：`AnalysisResult.clarify: bool` → `to_record()` 自动带出，
+     落进 `result_json`。**不加 DB 列**（create_all 不会给旧表加列，加列等于强制迁移；
+     Feedback 表的先例）。
+  3. `app/server/app.py`：analyze 端点从上一条 assistant 消息的 `result_json.clarify`
+     读出 prev_clarify（旧消息无此键 → False）。
+  4. `service.py`（analyze/analyze_stream/_run/_run_workflow）、`memory/context.py`
+     （MemoryContext/off_context/state_context/build）、`state.py`、`planner.py`：信号
+     贯通到闸门。全部**不进 prompt** —— planner 的 state 多一个键，prompt 逐字节不变。
+  5. `app/eval/runner.py`：多轮循环逐轮记录 `res.clarify` 传给下一轮（评测口径对齐）。
+- **行为矩阵（改后）**：
+
+  | 场景 | off 档 | state 档 |
+  |---|---|---|
+  | 首问模糊（无上文） | 反问 | 反问（snaps 空 → followup=False） |
+  | 用户答反问 | **直接算（新）** | **直接算（新）** |
+  | 有上文的中途指代轮 | 无上文 → 反问（架构缺口 = P0） | 不反问（followup=True） |
+
+- **测试**：`test_clarify_spec.py` +2（7 种答法出口、prev_clarify 压过词表）、
+  `test_workflow_memory.py` +3（VETO_PLAN 接线、词表压过、res.clarify 落盘）、
+  `test_web.py` +1（**端到端**：第一轮反问落盘 clarify=True → 用户答 → 第二轮直接算）。
+  runner 桩 `_run_one` 签名补 prev_clarify（2 处 Spy）。
+- **指纹**：P8 四个哈希全部未变（信号只走 state，不进任何 prompt）。
+- **遗留**：off 档中途指代轮仍会反问 —— 那是 P0（workflow 收不到 history），本条只修出口。
+
+## C-014 · 2026-11-16 · `_CLARIFY_RE` 收紧：反引号前缀不再算协议标记（C-011 的回归修复）
+
+- **触发**：C-013 的指纹测试 `test_planner_unchanged_without_notes` 红 —— Echo 桩原样
+  返回 prompt 时，prompt 输出格式一节第 19 行 `` `CLARIFY: <一句反问…>` `` 被 `re.M`
+  正则命中，标记之后的大半段 prompt（含 FOLLOWUP_HINT）被切走当「反问内容」。
+- **定性**：**真实的过宽，不只是测试桩问题**。C-011 把 `_CLARIFY_RE` 改 `re.M`（修
+  mul_021 的标记在第二行）时，前缀类 `[*_`#>\-]*` 保留了反引号 —— 真实模型复述输出格式
+  （`` `CLARIFY: …` ``）时会被整段误判成反问，计划与分析全丢。
+- **改动**：`_CLARIFY_RE` 前缀类 `[*_`#>\-]*` → `[*_#>\-]*`，尾部同理。
+  保留 `**CLARIFY**`（markdown 强调）与 `- CLARIFY`（列表）；排除反引号包裹（引用示例）。
+- **取舍**：误判的代价（整段计划被当反问展示、分析全丢）远大于漏判（走完整链路），
+  宁可收紧。漏判场景（模型用反引号包裹真标记）未见实测案例。
+- **验证**：test_metrics 全绿（含此前遗留红的 `test_planner_unchanged_without_notes`，
+  该失败先于 C-013 存在、stash 复核确认）；split_clarify 参数表 10 例全过；
+  neg_005/ord_029/neg_001 oracle 100%。
