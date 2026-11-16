@@ -523,3 +523,36 @@
   改判分逻辑要连带复查已通过用例是不是靠字面量蒙过去的。该单独做一次。
 - **未验证**：k=1，无三跑、无 `flip_rate` / `pass^3`。state 档全量多跑了 7 道 `mem_*`
   （4/7 对），上表已把这 7 道剔掉做同口径对比。
+
+## C-012 · 2026-11-16 · 修 `inherit:` 日期断言的字面匹配偏差（修尺子，不是改题）
+
+- **状态**：已生效，oracle 全绿；**真实模型重跑未做**（等网关窗口）
+- **触发**：C-011 的「已知偏差」条目。state 全量 7 处 `fail:inherit` 逐条定性后：
+  **4 处是尺子误判**（mul_012 两轮、mul_020 t1、mul_030 t1 —— 模型写
+  `(dt.year == 2024) & (dt.month == 3)`，约束完全继承、答案全对，`re.search("2024-03", code)`
+  找不到字面子串就判 fail）；1 处真失败（mul_017，模型真的丢了 2023 筛选）；2 处网关
+  error（mul_021/022）。`multi_turn.rate` 90.5% 里的 inherit 档 65% 失败率，三分之二是假的。
+- **改动**：只动 `app/eval/cases_multi.py` 的三处 `expect_turns`（mul_012 / mul_020 /
+  mul_030）。新增共享正则 `_IN_2024_03` / `_IN_2024_02`，同时接受两种形态：
+  - 字面串：`str[:7] == '2024-03'` / `startswith` / `between`（gold 与常见写法）
+  - 拆写：`year == 2024` 与 `month == 3` 各自精确命中、相距 ≤80 字符，`(?!\d)` 挡
+    `month == 30` 部分匹配
+  **不收没实测过的写法**（`.eq(3)` / `isin([3])`）—— inherit 是约束断言，误放行是假绿，
+  出现了再加分支。`mul_017` 的 `inherit:perf_2023` 保持不动：它是真失败。
+- **题面 / gold 零改动**：`question`、`ground_truth`、`no_history_truth`、`alt` 全部未动。
+  这是把「约束被继承」的断言从代理（关键词出现）升级为语义（两种等价写法都认），不是给
+  判分放水 —— 旧断言下这 4 轮的 `correct` 本来就是 True。
+- **测试**：`tests/test_multi_cases.py` 新增 5 条（断言引用共享正则的防回退、03 正则
+  12 参数化正反例、02 正则 5 参数化、gold 仍过的 oracle 保证）。用例「03 表里放 02 写法」
+  先红过一次，是测试写错位置不是正则错。
+- **验证**：
+  - 单测 36 passed；`test_eval_cases` / `test_metrics` 面 79 passed
+  - 直接调 `validate_cases(ALL_CASES)`：0 errors
+  - oracle：七道相关题（mul_012/017/020/021/022/023/030）13 个受约束轮全 ok，`rate=100`
+  - 离线重判：旧断言 4 个 `fail:inherit` 在新正则下全部转 ok；mul_017 保持 fail
+- **指纹断代**：`evalset_sha12` `76142b06a8ab` → `7c42591f7878`（cases_multi.py）。
+  **C-011 及之前的 multi_turn.rate 与本轮不可比**；`accuracy` 不受影响（correct 从来
+  只看答案比对，`expected_all` 不含 `no_history_truth`，也从不看 `turn_status`）。
+- **未验证**：mul_020 t1 / mul_030 t1 的 turn1 原代码没落盘（报告只存最后一轮 code），
+  修后判定用的是最后一轮 code，严格说这两轮要真实重跑确认。按排除法推断成立
+  （若 turn1 写了字面串旧断言就不会 fail，而 correct=True 说明约束语义对）。

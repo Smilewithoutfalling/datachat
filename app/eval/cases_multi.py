@@ -25,6 +25,19 @@ from app.eval.case_model import EvalCase
 # 表里有 18 条整行重复的录入，凡涉及金额/计数的题都要去掉
 _D = "d = df.drop_duplicates('order_id'); "
 
+# inherit: 的字面串匹配抓不到 year/month 拆写的等价实现（2026-11-16 实测：mul_012 两轮
+# 写 `(dt.year == 2024) & (dt.month == 3)`，答案全对，却被 `inherit:2024-03` 判
+# fail:inherit —— "2024-03" 只匹配字面子串）。这两个正则同时接受两种形态：
+#   字面串：str[:7] == '2024-03' / startswith('2024-03') / between('2024-03-01', ...)
+#   拆写：  year == 2024 与 month == 3 各自精确命中、相距 ≤80 字符（避免把不相干的
+#           两个表达式串起来误放）；(?!\d) 挡 month == 30 这类部分匹配。
+# 只收实测出现过的写法。`.eq(3)` / `isin([3])` 这类链式写法没出现过，出现了再加分支，
+# 不预先放宽 —— inherit 是约束断言，误放行的代价是假绿。
+_IN_2024_03 = (r"2024-03|year\s*==\s*2024[\s\S]{0,80}month\s*==\s*3(?!\d)"
+               r"|month\s*==\s*3(?!\d)[\s\S]{0,80}year\s*==\s*2024(?!\d)")
+_IN_2024_02 = (r"2024-02|year\s*==\s*2024[\s\S]{0,80}month\s*==\s*2(?!\d)"
+               r"|month\s*==\s*2(?!\d)[\s\S]{0,80}year\s*==\s*2024(?!\d)")
+
 
 MULTI_CASES = [
     # ============================================================
@@ -165,7 +178,7 @@ MULTI_CASES = [
                                "result = (m['category'].value_counts(normalize=True) * 100).round(2)",
              no_history_truth="result = (df['category'].value_counts(normalize=True) * 100).round(2)",
              keywords=["order_date", "category", "value_counts", "normalize"],
-             expect_turns=["inherit:2024-03", "inherit:2024-03"]),
+             expect_turns=["inherit:" + _IN_2024_03, "inherit:" + _IN_2024_03]),
 
     # ============================================================
     # H 三级依赖：分子靠第 2 轮，分母靠第 1 轮
@@ -269,7 +282,7 @@ MULTI_CASES = [
                                "result = int((m['city'] == '广州').sum())",
              no_history_truth="int((df['city'] == '广州').sum())",
              keywords=["order_date", "city", "广州"],
-             expect_turns=["inherit:2024-03", "inherit:2024-03"]),
+             expect_turns=["inherit:" + _IN_2024_03, "inherit:" + _IN_2024_03]),
     EvalCase(id="mul_021", category="multi_turn", dataset="orders", gold_kind="scalar",
              turns=["只看数码类的已完成订单，重复录入的只算一次。",
                     "这些订单的平均实付金额是多少元？保留两位小数。"],
@@ -381,7 +394,7 @@ MULTI_CASES = [
                                "result = round(float(m[m['category'] == '食品']['pay_amount'].sum()), 2)",
              no_history_truth="round(float(df[df['category'] == '食品']['pay_amount'].sum()), 2)",
              keywords=["order_date", "category", "食品"],
-             expect_turns=["inherit:2024-02", "inherit:2024-02"]),
+             expect_turns=["inherit:" + _IN_2024_02, "inherit:" + _IN_2024_02]),
 
     # ---- S 粒度下钻 ----
     EvalCase(id="mul_031", category="multi_turn", dataset="sales", gold_kind="series",

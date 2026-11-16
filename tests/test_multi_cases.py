@@ -313,3 +313,74 @@ def test_recall_turn_cases_are_known_and_multiturn():
 
     rec = [(c.id, c.recall_turn, bool(c.turns)) for c in ALL_CASES if getattr(c, "recall_turn", 0)]
     assert rec == [("mul_034", 1, True), ("mem_006", 1, True)]
+
+
+# ------------------------------------------------- inherit 日期断言（2026-11-16）
+
+def _turn_status(expect: str, code: str) -> str:
+    """直接走 runner 的真实判据入口，不在这里重写一份正则逻辑。"""
+    res = type("R", (), {"error_kind": None, "executed": True, "code": code})()
+    return EvalRunner._turn_status(res, expect)
+
+
+def test_date_inherit_assertions_use_the_shared_regex():
+    """三处日期断言必须引用共享正则，不允许再写回裸字面串。
+
+    背景：`inherit:2024-03` 抓不到 `dt.year == 2024 & dt.month == 3`（mul_012 两轮
+    实测误判，答案全对却被判 fail:inherit）。改成共享正则后，谁把断言写回
+    裸字面串，这条就红。
+    """
+    from app.eval.cases_multi import MULTI_CASES, _IN_2024_02, _IN_2024_03
+
+    bad = [c.id for c in MULTI_CASES
+           if any(str(e) in ("inherit:2024-03", "inherit:2024-02") for e in c.expect_turns)]
+    assert not bad, f"这些题还在用裸字面串日期断言：{bad}"
+    dated = [(c.id, c.expect_turns) for c in MULTI_CASES if "2024-0" in str(c.expect_turns)]
+    assert [i for i, _ in dated] == ["mul_012", "mul_020", "mul_030"]
+    for _, et in dated:
+        assert et == ["inherit:" + _IN_2024_03] * 2 or et == ["inherit:" + _IN_2024_02] * 2
+
+
+@pytest.mark.parametrize("code,ok", [
+    # gold / 常见字面写法
+    ("d[d['order_date'].str[:7] == '2024-03']", True),
+    ("df[df['order_date'].str.startswith('2024-03')]", True),
+    ("df[df['order_date'].between('2024-03-01', '2024-03-31')]", True),
+    # 曾经误判的拆写（mul_012 实测原句，答案全对却被旧断言判 fail）
+    ("df[(df['order_date'].dt.year == 2024) & (df['order_date'].dt.month == 3)]", True),
+    ("m = df[df['order_date'].dt.year == 2024]; m = m[m['order_date'].dt.month == 3]", True),
+    ("df[(df['order_date'].dt.month == 3) & (df['order_date'].dt.year == 2024)]", True),
+    # 反例：约束没继承 / 约束错 / 部分匹配陷阱
+    ("df['category'].value_counts()", False),
+    ("df[(df['order_date'].dt.year == 2023) & (df['order_date'].dt.month == 3)]", False),
+    ("df[(df['order_date'].dt.year == 2024) & (df['order_date'].dt.month == 12)]", False),
+    ("df[df['order_date'].dt.month == 30]", False),
+    ("df[(df['year'] == 2024).any() and (df['month'] == 3).any()]", False),
+])
+def test_2024_03_regex_accepts_equivalents_rejects_wrong(code, ok):
+    from app.eval.cases_multi import _IN_2024_03
+    got = _turn_status("inherit:" + _IN_2024_03, code)
+    assert got == ("ok" if ok else "fail:inherit"), (code, got)
+
+
+@pytest.mark.parametrize("code,ok", [
+    ("d[d['order_date'].str[:7] == '2024-02']", True),
+    # mul_030 turn2 实测的区间写法（含 '2024-02-01'，字面子串本来就能命中）
+    ("df[(df['order_date'] >= '2024-02-01') & (df['order_date'] <= '2024-02-29')]", True),
+    ("df[(df['order_date'].dt.year == 2024) & (df['order_date'].dt.month == 2)]", True),
+    ("df[df['order_date'].dt.month == 2]", False),          # 少了 year，跨年会错
+    ("df[df['order_date'].str[:7] == '2024-03']", False),   # 月份错了
+])
+def test_2024_02_regex(code, ok):
+    from app.eval.cases_multi import _IN_2024_02
+    got = _turn_status("inherit:" + _IN_2024_02, code)
+    assert got == ("ok" if ok else "fail:inherit"), (code, got)
+
+
+def test_oracle_gold_still_passes_date_assertions():
+    """gold 本身（字面写法）必须仍被判 ok —— 修尺子不许把 oracle 跑红。"""
+    for cid in ("mul_012", "mul_020", "mul_030"):
+        c = next(c for c in MULTI if c.id == cid)
+        for expect in c.expect_turns:
+            assert _turn_status(expect, c.ground_truth) == "ok", (cid, expect)
+
