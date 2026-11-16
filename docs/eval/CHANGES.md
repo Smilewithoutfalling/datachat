@@ -487,3 +487,39 @@
      实测 6 种自然答法（`按销售额` / `按金额` / `那就看销售额吧` / `按件数` …）全部 `may_clarify=True`。
      影响面：默认配置下的每一个 clarify 都是一次没有出口的往返。三条出路（改产品/改默认/改闸门）
      已写进 DEVLOG [181]，等定。
+
+## C-011 · 2026-11-16 · CLARIFY 标记逐行识别 + 拦下后兜底计划 · 首份可比的 workflow 双档读数
+
+- **状态**：已生效并实测（195 题，off / state 各一跑，k=1）
+- **触发**：C-010 落地后 34 道多轮只对 6 道。逐条查下来有两个独立原因 ——
+  ① 网关熔断（7 道 `actual=None`，`target circuit breaker`），是噪声不是能力；
+  ② `_CLARIFY_RE` 只匹配整串第 0 位，模型把 `CLARIFY:` 写在解释的第二行时整段被漏判。
+- **改动**：
+  1. `app/nodes/planner.py`：`_CLARIFY_RE` 改 `re.M` 逐行找；`split_clarify` 的 plan 取
+     标记之前的文字；闸门拦下时用新增的 `VETO_PLAN` 兜底（原先是置空，codegen 会自由发挥）。
+  2. `tests/test_workflow_mocked.py`：新增「标记在解释之后」「标记带 `- ` 前缀」两个用例。
+  3. `tests/test_workflow_memory.py`：`test_premise_imperative_is_not_clarified` 加断言
+     `r.plan == VETO_PLAN`。
+- **覆盖范围**：`code_sha12` 变（planner.py）。`evalset_sha12` **未变**（没动题集，也没动
+  `expect` 串）。P8 的 off / state 四个哈希全部未变 —— prompt 一个字没改，修的是 `invoke`
+  之后的解析。
+- **读数**（同一套 195 题，同一天，`--agent workflow`）：
+
+  | 分类 | `--memory off` | `--memory state` |
+  |---|---|---|
+  | 全量 | 169 / 195 = 86.7% | 181 / 195 = 92.8% |
+  | multi_turn | 10 / 34 = 29.4% | 24 / 34 = 70.6% |
+  | ambiguity | 14 / 14 | 13 / 14 |
+  | refusal | 13 / 13 | 13 / 13 |
+  | filtering | 28 / 28 | 28 / 28 |
+  | aggregation | 44 / 44 | 43 / 44 |
+
+  off 档 7 道熔断题已单独补跑（`outputs/wf_retry7.json`，6 道转绿、`mul_002` 仍真失败），
+  上表是合并后的数。
+- **已知偏差（未修，别当成绩）**：`inherit:` 判定是 `re.search(pattern, code)` 的**字面匹配**。
+  `mul_012/020/030` 用 `dt.year == 2024 & dt.month == 3` 表达 `2024-03`，语义对但判据不认。
+  单跑 34 道多轮时 state 档 27/34（79.4%）里有 5 处属这一类；全量 24/34 里 7 处 inherit
+  失败中也有。**没有改判据去追分** —— 改 `expect` 串会动 `evalset_sha12`、历史读数断代，
+  改判分逻辑要连带复查已通过用例是不是靠字面量蒙过去的。该单独做一次。
+- **未验证**：k=1，无三跑、无 `flip_rate` / `pass^3`。state 档全量多跑了 7 道 `mem_*`
+  （4/7 对），上表已把这 7 道剔掉做同口径对比。
