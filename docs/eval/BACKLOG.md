@@ -1,0 +1,406 @@
+# 评测待办（BACKLOG）
+
+写于 2026-11-16，对应 master `24c5ce1`（本地领先远端 5 个 commit，未推）。
+只写「还差什么、为什么、怎么验收」；做完的进 `DEVLOG.md`，读数进 `LEDGER.md`。
+
+**为什么单独一份**：`DEVLOG.md` 是做完的流水账，`LEDGER.md` 是读数表，两者都不放
+「没做的事」。缺这一层导致 10-16 到 11-14 之间反复重挖已经排除过的方向。
+
+**当前状态（分清两条线，否则全错）**：
+
+| | react | workflow |
+|---|---|---|
+| 全量 195 题 | **186/195 = 95.4%**（11-13, `ca14304`） | **169/195 = 86.7%**（11-16，合并补跑后） |
+| 单轮 161 题 | 152/161 | **159/161 = 98.8%** |
+| 多轮 34 题 | **34/34 = 100%**（off 档） | off 9/34 → state 24/34 |
+| ambiguity 14 题 | 7/14 | **14/14** |
+
+**同一套多轮 34 道题（id 与题面逐字相同，比对过两份报告）**。react 单轮不如 workflow，
+多轮完胜。产品默认 `workflow`（`app/server/app.py:111`）。
+
+---
+
+## 优先级总表
+
+| # | 优先级 | 事项 | 需 H 决策 | 成本 |
+|---|---|---|---|---|
+| P0 | 最高 | 产品默认 `agent=workflow`，多轮比 react 少 25 题；要不要换 | **是**（产品选型） | 半天 + 回归 |
+| P1 | 高 | 文档口径混用：本轮是 workflow、归档基线是 react，会被读成「涨了/崩了」 | 否 | 半小时 |
+| P2 | 高 | 读数没有可复算的合并产物（169/181 无文件支撑，台账根本没收到这批） | 否 | 半天 |
+| P3 | 高 | k=1，没有 pass^3 / flip_rate，「+14 是真增量还是抖动」答不了 | 否 | 3 小时机时 |
+| P4 | 中 | `inherit:` 是字面匹配，workflow+state 的 24/34 是**下界** | **是**（动评分口径） | 1 天 |
+| P5 | 中 | 产品默认 `memory_mode=off`，多轮白丢 14 题 | **是**（产品行为） | 一行 + 回归 |
+| P6 | 中 | workflow + off 下 clarify 反问后没有出口（用户被问死） | **是**（产品行为） | 半天 |
+| P7 | 低 | `corr_001` 漏 product 维度、`ts_007` 输出缺年份 | 否 | 半天 |
+| P8 | 低 | 网关熔断靠人工补跑 | 否 | 2 小时 |
+| P9 | 低 | `ord_028` 对「去重」零判别力：三种口径都算 2.26 | 否 | 1 小时 |
+
+**顺序理由**：P0 是所有其它项的坐标系 —— 决定「主线是哪条 agent」，P1 之后的所有
+读数都挂在它下面。P1 是纪律（半小时的事，不做会让后面所有文档自相矛盾）。
+P2、P3 是「让数字可信」，P4 会改尺子、必须排在它们之后。P5 起是具体改动。
+
+---
+
+## P0 产品默认 agent 是 workflow，而它多轮差 25 题
+
+### 事实
+
+同一套 34 道多轮题，题面逐字相同：
+
+| 配置 | 多轮 | 机制 |
+|---|---|---|
+| **react + off** | **34/34** | runner 传 `history`，react 直接读对话消息 |
+| workflow + off | 9/34 | `app/server/app.py:774` → `history = ... if agent == "react" else None` |
+| workflow + state | 24/34 | `fold()` 把 history 折叠成工作状态块，只给 planner |
+
+单轮反过来：workflow 159/161 = 98.8%，react 152/161 = 94.4%。
+ambiguity 更是 workflow 完胜（14/14 vs 7/14，那 7 道正是本轮 clarify 工作的产出）。
+
+全量 react 高 8.7pp，**全部来自多轮那 25 道**。
+
+### 为什么这条排第一
+
+DEVLOG [182] 的结论「多轮缺口只差一个记忆开关」在 workflow 内部成立，但会让人以为
+打开 `memory_mode=state` 就追上了 —— 实际还差 10 题。真正缺的是「能不能读原始对话」，
+这是架构差异，不是一个开关。
+
+产品默认 `workflow`，意味着用户默认拿到的是多轮 9/34 那一档。
+
+### 三个选择
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| (a) 默认改 react | `app/server/app.py:111` 一行 | react 单轮低 4.4pp（152 vs 159），且成本 10.8 秒/5779 token vs 5.12 秒/2655（贵一倍）；ambiguity 会从 14/14 掉到 7/14 —— **本轮的 clarify 工作等于白做** |
+| (b) 保持 workflow，给 workflow 补对话历史 | 让 workflow 也能读到最近的对话原文，而不只是折叠后的状态块 | 中等改动，可能冲掉 P8 指纹；但能同时拿到单轮 98.8% 和多轮 |
+| (c) 按场景路由 | 首轮/单轮走 workflow，检测到追问切 react | 复杂，两条路径都要维护，且「追问」判定本身是新的不确定性 |
+
+**(b) 最像正解**：workflow 单轮强、react 多轮强，把 react 读历史的机制搬到 workflow 的
+planner 输入里，等于取两者之长。但这是架构改动，得先量「给 planner 多喂最近 2 轮对话
+原文」对单轮有没有副作用（单轮没有上文，理论上零影响）。
+
+**我不自己动**：这改的是所有新会话的默认行为。
+
+---
+
+## P1 文档口径混用
+
+### 现象
+
+`docs/eval/README.md` 的「当前读数」一行写着
+「单轮 93.0%（pass^3 90.7%）/ 多轮 off 47.1% / 多轮 state 91.2% / 记忆 95.2%（`eval-v6`）」——
+**全部是 react**。DEVLOG [182] 写「单轮 98.8% / 多轮 off 29.4% / state 70.6%」——
+**全部是 workflow**。
+
+两个数字并排放，读者会得两个错误结论：「单轮从 93% 涨到 98.8%」和「多轮 state 从 91.2%
+掉到 70.6%」。**实际上两条线互不可比，一个都没变。**
+
+根因：`run_eval.py:104-106` 自己写着 ——「默认 workflow；**已归档的全部基线用的是 react**，
+要跟基线比就别省这个参数（缺口 9：默认值与基线口径不一致）」。默认值和基线口径不一致，
+这件事从缺口 9 立到现在一直没修。
+
+### 修法
+
+1. `docs/eval/README.md` 的「当前读数」拆成两行：`react（基线口径）` / `workflow（产品默认）`，
+   各自标日期与 sha。
+2. `DEVLOG [182]` 已在开头加了口径声明，`[181]` 标题本来就带 workflow。
+3. 立一条硬规矩写进 `docs/eval/README.md`：**任何读数表必须带 `agent=` 与 `memory_mode=`**，
+   没有就不许贴。这条也写进 `LEDGER.md` 的 NOTES。
+4. 顺手评估要不要把 `run_eval.py --agent` 的默认值改成 `None` 并强制显式传 ——
+   这会让「忘了传」变成一个错误而不是一个静默的口径错误。
+
+### 验收
+
+- `README.md` 两张读数表，agent 字样可见
+- 任意一份 `runs/*.json` 打开就能看出 agent 与 memory_mode
+
+---
+
+## P2 读数没有可复算的合并产物
+
+### 现象
+
+`docs/eval/LEDGER.md` 和 `docs/eval/runs/` 里**没有 11-16 这一批**。
+`python eval_ledger.py --check` 的回答是「台账已是最新 / 报告 157 份」，它没看见
+本轮任何一个文件。
+
+而 DEVLOG [182] 的两个核心数字来自人工加法，没有对应文件：
+
+- off 169/195 = `wf_full_195c.json` 的 **163** + `wf_retry7.json` 补跑 6
+- state 181/195 = `wf_full_195_state.json` 的 **185** − `memory` 类 4（该文件跑的是 **202** 题）
+
+两个原始文件的 `outcome.correct` 是 **163** 和 **185**，`comparable` 都是 `null`。
+**文档里写着 169/181，仓库里找不到任何一份 JSON 能算出这两个数。**
+（数字经逐题核对是对的，合并算术已在 DEVLOG [182] 补写，但那是孤证。）
+
+### 根因（两层）
+
+1. **命名绕过了台账**。`eval_ledger.py:122` 只收 `name.startswith("eval_")` 的报告；
+   本轮手跑用 `--out outputs/wf_*.json`，6 份全被过滤掉。台账报「已是最新」不是 bug，
+   是我的调用方式错了。
+2. **补跑是常态，但没有合并器**。网关熔断、超时之后按题号补跑一直是手工的：
+   挑出 `infra_error` 的题、`--case` 重跑、把数字加回表里。合并结果只活在人脑和 markdown 里。
+
+### 修法
+
+1. 写 `eval_merge.py`（仓库根目录，与 `eval_ledger.py` 同级 —— 这样不参与 `code_sha12`）：
+   - 入参：一个主报告 + N 个补跑报告
+   - 规则：补跑里出现的 case id **覆盖**主报告同 id 记录；覆盖时打印前值/后值
+   - 产出：`outputs/eval_<agent>_<时间>_merged.json`，`outcome` / `by_category` /
+     `multi_turn` 按合并后 cases 重算；`comparable` 填上被合并的文件
+   - 两种情况报错而不是静默：`evalset_sha256` 不一致；补跑里有主报告不存在的 case id
+2. 本轮立刻补：`wf_full_195c` + `wf_retry7` → merged，验证 outcome = 169/195；
+   `wf_full_195_state` 需要 `--drop-category memory` 才能得 181/195。
+3. 复制（不是改名）成 `eval_` 前缀，跑 `python eval_ledger.py` 重建台账。
+   **过程产物不入台账**：`wf_mul_off_gate2.json`（34 题 8 对）、`wf_mul_retry4.json`、
+   `wf_mul_state.json`（34 题 27 对）与全量的多轮部分重复但口径不同，收进去只制造歧义。
+   在 `LEDGER.md` NOTES 里写明「这批多轮以全量为准」。
+4. 此后手跑一律用默认命名，或 `eval_` 前缀。这条写进 `docs/eval/README.md`。
+
+### 验收
+
+- `python eval_ledger.py --check` 退出码 0，`docs/eval/runs/` 新增本轮记录
+- merged 文件重算的 outcome 与 DEVLOG [182] 表格**逐格相等**（7 个分类全查）
+- 删掉 `outputs/` 之后，从 `runs/*.json` 能把 169 与 181 重新算出来
+
+---
+
+## P3 k=1，没有 pass^3 / flip_rate
+
+### 现象
+
+本轮两档都是单跑。**机制早就有，只是没跑**：
+`run_eval.py:110` 有 `--repeat N`；`app/eval/stats.py` 有 `pass_at_1` / `pass_pow_k` /
+`flip_rate`；`eval_ledger.py:257` 会从多次跑算 flip_rate；历史上跑过 `eval_repeat3_*`（11-09）
+和 `eval_v6_*_run1/2/3`（11-11）。
+
+历史抖动幅度（可查的）：
+
+- 195 题 off，11-09 三次 168 / 171 / 169 → 跨度 **3 题**
+- 161 题 off，11-11 三次 149 / 151 / 149 → 跨度 2 题
+- 34 题多轮 state（react），11-11 三次 31 / 31 / 31 → **零抖动**
+
+### 为什么排在 P4 之前
+
+P4 会改判分口径，改完必须重跑才有对比。而 P3 决定的恰恰是「重跑一次读数的噪声有多大」。
+尺子没校准、噪声没测，先改尺子等于同时动两个变量，之后谁也说不清增量来自谁。
+
+另外 `wilson95` 现在给出 ±3.9~5.2pp 的区间，和「多轮 +14 题（7.2pp）」同一量级 ——
+**必须有三跑才能把 14 题和抖动分开。**
+
+### 修法
+
+成本是纯算力：195 题 × 5.12 秒 ≈ 17 分钟/次，三跑 ≈ 50 分钟/档。后台跑，不占人。
+
+1. workflow 的 off 与 state 各 `--repeat 3`
+2. 合并 summary，取 `pass_pow_k(k=3)` 与 `flip_rate`
+3. flip_rate 按分类拆开 —— 若抖动集中在多轮，那 +14 的可信度要打折
+
+### 验收
+
+- 两档各三份 run + summary，进台账
+- 结论表格里 `169` / `181` 换成 `pass^3` 或「中位数（min–max）」
+
+---
+
+## P4 `inherit:` 是字面匹配
+
+### 现象
+
+`app/eval/runner.py:197`：
+
+```python
+if expect.startswith("inherit:"):
+    return "ok" if re.search(expect[len("inherit:"):], res.code or "") else "fail:inherit"
+```
+
+裸 `re.search`，匹配的是**源码文本**。而 `inherit:2024-03` 想断言「3 月这个约束传下去了」。
+模型写 `dt.year == 2024) & (dt.month == 3` 语义正确，照样判 fail。
+state 档那 7 处 `inherit` 失败里，`mul_012` / `mul_020` / `mul_030` 就是这种假阴性。
+
+**后果**：workflow+state 多轮 24/34 是下界。off 档那 15 处不受影响（逐条查过，真丢约束）。
+
+### 三条路
+
+| 方案 | 做法 | 代价 | 问题 |
+|---|---|---|---|
+| (a) 改 `expect` 串 | → `inherit:2024.*0?3\|year.{0,10}2024` | 小 | **动 `evalset_sha12`**，历史读数全部断代；且是「改尺子迁就模型」 |
+| (b) 加 `inherit_py:` | 新判据类型：AST 提常量/比较表达式，判「约束是否出现在某个 filter 里」 | 中 | 旧 `inherit:` 可原样保留、逐条迁移、新旧并存对照 |
+| (c) 换判据维度 | 比**两轮之间 AST 提取的 filter 集合**：上一轮的约束这一轮还在不在 | 大 | 才真对得上「继承」；但评测器现在只存本轮 |
+
+**建议 (b) 止血，(c) 记成下一轮目标。(a) 不采用** —— 改题面换分数是自欺。
+无论走哪条，`docs/eval/CHANGES.md` 要立条目写明「口径变了、哪些历史读数不可比、
+要重跑哪些档」，并同步 `docs/gate/` 的阈值。
+
+**需 H 决策**：这是评分口径变更，会同时影响已发布的读数和 CI 闸门。
+
+---
+
+## P5 产品默认 `memory_mode=off`
+
+### 现象
+
+`app/memory/config.py:resolve_memory_mode()` → `env → settings → "off"`。
+`app/core/service.py:168` 一样。产品默认就是 off。
+
+### 支持改 state 的硬论证
+
+`app/memory/config.py` 模块注释原文：
+
+> state：批 1–3 的全部 + 口径 M2（有口径时）+ M6 warning（批 4b）；
+> **没有口径、没开改写时 system 与 f39753c 逐字节一致**
+
+单轮、无口径场景下 state 与 off **行为等价**（P8 指纹层面）。那 state 除「记忆库写盘」
+之外没有单轮代价，而 workflow 多轮 9/34 → 24/34。这是**严格占优**，不是权衡。
+
+### 反对理由（要一起看）
+
+- 记忆库开始写盘 = 用户数据落磁盘，隐私面扩大（`docs/THREAT_MODEL.md` 要同步）
+- 设置页默认值变了，老用户既有行为被动改变
+- 现有 P8 基线是 off 档立的，要重立
+
+### 决策项
+
+三选一：保持 `off` 并做 UI 提示 / 默认改 `state`（推荐，依据是上面那条逐字节一致）/
+默认 `state` 但首次启动弹一次说明。
+
+---
+
+## P6 clarify 反问后没有出口
+
+### 现象
+
+`app/nodes/planner.py:148`：
+
+```python
+if clarify and not may_clarify(state["question"], bool(state.get("followup"))):
+```
+
+`followup` 来自 `state["followup"]`，而产品里它**恒为 False** ——
+`app/server/app.py:774`：
+
+```python
+history = turn_history(s.messages) if agent == "react" else None
+```
+
+workflow 拿不到 history，服务端无从知道上一轮反问过。`app/core/ambiguity.py:101-109`
+的注释把这个限制写清楚了，但注释不是解法。
+
+第一轮问「您要统计哪个指标？」，用户答「按销售额」，第二轮 `may_clarify("按销售额")`
+仍是 True → 再问一遍。**试过 6 种自然答法，全 True。**
+
+### 修法（需 H 定，因为新增会话状态）
+
+最小改动：**不依赖完整 history 的布尔标记**。
+
+- `analyze()` 加入参（如 `last_was_clarify: bool = False`），sidecar 在会话上存一位
+- 澄清发生时置 True，下一次请求读到就传给 workflow，随即清掉
+- 不走 memory 模块（off 档下也要工作）
+
+必须是「一位标记」而不是「读 history」—— 后者要求 memory 至少 state 档，等于把 P6
+绑在 P5 上，两个决策纠缠。
+
+### 备选
+
+把 clarify 限制在 ReAct（有 history 的模式），workflow 一律不提问 —— 等于 `e45b7da` 白做。
+不推荐，但如果 H 认为「产品默认配置下不该有 clarify」，那也是明确答案。
+
+---
+
+## P7 两道单轮真错题（已看实际输出）
+
+1. **`corr_001`**「各地区的产品销量分布是怎样的？」
+   - 模型：`df.groupby('region')['units'].sum()`，还额外算了占比 → 「地区 → 总件数」
+   - gold：`crosstab(region, product, values=units, aggfunc='sum')`
+   - **真缺口：`product` 整个维度丢了。** 题面里「产品」是明写的，不是「分布」含义不清 ——
+     模型把题读成「各地区销量占比」。判错成立，题面不用改。
+   - 线索：模型主动加了 `percentage`，说明它的理解是自洽的，只是漏维度。这类错误靠
+     prompt 加一句「先数题面有几个维度」可能比改题面有效。
+
+2. **`ts_007`**「销售额最高的月份和最低的月份分别是哪个月？」
+   - 模型：`dt.month` 分组 → `{'销售额最高的月份': 6, '销售额最低的月份': 2}`
+   - gold：`resample('ME')` → `('2024-06', '2024-02')`
+   - **数值全对，错的只是输出缺年份。** 判错成立：产品里用户会传跨年 CSV，
+     `dt.month` 会把不同年同月合并，`6` 无法定位。
+   - 但要知道 `data/sample_eval.csv` 只有 **2024-01~06 单一年份**，所以现有数据上
+     `dt.month` 与 `resample('ME')` 等价 —— 这道题测的是「月份带年份」的输出规格，
+     不是分析能力。要真测跨年混月，得另起一题配跨年数据（不动 `sales` fixture）。
+
+---
+
+## P8 网关熔断靠人工补跑
+
+`target circuit breaker` 一次连挂 5~7 道（`actual=None`、`infra_error=True`）。
+本轮 195 题挂 7 道，补跑得 6 对。这类失败**不该算进能力读数**，现在靠「事后看
+`infra_error`、按 id 挑出来重跑、数字加回表里」兜。
+
+修法：`runner.py` 在 `infra_error` 且错误串含熔断/超时时自动退避重试（2~3 次指数退避），
+仍失败才记 error。判据只认 `error_kind == "llm"` 里的特定串，别把「模型真的不会」也重试了。
+
+做完 P2 的合并器后这条会降级（补跑变便宜），所以排在这儿。
+
+---
+
+## P9 `ord_028` 对「去重」零判别力
+
+之前记的「`ord_028` / `ord_030` 都缺 `drop_duplicates('order_id')`」**与代码不符**：
+
+`app/eval/cases_extra.py:10` 有 `_D = "d = df.drop_duplicates('order_id'); "`，
+`_DONE = _D + "d = d[d['status'] == '已完成']; "`。
+
+- **`ord_030` 复购率**：gold 与三条 alt 全带 `_D`/`_DONE`。**这条旧账划掉。**
+- **`ord_028` 平均每单买几件**：gold 写法没问题，问题是**数据让约束不可观测**。
+  实测 `data/eval/orders.csv`（1218 行 / 1200 唯一 `order_id` / 18 行重复）：
+
+  | 口径 | 值 |
+  |---|---|
+  | gold：去重后 `qty.mean()` | **2.26**（精确 2.26417） |
+  | 模型实际写的 `qty.sum() / order_id.count()`，未去重 | **2.26**（精确 2.25780） |
+  | alt 第 2 条 `df['qty'].mean()`，不去重不筛状态 | **2.26** |
+
+  三者四舍五入**全是 2.26**，精确值只差 0.0064。重复行是「同一订单重复录入」，
+  件数一致（`O000042` 两行 qty 都是 1、`O000078` 两行都是 3），均值几乎不动。
+
+  **这道题无论去不去重都给 2.26，它测不到「每单」两个字。** 两档模型都写
+  `sum/count`、都判 `strict` 通过，那是碰巧对。
+
+### 三条路
+
+(a) 改数据让去重可观测 → 动 `data_sha256`，**所有** orders 题历史读数作废；
+(b) 换成对重复敏感的指标 → 动 `evalset_sha256`，同样作废；
+(c) 承认现状，在 `judge.md` 记「`ord_028` 不测去重，只测平均」→ 零成本但留假安全感。
+
+**建议 (c) + 写死**：这道题还有别的价值（考「平均」和「保留两位」），
+而 (a)(b) 的作废成本摊到 30 多道 orders 题上不划算。**但必须写下来** ——
+否则下次又有人（包括我）以为它在测去重。
+
+---
+
+## 附：本地未跟踪产物（顺手清理）
+
+`git status` 里 5 项：
+
+```
+.doc-backup-20261028/                              # 文档备份目录
+ui/web/e2e/f4-visual.spec.ts-snapshots/08-running-fake-win32.png
+ui/web/web-dist.zip
+ui/web/web/                                        # 疑似解压产物
+web-dist.zip                                       # 与上面重复
+```
+
+`web-dist.zip` 有两份（根目录 + `ui/web/`）像构建脚本留下的。先看是不是某个脚本的输入，
+再决定入库还是 `.gitignore`，别直接删。`08-running-fake-win32.png` 如果是 e2e 快照
+就该入库（其他快照已在版本控制里）。
+
+---
+
+## 不许做的（踩过的坑，写死）
+
+1. **不拿题面迁就模型**。`corr_001`、`inherit` 的假阴性都属这一类。
+2. **不改判分器去追分**。要改先立 `CHANGES.md` 条目，说明哪些历史读数作废。
+3. **产品行为变更（P0、P5、P6）由 H 定**，不因为「反正他会同意」就自己改。
+4. **跨 agent 的数字不许横比**。react 与 workflow 是两条线（P1 的教训）。
+5. **`outputs/` 里的数字写进文档之前，先确认有文件能复算**（P2 的教训）。
+6. **补跑不覆盖原始文件**。原始 full 报告永远保留，合并产物另起名字。
+7. **看到「比上次差」先查指纹**。本轮差点把 react 31/34 和 workflow 27/34 当成回归 ——
+   `agent` 不同，`rendered_set_sha12` 一个有一个没有（workflow 结构上就不支持，
+   见 `fingerprint.py:422`），根本没得比。
