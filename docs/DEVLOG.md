@@ -10336,3 +10336,120 @@ P8 只重立 `STATE_BASELINE["workflow_history"]`（`7f38596168979aa0 → 7d68bc
   state/full 档已被这条推翻。**故意没改**：改它会让提交后的 `code_sha12` 与两份全量报告
   对不上（报告跑在 `207a61fb5441`）。下次动该文件时一并更新。
 
+## [186] 2026-11-17 · v7 断代落地：workflow+state 95.4%，`state` 与 `full` 分不出高低；react 没被拖退 · commit <本次>
+
+> **已通知记忆侧**：`b3a359c` 动了 `app/memory/snapshots.py`，只改 `render_block` 的 docstring
+> （「对话原文」→「对话快照」），零行为变化。本条的其余改动都在 `app/eval/` 与 `app/core/ambiguity.py`。
+
+### 一页结论
+
+| agent | memory_mode | n | 3 跑均值 | 区间 | pass^3 | flip_rate | token/题 |
+|---|---|---|---|---|---|---|---|
+| workflow | `off` | 195 | 85.1% | 85.1–85.1 | 83.6%（163/195） | 2.05% | 3338 |
+| **workflow** | **`state`** | **202** | **95.4%** | 95.0–96.0 | **93.1%（188/202）** | 2.64% | 3628 |
+| workflow | `full` | 202 | 95.7% | 95.5–96.0 | 94.6%（191/202） | 1.32% | 3609 |
+| react | `off` | 195 | 87.4% | 86.2–89.2 | 85.1%（166/195） | 3.42% | 8958 |
+| react | `state` | 202 | 93.1% | 92.6–93.6 | 90.6%（183/202） | 2.97% | 9733 |
+
+五档 × 3 跑 = 1755 题次，一页结论落在 `docs/eval/v7.md`，基线条目 `baselines.json["v7"]`。
+
+**`state` 与 `full` 分不出高低。** 差 0.3pp，而 `state` 自身翻转率 2.64%（McNemar 可检出 6 题），
+分类级逐项相同，token 差 19/题。**默认留 `state` 不是「够用」，是 `full` 买不到可测增益。**
+
+### 1. 为什么这一批必须断代
+
+三件事共一次断代（C-023 / C-024），免得 `evalset_sha12` 连断三次：
+
+1. **P10**：13 道多轮题的末轮断言从 `exec` 改成 `inherit:` —— 原来只验"跑得出结果"，
+   现在验"用没用上一轮那几个取值"。断言不是拍的，是**回放**出来的：套到 C-022 两份报告的
+   `code` 上先抓 2 处假失败（`mul_016` 把名单写死、`mul_027` 手写筛选），加等价分支后
+   回放 state 0 翻转、full 1 翻转（`mul_026`，真失败）。
+2. **删 `no_history_truth`**：字段 + 校验 + 22 处赋值 + 豁免表 + 3 条测试。它零运行时消费点，
+   "末轮不能单独作答"改由 `--memory off` 的三跑读数度量 —— 度量的东西一样，但不再是死配置。
+3. **P13**：`METRIC_MARKERS` 补 `离职|入职|在职`（`emp_007` 两批各反问一次）。
+
+断代结果：`evalset f1f233cc334c → 672b52a3a6b0`、`code 5104f0f5fd64 → 996020ad8a04`。
+**C-022 及此前的读数不可与 v7 相减**，这不是保守：题集、判据、主线 agent 三样同时变了。
+
+### 2. C-022 的 +8 与 v7 的 +22 不是一回事
+
+- **+8** 是 `state` 档**改前 vs 改后**（k=1，多轮 24/34 → 32/34）。同日跑的 full 改前
+  （25/34）证明那天模型没变好。
+- **+22** 是**同批的 `off` vs `state`**（多轮 10/10/9 → 32/30/31）。
+
+两者都被同一条事实托住：`off` 三跑正确数**完全相同**（166/166/166），多轮也只差一题
+（10/10/9），而 `inherit:` 断言 `off` 22/33 失败、`state`/`full` 0/33 失败，
+`exec`（0/30）与 `refusal`（0/5）三档全过。**差的是「记不记得上一轮定了什么口径」，
+不是「会不会写代码」**，这就是结构性缺口而不是抖动。
+
+### 3. react 配对：没被 C-021/C-022 拖退
+
+**多轮 case 级 31/31/31（v6，11-11）→ 32/32/30（v7）**，均值 31.0 → 31.3。
+
+能这么比是因为 **34 道多轮题的 prompt 逐字节没变**，而这条可验：react 的报告带
+`fingerprints.rendered.per_case`，拿 `eval_v6_mul_state_run1.json` 与今天的
+`eval_v7_react_state_run1.json` 逐题比 **34/34 相同**，`data_sha256` 同为 `abe40a78ff53`。
+
+**单轮不能比**：`biz_001`–`biz_020` 与 `neg_010` 共 21 题 prompt 变了
+（`rendered_set 54dbd79a809a → e9a191058e77`，首见 11-13 `biz_local_new.json`），来源是
+11-13 的 schema 列形态注解（B65），不是这一轮的改动 —— 今天的 `pr_oracle.json`
+（evalset `f1f233cc334c`）与 v7 三跑同值，把这条钉死了。
+
+**同一批里 workflow 反超 2.3pp，但反超不在多轮。** 202 题拆开：
+
+| 分类 | workflow/state | react/state | 差 |
+|---|---|---|---|
+| 单轮 161 | 157 / 157 / 156 | 150 / 148 / 151 | workflow +21 题次 |
+| 多轮 34 | 32 / 30 / 31 | 32 / 32 / 30 | 打平（workflow −1） |
+| 记忆 7 | 5 / 5 / 5 | 7 / 7 / 7 | react +6 题次 |
+| 合计 | 194 / 192 / 192 | 189 / 187 / 188 | workflow +14 题次 = 2.3pp |
+
+所以 v6 时期 react 的多轮优势**已经被抹平**（31.0 对 31.3），workflow 靠单轮反超；
+react 只在 7 道记忆专项上领先，而那 2 道正是 `mem_003`（真失败）与 `mem_006`（判定缺分支）
+—— **不能读成"react 的记忆更好"**。代价侧：react 每题 8958 / 9733 token、10.2 / 10.7 秒，
+是 workflow 的 2.7 倍与 1.7–1.9 倍。**主线换 workflow，两个理由都成立。**
+
+### 4. 三个记忆专项的判定
+
+| 题 | 判定 | 依据 |
+|---|---|---|
+| `mem_006`（8 轮长会话） | **假失败** — 题面要「件数与销售额」两列，末轮报件数 952（代码对），gold 只收销售额列 49,286 | 判定缺等价分支，与 `mul_016`/`mul_027` 同形态，记 BACKLOG N3 |
+| `mem_007`（截断专项） | **6 跑全对且截断真发生** — state 三跑 `memory_trimmed=['history','planner']`、full 三跑 `['planner']`，全部 `match=strict` | M9「截断后末轮还能不能答对」从盲区变成有数据 |
+| `mem_003`（植入口径） | **真失败** — 植入「净销售额 = net_amount 列合计」已注入（`sha=6179f1191e2a`），模型却按通用会计口径拒答「没有成本字段」 | state/full 各 3 跑全灭；这条考的就是植入能不能盖过先验，答案是盖不过 |
+
+### 5. 出境：快照通道零新增红
+
+`scripts/egress_audit.py` 只有单轮入口（单轮时 history 为空），所以新写
+`scripts/egress_audit_history.py`，真正喂两轮带数值的历史，四条断言仍复用 `app.eval.egress`。
+**同题对照**：`employees.csv` 带不带历史都是同一个红（`column_values`：dept 6 个取值 > 上限 3，
+字典枚举，历史里没有部门名）；`orders.csv` 两边 0 红。两表都打印「快照出现在 prompt 里：True」
+防假绿。**教训记在脚本注释里**：`-q` 必须两边一致 —— 字典是按问题相关性检索的，
+换一句问题连那条红都不会出现，很容易把「字典没检索到」读成「历史通道干净」。
+
+### 6. 工具与工程侧
+
+- **`eval_merge.py`（P2）**：补跑按 case id **覆盖**主报告，`overall`/`by_category`/`multi_turn`/
+  `outcome`/`cost` 全部灌回 `EvalReport` 重算（不另写一套算术）；指纹、case id、agent/memory_mode
+  三项不一致直接 abort。验收：`wf_full_195c + wf_retry7` = 169/195、`--drop-category memory`
+  = 181/195，与 [182] 的两个数逐数相等。6 条测试在 `tests/test_eval_merge.py`。
+- **全量 pytest**：`b3a359c` 上 **2061 passed / 0 failed / 2855 s**，不是只跑新增。
+  `dfc0a8d` 修的是 C-022 漏改的反向断言（`test_state_block_in_react_and_planner:188`），
+  四条 pytest job 同一个病因。
+- **CI**：`b3a359c` 的 run `44038791206` 7/7 success。
+
+### 7. 失真点与未做（别当日志里的漂亮话）
+
+- **react 两档的第三跑是分开补的**：16:49 那批 run1/run2 已落盘，run3 跑到 `off` 146/195、
+  `state` 87/202 时进程被中断。补法是克隆入口加 `--only-run 3`（`run-id: 3` 与 `seed+3`
+  仍走原逻辑，汇总从磁盘三份 run JSON 复原后交给原来的 `_print_repeat`）。克隆不叫
+  `run_eval.py`，`_ENTRY_FILES` 扫不到它，三跑 `entry_sha12` 一致（`c44fcc754331`）；
+  复原逻辑先拿 workflow/off 三跑对过账（`aggregate`/`stability`/`runs` 逐字段相同）。
+- **`--repeat` 的 `<tag>_summary.json` 没有 `agent` 也没有 `fingerprints`**，只能回
+  `run{k}.json` 读。记 BACKLOG N4，本轮不动 `run_eval.py`（跑到一半换入口会混两版 `entry_sha12`）。
+- **`canary-drift` 11-16 是红的**：`STALE_BASELINE`（判分器 `18c5e432eff2 → 289474f4d943`，
+  基线停在 11-10），同次观察到 `tokens_out +20.5%` / `cache_read −21.6%` / `reasoning +25.0%`
+  三个越界。重立基线会把这次观察冲掉，**等 H 定**（BACKLOG N5）。这条会挡住「连续 3 天全绿」。
+- **仓库里没有 release workflow**：只有 tests / eval(schedule) / canary-drift(周常) /
+  desktop(PR) / sidecar。「release 连续 3 天全绿」指哪条需要 H 指认。
+- **`mem_006` 没改**：改 gold 就是又一次断代，按"BACKLOG 冻结"原则放到下一轮。
+

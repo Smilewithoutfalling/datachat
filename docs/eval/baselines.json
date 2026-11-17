@@ -108,5 +108,25 @@
     ],
     "date": "2026-11-11",
     "note": "202 题（161 单轮 + 34 多轮双档 + 7 记忆专项）四片 × 3 跑，708 题次，全量重跑 114 分钟。**为什么是新尺子**：题集从 183 增到 202（eval-set 4270d57adf72 → 5748a13bdefc，新增 7 道记忆专项与 11 道单轮），`app/tools/schema.py` 又被 [154]（合计行）与 [156]（缺失哨兵）改过两次，判分器再被 [162]（recall 证据源）改一次 —— 四条 GATE_KEYS 里有三条变了，与 v5 的 98.0% 不能相减，只能重立一把尺子。 **读数**：single_off 149/151/149 = 93.0%±0.7pp，pass^3 146/161 = 90.7%，全错 8、翻转 7；mul_off 16/14/18 = 47.1%±5.6pp，pass^3 11/34 = 32.4%，全错 14、翻转 9；mul_state 31/31/31 = 91.2%±0.0pp，pass^3 29/34 = 85.3%，全错 1（mul_020）、翻转 4；mem_state 6/7/7 = 95.2%，pass^3 6/7 = 85.7%，全错 0、翻转 1（mem_005）。四片加权 pass^3 = 192/236 = 81.4%。 **`off` 不是\"无记忆\"，这一条以前被读错过**：`app/memory/context.py:off_context` 返回 `prompt_history=history`，历史以**对话消息**回灌，`history_tokens` 实测非零（mul_009=20、mul_020=158、mul_021=128）；`state` 才是把历史折叠成结构化状态块进 system。所以 mul_off 47.1% 与 mul_state 91.2% 的 44pp 差，量的是**两种历史呈现方式**，不是\"有记忆 vs 没记忆\"。行为层证据：mul_009 的 off 档末轮代码写着 `df.dept=='研发'`，mul_020 的 off 档写着 `2024-03-01` —— 这些口径只可能来自上文。 **已知故障与验证**：`mem_006` 在本批前半段（archive_v6pre，code_sha12=b2c333fd5a93）三跑全挂，根因是 recall 断言只认 `result_text`、把模型补的正确合计 952/49,286 判成编造，修法见 DEVLOG [162]（证据源补前轮 answer）；本基线的 6/7/7 就是修复后的验证 —— run2/run3 转正，且 `match=relaxed`（靠放宽层判对，已人工核对 5 个销售额逐项相等）。 **跨批噪声**：同一题集、同一份代码（只差 recall 段，不进单轮题判定路径）跑两批，single_off 94.4% → 92.5%，差 1.9pp；变化集中在 biz_020（三跑由全对变全错，旧批 run3 是 `literal_text` 写死 26，新批三跑 `computed` 全算 11 —— 模型在\"多表 join + 清洗\"上抖动，非回归）与既有的翻转题。**判回归时别拿 1.9pp 以内的差当信号。** **可比性**：四片 code_sha12 全为 8e1aed9a0007，判分器 judge_sha12=18c5e432eff2 与 v5 相同（本轮只动 runner 的断言，没动 comparator）。"
+  },
+  "v7": {
+    "commit": "b3a359c",
+    "commit_note": "跑批时 docs 与仓库根的 eval_merge.py 尚未提交（HEAD=b3a359c、工作区带改动），code_sha12 由 app/ 内容算出，与该 sha 一一对应；app/ 与 run_eval.py 在跑批期间无未提交改动。",
+    "run_commit": "b3a359c-dirty",
+    "code_sha12": "996020ad8a04",
+    "code_all_sha12": "587848acd84f",
+    "evalset_sha12": "672b52a3a6b0",
+    "rendered_set_sha12": null,
+    "rendered_set_sha12_note": "workflow 路径不可事前渲染（planner 的输入含上一步模型输出），故为 null；react 对照档的值为 e9a191058e77（202 题全量）。",
+    "entry_sha12": "c44fcc754331",
+    "entry_note": "取自 b3a359c 的 run_eval.py。react 两档的第三跑是克隆入口补的（--only-run 3），克隆文件不叫 run_eval.py、不在 _ENTRY_FILES 里，故三跑 entry_sha12 一致；磁盘复原的汇总已用 workflow/off 三跑对过账（aggregate/stability/runs 逐字段相同）。",
+    "judge_sha12": "289474f4d943",
+    "registry_sha12": "44136fa355b3",
+    "n": [
+      202,
+      195
+    ],
+    "date": "2026-11-17",
+    "note": "**主线换成 workflow + state**：202 题（161 单轮 + 34 多轮 + 7 记忆专项）五档 × 3 跑 = 1755 题次。workflow off/state/full = 166/166/166（85.1%，pass^3 83.6%，flip 2.05%）、194/192/192（95.4%，93.1%，2.64%）、193/194/193（95.7%，94.6%，1.32%）；react off/state = 169/168/174（87.4%，85.1%，3.42%）、189/187/188（93.1%，90.6%，2.97%）。 **state 与 full 分不出高低**：差 0.3pp，而 state 自身翻转率 2.64%（McNemar 可检出 6 题翻转），分类级逐项相同（多轮 32/30/31 对 32/32/31、聚合 42/43/42 对 42/43/42），token 差 19/题。默认留 state 不是「够用」，是 full 买不到可测增益。 **C-022 的 +8 与 +22 是两个问题**：+8 是 state 档改前改后（k=1，多轮 24/34 → 32/34，同日 full 改前 25/34 作模型对照）；+22 是同批 off vs state 的差（多轮 10/10/9 → 32/30/31），inherit 断言 off 22/33 失败 → state/full 0/33，exec 与 refusal 三档全 0 失败 —— 差的是「记不记得上一轮的口径」，不是会不会写代码。 **react 没被拖退**：34 道多轮题的 prompt 逐字节未变（rendered.per_case 与 11-11 的 eval_v6_mul_state 34/34 相同，data_sha256 同为 abe40a78ff53），多轮 case 级 31/31/31 → 32/32/30。react 单轮全量不能与 v6 相减：biz_001–biz_020 与 neg_010 共 21 题 prompt 变了（rendered_set 54dbd79a809a → e9a191058e77，首见 11-13 biz_local_new，来自 B65 schema 列形态注解）。 **为什么是新尺子**：evalset f1f233cc334c → 672b52a3a6b0（P10 给 13 道多轮补 inherit 断言、删 22 处 no_history_truth）、code 5104f0f5fd64 → 996020ad8a04（C-023 补「离职/入职/在职」词表）、judge 18c5e432eff2 → 289474f4d943（11-16 canary 报 STALE_BASELINE 时已在用新判分器）。三条里两条换了，与 eval-v6 的 93.0% 等读数不可相减。 **已知故障**：mem_003 三档 6 跑全错是真失败（植入「净销售额 = net_amount」被模型先验盖掉，条目确已注入 sha=6179f1191e2a）；mem_006 六跑全错是假失败（题面要「件数与销售额」两列，gold 只收销售额列，记 BACKLOG N3）；mem_007 的截断专项 6/6 全为 strict 判对且 memory_trimmed 确实触发（state ['history','planner']、full ['planner']）。 **代价**：react 每题 8958/9733 token、10.2/10.7 秒，是 workflow 的 2.7 倍与 1.7–1.9 倍；主线换 workflow 的两个理由（分数更高、代价更低）都成立。"
   }
 }
