@@ -10182,3 +10182,60 @@ D 是唯一「不动代码结构就拿到大部分收益」的。但它改的是
 - P0 未动：产品默认 workflow + off，中途指代轮（「那 S02 呢」）仍会反问 —— 架构缺口，需 H 定方案
 - P5 未动：默认 memory_mode 仍 off
 - mul_020 t1 / mul_030 t1 的修后判定是离线重判（报告只存最后一轮 code），严格确认要真实重跑
+
+## [184] 2026-11-17 · 产品默认记忆档 off → state（P5 / C-021）· commit <本次>
+
+### 为什么动
+
+[182] 结尾列的四条路里，D（把产品默认改成 state）是唯一「不动代码结构就拿到大部分收益」的。
+依据是 C-020 的同指纹配对（同一 evalset `7c42591f7878`、同一 code、同一模型，唯一变量 `--memory`）：
+
+| | off | state | Δ |
+|---|---|---|---|
+| 全量（195 题共有部分） | 166 · 85.13% | 182 · 93.33% | **+16** |
+| 多轮 | 9/34 | 24/34 | **+15** |
+| 其余六类 | 158/161 | 158/161 | ±0（+1/−1 是抖动） |
+| tokens/题 | 3330 | 3387 | +1.7% |
+
+H 2026-11-16 拍板执行。
+
+### 改了什么
+
+| 位置 | 改动 |
+|---|---|
+| `app/memory/config.py` | `DEFAULT_MODE = "state"`，`resolve_memory_mode()` 兜底从字面量 `"off"` 改成它 |
+| `app/server/app.py` | `GET /settings` 的 `memory.setting` 也落默认档（否则设置页显示"关闭"而实际生效 state） |
+| `run_eval.py` | 不给 `--memory` 时按产品默认解析并写进 `meta.memory_mode`；`requires_memory` 的跳过判定改用解析值 |
+| `app/core/testing.py` | oracle 桩补答「你是问题改写器」那次调用（见下） |
+| `ui/web` | 「（默认）」从 off 移到 state；两处 `?? "off"` → `?? "state"` |
+| 文档 | spec §3.7、sidecar 契约、THREAT_MODEL §2.5（T12/T13）、LEDGER 注 17、BACKLOG P5 |
+
+### 被这次改动暴露的旧漏洞（不是新 bug）
+
+全量测试抓出 `test_oracle_pipeline_all_correct[react]` 红：`mem_004` / `mem_005` 两条改写题
+`executed=False`。根因不是产品代码 —— 这两条是**改写题**，runner 按 `case.rewrite` 传
+`rewrite=True`；默认档是 off 时 service 把改写短路掉，oracle 桩从没答过那次调用，所以
+「桩只会在第一次调用时给代码」这个假设一直没被撞过。默认改 state 后改写真的发了，
+react 桩的计数器被吃掉一轮，第二轮就只吐结论、不执行。
+
+**这条测试此前是"绿得没意义"**：它包含 mem_* 全量，但那两条从来没走过改写路径。
+修法是让桩识别改写 prompt 并回 `{"needs_clarify": true}`（M7 契约回落原问题，不消耗计数）。
+
+### 被动改变的行为（要说清楚）
+
+- **单轮**：逐字节不变。P8 三条哈希一个没动（那三条测试改成显式 `memory_mode="off"`）。
+- **多轮**：react 也从「消息式回灌 `turn_history`」换成「快照数据块 `turn_snapshots`」；
+  workflow 从收不到 history 变成收得到（P0 的那个洞在 state 档本就不存在）。
+- **默认跑批**：195 题 → 202 题（收录 7 条 `requires_memory`）。这是设计，不是意外。
+- **canary 10 条**：全是单轮、无口径 → prompt 不变，`canary_sha12` 与读数仍可比。
+
+### 测试
+
+85 个测试文件逐文件跑（整目录一把跑要 1 小时以上、`test_eval_cases.py` 单个就 18 分钟，
+中途被打断三次，改成逐文件 + 单独跑慢文件）：**全部通过，零 failed / error**。
+`test_eval_cases.py` 修桩后单独复跑，见 CHANGES C-021。
+
+### 还没动的
+
+- P0（workflow 收不到 history）**不再是瓶颈**：state 档下多轮 24/34，冲突只在 off 档存在。
+- `full` 档没跑（state + 口径 + 长历史），三档读数还缺一格。

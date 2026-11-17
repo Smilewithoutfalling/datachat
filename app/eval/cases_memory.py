@@ -5,8 +5,9 @@
 - 改写题（M7）：省略指代的追问，改写 + state 组合下能答对
 - 长历史题（M4）：轮次堆到触发遮罩，末轮仍能回头引用第 1 轮的数
 
-**这些题全部带 requires_memory，默认（off）跑批自动跳过**——off 档口径不进 prompt、
-改写被 service 短路，判分必错。要跑它们：`run_eval.py --memory state|full`。
+**这些题全部带 requires_memory，off 档跑批自动跳过**——off 档口径不进 prompt、
+改写被 service 短路，判分必错。默认档 2026-11-16 起是 state（C-021），所以不带参数的
+跑批会收录这类题；显式 `--memory off` 才会跳过。
 
 判分口径写死在 gold 里（口径语义不是字面语义），所以这些题在 off 档没有"照常"对照——
 "没口径照常"的对照由现有 agg/filt 类题承担，两类题的 question 措辞刻意不同，

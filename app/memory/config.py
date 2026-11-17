@@ -1,7 +1,11 @@
 """记忆开关（spec §3.7）。
 
-取值顺序：环境变量 DATACHAT_MEMORY（测试 / 评测 / 消融用）→ settings 表的 memory_mode（产品设置页）→ "off"。
+取值顺序：环境变量 DATACHAT_MEMORY（测试 / 评测 / 消融用）→ settings 表的 memory_mode（产品设置页）→ DEFAULT_MODE。
 每次调用时读，不在 import 时读成常量（pytest 的 monkeypatch.setenv 之后要立刻生效）。
+
+**默认档是 `state`（2026-11-16 起，C-021）**，不再是 `off`。依据是同指纹配对读数
+（C-020）：off → state 多轮 9/34 → 24/34、其余六类合计 +1/−1、tokens +1.7%/题。
+`off` 仍然保留且仍然逐字节兼容（P8），只是不再是不设置时的落点。
 
 返回的是**实际生效的值**。批 4a 起三档都是真的（docs/roadmap/memory-batch4.md §2）：
 - off：什么都不变（P8）；
@@ -19,6 +23,7 @@ import logging
 import os
 
 MODES = ("off", "state", "full")         # 批 4a：full 不再是 state 的别名
+DEFAULT_MODE = "state"                   # 产品默认档（2026-11-16，C-021；此前是 "off"）
 ENV = "DATACHAT_MEMORY"
 SETTING_KEY = "memory_mode"
 REWRITE_ENV = "DATACHAT_REWRITE"
@@ -50,8 +55,8 @@ def env_override() -> str | None:
 
 
 def resolve_memory_mode(settings_value: str | None = None) -> str:
-    """本轮实际生效的记忆模式：env → settings → off。"""
-    return env_override() or normalize(settings_value) or "off"
+    """本轮实际生效的记忆模式：env → settings → DEFAULT_MODE（state）。"""
+    return env_override() or normalize(settings_value) or DEFAULT_MODE
 
 
 def normalize_flag(value) -> bool | None:

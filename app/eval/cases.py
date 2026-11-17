@@ -350,8 +350,9 @@ CATEGORY_MAP = {
     "refusal": "应拒答",
     "ambiguity": "歧义",
     "multi_turn": "多轮",
-    # 批 4 记忆专项：口径/改写/长历史。全部 requires_memory，默认（off）跑批自动跳过，
-    # 只在 --memory state|full 的报告里出现 —— by_category 的这一类在 off 报告里不存在
+    # 批 4 记忆专项：口径/改写/长历史。全部 requires_memory，**off 档**跑批自动跳过，
+    # 只在 state|full 的报告里出现 —— by_category 的这一类在 off 报告里不存在。
+    # 2026-11-16 起默认档是 state（C-021），所以「默认跑批」现在会收录这类题。
     "memory": "记忆",
 }
 

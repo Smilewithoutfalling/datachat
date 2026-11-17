@@ -178,6 +178,10 @@ def test_post_message_injects_notes_when_state(home, sample_path, agent):
     c, d = setup(home, sample_path, factory=lambda: m)
     n = c.post(notes_url(d), json=PROFIT, headers=H).json()
     s = c.post("/sessions", json={"dataset_id": d, "agent": agent}, headers=H).json()
+    # 2026-11-16（C-021）：不设置时默认档是 state。这条验的是 off 不注入，所以先确认
+    # 默认值、再显式关掉 —— 不靠"默认是 off"这个前提，默认值变了它也不会变哑巴。
+    assert c.get("/settings", headers=H).json()["memory"]["mode"] == "state"
+    c.put("/settings", json={"memory_mode": "off"}, headers=H)
     # off：不注入，memory_notes = []
     r = _ask(c, s["id"], "利润是多少")
     assert r["memory_mode"] == "off" and r["memory_notes"] == []

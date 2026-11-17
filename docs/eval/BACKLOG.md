@@ -252,9 +252,18 @@ if expect.startswith("inherit:"):
 
 ---
 
-## P5 产品默认 `memory_mode=off`
+## P5 产品默认 `memory_mode=off` —— **已改（2026-11-16，C-021）**
 
-### 现象
+**结论**：默认档改为 `state`（`app/memory/config.py:DEFAULT_MODE`）。三条「反对理由」逐条
+核过：①隐私面**没有扩大** —— `app/server/db.py` 里没有任何记忆表，state 的输入全部来自
+已经落盘的 `messages`（快照/工作状态都是读时派生），只有用户手写口径才新增一行
+`DatasetNote`；②老用户既有行为改变只发生在**多轮**（单轮 ±1 是抖动），设置页仍可改回 off；
+③P8 的 off 基线**不用重立** —— 那几条测试改成显式传 `memory_mode="off"`，哈希值一个没动。
+评测侧：`run_eval.py` 不给 `--memory` 时按产品默认解析并写进 meta（此前是 None，默认值一改
+`null` 的含义就漂了）；指纹里 `memory_mode` 是门禁键，所以新的 state 批次与历史 off 批次
+**不可比**，这是设计不是事故。
+
+### 现象（改动前）
 
 `app/memory/config.py:resolve_memory_mode()` → `env → settings → "off"`。
 `app/core/service.py:168` 一样。产品默认就是 off。
@@ -280,8 +289,9 @@ if expect.startswith("inherit:"):
 > state：批 1–3 的全部 + 口径 M2（有口径时）+ M6 warning（批 4b）；
 > **没有口径、没开改写时 system 与 f39753c 逐字节一致**
 
-单轮、无口径场景下 state 与 off **行为等价**（P8 指纹层面）。那 state 除「记忆库写盘」
-之外没有单轮代价，而 workflow 多轮 9/34 → 24/34。这是**严格占优**，不是权衡。
+单轮、无口径场景下 state 与 off **行为等价**（P8 指纹层面）。state 没有单轮代价
+（原稿这里写的「除记忆库写盘之外」是错的：state 不新增任何落盘，见上面 ①），
+而 workflow 多轮 9/34 → 24/34。这是**严格占优**，不是权衡。
 
 ### 反对理由（要一起看）
 
@@ -293,6 +303,9 @@ if expect.startswith("inherit:"):
 
 三选一：保持 `off` 并做 UI 提示 / 默认改 `state`（推荐，依据是上面那条逐字节一致）/
 默认 `state` 但首次启动弹一次说明。
+
+**已选第二项**（H 于 2026-11-16 决定，实现见 C-021）。没做「首次启动弹说明」：单轮行为
+逐字节不变，多轮只是变好，弹窗解释一句「我们默认打开了会话记忆」价值不如打扰成本。
 
 ---
 

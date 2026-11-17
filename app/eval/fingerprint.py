@@ -353,8 +353,8 @@ def _env_flag(name: str, default: str = "off") -> str:
 def memory_mode() -> str:
     """本轮实际生效的记忆模式。
 
-    记忆系统落地后由 app/memory/config.py 的 resolve_memory_mode() 给（env → settings → off，
-    见 memory-system-spec.md §3.7）；现在还没有这个模块，行为等价于 off。
+    由 app/memory/config.py 的 resolve_memory_mode() 给（env → settings → DEFAULT_MODE，
+    默认档 2026-11-16 起是 state，见 memory-system-spec.md §3.7 / C-021）。
     两者都取不到时返回 "unknown"——comparable 遇到 unknown 一律判不可比，不猜。
     """
     try:

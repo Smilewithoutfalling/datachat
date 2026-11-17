@@ -67,15 +67,25 @@ def oracle_model(code: str, agent: str = "workflow", *, say: str | None = None) 
     `say`：只回一句话、**不执行任何代码**。澄清题（EV-B7 的 clarify）用 —— 那类题的
     正确行为是反问，没有 gold 可执行；照旧执行 `result = None` 会被判成"没问清就动手"，
     于是 oracle 自检红、PR 档永久红，而红的原因不是判分链路坏了。
+
+    **改写器（M7）的调用也要答。** 改写题（`mem_004` / `mem_005`）在 `memory_mode != off`
+    时会先发一次「你是问题改写器」的调用，那一次不是分析、也不该消耗下面那个"第一次给代码"
+    的计数：2026-11-17 之前默认档是 off，改写被 service 短路，这条路径在 oracle 自检里根本
+    没被走到，所以桩不答也没人发现。桩拿不到"正确改写"（它不知道 gold 对应的是哪句人话），
+    就明说拿不准 → 按 M7 的契约回落原问题，判分链路照旧可验；改写质量由真实模型跑 mem_* 题测。
     """
     if say is not None:
         def respond(messages):
             return say
         return ScriptedChatModel(responder=respond, calls=[])
 
+    rewrite_fallback = '{"rewritten": "", "needs_clarify": true, "reason": "oracle 不判改写"}'
+
     if agent == "workflow":
         def respond(messages):
             text = prompt_text(messages)
+            if "你是问题改写器" in text:
+                return rewrite_fallback
             if "写一段 pandas 代码" in text or "请修正它" in text:
                 return code
             if "数据分析规划助手" in text:
@@ -85,6 +95,9 @@ def oracle_model(code: str, agent: str = "workflow", *, say: str | None = None) 
         state = {"n": 0}
 
         def respond(messages):
+            # 改写调用不计数：它发生在分析之前，计进去会让"第一次给代码"错位一轮
+            if "你是问题改写器" in prompt_text(messages):
+                return rewrite_fallback
             state["n"] += 1
             if state["n"] == 1:
                 return AIMessage(content="", tool_calls=[{

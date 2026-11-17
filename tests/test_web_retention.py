@@ -188,7 +188,8 @@ def test_settings_memory_mode_roundtrip(home, monkeypatch):
     c = client(home, ScriptedChatModel(replies=[], calls=[]))
     monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
     # 批 4b：memory 段另加 rewrite_setting / rewrite_env（设置页分开显示「存的值 / 被环境变量覆盖」）
-    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "off", "setting": "off", "env": None,
+    # 2026-11-16（C-021）：没存过设置时 setting 显示默认档 state，mode 也随之生效为 state
+    assert c.get("/settings", headers=H).json()["memory"] == {"mode": "state", "setting": "state", "env": None,
                                                               "rewrite": False, **NO_RW}
     r = c.put("/settings", json={"memory_mode": "state"}, headers=H)
     assert r.status_code == 200 and r.json()["memory"] == {"mode": "state", "setting": "state", "env": None,

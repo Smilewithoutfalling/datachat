@@ -126,7 +126,8 @@ def test_history_rebuilds_context_and_steps_are_this_turn_only(sample_path):
     from app.core.service import MAX_HISTORY_TURNS
     m = ScriptedChatModel(replies=[tool_call("result = 2"), "本轮结论"], calls=[])
     hist = [(f"问{i}", f"答{i}") for i in range(MAX_HISTORY_TURNS + 2)]
-    res = analyze(sample_path, "现在呢", agent="react", chat_model=m, history=hist)
+    # 验的是 off 档的消息式回灌与裁剪（默认档 2026-11-16 起是 state，走的是历史数据块，C-021）
+    res = analyze(sample_path, "现在呢", agent="react", chat_model=m, history=hist, memory_mode="off")
     sent = str(m.calls[0])
     assert "'问0'" not in sent and "'问1'" not in sent and "'问2'" in sent and "答11" in sent and "现在呢" in sent
     assert res.ok and res.answer == "本轮结论"

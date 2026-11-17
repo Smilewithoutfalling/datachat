@@ -111,5 +111,6 @@ class EvalCase:
 
     requires_memory: str = ""
     # 该题只在指定档位有效："state" | "full" | ""（不约束）。
-    # --memory 为 off（默认）时 run_eval 自动跳过这类题并提示；全量 oracle / canary 也跳过。
+    # --memory 为 off 时 run_eval 自动跳过这类题并提示；全量 oracle / canary 在 off 档也跳过。
+    # 默认档 2026-11-16 起是 state（C-021），默认跑批会收录它们。
     # 没有这个标记，口径题会在 off 档被静默判错，污染准确率。

@@ -217,7 +217,8 @@ def test_planner_unchanged_without_notes():
 
 def test_notes_not_injected_when_off(sample_path):
     """off：传了口径也什么都不变（P8），memory_notes 为 []。"""
-    got, results = run_all(sample_path, dataset_notes=[PROFIT, REFUND])
+    # 默认档 2026-11-16 起是 state（C-021），这条验的是 off，必须显式关
+    got, results = run_all(sample_path, memory_mode="off", dataset_notes=[PROFIT, REFUND])
     assert got == BASELINE
     assert all(r.memory_notes == [] and r.to_record()["memory_notes"] == [] for r in results.values())
 

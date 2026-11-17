@@ -16,6 +16,9 @@
 3. **记忆是数据不是指令。** 历史、口径、规则一律包进数据块；用户问题里的"记住/以后都"只作为候选，不自动生效。
 4. **追加不删原文。** 压缩只往 `compactions` 追加，`messages` 一行不删。可审计优先于省空间。
 5. **默认关闭、可回退。** 所有新行为挂在 `DATACHAT_MEMORY` 下；`off` 时输出必须与现在**逐字节一致**。每张卡都要有这个开关的测试。
+   > **2026-11-16 修订（C-021）**：交付期已过，产品默认档从 `off` 改成 `state`。`off` 仍是
+   > 一等档位、仍逐字节兼容（P8 那三条测试现在显式传 `memory_mode="off"`，哈希值未变）。
+   > 改默认的依据是同指纹配对读数：多轮 9/34 → 24/34，单轮 ±1，tokens +1.7%/题。
 
 ### 任务卡索引
 
@@ -326,9 +329,9 @@ def history_mode() -> str:
 |---|---|---|---|
 | 环境变量 | `DATACHAT_MEMORY=off\|state\|full` | 高（设了就以它为准） | 测试、评测、消融脚本 |
 | `settings` 表 | `memory_mode`（同三个取值） | 低 | 产品：设置页「分析」区一个三选一（批 1 随 M1 一起做，前端只加这一个控件） |
-| 都没有 | — | — | `off` |
+| 都没有 | — | — | `state`（2026-11-16 起，C-021；此前 `off`） |
 
-`memory_mode()` 每次调用时按上表读取（env → settings → `"off"`）；读 settings 要走注入的 db 会话，`app/core` 不直接 import `app/server`，由 `post_message` 读好后作为参数传进 `analyze_stream`。`DATACHAT_REWRITE` 同理（settings 键 `memory_rewrite`）。
+`memory_mode()` 每次调用时按上表读取（env → settings → 默认档）；读 settings 要走注入的 db 会话，`app/core` 不直接 import `app/server`，由 `post_message` 读好后作为参数传进 `analyze_stream`。`DATACHAT_REWRITE` 同理（settings 键 `memory_rewrite`）。
 
 - `off`：所有新逻辑短路，行为与现在逐字节一致。
 - `state`：M1 + M3 + M5 + M12（不压缩、不改写）。

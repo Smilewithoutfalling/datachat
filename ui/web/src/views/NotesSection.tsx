@@ -41,7 +41,8 @@ export function NotesSection({ c, datasetId }: { c: Client; datasetId: string })
   useEffect(() => {
     let live = true;
     c.notes(datasetId).then((l) => live && setNotes(l), (e) => live && setLoadError(`读取口径失败：${errText(e)}`));
-    c.settings().then((s) => live && setMemoryOff((s.memory?.mode ?? "off") === "off"), () => undefined);
+    // 兜底值跟后端默认档一致（C-021 起 state）：读不到设置时不能再假设"记忆是关的"
+    c.settings().then((s) => live && setMemoryOff((s.memory?.mode ?? "state") === "off"), () => undefined);
     return () => {
       live = false;
     };

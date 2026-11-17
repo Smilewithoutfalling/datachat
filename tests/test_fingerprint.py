@@ -181,7 +181,7 @@ def test_runtime_config_defaults(monkeypatch):
     monkeypatch.delenv("DATACHAT_REWRITE", raising=False)
     cfg = fp.runtime_config()
     assert cfg["rewrite"] == "off"
-    assert cfg["memory_mode"] in ("off", "unknown")   # 记忆系统未落地时是 off
+    assert cfg["memory_mode"] in ("state", "unknown")   # C-021 起默认档是 state；读不到就是 unknown
 
 
 def test_env_flag_normalizes(monkeypatch):

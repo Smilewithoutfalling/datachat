@@ -78,7 +78,8 @@ class EvalRunner:
         """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
         为 None 时用真实模型（llm_config 或环境变量）。
         阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。
-        memory_mode（批 4 三档读数）：None = 不传，analyze 自己解析（env DATACHAT_MEMORY → off）；
+        memory_mode（批 4 三档读数）：None = 不传，analyze 自己解析（env DATACHAT_MEMORY → 默认档，
+        C-021 起是 state）；
         显式传 "off"/"state"/"full" 时每题都用这一档 —— 三档对照必须显式，靠 env 容易串档。
         run_suffix（E3）：追加到每题 system prompt 末尾的无语义文本。--repeat>1 时 run_eval.py
         每轮设 "\\n\\nrun-id: <k>"（可写属性，见 run_eval 主循环），打破网关在 temperature 0 下的

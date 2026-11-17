@@ -74,7 +74,9 @@ def run_state_all(sample_path, **kw):
 
 
 def test_off_mode_prompt_is_byte_identical(sample_path):
-    got, results = run_all(sample_path)
+    # 2026-11-16 起产品默认档是 state（C-021），所以这条必须显式传 off：
+    # 它验的是"off 与 3ce6b77 逐字节一致"，不是"不传参数时是什么档"。
+    got, results = run_all(sample_path, memory_mode="off")
     assert got == BASELINE
     for r in results.values():
         assert r.memory_mode == "off" and r.memory_trimmed == [] and r.rewrite is None
@@ -86,7 +88,7 @@ def test_off_mode_explicit_setting_is_byte_identical(sample_path):
 
 
 def test_off_mode_records_history_tokens_baseline(sample_path):
-    _, results = run_all(sample_path)
+    _, results = run_all(sample_path, memory_mode="off")
     assert results["react_single"].history_tokens == 0
     chars = sum(len(q) + len(a) for q, a in HISTORY)
     assert results["react_history"].history_tokens == -(-chars // 2)     # EST_CHARS_PER_TOKEN=2
@@ -106,11 +108,13 @@ def test_state_mode_changes_prompt_and_reports_state(sample_path, monkeypatch):
 
 
 @pytest.mark.parametrize("env,setting,want", [
-    (None, None, "off"), (None, "state", "state"), ("off", "state", "off"), ("state", None, "state"),
+    # 2026-11-16（C-021）：默认档 off → state。env 与 settings 都没给时落 DEFAULT_MODE；
+    # "不认识的值"同理落到默认档，不是落到 off。
+    (None, None, "state"), (None, "state", "state"), ("off", "state", "off"), ("state", None, "state"),
     ("full", None, "full"),             # 批 4a：full 是独立一档，不再是 state 的别名（原期望 "state"）
     (None, "full", "full"), ("state", "full", "state"),
     ("bogus", "state", "state"),        # 不认识的环境变量值忽略，落到设置
-    (None, "bogus", "off"), ("", "state", "state"), (" STATE ", None, "state"),
+    (None, "bogus", "state"), (None, "off", "off"), ("", "state", "state"), (" STATE ", None, "state"),
 ])
 def test_resolve_memory_mode_order(monkeypatch, env, setting, want):
     if env is None:
@@ -118,6 +122,12 @@ def test_resolve_memory_mode_order(monkeypatch, env, setting, want):
     else:
         monkeypatch.setenv("DATACHAT_MEMORY", env)
     assert resolve_memory_mode(setting) == want
+
+
+def test_default_mode_is_state(monkeypatch):
+    """C-021：env 与 settings 都没有时落 state。off 仍是显式档（上面那行的 ("off", …, "off")）。"""
+    monkeypatch.delenv("DATACHAT_MEMORY", raising=False)
+    assert resolve_memory_mode() == "state"
 
 
 def test_settings_value_reaches_analyze(sample_path):
@@ -168,8 +178,9 @@ def test_full_mode_under_budget_equals_state(sample_path, monkeypatch, no_rewrit
 def test_off_mode_ignores_rewrite_switch(sample_path, monkeypatch):
     """P8：改写开关打开、记忆 off 时，prompt 仍与 3ce6b77 一致，也不发改写请求。"""
     monkeypatch.setenv("DATACHAT_REWRITE", "1")
-    got, results = run_all(sample_path)
+    # 同 test_off_mode_prompt_is_byte_identical：默认档已不是 off（C-021），这里必须显式关
+    got, results = run_all(sample_path, memory_mode="off")
     assert got == BASELINE
-    got, results = run_all(sample_path, rewrite=True)
+    got, results = run_all(sample_path, memory_mode="off", rewrite=True)
     assert got == BASELINE
     assert all(r.rewrite is None for r in results.values())

@@ -113,7 +113,9 @@ def main():
                              "真崩溃走异常路径退出码仍非零，tier_check 靠报告兜底")
     parser.add_argument("--rescore", default=None, metavar="REPORT", help="离线重新打分一份已有报告，不调用模型")
     parser.add_argument("--memory", default=None, choices=["off", "state", "full"],
-                        help="记忆档位（批 4 三档读数）。默认 None = analyze 自己解析（env DATACHAT_MEMORY → off）。"
+                        help="记忆档位（批 4 三档读数）。默认 None = 按产品默认解析（env DATACHAT_MEMORY → "
+                             "DEFAULT_MODE；settings 表只在服务端生效，CLI 读不到，2026-11-16 起默认 state），"
+                             "解析结果会写进报告 meta。"
                              "显式指定时每题固定这一档；env 若与此档冲突会直接报错退出，不做静默覆盖")
     parser.add_argument("--write", action="store_true",
                         help="配合 --rescore：把新判定写回报告（不改模型输出，另记 rescored 与 run_code_sha12）")
@@ -168,9 +170,16 @@ def main():
             print(f"环境变量 DATACHAT_MEMORY={env_mode!r} 与 --memory {effective_memory!r} 冲突；"
                   f"显式参数会被 env 覆盖，跑出来就不是你要的档位。清掉 env 或两者改成一致。")
             sys.exit(1)
+    else:
+        # 没给 --memory 时按产品默认解析（env → settings → DEFAULT_MODE）。2026-11-16 起
+        # 默认档是 state（C-021），"没给参数"不再等于 off：下面 requires_memory 的取舍和
+        # 报告 meta 都必须是解析出来的这一档，否则会出现"按 off 跳过记忆题、实际按 state 跑"。
+        from app.memory.config import resolve_memory_mode as _resolve_mode
+        effective_memory = _resolve_mode()
+        args.memory = effective_memory
     # requires_memory 题（口径/改写/长历史）只在对应档位有意义：off 档口径不进 prompt、
-    # 改写被 service 短路，判分必错。默认（off）跑批自动跳过并提示，不静默、也不误跑。
-    if (effective_memory or "off") == "off":
+    # 改写被 service 短路，判分必错。off 档跑批自动跳过并提示，不静默、也不误跑。
+    if effective_memory == "off":
         skipped = [c.id for c in cases if getattr(c, "requires_memory", "")]
         if skipped:
             cases = [c for c in cases if not getattr(c, "requires_memory", "")]
@@ -219,9 +228,9 @@ def _run_agent(agent, cases, args, llm_config, stamp):
     meta = run_metadata(llm_config, runner.datasets["sales"] if "sales" in used else None)
     meta.update({"data": args.data or "data/sample_eval.csv", "oracle": args.oracle,
                  "use_dictionary": not args.no_dict,
-                 # 三档读数：报告 meta 必须记"我们要求的档位"。运行时实际生效值由
-                 # runtime_config 的 memory_mode（resolve_memory_mode）独立记录，
-                 # 两处不一致 = env 插了一脚，comparable 那边能看到。
+                 # 三档读数：报告 meta 记「这一批实际按哪一档跑」。--memory 没给时上面已经把
+                 # args.memory 填成解析出来的默认档（C-021 起 state），所以这里不再是 None ——
+                 # None 会让同一份报告说不清是 off 还是 state（默认值改过，null 的含义会漂）。
                  "memory_mode": args.memory,
                  "datasets": datasets_metadata({k: v for k, v in runner.datasets.items() if k in used}),
                  "filter": {"dataset": args.dataset, "category": args.category, "case": args.case}})

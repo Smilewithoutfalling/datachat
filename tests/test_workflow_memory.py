@@ -57,7 +57,9 @@ def test_workflow_gets_state_block(sample_path, mode):
 
 def test_workflow_prompt_unchanged_when_off(sample_path):
     """与 P8 的 workflow 哈希同一份数据：off 下带不带历史、开不开改写，workflow 的 prompt 都与 3ce6b77 一致。"""
-    for kw in ({}, {"history": HISTORY}, {"history": HISTORY, "rewrite": True}):
+    # 默认档 2026-11-16 起是 state（C-021），所以每个 kw 都显式带 off
+    for kw in ({"memory_mode": "off"}, {"memory_mode": "off", "history": HISTORY},
+               {"memory_mode": "off", "history": HISTORY, "rewrite": True}):
         from tests.test_core_analyze import wf_model
         m = wf_model(["result = df.groupby('region')['units'].sum()"])
         r = analyze(sample_path, "哪个地区卖得最好", chat_model=m, llm_config=FAST, **kw)

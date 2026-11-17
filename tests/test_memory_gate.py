@@ -57,7 +57,7 @@ def test_gate_warning_in_state_and_full(sample_path, mode):
 
 def test_gate_warning_not_in_off(sample_path):
     m = ScriptedChatModel(replies=[tc("result = 1"), "好"], calls=[])
-    r = analyze(sample_path, HIT, agent="react", chat_model=m, llm_config=FAST)
+    r = analyze(sample_path, HIT, agent="react", chat_model=m, llm_config=FAST, memory_mode="off")
     assert r.memory_mode == "off" and gate.WARNING not in r.warnings
 
 

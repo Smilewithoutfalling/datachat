@@ -124,7 +124,7 @@ class SettingsIn(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     base_url: Optional[str] = Field(None, max_length=500)
     timeout: Optional[float] = Field(None, ge=TIMEOUT_RANGE[0], le=TIMEOUT_RANGE[1])
-    memory_mode: Optional[Literal["off", "state", "full"]] = None    # 阶段 6.6：会话记忆（实验），默认 off；批 4a 起 full 是独立一档
+    memory_mode: Optional[Literal["off", "state", "full"]] = None    # 阶段 6.6：会话记忆（实验）；批 4a 起 full 是独立一档，2026-11-16 起默认档 state（C-021）
     memory_rewrite: Optional[bool] = None    # 批 4a M7：追问前先改写指代 / 相对时间（多一次模型调用），默认关
 
 
@@ -918,9 +918,11 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 over.discard("timeout")      # 同 llm_config：坏值不生效
         sources = {k: "settings" if k in over else "env" if conns.legacy_env_source(k) else "default"
                    for k in SETTING_KEYS}
-        from app.memory.config import (REWRITE_SETTING_KEY, SETTING_KEY, env_override, normalize, normalize_flag,
-                                       resolve_memory_mode, resolve_rewrite, rewrite_env_override)
-        memory = {"mode": resolve_memory_mode(st.get(SETTING_KEY)), "setting": normalize(st.get(SETTING_KEY)) or "off",
+        from app.memory.config import (DEFAULT_MODE, REWRITE_SETTING_KEY, SETTING_KEY, env_override, normalize,
+                                       normalize_flag, resolve_memory_mode, resolve_rewrite, rewrite_env_override)
+        # setting 是「这里存的值」：没存过就显示默认档本身（C-021 起是 state），不然设置页会出现
+        # 「下拉框选 off、实际生效 state」这种自相矛盾的画面。
+        memory = {"mode": resolve_memory_mode(st.get(SETTING_KEY)), "setting": normalize(st.get(SETTING_KEY)) or DEFAULT_MODE,
                   "env": env_override(),        # 阶段 6.6：mode 是实际生效值；env 非空时设置页提示被环境变量覆盖
                   "rewrite": resolve_rewrite(st.get(REWRITE_SETTING_KEY)),   # 批 4a：改写开关的实际生效值（env → settings → False）
                   # 批 4b：设置页要分开显示「这里存的值」和「被环境变量覆盖」（同 setting / env 的分法）

@@ -24,7 +24,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
   const [items, setItems] = useState<Connection[] | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [timeout, setTimeoutText] = useState("");
-  const [memory, setMemory] = useState<MemoryMode>("off");
+  const [memory, setMemory] = useState<MemoryMode>("state");   // 兜底跟后端默认档一致（C-021）
   const [rewrite, setRewrite] = useState(false); // 批 4b：改写开关（设置页存的值，不是生效值）
   const [edit, setEdit] = useState<Edit>(null);
   const [test, setTest] = useState<TestState | null>(null);
@@ -51,7 +51,7 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
         const act = applyList(l.items);
         setSettings(s);
         setTimeoutText(String(s.timeout));
-        setMemory(s.memory?.setting ?? "off");
+        setMemory(s.memory?.setting ?? "state");
         setRewrite(s.memory?.rewrite_setting ?? s.memory?.rewrite ?? false);
         // D2：没有任何能用的连接（只有环境变量且没 Key）→ 直接新建第一个连接
         if (act?.readonly && !act.key.configured) setEdit({ kind: "new" });
@@ -172,8 +172,8 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
               追问时带上的上下文
               <span className="ctl">
                 <select aria-label="会话记忆" value={memory} onChange={(e) => setMemory(e.target.value as MemoryMode)}>
-                  <option value="off">关闭：只带最近几轮问答（默认）</option>
-                  <option value="state">开启：再带上分析前提和失败的轮次</option>
+                  <option value="off">关闭：只带最近几轮问答</option>
+                  <option value="state">开启：再带上分析前提和失败的轮次（默认）</option>
                   <option value="full">开启（完整）：再压缩较长的历史，并参考你点过赞的写法</option>
                 </select>
               </span>

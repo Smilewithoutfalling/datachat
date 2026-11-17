@@ -313,20 +313,23 @@ test("结论 Markdown：标题、列表、表格都渲染在 .md 下，第一个
   expect(md.querySelector(":scope > h3")?.textContent).toBe("细节");
 });
 
-// 阶段 6.6：会话记忆开关（memory-system-spec.md §3.7）。默认 off；保存发 {memory_mode}；被环境变量覆盖时提示
+// 阶段 6.6：会话记忆开关（memory-system-spec.md §3.7）。默认档 2026-11-16 起是 state（C-021，此前 off）；
+// 保存发 {memory_mode}；被环境变量覆盖时提示
 // 批 4b：保存时一并发改写开关 memory_rewrite（原来只发 memory_mode）
-test("设置：会话记忆开关默认关闭，保存发 memory_mode 与 memory_rewrite；环境变量覆盖时写明", async () => {
+test("设置：会话记忆开关默认开启（state），保存发 memory_mode 与 memory_rewrite；环境变量覆盖时写明", async () => {
   const be = setup({
+    "GET /settings": { model: "qwen", base_url: "https://x/v1", timeout: 60,
+      memory: { mode: "state", setting: "state", env: null, rewrite: false, rewrite_setting: false, rewrite_env: null } },
     "PUT /settings": (b: unknown) => ({ model: "qwen", base_url: "https://x/v1", timeout: 60,
       memory: { mode: (b as { memory_mode: string }).memory_mode, setting: (b as { memory_mode: string }).memory_mode, env: null } }),
   });
   fireEvent.click(await screen.findByRole("button", { name: "设置" }));
   const view = await screen.findByTestId("settings-view");
   const sel = within(view).getByLabelText("会话记忆") as HTMLSelectElement;
-  expect(sel.value).toBe("off");
-  fireEvent.change(sel, { target: { value: "state" } });
+  expect(sel.value).toBe("state");
+  fireEvent.change(sel, { target: { value: "full" } });
   await act(async () => fireEvent.click(within(view).getByRole("button", { name: "保存记忆设置" })));
-  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({ memory_mode: "state", memory_rewrite: false });
+  expect(be.calls.find((x) => x.method === "PUT" && x.path === "/settings")?.body).toEqual({ memory_mode: "full", memory_rewrite: false });
   expect(screen.getByRole("status").textContent).toBe("设置已保存。");
   expect(within(view).getByTestId("memory-hint").textContent).not.toContain("覆盖");
 });

@@ -823,3 +823,63 @@
     大部分伤害，不必先动 history 通路。
 - **未验证**：k=1，两档各跑一次；单轮 +/-1 的抖动说明 16 题的差里有 1~2 题是噪声，
   多轮那 15 题不在噪声量级内。`full` 档（state + 口径 + 长历史）没跑。
+
+## C-021 · 2026-11-16 · 产品默认记忆档 off → state（P5）
+
+- **状态**：已生效；代码、评测入口、设置页、文档同批改完
+- **触发**：C-020 的同指纹配对读数 —— 唯一变量 `--memory`，195 题里 **+16**（其中多轮 +15、
+  单轮 ±1 抖动），tokens **+1.7%/题**。这是项目里证据最硬、代价最小的产品改动（BACKLOG P5）。
+- **改动**（5 处代码 + 1 处文案）：
+  1. `app/memory/config.py`：新增 `DEFAULT_MODE = "state"`，`resolve_memory_mode()` 的兜底
+     从字面量 `"off"` 改成它。**`off` 仍是一等档位**，只是不再是不设置时的落点。
+  2. `app/server/app.py`：`GET /settings` 的 `memory.setting` 一并落默认档 —— 否则设置页
+     会出现「下拉框显示关闭、实际生效 state」的自相矛盾（`setting` = 这里存的值，没存过就是默认）。
+  3. `run_eval.py`：不给 `--memory` 时**按产品默认解析、写进报告 `memory_mode`**。改之前这里
+     是 `None`：默认值一改，`null` 的含义就从 off 漂成 state，同一份报告说不清跑的是哪档。
+     顺带修掉一个会被这次改动引爆的坑 —— `requires_memory` 的跳过判定原本是
+     `(args.memory or "off") == "off"`，默认变 state 后它会「按 off 跳过记忆题、实际按 state 跑」。
+  4. `ui/web`：设置页「（默认）」文案从 off 移到 state；两处 `?? "off"` 兜底改 `?? "state"`。
+  5. `app/core/testing.py`（oracle 桩，**被全量测试抓出来的连带修复**）：桩要多答一种调用 ——
+     `mem_004` / `mem_005` 是改写题（runner 按 `case.rewrite` 显式传 `rewrite=True`），
+     `memory_mode != off` 时 service 会先发一次「你是问题改写器」的调用。默认档是 off 时
+     这次调用被短路，桩从不答它；默认改 state 后 react 桩的 `state["n"]` 计数被这次改写调用
+     吃掉一轮，第二轮拿到的是"结论"而不是工具调用 → `executed=False`，两条题报错。
+     修法是让桩识别改写 prompt 并回 `{"needs_clarify": true}`（按 M7 契约回落原问题，
+     **不消耗**工具调用计数）。桩不知道 gold 对应哪句人话，所以不假装会改写 ——
+     它只保证判分链路可验；改写质量由真实模型跑 mem_* 题测。
+- **反对理由逐条核过**（BACKLOG P5 原来列了三条）：
+  - 「记忆库写盘 = 隐私面扩大」**前提不成立**：`app/server/db.py` 里没有任何记忆表，回合快照与
+    工作状态都是读时从已存的 `messages` 派生，state 不新增一行落盘；只有用户手写口径才多一行
+    `dataset_notes`。已写进 `docs/THREAT_MODEL.md` §2.5（T12 / T13）。
+  - 「老用户既有行为被动改变」：单轮行为逐字节不变（P8 三条测试全绿、哈希一个没改），变化
+    只在多轮；设置页仍可改回 off，且 `off` 与改动前完全一致。
+  - 「现有 P8 基线要重立」：**不用**。P8 的 off 测试改成显式传 `memory_mode="off"`，基线值未动。
+- **因默认值变更而必须显式化的测试（8 处，全部是"验 off 行为但靠默认值"的）**：
+  `test_memory_p8.py` 三条（`test_off_mode_prompt_is_byte_identical`、
+  `test_off_mode_records_history_tokens_baseline`、`test_off_mode_ignores_rewrite_switch`）、
+  `test_memory_gate.py::test_gate_warning_not_in_off`、`test_metrics.py::test_notes_not_injected_when_off`、
+  `test_workflow_memory.py::test_workflow_prompt_unchanged_when_off`、
+  `test_stream.py::test_history_rebuilds_context_and_steps_are_this_turn_only`、
+  `test_fingerprint.py::test_runtime_config_defaults`（期望值改 state）。
+  另有三处断言默认值本身的测试跟着改：`test_memory_p8.py` 的 `resolve` 参数表（新增
+  `(None, None, "state")` 与 `test_default_mode_is_state`）、`test_dataset_notes_api.py`（先断言
+  默认是 state、再显式关 off 验"不注入"）、`test_web_retention.py`（`GET /settings` 默认值）。
+  前端 `views.test.tsx` 的「默认关闭」改成「默认 state」。
+- **验证**：
+  - 评测入口端到端（oracle，真跑 CLI）：不带 `--memory` → `memory_mode: state`、
+    `fingerprints.memory_mode: state`、`memory.modes = {state: 3}`、`uniform: true`；
+    `--case mem_001` 不带 `--memory` **收录**该题，带 `--memory off` **跳过并提示**（P5 之前
+    默认档是 off，这条路径一直没被走过）。
+  - 全量测试（env 未设 `DATACHAT_MEMORY`，**逐文件跑**：整目录一把跑要 1 小时以上，
+    `test_eval_cases.py` 单个就 18 分钟，中途被打断过三次，改成逐文件、慢文件单独跑）：
+    85 个测试文件 **全部通过，零 failed / zero error**；
+    `tests/test_eval_cases.py` 修桩后单独复跑 **230 passed / 1075 s**。
+  - 这把红不是产品 bug，是 **oracle 桩的旧漏洞被默认值变更撞出来**：`mem_004` / `mem_005`
+    是改写题（runner 按 `case.rewrite` 传 `rewrite=True`），off 档改写被短路，桩从没答过
+    「你是问题改写器」那次调用；state 档改写真的发了，react 桩的 `state["n"]` 被吃掉一轮，
+    第二轮只吐结论不执行。修法见改动 5。`test_oracle_pipeline_all_correct[workflow|react]`
+    修后各跑全量 202 题 100%（2 passed / 1096 s）。
+  - `run_eval.py --oracle --canary`：10/10，`memory_mode: state` —— canary 全是单轮无口径，
+    prompt 不变，探针判读规则不受影响。
+  - 前端 `vitest run src/views/views.test.tsx src/views/dataset-notes.test.tsx` 全绿、
+    `tsc --noEmit` 干净。
