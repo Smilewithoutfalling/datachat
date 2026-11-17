@@ -185,7 +185,12 @@ def test_state_block_in_react_and_planner(sample_path, monkeypatch):
     wm = wf_model(["result = 1"])
     analyze(sample_path, "按产品拆开", chat_model=wm, llm_config=FAST, history=hist)
     planner = prompt_text(wm.calls[0])
-    assert "<<<会话状态开始" in planner and "历史对话" not in planner     # 工作流只吃状态，不吃历史
+    # C-022 改了设计：workflow 的 planner 现在**同时**拿状态块和最近两轮的对话快照
+    # （问 + 答案摘要 + 结果形态），因为只靠 fold() 出来的前提行答不了「那 S02 呢」。
+    # 这里只钉「两块都在、且状态块在前」；快照的窗口宽度/轮次编号/预算另有断言，
+    # 见 tests/test_workflow_history.py。
+    assert "<<<会话状态开始" in planner and "历史对话" in planner
+    assert planner.index("<<<会话状态开始") < planner.index("<<<历史对话开始")   # 状态在前，快照在后
 
 
 # ------------------------------------------------------------------ 批 3：B1 用户前提区 / B2 出处轮次
