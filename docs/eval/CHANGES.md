@@ -829,7 +829,7 @@
 - **状态**：已生效；代码、评测入口、设置页、文档同批改完
 - **触发**：C-020 的同指纹配对读数 —— 唯一变量 `--memory`，195 题里 **+16**（其中多轮 +15、
   单轮 ±1 抖动），tokens **+1.7%/题**。这是项目里证据最硬、代价最小的产品改动（BACKLOG P5）。
-- **改动**（5 处代码 + 1 处文案）：
+- **改动**（6 处代码 + 1 处文案）：
   1. `app/memory/config.py`：新增 `DEFAULT_MODE = "state"`，`resolve_memory_mode()` 的兜底
      从字面量 `"off"` 改成它。**`off` 仍是一等档位**，只是不再是不设置时的落点。
   2. `app/server/app.py`：`GET /settings` 的 `memory.setting` 一并落默认档 —— 否则设置页
@@ -847,6 +847,12 @@
      修法是让桩识别改写 prompt 并回 `{"needs_clarify": true}`（按 M7 契约回落原问题，
      **不消耗**工具调用计数）。桩不知道 gold 对应哪句人话，所以不假装会改写 ——
      它只保证判分链路可验；改写质量由真实模型跑 mem_* 题测。
+  6. `.github/workflows/eval.yml` + 新增 `scripts/eval/expected_cases.py`：CI 的
+     `--expect-n` 必须镜像 runner 的取舍。原来两处 YAML 里是
+     `sum(1 for c in ALL_CASES if not c.requires_memory)` = 195（写死了"默认档是 off"），
+     默认改 state 后报告是 202 条 → `tier_check` 结构性红灯。现在算题只有一份逻辑
+     （`resolve_memory_mode() == "off"` 才减 7 条），`tests/test_expected_cases.py` 钉住
+     202 / 195 / 202 三种情形。
 - **反对理由逐条核过**（BACKLOG P5 原来列了三条）：
   - 「记忆库写盘 = 隐私面扩大」**前提不成立**：`app/server/db.py` 里没有任何记忆表，回合快照与
     工作状态都是读时从已存的 `messages` 派生，state 不新增一行落盘；只有用户手写口径才多一行

@@ -10207,6 +10207,7 @@ H 2026-11-16 拍板执行。
 | `app/server/app.py` | `GET /settings` 的 `memory.setting` 也落默认档（否则设置页显示"关闭"而实际生效 state） |
 | `run_eval.py` | 不给 `--memory` 时按产品默认解析并写进 `meta.memory_mode`；`requires_memory` 的跳过判定改用解析值 |
 | `app/core/testing.py` | oracle 桩补答「你是问题改写器」那次调用（见下） |
+| `scripts/eval/expected_cases.py` + `eval.yml` | CI 的 `--expect-n` 改成和 runner 同一份算题逻辑（原来是写死的 195 = 假设默认档 off，默认改 state 后报告 202 条 → 结构性红灯） |
 | `ui/web` | 「（默认）」从 off 移到 state；两处 `?? "off"` → `?? "state"` |
 | 文档 | spec §3.7、sidecar 契约、THREAT_MODEL §2.5（T12/T13）、LEDGER 注 17、BACKLOG P5 |
 
@@ -10233,7 +10234,8 @@ react 桩的计数器被吃掉一轮，第二轮就只吐结论、不执行。
 
 85 个测试文件逐文件跑（整目录一把跑要 1 小时以上、`test_eval_cases.py` 单个就 18 分钟，
 中途被打断三次，改成逐文件 + 单独跑慢文件）：**全部通过，零 failed / error**。
-`test_eval_cases.py` 修桩后单独复跑，见 CHANGES C-021。
+`test_eval_cases.py` 修桩后单独复跑 **230 passed / 1075 s**；新增
+`tests/test_expected_cases.py` 3 条钉住 CI 的题数算法（202 / 195 / 202）。
 
 ### 还没动的
 
