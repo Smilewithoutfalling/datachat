@@ -18,6 +18,12 @@
 改 planner prompt 之后一致"。P8 的约束没有放宽（off 下仍然不许有任何记忆块），但比对的
 锚点从"阶段 6.6 之前"变成了"加澄清分支之后"。下次谁要再动 planner 的 prompt，先想清楚
 值不值这个价 —— 而且**改完当场重立**，别隔一轮再补。
+
+**2026-11-17 第三次重立，只动 state 档的 `workflow_history`**（`7f38596168979aa0` →
+`7d68bc6d9ac25f29`；其余三个哈希一个都没动）：P0 给 workflow 的 planner 补了最近两轮
+对话原文（`memory_history`）。这是**设计变更**，不是修复 —— 单轮没有历史块，所以
+`workflow`（无 history）与 off 档三个哈希必须原样不动，它们现在就是这条改动的护栏：
+谁把历史块漏进单轮，这三个哈希立刻红。
 """
 import hashlib
 import json
@@ -36,7 +42,7 @@ BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "167addb043be1e
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
 # workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
 STATE_BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "a9c62ff882a7728a",
-                  "workflow": "d4f7e82e2b41e9cf", "workflow_history": "7f38596168979aa0"}
+                  "workflow": "d4f7e82e2b41e9cf", "workflow_history": "7d68bc6d9ac25f29"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 

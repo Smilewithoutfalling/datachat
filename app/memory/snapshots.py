@@ -199,12 +199,23 @@ def render_turn(n: int, s: TurnSnapshot, tz: tzinfo | None = None) -> str:
     return "\n".join(lines)
 
 
-def render_block(snaps: list[TurnSnapshot], max_tokens: int, tz: tzinfo | None = None) -> tuple[str, int]:
+def render_block(snaps: list[TurnSnapshot], max_tokens: int, tz: tzinfo | None = None,
+                 last_n: int | None = None) -> tuple[str, int]:
     """渲染历史块（§3.4 的格式）。最多 MAX_TURNS 轮；超过 max_tokens 时从最早的一轮开始丢。
-    返回 (块, 丢掉的轮数)。空历史 → ("", 0)：整块不出现（P8）。轮次编号按会话里的真实序号。"""
+    返回 (块, 丢掉的轮数)。空历史 → ("", 0)：整块不出现（P8）。轮次编号按会话里的真实序号。
+
+    `last_n` 只渲染**最近 N 轮**（P0：workflow 的 planner 只补最近的对话原文，不是整段历史）。
+    这是窗口设计而不是预算裁剪，所以 dropped 返回 0 —— 否则调用方会把「按窗口省略的轮次」
+    记成 `memory_trimmed`，给用户报一句不存在的「已自动省略较早的对话」。
+    窗口内仍受 max_tokens 约束，超了照旧从最早丢。
+    """
     snaps = list(snaps or [])
-    dropped = max(0, len(snaps) - MAX_TURNS)
-    keep = list(enumerate(snaps, 1))[-MAX_TURNS:]
+    if last_n is not None:
+        dropped = 0
+        keep = list(enumerate(snaps, 1))[-last_n:] if last_n > 0 else []
+    else:
+        dropped = max(0, len(snaps) - MAX_TURNS)
+        keep = list(enumerate(snaps, 1))[-MAX_TURNS:]
     while keep:
         body = "\n\n".join(render_turn(n, s, tz) for n, s in keep)
         block = f"{BLOCK_HEAD}\n{body}\n{BLOCK_TAIL}"

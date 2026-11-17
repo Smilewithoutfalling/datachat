@@ -889,3 +889,91 @@
     prompt 不变，探针判读规则不受影响。
   - 前端 `vitest run src/views/views.test.tsx src/views/dataset-notes.test.tsx` 全绿、
     `tsc --noEmit` 干净。
+
+---
+
+## C-022 · 2026-11-17 · workflow 的 planner 补最近两轮对话原文（P0）
+
+- **状态**：已生效；三档（off / state / full）读数同批重跑
+- **触发**：BACKLOG P0 —— 产品默认 `agent=workflow`，而它多轮 24/34、react 34/34。
+  差的不是记忆开关（C-020 已把开关开到 state），是**能不能读到原文**：`fold()` 只保留
+  结构化的口径（表 / 筛选 / 指标 / 前提），指代与被省略的主语（「那 S02 呢」「换成上个月」
+  「再按地区拆一层」）只活在原句里。
+- **改动**（7 处代码 + 1 个测试文件）：
+  1. `app/memory/context.py`：`MemoryContext` 新增 `planner_history`；`state_context()` 用
+     `render_block(snaps, PLANNER_TOKENS, last_n=PLANNER_TURNS)` 算它。**`PLANNER_TURNS = 2`**：
+     追问的指代几乎都落在上一轮，超过两轮还在指代的句子本身说不清；窗口内若仍超
+     `PLANNER_TOKENS=1200` 就截问题原文，并记 `memory_trimmed=["planner"]`（不静默）。
+  2. `app/memory/snapshots.py`：`render_block(..., last_n=None)` 只渲染最近 N 轮。
+     轮次编号仍是会话真实序号（3 轮取后 2 轮 → 第 2/3 轮）；**窗口省略 `dropped=0`**，
+     因为那是设计窗口不是预算裁剪 —— 否则会给人报一句不存在的「已自动省略较早的对话」。
+  3. `app/memory/budget.py`：`PLANNER_TOKENS = 1200`。**不进投影闸门**：planner 每轮只调
+     一次，M12 的 `history_cap` 算的是"每次调用都要付"的块，口径不同不能混。
+  4. `app/core/service.py`：`_run_workflow(..., planner_history="")` → `state["memory_history"]`。
+     只在非空时写键，off 档与首轮没有这个键（P8）。
+  5. `app/state.py`：`memory_history` 字段与它的边界（只给 planner、off/首轮不存在）。
+  6. `app/nodes/planner.py`：块顺序 `metrics_block → memory_state → memory_history`（原文是
+     参考材料，优先级必须排在口径之后）；`FOLLOWUP_HINT` 的开关从 `memory_state` 放宽为
+     `memory_state or memory_history` —— 有原文就算有上文，这正是 P0 的实质：
+     原来状态块为空（首轮 / fold 提不出东西）时 planner 既看不到原文、也不被告知这是追问。
+  7. `tests/test_workflow_history.py`（新增，7 条）：窗口是最近 2 轮且用真实轮次号、
+     原文只进 planner 不进 codegen/summarizer、off 与首轮整块不出现、
+     `FOLLOWUP_HINT` 不依赖状态块、`last_n` 是窗口不是裁剪。
+  8. `tests/test_workflow_memory.py`：`test_workflow_gets_state_block` 里原来断言
+     `"<<<历史对话开始" not in p` —— 那是旧设计，改为 `in p` 并注明改动出处。
+  9. `app/memory/context.py` + `app/core/service.py`：`state_context` / `build` 的 `planner=`
+     开关，只有 workflow 算这一块（react 算了也不送出去，见下面指纹一节）。
+- **指纹**：`code 98a91f766987 → 207a61fb5441`（`code_all 12515b8ecd23 → 3831f6fb94af`），
+  两份全量报告就跑在 `207a61fb5441` 上。**提交时是 `f4fa6bc5ab2a`**（`code_all 47ff9888ea32`）
+  —— 全量跑完之后又改了两处，都与行为无关：
+  ① `state_context` / `build` 加 `planner=` 开关，让 **react 不再计算**那两轮原文（react 没有
+  planner，算了也不送出去，却会在报告里多一个 `memory_trimmed=["planner"]`，把「历史太长」
+  记成「planner 被裁」）；② `service.py` 里 `state_block` 那行注释还写着「工作流不吃历史」。
+  **workflow 路径逐字节不变**（`planner=True` 时是同一次 `render_block` 调用），react 的 prompt
+  也不变；`--canary --memory state` 在最终代码上复跑 **10/10**（`canary_sha12 592b9f3baa7e`，
+  与改动前同一组题同一个值）。
+  `evalset 7c42591f7878 → f1f233cc334c` —— **这一项是假变化**，见下。
+- **读数**（同模型 `Qwen3.5-397B-A17B`、temperature 0、k=1）：
+
+  | 配置 | 报告 | 全量 | 多轮 | 轮次约束满足 | token/题 |
+  |---|---|---|---|---|---|
+  | state 改前 | `eval_wf_full_state_1116d` | 186/202 92.1% | 24/34 70.6% | 81/84 96.4% | 3583 |
+  | **state 改后** | `eval_wf_state_p0_1117` | **192/202 95.0%** | **32/34 94.1%** | **84/84 100%** | 3613 |
+  | full 改前（同日跑） | `eval_wf_memfull_1117` | 185/202 91.6% | 25/34 73.5% | 81/84 96.4% | 3668 |
+  | **full 改后** | `eval_wf_full_p0_1117` | **194/202 96.0%** | **32/34 94.1%** | **84/84 100%** | 3615 |
+
+- **为什么这 +8 不是"今天模型变好了"**：full 档改前是**今天**跑的（185/202、多轮 25/34），
+  与昨天 state 改前（186、24/34）几乎一样 —— 模型没变。同一天里 state 改后多出的 8 题
+  全部落在多轮组，其余七类合计 ±1。轮次约束满足从 81/84 到 84/84（`exec 0/59`、
+  `inherit 0/20`、`refusal 0/5` 三轮次类型零失败）是同一件事的独立测量。
+- **逐题**：修好 9 题 —— `mul_008/010/013/017/019/024/027/031` 与 `mem_007`；变差 3 题 ——
+  `agg_009`、`corr_001`、`emp_007`。**变差的 3 道全是单轮**，而单轮没有历史块、prompt 逐字节
+  不变（P8 的 `workflow` 哈希一个没动），只能是 k=1 抖动；`emp_007` 那次是模型反问
+  （「您希望如何定义 2024 年离职」），`METRIC_MARKERS` 缺「离职」一词，另记 BACKLOG（P13）。
+- **剩下的 2 道多轮错题不再是架构问题**：`mul_005`（「换成市场部，其他口径不变」→ 答成各职级
+  明细、actual 是 `nan`，因为 gold 的 dept 值是「市场」而模型筛「市场部」）与 `mul_026`
+  （问「有多少人」答回部门名「研发」）都是口径 / result 形态问题，planner 手里已有原文。
+- **`evalset f1f233cc334c ≠ 7c42591f7878` 是假不可比，证据三条**：
+  1. `git diff cf48b34..HEAD -- app/eval/cases*.py app/eval/case_model.py` 只有注释行；
+  2. 两份报告的 202 个 `id` 集合相同，逐题比对 `question / ground_truth / category / dataset /
+     turns` **零差异**；
+  3. 五张表 + `biz` 的 `datasets.*.sha256` 逐字相同（`abe40a78ff53 / b21bad987c65 /
+     3fd0f03966b8 / 0aac24693528 / 5cac5264456e`）。
+  → 指纹是文件字节哈希，注释一改就变。**读数可比**，但 `fingerprints.evalset_sha12` 这个
+  门禁键不同，`tier_check` 会判不可比；引读数时要带这段说明。
+- **P8 只重立了一个哈希**：`STATE_BASELINE["workflow_history"] 7f38596168979aa0 → 7d68bc6d9ac25f29`；
+  `BASELINE["workflow"]` 与 `STATE_BASELINE["workflow"]`（无 history）**一个没动** ——
+  它们现在是"单轮不许出现历史块"的护栏。
+- **未验证**：
+  - k=1，配对只各跑一次。+8 的题面级置信度靠"同日 full 改前对照 + 轮次约束 84/84 + 逐题
+    归因"三重证据，但没有 pass^3 / flip_rate。
+  - **产品 UI 路径未实测**：`app/server/app.py` 的 `post_message` 在 `mode != "off"` 时给两种
+    agent 都传 `turn_snapshots`（P5 之前就是这样），P0 只是把这个已有输入用起来，
+    但没在真 UI 里点过一轮追问。
+  - 长会话（>12 轮）时窗口只保留最近 2 轮：`mem_007`（29 轮、问题也长）实测触发了**窗口内
+    截断** —— state 档 `memory_trimmed=["history","planner"]`、full 档 `["planner"]`；
+    该题两档都判对（口径在 `dataset_notes` 里，不依赖原文）。更早的指代只能靠状态块的
+    `constraints`，没有专门实测。
+  - `app/core/ambiguity.py` 的 docstring 仍写着「产品的 workflow 收不到 history」——
+    那句在 off 档仍成立，在 state/full 档已被 P0 推翻。**故意没改**：改它会让提交后的
+    `code_sha12` 与上面两份全量报告对不上。下次动该文件时一并更新。

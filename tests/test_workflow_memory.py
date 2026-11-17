@@ -52,7 +52,10 @@ def test_workflow_gets_state_block(sample_path, mode):
     assert STATE_HEAD in p and 'region == "华北"' in p
     assert p.index("数据表的结构") < p.index(STATE_HEAD) < p.index("相关字段说明")       # 插在表结构之后
     assert all(STATE_HEAD not in t for t in log["codegen"] + log["summarizer"])     # 只给 planner
-    assert "<<<历史对话开始" not in p                                                 # workflow 不吃历史块
+    # P0（2026-11-17）：workflow 的 planner 以前完全不吃历史。现在补最近几轮原文 ——
+    # 「折叠后的状态块没有指代，原文有」。这条断言原来写的是 `not in p`，改动见
+    # tests/test_workflow_history.py（那条文件专门管这件事，这里只确认它确实进了 planner）。
+    assert "<<<历史对话开始" in p
 
 
 def test_workflow_prompt_unchanged_when_off(sample_path):

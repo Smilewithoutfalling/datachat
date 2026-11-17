@@ -130,9 +130,12 @@ def plan(state, config=None):
         field_notes=state.get("field_notes") or "（无）",
         question=state["question"],
     )
-    # 阶段 6.6 M1：工作状态块；批 4b M2：口径块（在状态块之前，优先级 表结构 > 口径 > 字段说明）。
-    # 两者都已带数据标记，插在表结构之后；都没有时 prompt 不变（P8 / state 哈希）。
-    blocks = [b for b in (state.get("metrics_block"), state.get("memory_state")) if b]
+    # 阶段 6.6 M1：工作状态块；批 4b M2：口径块（在状态块之前，优先级 表结构 > 口径 > 字段说明）；
+    # P0：最近几轮的对话原文（折叠后的状态块没有指代，原文有）。
+    # 三者都已带数据标记，插在表结构之后；都没有时 prompt 不变（P8 / state 哈希）。
+    # 原文放最后：它是参考材料，不是本轮要遵守的口径 —— 口径块的优先级必须仍在它前面。
+    blocks = [b for b in (state.get("metrics_block"), state.get("memory_state"),
+                          state.get("memory_history")) if b]
     if blocks:
         joined = "\n\n".join(blocks)
         msg = msg.replace("\n\n相关字段说明（来自数据字典）：", f"\n\n{joined}\n\n相关字段说明（来自数据字典）：", 1)
@@ -144,7 +147,8 @@ def plan(state, config=None):
         msg += ANSWERABLE_HINT
     # 会话中的追问本轮往往很短（「那 S02 呢」），单看这半句确实没指标 —— 但上一轮定过。
     # 没有这一句，多轮题会被反问，而那正是记忆该起作用的地方。
-    elif state.get("memory_state"):
+    # 有原文也算有上文：P0 之后 planner 能看到最近几轮的对话，判「这是追问」不再依赖折叠状态。
+    elif state.get("memory_state") or state.get("memory_history"):
         msg += FOLLOWUP_HINT
     text = llm.invoke(msg)
     clarify, plan_text = split_clarify(text)

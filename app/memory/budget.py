@@ -11,6 +11,7 @@ STATE_TOKENS = 500          # 工作状态块（M1）
 DICT_TOKENS = 2000          # 口径块（M2，批 4b：app/memory/metrics.py 的注入上限；同时参与投影闸门的 fixed）
 HISTORY_TOKENS = 6000       # 历史块（M3/M5）
 HISTORY_TOKENS_TIGHT = 4000 # 投影超阈值时的历史上限
+PLANNER_TOKENS = 1200       # 只给 workflow planner 的最近几轮原文（P0）的硬上限
 SYSTEM_TOKENS = 1500
 TOOL_TOKENS = 4000
 DEFAULT_EXPECTED_CALLS = 6

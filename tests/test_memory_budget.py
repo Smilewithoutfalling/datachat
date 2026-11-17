@@ -53,5 +53,6 @@ def test_paste_4000_chars_plus_10_turns_does_not_hit_budget(sample_path, monkeyp
     m = ScriptedChatModel(replies=["根据上文，华北最高"], calls=[])
     r = analyze(sample_path, "所以呢", agent="react", chat_model=m, llm_config=FAST, history=hist)
     assert r.ok and r.memory_mode == "state"
+    # react 没有 planner，不该算出 planner 窗口（否则这里会多一个 "planner" —— 见 C-022）
     assert r.history_tokens <= B.HISTORY_TOKENS and r.memory_trimmed == ["history"]
     assert B.TRIM_WARNING in r.warnings and not r.usage.budget_hit

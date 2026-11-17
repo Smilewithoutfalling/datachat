@@ -256,14 +256,15 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     notes_text = format_notes(notes) if notes else ""
     from app.memory import context as memctx
     mc = memctx.build(res.memory_mode, history, token_budget=tracker.usage.budget,
-                      history_messages=history_messages, prev_clarify=prev_clarify)
+                      history_messages=history_messages, prev_clarify=prev_clarify,
+                      planner=(agent == "workflow"))
     res.history_tokens, res.memory_trimmed = mc.history_tokens, list(mc.trimmed)
     res.warnings += mc.warnings
     metrics_block, pairs_block = _memory_blocks(res, agent, question, dataset_notes, accepted_pairs)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
                       dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup,
-                      mc.prev_clarify)
+                      mc.prev_clarify, planner_history=mc.planner_history)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block,
@@ -315,7 +316,7 @@ def _evidence_with_original(res, question, evidence):
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
                   max_attempts, exec_timeout, state_block="", metrics_block="", followup=False,
-                  prev_clarify=False):
+                  prev_clarify=False, planner_history=""):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
@@ -331,8 +332,10 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         # 同样只给 may_clarify，不进 prompt。
         "prev_clarify": bool(prev_clarify),
     }
-    if state_block:            # 阶段 6.6 M1：工作流只吃工作状态（planner），不吃历史
+    if state_block:            # 阶段 6.6 M1：折叠出来的工作状态块（planner 的另一半输入见下面 memory_history）
         state["memory_state"] = state_block
+    if planner_history:        # P0：折叠后的状态块丢了指代与被省略的主语，planner 另补最近几轮原文
+        state["memory_history"] = planner_history
     if metrics_block:          # 批 4b M2：口径块只给 planner（同一句拒答补句在 planner 里）
         state["metrics_block"] = metrics_block
     config = {
