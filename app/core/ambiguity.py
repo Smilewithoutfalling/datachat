@@ -34,6 +34,11 @@ METRIC_MARKERS = re.compile(
     r"金额|单价|价格|标价|成本|利润|毛利|销量|件数|买几件|多少件|数量|库存|到货"
     r"|工资|月薪|年薪|薪资|奖金|绩效|折扣|退款|销售额|营收|收入|客单价|复购率|流失率"
     r"|占比|比重|比例|比率|行数|条数|人数|员工|天数|司龄|年龄|评分|分数|时长|周转"
+    # P13（2026-11-17）：「2024 年离职了多少人？」被判成"缺指标"→ 反问。人数类指标在
+    # 员工表里常以**状态词**出现，而不是「人数」二字。这三个是员工表的口径谓词，
+    # 与「司龄」「天数」同类。副作用只在一侧：命中即放行，不再给模型反问的机会 ——
+    # 所以 tests/test_clarify_spec.py 的反向断言（clarify 题不许被放行）必须同时过。
+    r"|离职|入职|在职"
     r"|明细|记录|清单"
 )
 
@@ -107,13 +112,15 @@ def may_clarify(question: str, followup: bool = False, prev_clarify: bool = Fals
 
     ## followup 这一条的效力范围（别读错）
 
-    `followup` 是「本轮之前有轮次」，由 service 从 `mc.followup` 取。**但产品的 workflow
-    收不到 history** —— `app/server/app.py` 明写 `history = turn_history(...) if agent ==
-    "react" else None`，所以产品里 workflow（off 档）的 followup 恒为 False。state 档
-    `followup=bool(snaps)`：有上文时不反问，此时模型看得见工作状态块，指代轮能自己答。
+    `followup` 是「本轮之前有轮次」，由 service 从 `mc.followup` 取。**off 档下产品的
+    workflow 拿不到 history** —— `app/server/app.py` 写 `history = turn_history(...) if
+    agent == "react" else None`，所以 off 档里 workflow 的 followup 恒为 False。
+    state / full 档 `followup=bool(snaps)`：有上文时不反问，此时 planner 手里有工作状态块
+    和最近两轮的对话快照（C-022），指代轮能自己答。**2026-11-17 更正**：本条原写「产品的
+    workflow 收不到 history」，那是 C-022 之前的事实，已过时。
 
-    它在评测里才主要生效：runner 一律传 history，workflow 收下就丢（见 docs/eval/LEDGER.md:224
-    记的坑）。所以这一条首先是**对齐评测口径** —— 多轮题的中间轮（「那 S02 呢？」）不反问。
+    评测里 runner 一律传 history，所以这条首先是**对齐评测口径** —— 多轮题的中间轮
+    （「那 S02 呢？」）不反问。
 
     真正改变产品行为的是第 2~5 条：用户在产品里说「只看 2024 年 3 月的订单」，不该被反问。
 

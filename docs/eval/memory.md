@@ -11,7 +11,6 @@ EvalCase(id="mul_035", category="multi_turn", dataset="orders", gold_kind="scala
                 "其中 APP 渠道的有多少笔？"],                 # 第 2 轮（= question，判分只看它）
          question="其中 APP 渠道的有多少笔？",
          ground_truth=_D + "d = d[d['status'] == '已完成']; result = int((d['channel'] == 'APP').sum())",
-         no_history_truth="result = int((df['channel'] == 'APP').sum())",
          keywords=["status", "channel", "APP"],
          expect_turns=["exec", "inherit:已完成"]),
 ```
@@ -23,8 +22,10 @@ EvalCase(id="mul_035", category="multi_turn", dataset="orders", gold_kind="scala
 | `turns` | ✓ | 按时间顺序的全部问题；非空时 `question` 必须等于 `turns[-1]` |
 | `expect_turns` | ✓ | 每轮一个约束，长度必须等于 `len(turns)`。取值见下 |
 | `ground_truth` | ✓ | **只算最后一轮**，且是独立的完整表达式（gold 执行时没有前几轮的结果） |
-| `no_history_truth` | 二选一 | 把末轮当独立单轮题时的"直白答案"；用于机械验证"这题真的需要历史" |
 | `recall_turn` | 可选 | 跨轮数字断言，见下 |
+
+> `no_history_truth` 已于 2026-11-17 删除（零运行时消费点，随 v7 断代清掉）。
+> 「末轮不能单独作答」这条性质现在由 `--memory off` 的三跑读数度量。
 | `gold_dataset` | 可选 | 脏数据题（EV-B6）用：gold 在干净表上跑 |
 
 `expect_turns` 的取值：
@@ -38,17 +39,15 @@ EvalCase(id="mul_035", category="multi_turn", dataset="orders", gold_kind="scala
 
 1. **末轮必须不能单独作答。** 判据：把 `turns[-1]` 单独发给一个没看过历史的模型，它无法确定要算什么。
    "那 S02 呢""这些记录里"这种指代要敢写 —— 单轮题不敢写的是歧义，多轮题必须写。
-2. **`no_history_truth` 与豁免表二选一。** 没写对照的题必须在
-   `tests/test_multi_cases.py::_NOT_ABOUT_REMEMBERING` 里登记理由，否则测试红。
-   两边都写也红。这不是文书负担：mul_014/mul_030 初稿的"记忆题"在两种口径下答案恰好相同，
-   一分记忆都没测出来 —— 这道闸就是防它的。
-3. **`no_history_truth` 必须与 gold 不同**（`test_no_history_truth_actually_differs_from_gold`）。
-   相同 = 不带历史也能对 = 零信息量。
-4. **gold 不跨轮传值。** 每轮是独立的 analyze 调用，历史里只有问答文本（+ off 路径的可信代码快照）。
+2. **加题时自查一遍「不看历史也算得出同一个数吗」。** 这条原先由 `no_history_truth` +
+   豁免表机械挡（2026-11-17 删除，零运行时消费点）。历史教训不变：mul_014/mul_030 初稿的
+   "记忆题"在两种口径下答案恰好相同，一分记忆都没测出来。现在没有自动闸，
+   代价改由 `--memory off` 的三跑读数暴露 —— 新题如果 off 档也全对，就是零信息量。
+3. **gold 不跨轮传值。** 每轮是独立的 analyze 调用，历史里只有问答文本（+ off 路径的可信代码快照）。
    末轮想要什么条件就写什么条件 —— 这正是 `inherit:` 能断言"约束被带下来"的原因。
-5. **前几轮失败不重试。** 历史变脏是真实行为，重试会掩盖 D4（失败恢复）要测的东西。
-6. **轮数克制。** 多轮题成本是 `turns ×`；规格的 8 条里最长 3 轮，别把新题都写成 5 轮。
-7. **id 走 `mul_` 前缀**，`^[a-z]{2,6}_\d{3}$`；加题必须同步改
+4. **前几轮失败不重试。** 历史变脏是真实行为，重试会掩盖 D4（失败恢复）要测的东西。
+5. **轮数克制。** 多轮题成本是 `turns ×`；规格的 8 条里最长 3 轮，别把新题都写成 5 轮。
+6. **id 走 `mul_` 前缀**，`^[a-z]{2,6}_\d{3}$`；加题必须同步改
    `tests/test_eval_cases.py::test_case_count_and_ids_unique` 里写死的题数 —— 那行故意写死，
    加题会让 evalset 指纹变、历史数字失去可比性，必须显式过一次。
 

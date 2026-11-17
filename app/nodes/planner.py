@@ -131,9 +131,9 @@ def plan(state, config=None):
         question=state["question"],
     )
     # 阶段 6.6 M1：工作状态块；批 4b M2：口径块（在状态块之前，优先级 表结构 > 口径 > 字段说明）；
-    # P0：最近几轮的对话原文（折叠后的状态块没有指代，原文有）。
+    # P0：最近两轮的对话快照（问的原话 + 答案摘要 + 结果形态；折叠后的状态块没有指代，快照有）。
     # 三者都已带数据标记，插在表结构之后；都没有时 prompt 不变（P8 / state 哈希）。
-    # 原文放最后：它是参考材料，不是本轮要遵守的口径 —— 口径块的优先级必须仍在它前面。
+    # 快照放最后：它是参考材料，不是本轮要遵守的口径 —— 口径块的优先级必须仍在它前面。
     blocks = [b for b in (state.get("metrics_block"), state.get("memory_state"),
                           state.get("memory_history")) if b]
     if blocks:

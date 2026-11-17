@@ -892,11 +892,11 @@
 
 ---
 
-## C-022 · 2026-11-17 · workflow 的 planner 补最近两轮对话原文（P0）
+## C-022 · 2026-11-17 · workflow 的 planner 补最近两轮对话快照（P0）
 
 - **状态**：已生效；三档（off / state / full）读数同批重跑
 - **触发**：BACKLOG P0 —— 产品默认 `agent=workflow`，而它多轮 24/34、react 34/34。
-  差的不是记忆开关（C-020 已把开关开到 state），是**能不能读到原文**：`fold()` 只保留
+  差的不是记忆开关（C-020 已把开关开到 state），是**能不能读到上一轮原话**：`fold()` 只保留
   结构化的口径（表 / 筛选 / 指标 / 前提），指代与被省略的主语（「那 S02 呢」「换成上个月」
   「再按地区拆一层」）只活在原句里。
 - **改动**（7 处代码 + 1 个测试文件）：
@@ -974,6 +974,54 @@
     截断** —— state 档 `memory_trimmed=["history","planner"]`、full 档 `["planner"]`；
     该题两档都判对（口径在 `dataset_notes` 里，不依赖原文）。更早的指代只能靠状态块的
     `constraints`，没有专门实测。
-  - `app/core/ambiguity.py` 的 docstring 仍写着「产品的 workflow 收不到 history」——
-    那句在 off 档仍成立，在 state/full 档已被 P0 推翻。**故意没改**：改它会让提交后的
-    `code_sha12` 与上面两份全量报告对不上。下次动该文件时一并更新。
+  - `app/core/ambiguity.py` 的 docstring 当时仍写着「产品的 workflow 收不到 history」，
+    那句已被 P0 推翻，**当时故意留签**（改了会让 `code_sha12` 与上面两份全量报告对不上）。
+    **已由 C-023 一并更正**（2026-11-17，同一次断代）。
+
+## C-023 · 2026-11-17 · `METRIC_MARKERS` 补「离职 / 入职 / 在职」（P13）
+
+- **状态**：已生效；与 C-024 同属 **v7 断代**（`code_sha12` / `evalset_sha12` 一次换掉）
+- **触发**：`emp_007`（「2024 年离职了多少人？」）在两批读数里各反问过一次。属 k=1 抖动，
+  但抖出来的形态暴露了词表缺口：`OPERATOR_MARKERS` 命中「多少」，`METRIC_MARKERS` 一个都不命中
+  （有「人数」但没有「离职」）→ `answerable_by_terms` 判 False → 交给模型自由判断 → 反问短路整轮。
+- **改动**：
+  1. `app/core/ambiguity.py`：`METRIC_MARKERS` 加 `离职|入职|在职`。理由是**人数类指标在员工表里
+     常以状态词出现**，与已有的「司龄」「天数」同类，而不是新增一类语义。
+  2. `tests/test_clarify_spec.py`：放行用例加三句（离职 / 入职 / 在职各一）。
+     反向断言 `test_answerable_by_terms_does_not_gate_the_clarify_cases` 原样通过 ——
+     6 道 clarify 题一个都没被新词误放行，这是补词的代价项，必须当场验。
+  3. `app/core/ambiguity.py` 的 followup docstring：删掉「产品的 workflow 收不到 history」。
+     那句在 off 档成立、在 state/full 档已被 C-022 推翻，C-022 当时**故意留签**（改了会让
+     提交后的 `code_sha12` 与两份全量报告对不上）；本次本来就动这个文件，一并更正。
+- **副作用边界**：词表只用于"放行"，补词的唯一代价是这几类句子不再给模型反问的机会。
+  已知未覆盖：`METRIC_MARKERS` 里没有「编制」「离职率」（`流失率` 有），出现实测需求再加。
+
+## C-024 · 2026-11-17 · P10 `inherit:` 断言补 13 道 + 删除 `no_history_truth`（v7 断代）
+
+- **状态**：已生效；与 C-023 同一次断代
+- **触发**：BACKLOG P10 —— 34 道多轮题里 15 道末轮只断言 `exec`（"代码跑通了"），
+  所以「约束没继承下来但答案碰巧对」这类错误在 `multi_turn.rate` 里完全不可见
+  （`mul_013` 漏了首轮的「在职」，57.65% vs 60.56%，`turn_status` 全 `ok`）。
+- **改动 1 · 补 `inherit:`（13 道）**：`mul_001/003/006/007/008/013/015/016/024/026/027/031/032`。
+  只写**用户原话里出现过的约束取值**（地区 / 门店 / SKU / 部门 / 状态），不写列名；
+  复合约束用 `(?s)(?=.*A)(?=.*B)`（runner 是单次 `re.search`）。
+- **回放验证（关键步骤，不靠跑）**：把新断言套到 C-022 那两份全量报告的 `code` 字段上，
+  逐题比对旧 `turn_status` 与新判定 —— 得到 **2 处假失败**（`mul_016` / `mul_027` 答案对但
+  写法不同：把上一轮算出的地区名单/门店号直接写死，没有重算 `nlargest` / `idxmax`）。
+  按 `_IN_2024_03` 的既有约定给这两条加等价分支（`nlargest|华南`、`idxmax|'S01'`），
+  再回放：state 档 **0 翻转**、full 档 **1 翻转**（`mul_026`，`correct=False`，是新抓到的真失败）。
+- **改动 2 · 删 `no_history_truth`**：字段（`case_model.py`）、校验规则（`validate.py` 2b）、
+  22 处赋值、`tests/test_multi_cases.py` 的豁免表 `_NOT_ABOUT_REMEMBERING` 与两条测试、
+  `tests/test_eval_cases.py` 的一条校验测试、`docs/eval/memory.md` 的字段表。
+  该字段**零运行时消费点**（`runner.expected_all` 只读 `ground_truth`），README 早就记着
+  "留到下次换尺子时一起清"，这次就是那次换尺子。
+- **失去的东西（明写，别当没发生）**：「末轮不能单独作答」这条性质**不再有静态自动闸**。
+  以前 mul_014/mul_030 初稿那种"不看历史答案也相同"的废题会被 `test_no_history_truth_actually_differs_from_gold`
+  当场挡住，现在只能靠 `--memory off` 的三跑读数暴露（off 档也全对的题 = 零信息量）。
+  判断依据从"跑两段代码比数"降级为"读 off 档读数"，这是本次断代付出的代价。
+- **断代**：`evalset_sha12 672b52a3a6b0`（原 `f1f233cc334c`）、
+  `code_sha12 996020ad8a04`（原 `5104f0f5fd64`）、`code_all_sha12 587848acd84f`。
+  **C-022 及此前所有读数不可与本批相减。**
+- **验证**：`tests/test_multi_cases.py` + `tests/test_clarify_spec.py` 48 passed；
+  34 道多轮题的 oracle 跑批 `inherit 0/33 失败`、`exec 0/30`、`refusal 3/5`（refusal 的 3 处
+  是 oracle 桩不会拒答，与本改动无关，`pr_oracle.json` 里同值）。

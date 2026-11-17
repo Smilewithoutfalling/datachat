@@ -80,11 +80,6 @@ def validate_cases(cases: list) -> list[str]:
         elif c.expect_turns:
             errors.append(f"{c.id}: expect_turns 只在多轮题上有效（turns 为空）")
 
-        # 2b. no_history_truth 是"最后一轮当单轮题"的对照，单轮题没有"最后一轮"可言。
-        #     写错地方时不会有人报错，只会静默变成一段没人读的代码。
-        if c.no_history_truth and not c.turns:
-            errors.append(f"{c.id}: no_history_truth 只在多轮题上有效（turns 为空）")
-
         # 2c. recall_turn（EV-B5 跨轮数字断言）：只对多轮题有意义，且指向的必须是
         #     最后一轮**之前**的某轮 —— 指向末轮等于拿自己当证据，永远过、永远测不到。
         #     写成负数 / 越界的静默失效方式与 expect_turns 拼错一样：断言根本不触发。

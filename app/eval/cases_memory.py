@@ -113,7 +113,6 @@ MEMORY_CASES = [
              # 「那 5 月呢」脱离历史可以读成"全表 5 月"（50998），与正确答案"华东 5 月"
              # （15091）不同 —— 没有任何一条路能靠巧合答对。
              ground_truth="m = (pd.to_datetime(df['date']).dt.year == 2024) & (pd.to_datetime(df['date']).dt.month == 5) & (df['region'] == '华东')\nresult = int((df.loc[m, 'units'] * df.loc[m, 'price']).sum())",
-             no_history_truth="m = pd.to_datetime(df['date']).dt.month == 5\nresult = int((df.loc[m, 'units'] * df.loc[m, 'price']).sum())",
              keywords=["groupby", "sum"]),
 
     EvalCase(id="mem_005", category="memory", dataset="sales", gold_kind="scalar",
@@ -125,7 +124,6 @@ MEMORY_CASES = [
              # 华东 3 月 A=180、C=55，两个值都真实存在（避免"答 0"的边界）；
              # 脱离历史的直白读法"全表 3 月 C 的件数"是另一个值，写进 no_history 对照。
              ground_truth="m = (pd.to_datetime(df['date']).dt.month == 3) & (df['region'] == '华东') & (df['product'] == 'C')\nresult = int(df.loc[m, 'units'].sum())",
-             no_history_truth="m = (pd.to_datetime(df['date']).dt.month == 3) & (df['product'] == 'C')\nresult = int(df.loc[m, 'units'].sum())",
              keywords=["groupby", "sum"]),
 
     # ---- 长历史题（M4）：轮次堆长，末轮回头引用第 1 轮。只在 full 档触发遮罩 ----
@@ -150,7 +148,6 @@ MEMORY_CASES = [
                            "g = df.loc[m].groupby('region').apply(\n"
                            "    lambda x: int((x['units'] * x['price']).sum()))\n"
                            "result = g"),
-             no_history_truth="",
              # 豁免：「那张表」指第 1 轮的计算结果，脱离历史没有指代对象；且本题考的是
              # 隔 7 轮之后还能不能复述，单轮重算测不出复述能力
              keywords=["groupby"]),
@@ -176,7 +173,6 @@ MEMORY_CASES = [
              ground_truth=("m = (pd.to_datetime(df['date']).dt.year == 2024) & "
                            "(pd.to_datetime(df['date']).dt.month == 1) & (df['region'] == '华北')\n"
                            "result = int(df.loc[m, 'units'].sum())"),
-             no_history_truth="",
              # 豁免：「第二十九条」是历史里的条款编号，脱离历史没有指代对象（同 mem_006 的
              # 「那张表」）；本题考的是截断后还能不能答对，单轮跑测不出这个
              keywords=["sum"]),

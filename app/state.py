@@ -10,7 +10,7 @@ class AgentState(TypedDict, total=False):
     data_access_review: str  # 同上，reviewer prompt 的措辞
     field_notes: str     # 数据字典检索到的字段说明（已格式化，独立于 question，B04）
     memory_state: str    # 阶段 6.6 M1：会话工作状态块（已带数据标记），只给 planner；off 时没有这个键
-    memory_history: str  # P0：最近几轮对话原文（已带数据标记），只给 planner；off / 首轮时没有这个键
+    memory_history: str  # P0：最近两轮的对话快照（问的原话+答案摘要+结果形态，已带数据标记），只给 planner；off / 首轮时没有这个键
     metrics_block: str   # 批 4b M2：数据口径块（已带数据标记），只给 planner；没有口径（含 off）时没有这个键
     plan: str            # Planner 产出的分析步骤
     clarify: str         # 口径不明时 Planner 产出的反问（非空 = 跳过 codegen/executor，直接作答）

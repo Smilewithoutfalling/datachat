@@ -335,15 +335,3 @@ def test_every_case_module_is_fingerprinted():
     assert mods, "一个用例模块都没扫到，glob 写错了"
     missing = [m for m in mods if f"app/eval/{m}" not in EVALSET_FILES]
     assert not missing, f"这些模块没进指纹：{missing}"
-
-
-def test_no_history_truth_rejected_on_single_turn_case():
-    """no_history_truth 写在单轮题上要被挡住。
-
-    这个字段的语义是"把最后一轮当单轮题算出来的答案"，单轮题没有"最后一轮"这回事。
-    写错位置不会让任何东西报错，只会静默变成一段没人读的代码——规则 6（枚举写错会
-    静默失效）的同类问题，所以在校验层挡掉。
-    """
-    c = EvalCase(id="tmp_007", category="aggregation", question="q", ground_truth="1",
-                 no_history_truth="result = 0")
-    assert any("no_history_truth" in e for e in validate_cases([c]))

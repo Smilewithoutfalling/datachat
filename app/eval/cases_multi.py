@@ -48,16 +48,14 @@ MULTI_CASES = [
                     "那这些记录的销量合计是多少件？"],
              question="那这些记录的销量合计是多少件？",
              ground_truth="result = int(df[df['region'] == '华东']['units'].sum())",
-             no_history_truth="result = int(df['units'].sum())",
              keywords=["region", "units", "sum"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:华东"]),
     EvalCase(id="mul_002", category="multi_turn", dataset="orders", gold_kind="scalar",
              turns=["只看已完成的订单，重复录入的只算一次。这样的订单有多少笔？",
                     "其中来自 APP 渠道的有多少笔？"],
              question="其中来自 APP 渠道的有多少笔？",
              ground_truth=_D + "d = d[d['status'] == '已完成']; "
                                "result = int((d['channel'] == 'APP').sum())",
-             no_history_truth="result = int((df['channel'] == 'APP').sum())",
              keywords=["status", "channel", "APP"],
              expect_turns=["exec", "inherit:已完成"]),
     EvalCase(id="mul_003", category="multi_turn", dataset="inventory", gold_kind="scalar",
@@ -66,7 +64,7 @@ MULTI_CASES = [
              question="那 S02 呢？",
              ground_truth="result = int(df[df['store'] == 'S02']['sold'].sum())",
              keywords=["store", "sold", "sum"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:S02"]),
 
     # ============================================================
     # B 纠正覆盖：第 2 轮推翻第 1 轮的前提，不是在上面叠加
@@ -96,10 +94,9 @@ MULTI_CASES = [
              question="把已退款的也加进来，重新算一遍。",
              ground_truth=_D + "d = d[d['status'].isin(['已完成', '已退款'])]; "
                                "result = round(float(d['pay_amount'].sum()), 2)",
-             no_history_truth="result = round(float(df['pay_amount'].sum()), 2)",
              keywords=["status", "已退款", "pay_amount", "sum"],
              # 「去重」这个前提只在第 1 轮说过，第 2 轮要自己带下来 —— 不去重金额就对不上
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:drop_duplicates"]),
 
     # ============================================================
     # C 指代消解：最后一轮的动作对象是上一轮的**结果**
@@ -111,7 +108,7 @@ MULTI_CASES = [
              ground_truth="s = (df['units'] * df['price']).groupby(df['region']).sum(); "
                           "result = round(float(s.max() - s.min()), 2)",
              keywords=["groupby", "region", "max", "min"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:region"]),
     EvalCase(id="mul_008", category="multi_turn", dataset="inventory", gold_kind="scalar",
              # 「有记录的天数」在单门店表里等价于行数，但 inventory 是 5 门店 × 92 天，
              # 行数(460) 是 天数(92) 的 5 倍 —— 模型 4 次里 3 次按行数算。补一句消歧，
@@ -122,7 +119,7 @@ MULTI_CASES = [
              ground_truth="k = df[df['sku'] == 'K100']; "
                           "result = round(float(k['closing_stock'].sum() / k['date'].nunique()), 2)",
              keywords=["sku", "closing_stock", "nunique"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:K100"]),
 
     # ============================================================
     # D 分组粒度继承：最后一轮只改粒度，指标与筛选都不变
@@ -132,7 +129,6 @@ MULTI_CASES = [
                     "按职级拆开看呢？"],
              question="按职级拆开看呢？",
              ground_truth="result = df[df['dept'] == '研发'].groupby('level')['monthly_salary'].mean().round(2)",
-             no_history_truth="result = df.groupby('level')['monthly_salary'].mean().round(2)",
              keywords=["dept", "level", "groupby", "mean"],
              expect_turns=["exec", "inherit:研发"]),
 
@@ -147,7 +143,6 @@ MULTI_CASES = [
              question="这些订单一共多少笔？",
              ground_truth=_D + "d = d[(d['status'] == '已完成') & (d['channel'] == 'APP') "
                                "& (d['category'] == '数码')]; result = int(len(d))",
-             no_history_truth="result = int(len(df))",
              keywords=["status", "channel", "category"],
              # 前三轮是纯指令，模型可能只回「好的」而不执行代码 → any
              # 第 4 轮必须把三个条件都重写（代码不跨轮传递），所以三代条件都要在
@@ -176,7 +171,6 @@ MULTI_CASES = [
              question="这些订单里各品类的订单笔数占比是多少？用百分数表示，保留两位小数，按占比从高到低排。",
              ground_truth=_D + "m = d[d['order_date'].str[:7] == '2024-03']; "
                                "result = (m['category'].value_counts(normalize=True) * 100).round(2)",
-             no_history_truth="result = (df['category'].value_counts(normalize=True) * 100).round(2)",
              keywords=["order_date", "category", "value_counts", "normalize"],
              expect_turns=["inherit:" + _IN_2024_03, "inherit:" + _IN_2024_03]),
 
@@ -191,9 +185,8 @@ MULTI_CASES = [
              question="男性占比是多少？用百分数表示，保留两位小数。",
              ground_truth="x = df[(df['dept'] == '研发') & (df['leave_date'].isna())]; "
                           "result = round(float((x['gender'] == '男').sum() / len(x) * 100), 2)",
-             no_history_truth="result = round(float((df['gender'] == '男').sum() / len(df) * 100), 2)",
              keywords=["dept", "leave_date", "gender"],
-             expect_turns=["exec", "exec", "exec"]),
+             expect_turns=["exec", "exec", r"inherit:(?s)(?=.*研发)(?=.*leave_date)"]),
 
     # ============================================================
     # 第二批（mul_014 起）：把 13 条扩到 33 条
@@ -203,9 +196,12 @@ MULTI_CASES = [
     # 6 对是 0.031、5 对是 0.0625，跟总题数无关。扩题改变的是两件事：能产生多少条
     # 不一致对（13 题只挤出 5 条），以及正确率区间的宽度（13 题约 ±13pp，33 题约 ±8pp）。
     #
-    # 每条都带 no_history_truth（除下面注明豁免的 6 条），由 tests/test_multi_cases.py
-    # 机械验证 gold 与它不相等。理由见 case_model.py 该字段的注释：题面读起来像依赖上文
-    # 不够，数据上"不看历史也算得出同一个数"的题等于白跑。
+    # 每道题都必须在题面上做到「末轮单独拿出来无法作答」（判据见本文档开头）。
+    # 2026-11-17 之前这里靠 `no_history_truth`（把末轮当单轮题跑一遍，与 gold 比对）机械
+    # 验证这件事；该字段零运行时消费点，已随 v7 断代删除。现在这条性质由 **k=3 的
+    # `--memory off` 读数**负责度量：off 档把历史当对话消息回灌，答不出的题会直接掉分。
+    # 需要人判的只剩一类 —— 指代对象是上一轮的**计算结果**（「那个部门」「这 3 个地区」），
+    # 这种题写不出"最直白的单轮答案"，靠代码根因比靠断言可靠。
     # ============================================================
 
     # ---- I 排除条件继承：否定条件在下一轮最容易丢 ----
@@ -217,8 +213,6 @@ MULTI_CASES = [
              ground_truth="s = df[df['region'] != '华南']; "
                           "g = (s['units'] * s['price']).groupby(s['region']).sum(); "
                           "result = round(float(g.max() / g.sum() * 100), 2)",
-             no_history_truth="g = (df['units'] * df['price']).groupby(df['region']).sum(); "
-                              "result = round(float(g.max() / g.sum() * 100), 2)",
              keywords=["region", "华南", "groupby"],
              expect_turns=["exec", "inherit:华南"]),
     EvalCase(id="mul_015", category="multi_turn", dataset="orders", gold_kind="scalar",
@@ -228,10 +222,8 @@ MULTI_CASES = [
              ground_truth=_D + "d = d[d['status'] != '已取消']; "
                                "lo = d.groupby('city')['pay_amount'].sum().idxmin(); "
                                "result = int((d['city'] == lo).sum())",
-             no_history_truth="lo = df.groupby('city')['pay_amount'].sum().idxmin(); "
-                              "result = int((df['city'] == lo).sum())",
              keywords=["status", "city", "pay_amount"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", r"inherit:(?s)(?=.*drop_duplicates)(?=.*已取消)"]),
 
     # ---- J 指代上一轮算出的集合/实体 ----
     EvalCase(id="mul_016", category="multi_turn", dataset="sales", gold_kind="scalar",
@@ -243,14 +235,16 @@ MULTI_CASES = [
                           "top = s.nlargest(3); result = round(float(top.sum() / s.sum() * 100), 2)",
              # 豁免：指代的是上一轮算出的地区名单，脱离历史写不出"最直白的答案"
              keywords=["region", "nlargest", "sum"],
-             expect_turns=["exec", "exec"]),
+             # 末轮要的是「上一轮算出的那 3 个地区」。实测两种写法都出现过：重算 nlargest，
+             # 或把三名直接写死（['华南','华东','华北']）。两条都收 —— 写死的那份是靠记忆
+             # 才写得出来的，正是这条断言要保护的行为。只收 nlargest 会把它判成假失败。
+             expect_turns=["exec", r"inherit:nlargest|华南"]),
     EvalCase(id="mul_017", category="multi_turn", dataset="employees", gold_kind="scalar",
              turns=["绩效评级为 A 的员工有多少人？",
                     "这些人的平均月薪是多少元？"],
              question="这些人的平均月薪是多少元？",
              ground_truth="x = df[df['perf_2023'] == 'A']; "
                           "result = round(float(x['monthly_salary'].mean()), 2)",
-             no_history_truth="round(float(df['monthly_salary'].mean()), 2)",
              keywords=["perf_2023", "monthly_salary", "mean"],
              expect_turns=["exec", "inherit:perf_2023"]),
 
@@ -261,7 +255,6 @@ MULTI_CASES = [
              question="同样这个范围，换成总销售额，是多少元？",
              ground_truth="e = df[df['region'] == '华东']; "
                           "result = round(float((e['units'] * e['price']).sum()), 2)",
-             no_history_truth="round(float((df['units'] * df['price']).sum()), 2)",
              keywords=["region", "华东", "units", "price"],
              expect_turns=["exec", "inherit:华东"]),
     EvalCase(id="mul_019", category="multi_turn", dataset="inventory", gold_kind="scalar",
@@ -269,7 +262,6 @@ MULTI_CASES = [
                     "同一个门店，换成销量合计呢？"],
              question="同一个门店，换成销量合计呢？",
              ground_truth="x = df[df['store'] == 'S03']; result = int(x['sold'].sum())",
-             no_history_truth="int(df['sold'].sum())",
              keywords=["store", "S03", "sold"],
              expect_turns=["exec", "inherit:S03"]),
 
@@ -280,7 +272,6 @@ MULTI_CASES = [
              question="其中广州的有多少笔？",
              ground_truth=_D + "m = d[d['order_date'].str[:7] == '2024-03']; "
                                "result = int((m['city'] == '广州').sum())",
-             no_history_truth="int((df['city'] == '广州').sum())",
              keywords=["order_date", "city", "广州"],
              expect_turns=["inherit:" + _IN_2024_03, "inherit:" + _IN_2024_03]),
     EvalCase(id="mul_021", category="multi_turn", dataset="orders", gold_kind="scalar",
@@ -289,7 +280,6 @@ MULTI_CASES = [
              question="这些订单的平均实付金额是多少元？保留两位小数。",
              ground_truth=_D + "d = d[(d['status'] == '已完成') & (d['category'] == '数码')]; "
                                "result = round(float(d['pay_amount'].mean()), 2)",
-             no_history_truth="round(float(df['pay_amount'].mean()), 2)",
              keywords=["status", "category", "pay_amount", "mean"],
              expect_turns=["inherit:数码", "inherit:数码"]),
 
@@ -302,7 +292,6 @@ MULTI_CASES = [
              question="这些订单的实付金额合计是多少元？重复录入的只算一次。",
              ground_truth=_D + "d = d[(d['channel'] == 'APP') & (d['status'] == '已完成')]; "
                                "result = round(float(d['pay_amount'].sum()), 2)",
-             no_history_truth="round(float(df['pay_amount'].sum()), 2)",
              keywords=["channel", "APP", "status", "pay_amount"],
              # 第 2 轮问字段，答完什么都没变 —— 测它会不会把 APP 这个前提弄丢
              expect_turns=["any", "any", "any", "inherit:APP"]),
@@ -315,7 +304,6 @@ MULTI_CASES = [
              ground_truth=_D + "d = d[d['status'] == '已取消']; "
                                "result = round(float(d['pay_amount'].sum()), 2)",
              # 最后一轮自己说了"已取消"，唯一的隐藏前提是"去重"（首轮说过，末轮没说）
-             no_history_truth="round(float(df[df['status'] == '已取消']['pay_amount'].sum()), 2)",
              keywords=["status", "已取消", "pay_amount"],
              expect_turns=["exec", "inherit:已取消"]),
     EvalCase(id="mul_024", category="multi_turn", dataset="employees", gold_kind="scalar",
@@ -324,10 +312,8 @@ MULTI_CASES = [
              question="刚才忘了说，离职的也要算进来，重新算。",
              ground_truth="result = round(float(df[df['dept'] == '研发']['monthly_salary'].mean()), 2)",
              # 不带历史时的最直白答案 = 第 1 轮那个口径（只在职），正好是本题要推翻的那个数
-             no_history_truth="x = df[(df['dept'] == '研发') & df['leave_date'].isna()]; "
-                              "result = round(float(x['monthly_salary'].mean()), 2)",
              keywords=["dept", "monthly_salary", "mean"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:研发"]),
 
     # ---- O 换话题：该丢的约束必须丢掉（防过度继承） ----
     EvalCase(id="mul_025", category="multi_turn", dataset="employees", gold_kind="scalar",
@@ -353,7 +339,9 @@ MULTI_CASES = [
                           "result = int(((df['dept'] == b) & (df['perf_2023'] == 'A')).sum())",
              # 豁免：「那个部门」的指代对象是上一轮的 argmax 结果，脱离历史没有"最直白答案"
              keywords=["dept", "monthly_salary", "perf_2023"],
-             expect_turns=["exec", "exec"]),
+             # 两条分支：重算 argmax，或把解出来的部门名写死。只认 idxmax 会把「写死研发部」
+             # 判成假失败 —— 那种写法同样证明它记住了上一轮的结论。
+             expect_turns=["exec", r"inherit:idxmax|研发"]),
     EvalCase(id="mul_027", category="multi_turn", dataset="inventory", gold_kind="scalar",
              turns=["累计销量最高的门店是哪个？",
                     "这个门店的期末库存合计是多少件？"],
@@ -362,7 +350,8 @@ MULTI_CASES = [
                           "result = int(df[df['store'] == s]['closing_stock'].sum())",
              # 豁免：同上，「这个门店」是上一轮的 argmax 结果
              keywords=["store", "sold", "closing_stock"],
-             expect_turns=["exec", "exec"]),
+             # 同上：idxmax 或写死解出来的门店号（实测出现过 df[df['store'] == 'S01']）
+             expect_turns=["exec", r"inherit:idxmax|'S01'"]),
 
     # ---- Q 拒答链：连续拒答不能污染后续，也不能被上一轮带成编造 ----
     EvalCase(id="mul_028", category="multi_turn", dataset="orders", gold_kind="scalar",
@@ -371,7 +360,6 @@ MULTI_CASES = [
                     "那就只算广州的订单金额合计吧，重复录入的只算一次。"],
              question="那就只算广州的订单金额合计吧，重复录入的只算一次。",
              ground_truth=_D + "result = round(float(d[d['city'] == '广州']['pay_amount'].sum()), 2)",
-             no_history_truth="round(float(df[df['city'] == '广州']['pay_amount'].sum()), 2)",
              keywords=["city", "广州", "pay_amount"],
              expect_turns=["refusal", "refusal", "exec"]),
     EvalCase(id="mul_029", category="multi_turn", dataset="employees", gold_kind="text",
@@ -392,7 +380,6 @@ MULTI_CASES = [
              question="这些订单里，食品类的实付金额合计是多少元？",
              ground_truth=_D + "m = d[d['order_date'].str[:7] == '2024-02']; "
                                "result = round(float(m[m['category'] == '食品']['pay_amount'].sum()), 2)",
-             no_history_truth="round(float(df[df['category'] == '食品']['pay_amount'].sum()), 2)",
              keywords=["order_date", "category", "食品"],
              expect_turns=["inherit:" + _IN_2024_02, "inherit:" + _IN_2024_02]),
 
@@ -402,9 +389,8 @@ MULTI_CASES = [
                     "再按地区拆一层呢？"],
              question="再按地区拆一层呢？",
              ground_truth="result = df.groupby(['product', 'region'])['units'].sum()",
-             no_history_truth="df.groupby('region')['units'].sum()",
              keywords=["groupby", "product", "region", "units"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", r"inherit:(?s)(?=.*product)(?=.*region)"]),
 
     # ---- T 份额：分母指代上一轮的实体 ----
     EvalCase(id="mul_032", category="multi_turn", dataset="inventory", gold_kind="scalar",
@@ -416,7 +402,7 @@ MULTI_CASES = [
                           "result = round(float(k['sold'].sum() / df['sold'].sum() * 100), 2)",
              # 豁免：「它」指上一轮的 SKU；脱离历史，「它」没有指代对象
              keywords=["sku", "K200", "sold"],
-             expect_turns=["exec", "exec"]),
+             expect_turns=["exec", "inherit:K200"]),
 
     # ---- U 选择性撤销：撤掉中间某轮的约束，保留更早的那个 ----
     EvalCase(id="mul_033", category="multi_turn", dataset="orders", gold_kind="scalar",
@@ -425,7 +411,6 @@ MULTI_CASES = [
                     "回到全部渠道，但仍只看已完成的，一共多少笔？重复录入的只算一次。"],
              question="回到全部渠道，但仍只看已完成的，一共多少笔？重复录入的只算一次。",
              ground_truth=_D + "d = d[d['status'] == '已完成']; result = int(len(d))",
-             no_history_truth="int(len(df))",
              keywords=["status", "已完成"],
              # 末轮要撤掉 APP、保住已完成 —— 单纯"把历史全部叠加"会算成 APP 子集，判错
              expect_turns=["any", "any", "inherit:已完成"]),
@@ -442,7 +427,6 @@ MULTI_CASES = [
              ground_truth="s = df['units'] * df['price']; result = int(s.sum())",
              # 豁免：「那个数字」指第 1 轮的计算结果，脱离历史没有指代对象；
              # 且本题考的是"复述对不对"，单轮重算出同一个值测不出复述能力
-             no_history_truth="",
              keywords=["units", "price", "sum"],
              expect_turns=["exec", "exec", "exec"],
              recall_turn=1),
