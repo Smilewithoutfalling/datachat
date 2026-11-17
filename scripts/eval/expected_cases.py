@@ -11,9 +11,18 @@
 
 `DATACHAT_MEMORY` 会影响结果（env 优先于默认档），这正是要的：CI 若哪天设了 env，
 这里算出来的数就和 runner 实际跑的题数一致。
-"""
-from app.eval.cases import ALL_CASES
-from app.memory.config import resolve_memory_mode
+
+**必须自己把仓库根塞进 sys.path**：CI 里是 `python scripts/eval/expected_cases.py`，
+直跑时 `sys.path[0]` 是 `scripts/eval`，`import app` 会 ModuleNotFoundError
+（2026-11-17 本地复现 CI 时踩到；`tier_check.py` 同样的写法）。"""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+
+from app.eval.cases import ALL_CASES  # noqa: E402
+from app.memory.config import resolve_memory_mode  # noqa: E402
 
 
 def expected_count() -> int:
