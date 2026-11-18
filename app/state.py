@@ -36,5 +36,7 @@ class AgentState(TypedDict, total=False):
     max_attempts: int    # 最大重试次数
     exec_timeout: int    # 单次代码执行超时（秒）
     not_code: bool       # 修复批 1 F3：上一次「代码」其实是一段文字说明（reviewer 不再拿它当出错代码）
+    sanity_issue: str    # A2：执行成功但结果形态可疑（空表 / 全 NaN / inf）的一句说明；空 = 没问题
+    sanity_retried: bool # A2：已经因为可疑送过一次 reviewer（只给一次）
     truncated: bool      # V2d §3：本次 codegen / reviewer 输出被长度上限截断（executor 不执行半截代码）
     answer_truncated: bool  # V2d §3：summarizer 的结论被截断（service 加 warning）

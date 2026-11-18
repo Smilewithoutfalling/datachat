@@ -7,6 +7,7 @@ from app.core.result import format_result
 from app.tools.dataset import copy_data, load_data
 from app.tools.persist import new_chart_path
 from app.tools.sandbox import run_code
+from app.tools.sanity import result_issue
 
 
 def _dataset(state, config):
@@ -79,8 +80,15 @@ def execute(state, config=None):
           and not assigns_result(state.get("code", ""))):
         error = NO_RESULT_ERROR
 
+    # A2：成功但结果形态可疑（空表、全 NaN、inf）→ 记下来让路由送 reviewer 再看一遍，只给一次机会。
+    # 不写进 error：重试用尽或预算到了时，这个结果照常交给 summarizer，不能因为「可疑」把它丢掉。
+    sanity_issue = ""
+    if not error and not state.get("sanity_retried"):
+        sanity_issue = result_issue(result) or ""
+
     update = {
         "not_code": not_code,
+        "sanity_issue": sanity_issue,
         "result": None if error else result,
         "result_text": "" if error else format_result(result),
         "chart_path": chart or "",
@@ -93,6 +101,8 @@ def execute(state, config=None):
         "charts_discarded": cap.get("charts_discarded", 0),
         "chart_warnings": cap.get("chart_warnings") or [],
     }
+    if sanity_issue:
+        update["sanity_retried"] = True
     # 只记第一次执行的报错，用来区分"一次写对"与"reviewer 修好"
     if error and not state.get("initial_error") and state.get("attempts", 0) == 0:
         update["initial_error"] = error

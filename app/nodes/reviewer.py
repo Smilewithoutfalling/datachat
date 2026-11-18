@@ -3,6 +3,7 @@
 from app.core.llm import node_llm, strip_code
 from app.tools.dataset import REVIEW_SINGLE_ACCESS
 from app.tools.plotting import CHART_GUIDE
+from app.tools.sanity import sanity_message
 
 NOT_CODE_PLACEHOLDER = "（上一次没有输出代码，输出的是一段文字说明；请按上面的分析计划重新写完整代码）"
 
@@ -46,7 +47,8 @@ def review_and_fix(state, config=None):
         plan=state.get("plan", "") or "（无）",
         # F3：上一次输出的是文字不是代码时，不把那段文字当「出错的代码」喂回去（否则 reviewer 会接着复述）
         code=NOT_CODE_PLACEHOLDER if state.get("not_code") else state["code"],
-        error=state["error"],
+        # A2：执行成功但结果可疑时没有 error，把可疑点当「错误信息」给它（提示里允许原样保留）
+        error=state.get("error") or sanity_message(state.get("sanity_issue", "")),
         chart_guide=CHART_GUIDE,
     )
     text, truncated = llm.invoke_checked(msg)

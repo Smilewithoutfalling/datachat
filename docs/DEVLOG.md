@@ -10596,3 +10596,22 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 | e2e off / state / full（--grep-invert 视觉） | 各 42 passed |
 | vitest | 没跑，ui/ 没有改动 |
 第一次跑 e2e 时 41 条红，原因是沙箱缺 libatk，跟代码无关。执行 `playwright install-deps chromium` 之后重跑，三档全绿。
+
+## [待编号] 2026-11-18 · 阶段 7 A2 结果合理性校验 + A3 枚举值召回 · commit <待提交>
+
+方案：`docs/roadmap/phase7-a2a3.md`（方案与实现同 PR，基于 #103）。题库、判分、基线都不动。
+
+### A2
+- `app/tools/sanity.py::result_issue`：判断三类结果——空结果（0 行或 0 列）、全为 NaN、出现 inf。结果是 dict 时逐个值检查；字符串不检查。
+- 结果可疑时不计为错误。executor 写入 `sanity_issue` / `sanity_retried`；`graph._route_after_exec` 把它和报错同样送进 reviewer，但只送一次。重试用完或预算到顶时，原结果照常交给 summarizer。reviewer 的「错误信息」位置写的是可疑点和一张检查清单，并允许它原样交回代码。
+- `AnalysisResult.sanity_issue` 记录第一次触发时的说明。
+- 离线误报检查：217 份 gold 结果中命中 0 份。
+
+### A3
+- `app/tools/value_hints.py`：问题分词，与文本列取值做归一化（NFKC、去空白、转小写）匹配，规则是相等，或包含且短的一方至少占一半长度。只有能带来新信息时才输出提示，提示内容放进数据分隔块，附在 field_notes 后面，workflow 和 react 都能看到。
+- 每列遵守出境合同：「样例 + 问题」中出现的取值，加上提示里的取值，合计不超过 3 个（`MAX_COLUMN_HITS == EGRESS_MAX_COLUMN_HITS`，有测试钉住）。
+- 没有提示时 prompt 逐字节不变，P8 / state 哈希没有变化。
+- 离线统计：256 轮中有 18 轮出提示，全部在 biz_*。措辞是「仅供对照写法、按题意判断」，这是为了避开 biz_007 / biz_015 中「退款」→「已退款」的误导。
+
+### 测试
+新增 `tests/test_a2a3.py`，共 11 条。闸门结果见汇报。

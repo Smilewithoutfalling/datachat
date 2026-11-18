@@ -48,6 +48,8 @@ class AnalysisResult:
                                                 # 产品从上一条消息的 result_json 读它得到 prev_clarify，
                                                 # 评测里 runner 逐轮记录 —— clarify 的出口信号，见 may_clarify
     field_notes: list = field(default_factory=list)  # 数据字典命中的 (field, description)
+    sanity_issue: str = ""                      # 阶段 7 A2：第一次触发的「结果可疑」说明（空 = 没触发；只工作流）
+    value_hints: str = ""                       # 阶段 7 A3：附在字段说明后面的「实际取值」提示（空 = 没有）
     attempts: int = 0                           # 修复/重试次数（工作流：reviewer 次数；ReAct：报错的执行次数）
     initial_error: Optional[str] = None         # 第一次执行的报错（无则 None），用于修复率统计
     executed: bool = False                      # 是否有代码执行成功并拿到结果
