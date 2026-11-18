@@ -59,6 +59,8 @@ python scripts/eval/canary.py "outputs/eval_react_canary_*.json"   # 与冻结�
   基线过期。加 `--out drift.json` 存一份机器可读结果（`.github/workflows/drift.yml` 就是这么用的）。
 - 重立基线：`python scripts/eval/canary.py "<那批报告>" --init --force`。**它会拒绝静默覆盖**，
   没有 `--force` 就返回 2 —— 自动更新基线等于让哨兵自己闭嘴。
+  实操走 `drift.yml` 的 `workflow_dispatch`（`init=true`，`repeat=6`）：CI 的工作树是干净的，
+  本地跑容易把未提交改动算进 `code_sha12`。
 
 offline 自检（不调模型，只验证 gold 与判分自洽）：
 
@@ -79,22 +81,31 @@ python run_eval.py --canary --oracle
 而没人会为改一行 prompt 重跑六轮，于是它静默失效。失效方式不是报错，是被无视。
 产品代码改过时 `code_sha12` 仍会写进 reason 提示归因方向，但**不阻断比对**。
 
-基线（2026-11-04 09:40，6 跑 / 60 题次，`docs/eval/canary/baseline.json`）：
+基线（2026-11-10 13:39，6 跑 / 60 题次，`docs/eval/canary/baseline.json`）：
 
 | 项 | 值 |
 |---|---|
-| 判对数 | 9 / 10 / 10 / 9 / 10 / 10 |
-| 逐题翻转 | 2（`ord_013`、`ord_017`，各掉一轮） |
-| 两次掉题的形态 | **都是「答对了没交卷」**：`no_assign`，答案正文与 gold 逐字相同（660 / 0.3665） |
-| usage 比例 | in 94.4% / out 5.6%；`cache_read` / `reasoning` 网关恒不回（None） |
-| 指纹 | `canary_sha12 = 592b9f3baa7e`、`code_sha12 = 4b58e8b9fd80`、`judge_sha12` **缺** |
+| 判对数 | 10 × 6 |
+| 逐题翻转 | 0 |
+| usage 比例 | in 49.6% / out 5.0% / `cache_read` 43.6% / `reasoning` 1.8% |
+| 指纹 | `canary_sha12 = 592b9f3baa7e`、`code_sha12 = a2ca51b11273`、`judge_sha12 = 18c5e432eff2` |
 
-> ⚠️ **这份基线已经不可用（2026-11-09 起）。** 当前 `code_sha12 = a2ca51b11273`
-> （C-001 改字典、C-002 改题面），且基线里**没有 `judge_sha12` 字段**。
-> `scripts/eval/canary.py` 会判 `stale_baseline`（退出码 2）并提示重立 —— 这是正确行为。
-> 重立命令：`python scripts/eval/canary.py "<那批报告>" --init --force`，成本 10 题 × 6 跑
-> ≈ 26 万 tokens_in / 1.6 万 tokens_out（按本基线自己记的 `usage_total`）。
-> 重立之前，漂移哨兵处于失效状态；打开 `DATACHAT_CANARY_ENABLED` 只会得到退出码 2。
+> 这份基线在 2026-11-13 作废：`d15ec5a` 改了 `app/eval/negative.py` 的 clarify 判据，
+> `judge_sha12` 变成 `289474f4d943`。它被 11-16 的周常跑抓到（下一节），11-18 已重立。
+
+## 11-16 那次红：三条观察 + 一个 stale
+
+2026-11-16 的周常跑（run `43823816830`）判 `STALE_BASELINE`，**不是漂移**：
+
+| 观察 | 数值 | 说明 |
+|---|---|---|
+| judge 变了 | `18c5e432eff2` → `289474f4d943` | `d15ec5a`（11-13）改 `negative.py`：`_CLARIFY_SIGNS` 扩词、`_gave_answer` 改看 `result` |
+| 探针本身 | 10/10 全对 | 没有掉题，也没有合同类失败 |
+| usage 比例（相对基线） | `tokens_out` 0.0498→0.0600（+20.5%）、`cache_read` 0.4357→0.3418（−21.6%）、`reasoning` 0.0184→0.0230（+25.0%） | 网关回包结构在动，不是哪条坏了 |
+
+这三条如果一直留着，canary 会每周红一次（同一个 stale 原因），红到最后没人看。
+按 H 的决定（2026-11-18）：**先导出这三条观察（就是上表），再重立基线**。
+重立之后，canary 只判「模型与 judge 的漂移」，代码改动不阻断比对。
 
 判读按**机制**分，不按条数分：
 

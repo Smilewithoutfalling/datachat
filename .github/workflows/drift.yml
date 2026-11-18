@@ -1,5 +1,9 @@
 # EV-D5 漂移哨兵：每周跑一次十条 canary，与冻结基线（docs/eval/canary/baseline.json）比。
 #
+# **它只管模型与 judge，不管代码**（2026-11-18 明确）：产品代码改了但十条读数没动，
+# 不报红 —— 那是 nightly 的活。判据沿用 2026-11-09 的收窄：`canary_sha12`（题单）与
+# `judge_sha12`（判分器 + 数据表）必须同；`code_sha12` 只写进 reason 提示归因方向。
+#
 # **默认不跑。** 需要仓库里配三样东西，缺任一样这个 job 就直接 skip，不产红：
 #   Variable `DATACHAT_CANARY_ENABLED = 1`     —— 总开关（没有它，schedule 到点也跳过）
 #   Secret   `DATACHAT_LLM_KEY`                —— 真 Key（Actions 里的 secret，不入库）

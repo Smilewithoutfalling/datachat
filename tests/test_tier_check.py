@@ -107,27 +107,36 @@ def test_cli_missing_file_exits_1(tmp_path):
 
 
 # ------------------------------------------------------------------ 文档与 workflow 不能漂
-def test_tiers_doc_ids_match_workflow_case_list():
-    """8 题名单在 `tiers.md` 与 `eval.yml` 里各写了一遍。
+def test_nightly_workflow_matches_v7_baseline():
+    """nightly 跑的对象必须与基线文件写的一致。
 
-    两处都改才算改。只改一处的话：CI 跑的题和文档说的不是同一批，而读文档的人不会发现。
+    这两处任何一处被改（换了 agent、换了记忆档、忘了带门禁），读数就不再对得上基线，
+    而读日志的人只看得到"绿"或"红"，看不出比的是不是同一件事。
     """
-    import re
-
     import yaml
 
-    doc = open(os.path.join(ROOT, "docs", "eval", "tiers.md"), encoding="utf-8").read()
-    doc_ids = re.findall(r"^\| [^|]+ \| `([a-z]+_\d+)`", doc, re.M)
-    assert len(doc_ids) == 8, doc_ids
+    base = json.load(open(os.path.join(ROOT, "docs", "eval", "baseline_v7.json"),
+                          encoding="utf-8"))
+    wf = yaml.safe_load(open(os.path.join(ROOT, ".github", "workflows", "eval.yml"),
+                             encoding="utf-8"))
+    nightly = wf["jobs"]["nightly"]
+    runs = [str(s.get("run") or "") for s in nightly["steps"]]
+
+    evals = [r for r in runs if "run_eval.py" in r]
+    assert len(evals) == 1, f"nightly 应当只有一次全量跑，实际 {len(evals)} 次"
+    assert f"--agent {base['agent']}" in evals[0], evals[0]
+    assert f"--memory {base['memory_mode']}" in evals[0], evals[0]
+    assert "--case" not in evals[0], "nightly 是全量，不许挑题"
+    assert any("nightly_gate.py" in r for r in runs), "nightly 没接门禁"
+
+
+def test_pr_tier_does_not_call_the_model():
+    """PR 档的定位是「不调 LLM」。谁把真模型塞回去，每次提交都要花钱，而且不判红。"""
+    import yaml
 
     wf = yaml.safe_load(open(os.path.join(ROOT, ".github", "workflows", "eval.yml"),
                              encoding="utf-8"))
-    used = []
-    for job in wf["jobs"].values():
-        for step in job["steps"]:
-            m = re.search(r"--case ([a-z0-9_,]+)", str(step.get("run") or ""))
-            if m:
-                used.append(sorted(x for x in m.group(1).split(",") if x))
-    assert used, "eval.yml 里没找到 --case"
-    for ids in used:
-        assert ids == sorted(doc_ids), f"workflow 的名单与 tiers.md 不一致：{ids}"
+    pr = wf["jobs"]["pr"]
+    blob = yaml.safe_dump(pr, allow_unicode=True)
+    assert "DEEPSEEK_API_KEY" not in blob
+    assert "DATACHAT_LLM_KEY" not in blob

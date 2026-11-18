@@ -1,69 +1,106 @@
-# 评测系统入口
+# 评测系统入口（v7 稳态，2026-11-18 起）
 
-四条资产，各管一个维度。**任何代码改动都应该被其中至少一条捕获**；捕获不到的改动，
-说明这套评测有缺口，不是"改动安全"。
+> **v7 是冻结的尺子。** 题库、gold、判分口径的改动一律先进 `BACKLOG.md` 的「下一轮」，
+> 攒够了一次性断代（新基线 + 说明）。不按单题断代，也不在日常跑批里改判据。
+>
+> **任何读数表必须同时标出 `agent=` 与 `memory_mode=`**（2026-11-17，P1）。缺一个就不许贴：
+> react 与 workflow 是两条线，`off` 与 `state` 是两种呈现方式，横着比出来的"涨了/崩了"全是假的。
 
-| 资产 | 管什么 | 入口 | 当前读数 | 自动跑 |
-|---|---|---|---|---|
-| **202 题 · workflow（产品默认）** | 能力回归 | `run_eval.py --agent workflow` | `memory_mode=state` **95.4%**（pass^3 93.1%，n=202）；对照 `off` 85.1%（n=195）、`full` 95.7%（`eval-v7`，2026-11-17，`code 996020ad8a04`） | 否，手动 |
-| **202 题 · react（基线口径）** | 能力回归 | `run_eval.py --agent react` | `memory_mode=state` **93.1%**（pass^3 90.6%，n=202）；对照 `off` 87.4%（n=195）（`eval-v7`，同日同指纹） | 否，手动 |
-| **25 题闸门** | 外部有效性（真实脏表） | `scripts/gate/run_gate.py` | **25/25**，failures 0，guessing 0（[158]） | nightly 03:00 |
-| **canary drift** | 稳定性（同题多跑的翻转速） | `.github/workflows/drift.yml` | 6 跑 **60/60**，flips 0（[152]） | 周一 01:00 |
-| **出境审计** | 安全（prompt 里不该出现的值） | `scripts/egress_audit.py` | 7 列红 → 4 列，全是字典枚举（设计内）（[161]） | 否 |
+## 三层，日常只看这三层
 
-## 数字怎么用
+| 层 | 什么时候跑 | 跑什么 | 红灯 |
+|---|---|---|---|
+| **PR** | 每次提交 / PR | `pytest`（`tests.yml`）+ `pr_oracle` 全量 oracle（**不调模型**） | oracle 判错、执行失败、题数不对 |
+| **nightly** | **master 每次变更**（只改 `docs/` 或 `*.md` 除外；也可手动） | `agent=workflow` `memory_mode=state` 全量 **202 题，跑 1 次**，对 v7 基线 | ① 通过数比基线低 **6 题及以上**；② v7 三跑全对的题有 **2 题及以上**变错 |
+| **canary-drift** | 周一 01:00 UTC（也可手动） | 十条固定探针，比冻结基线 | 算错 / usage 比例移动 >20%；`stale_baseline` = 该重立基线 |
 
-> **硬规矩（2026-11-17，P1）：任何读数表必须同时标出 `agent=` 与 `memory_mode=`。**
-> 缺一个就不许贴 —— react 与 workflow 是两条线，`off` 与 `state` 是两种呈现方式，
-> 横着比出来的"涨了/崩了"全是假的。历史上一次误读就是这么来的：把 react 的单轮 93.0%
-> 与 workflow 的单轮 98.8% 并排放，读者以为涨了 5.8pp，实际两条线都没动。
-> 同一条也写进 `LEDGER.md` 的 NOTES 区。
+三层之外还有 `release` / `inject` / `rerun` 三个**手动工具**，不在日常：release 归档、
+inject 录注入基线、rerun 对历史报告定向复跑。五档对照（`off` / `full` / `react`）也不在日常，
+只在断代或有人提问时手动跑。
 
-**`FROZEN.md` 先读。** 概括：这些百分比只能做"同一指纹下的回归对比"，不能当准确率对外说。
+### nightly 的两条红线是写死的
+
+锚点是 `docs/eval/baseline_v7.json`：v7 的 workflow+state 三跑（194 / 192 / 192，取中位 **192**），
+`pass^3` 名单 **188** 道。`scripts/eval/nightly_gate.py` 只判两件事：
+
+1. 本次通过数 **≤ 186**（192 − 6）；
+2. 188 道三跑全对的题里，有 **≥2 道**变错。
+
+「不可比」不等于「红」，退 **2**，动作是修流水线或断代，不是查回归：
+
+- `agent` / `memory_mode` 与基线不同（换了被测对象）；
+- 题数不是 202（没跑完，或题集改过）；
+- `evalset_sha12` / `judge_sha12` 与基线不同（**尺子动过**）；
+- 报告里有 `infra_error`（网关熔断/超时，不是能力读数）。
+
+> 按 v7 的数，规则 1 是规则 2 的超集：中位 192 与 pass^3 188 之间只有 4 题余量，
+> 掉 6 题必然已经翻了 2 道稳定题。两条都留着是因为余量会随断代变化 ——
+> **别因为规则 2 先响就把规则 1 删了。**
+
+## 红了怎么看
+
+**nightly 红**：看同一次运行的 artifact `eval-nightly-<run_id>` 里的 `nightly_brief.md`
+（同时贴在 job summary）。简报固定给三样：
+
+1. 触发了哪条规则、差多少；
+2. **翻了的题**：id、分类、题面、gold、本次答案；
+3. **提交区间**：上次绿的 nightly 到本次的所有提交（最多 20 条）。
+
+处置：**不自动修，也不改尺子。** 由改产品的一侧回到提交区间里找改动，修完推 master，
+nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条 issue。
+
+**PR 红**：oracle 判错只可能是判分链路/执行器坏了，不是模型不会 —— 修代码。
+**canary 红**：`drift`（退出码 1）指向权重或网关回包；`stale_baseline`（2）是判分器/数据表
+动过，该重立基线；`incomparable`（2）是题单变了。细节见 `CANARY.md`。
+
+## 什么时候断代
+
+只有这三样动过才断代：**题库（题面/增删题）**、**gold**、**判分口径**。
+
+- 日常发现的问题先记 `BACKLOG.md`「下一轮」，**不单题改**；攒够一次（预计一个月至多一次）一起做。
+- 断代 = 出新基线文件（`baseline_v7.json` → `baseline_v8.json`，把 `eval.yml` 的
+  `--baseline` 指过去）+ 在 `CHANGES.md` 记一条 + 更新 `baselines.json` 与本文的读数表。
+- **只有断代才写 `CHANGES.md` 与 `LEDGER.md`。** 日常 nightly 不进台账 —— 报告留在 Actions 工件里。
+- 尺子一动，旧基线立刻不可比：nightly 会以退出码 2 明确报「先断代」，不会把差异算成回归。
+
+## 当前读数（v7，2026-11-17，各 3 跑）
+
+`code 996020ad8a04` / `evalset 672b52a3a6b0`。详细分解见 `v7.md` 与 `v7-report-20261117.md`。
+
+| agent | memory_mode | n | 3 跑均值 | pass^3 | 备注 |
+|---|---|---|---|---|---|
+| **workflow** | **`state`** | **202** | **95.4%** | **93.1%** | 产品主线，nightly 的对象 |
+| workflow | `off` | 195 | 85.1% | 83.6% | 对照：无状态块 |
+| workflow | `full` | 202 | 95.7% | 94.6% | 对照：与 state 分不出高低 |
+| react | `off` | 195 | 87.4% | 85.1% | 对照 |
+| react | `state` | 202 | 93.1% | 90.6% | 对照：贵 2.7 倍 token |
+
+**`FROZEN.md` 先读。** 这些百分比只能做「同一指纹下的回归对比」，不能当准确率对外说。
 五条理由（n=1、网关缓存、自造数据、比较器放宽、题面会变）都在那个文件里。
 
-## 什么算回归
-
-**202 题**：同一 `evalset_sha12` + 同一 `code_sha12` + 同一模型，分数下降才算。
-指纹不同就是不可比，不许拿两把尺子算趋势（`GATE_KEYS` 的注释写了为什么不豁免）。
-
 **差多少才算降**：同题集、同一份代码（只差 recall 断言，不进单轮判定路径）跑两批，
-`single_off` 94.4% → 92.5%，**差 1.9pp**。1.9pp 以内的差当噪声，别当回归信号。
+`single_off` 94.4% → 92.5%，差 1.9pp。**1.9pp 以内的差当噪声**，这也是 nightly 把阈值定在
+6 题（≈3pp）的依据。
 
-**`off` 不等于"没记忆"**：`off` 把历史以**对话消息**回灌，`state` 折叠成结构化状态块。
-47.1% vs 91.2% 量的是两种呈现方式，不是"有记忆 vs 没记忆"。读这两行之前先记住这一条，
-否则会把 44pp 说成"记忆的收益"。
+**`off` 不等于"没记忆"**：`off` 把历史以对话消息回灌，`state` 折叠成结构化状态块。
+85.1% vs 95.4% 量的是两种呈现方式，不是"有记忆 vs 没记忆"。
 
-**25 题闸门**：按 `m13r` profile 判，`allowed_fail` 之外不许错。答对 `allowed_fail` 里的题
-记为"意外答对"，**不改门槛**（改门槛只能新增 profile）。
+## 手动工具（不在日常三层）
 
-**canary**：`flips > 0` 或通过数下降才算。它不判对错，判的是"同一道题两次跑结果不同"。
-
-**出境审计**：四条合同任一被违反就是红。③ 的"无法用子串法判定"走 `Audit.notes`，不是红 ——
-那是"我没能判"，不是"合同被违反"。
-
-## 当前缺口
-
-**`eval-v0`～`eval-v5` 全部不可与 `eval-v6` 相减。** `app/tools/schema.py` 被 [154]（合计行）
-与 [156]（缺失哨兵）改过两次，`app/eval/runner.py` 的 recall 证据源被 [162] 改一次，
-题集也从 183 涨到 202（`evalset_sha12` 4270d57adf72 → 5748a13bdefc）——
-`GATE_KEYS` 四条键里有三条变了。**v6 是当前唯一能判回归的尺子**，旧基线只能看历史。
-
-重建一次 = 708 题次 / 114 分钟 / 四片 × 3 跑（`eval-v6` 实测，`scripts/eval/rebuild_baseline.py`）。
-
-**已知未修**：`mem_state` 片只有 7 题，`pass^3` 的单题权重 14.3%，一个翻转就是 14pp ——
-读数能看，但别拿它做小步对比。要提精度只能加题（`cases_memory.py`）。
-
-**`no_history_truth` 已删除**（2026-11-17，随 v7 断代）：34 道多轮题里 22 道声明过它，
-全库**零运行时消费点**（`runner.expected_all` 只读 `ground_truth`），删除动的是 `evalset_sha12`。
-「末轮不能单独作答」这条性质改由 `--memory off` 的三跑读数度量 —— 静态度量换成了实测量。
+| 工具 | 干什么 | 入口 |
+|---|---|---|
+| 25 题闸门 | 外部有效性（真实脏表），人工判定 `human_correct` | `scripts/gate/run_gate.py`、release 档 |
+| 出境审计 | prompt 里不该出现的值 | `scripts/egress_audit.py` |
+| 合并器 | 补跑后按 case id 覆盖主报告并重算 | `eval_merge.py` |
+| 台账 | 全量 outputs → `LEDGER.md` + `runs/` | `eval_ledger.py` |
+| 五档对照 | 断代或有疑问时重跑 off/full/react | `run_eval.py --agent X --memory Y --repeat 3` |
 
 ## 怎么验这套资产本身
 
 评测代码有自己的单测，改判据 / 改台账 / 改题集之后要跑：
 
 ```bash
-CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 1907 项 / 32 分钟
+CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 2000+ 项 / 约 48 分钟
 ```
 
 **必须带这个阈值，否则进程会被杀。** 本机（Windows + WorkBuddy）注入了一层 safe-delete
@@ -90,6 +127,7 @@ CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 1907 项 / 32 �
 | 改了什么 | 跑什么 | 规模 |
 |---|---|---|
 | `baselines.json` / `eval_ledger.py` | `test_ledger.py test_fingerprint.py test_replay.py test_report_adapter.py test_rescore_ledger.py test_tier_check.py` | 115 项 / 14s |
+| `baseline_v7.json` / `nightly_gate.py` | `test_nightly_gate.py test_tier_check.py` | 28 项 / 6s |
 | `app/eval/comparator.py` | `test_comparator.py` | — |
 | 题集 `app/eval/cases*.py` | `test_eval_cases.py` + `test_multi_cases.py test_memory_cases.py` | 12 分钟起 |
 | `app/eval/runner.py` | `test_eval_runner.py test_multi_cases.py test_memory_cases.py test_v2d.py` | 约 1 分钟 |

@@ -1,124 +1,71 @@
-# 评测三档：PR / nightly / release
+# 三层的判据为什么这么定
 
-三档回答三个不同的问题，不是同一件事跑三遍：
+> **操作口径看 `README.md`**（三层各测什么、红了怎么看、什么时候断代）。
+> 本文件只回答"为什么是这几个数"，以及被撤掉的旧设计。数字变了先改 README，再来改这里。
 
-| 档 | 回答的问题 | 花不花钱 |
-|---|---|---|
-| PR | 改了这行代码，评测流水线还通不通？ | 不花（不调模型） |
-| nightly | 模型与判分器有没有悄悄漂？ | 花（真模型，读 secret） |
-| release | 这批数字能不能拿去对外说？ | 花，且要人工签字 |
+## 为什么 PR 不判准确率
 
-## 一条贯穿三档的判断：小样本准确率不能当门禁
+8 题里翻 1 题就是 12.5pp。EV-C2 算过 MDE：双侧精确 McNemar 要 **6:0 才显著**（5:0 的
+p 是 0.0625）。所以小样本上的任何准确率门槛拦住的都是噪声，不是退化。
 
-8 题里翻 1 题就是 12.5pp。EV-C2 算过 MDE：双侧精确 McNemar 要 **6:0 才显著**
-（5:0 的 p 是 0.0625）。所以在 8 题这个量级上，任何准确率门槛（"≥7/8 才通过"）
-拦住的都是噪声，不是退化。
+PR 档唯一的红灯是 `oracle`：假模型的输出就是标准答案，判错只能是判分链路/执行器坏了。
+2026-11-18 起 PR 不再跑 8 题真模型冒烟 —— 它不判红、每推一次花一次钱，而且名单里的
+`mul_005` 在 v7 三跑里就是 0/3（永远答不对），连"能跑"这个信号都被它污染。
 
-结论：**三档的红灯只判「能不能跑完、报告结构完不完整」，不判「答对几题」。**
-准确率写进报告与 artifact，归 `docs/eval/LEDGER.md` 的趋势和 drift 哨兵（EV-D5）。
-这与 EV-C1「`flip_rate > 0.4` 的题不许进 `allowed_fail`」是同一条逻辑：
-先证明这个数不是噪声，再拿它当判据。
+## 为什么 nightly 是「202 题 × 1 跑」+ 两条绝对阈值
 
-## 8 题冒烟名单
+**为什么不跑 3 跑**：nightly 要给每次 master 变更一个快信号。3 跑是 606 题次，
+按 v7 实测 5.4 s/题 ≈ 55 分钟；1 跑 ≈ 18 分钟。judge 与题库冻结之后，重复跑买到的是
+"抖动估计"，而抖动已经由 v7 的三跑测过了（写进基线文件）。
 
-PR 与 nightly 共用同一份名单。**改名单要改这里并写理由**，否则下一个人只看到 8 个 id。
+**为什么阈值是 6 题与 2 题**
 
-| 类 | id | 为什么是它 |
-|---|---|---|
-| 聚合 | `agg_013` | canary 实证（6 跑 60 题次全对）：两级聚合，gold 标量 |
-| 聚合 | `ord_007` | canary 实证：去重 + `groupby.size` + 计数，gold 标量 |
-| 过滤 | `ord_012` | canary 实证。**避开 `ord_013`**：6 跑里掉过 1 次"算对没交卷"，进冒烟会制造假红 |
-| 关联 | `emp_015` | canary 实证。**避开 `ord_017`**：同 `ord_013`，掉过 1 次 |
-| 时序 | `ts_010` | canary 实证：`resample('ME')` + `pct_change`，gold 标量 |
-| 拒答 | `ord_026` | canary 实证：问物流时长，数据里没有 |
-| 歧义 | `ord_027` | 8 条 ambiguity 里 alt 最全的一条（不区分状态 / 折扣前 / 未去重三种都算对）—— 冒烟要验的是容错机制还在工作 |
-| 多轮 | `mul_005` | 33 条里变量最少的一条：2 轮、只换 `dept` 一个筛选条件（`expect_turns: inherit:市场`） |
+- v7 的 workflow+state 三跑是 194 / 192 / 192：单跑自然抖动实测 **2 题**。
+  6 题 = 3 倍抖动，约 3pp。同题集同代码的两批实测差过 1.9pp（`single_off` 94.4% → 92.5%），
+  1.9pp 以内当噪声 —— 6 题留了足够余量，又能在 20 分钟内抓到一个"每类都掉一点"的退化。
+- 第二条盯的是**集中退化**：188 道三跑全对的题（`pass3_ids`）里翻 2 道。只掉 2 题、
+  但两道都是稳定题时，规则 1 不会响，而"稳定题开始不稳"比"总数少 2"更值得查。
+- 两条都是**绝对题数**，不是百分比：题集变了百分比会漂，而题数是同一把尺子上的刻度。
 
-7 类各 1 条 = 7，第 8 条给最大的类（aggregation 43/183）。
+> 按 v7 的数，192 与 188 之间只有 4 题余量，所以规则 1 触发时必然已经翻了 2 道稳定题
+> （规则 2 也会响）。这不是 bug，是这把尺子的实际形状；两条都留着，是因为断代后
+> `correct` 与 `pass^3` 的间距会变（加题、修 gold 都会动它），届时规则 1 才会独立生效。
 
-**为什么歧义与多轮只给 1 条**：这两类的判定边界本来就在晃（ambiguity 靠 `alt_ground_truths`
-容错，multi_turn 依赖记忆编排）。冒烟里放多了，红灯就分不清是 pipeline 坏了还是题自己在抖。
+**为什么"不可比"单独一档（退出码 2）**
 
-## 三档怎么跑
+`agent` / `memory_mode` / `n` / `evalset_sha12` / `judge_sha12` 任一不同，读数与基线
+就不是同一件事。把它算成红，会逼着人去看一堆假回归；算成绿，则会让尺子悄悄漂走。
+所以单列一档：动作是修流水线或断代，不是查产品代码。
 
-### PR：`pull_request`
+`infra_error` 也归到这一档：网关熔断的题不是能力读数，算成"变错"会在网关打嗝时误报退化。
 
-```bash
-python run_eval.py --oracle --agent react          # 全量 193 题，不调模型
-```
+## 为什么 canary 不是回归套件
 
-- **红灯条件**：oracle 有任何一题判错（`overall.correct < n`）。执行失败也算，**但 clarify 除外** ——
-  那 6 条负向题的正确行为就是不执行（反问），把它们算成"执行失败"会让 PR 档永久红。
-  `tier_check --require-all` 里显式排除了 `expect_kind="clarify"`。
-- 产物：`outputs/eval_react_oracle_*.json` → 上传 artifact，不进仓库。
-- 有 secret 时额外跑 8 题真模型，**只产出、不判红**（理由见上一节）。
+十条探针只锁"同一道题两次跑结果是否一致"，用来发现**权重与 judge** 的漂移。它不构成
+能力抽样：十条全绿只说明这十个点没动。日常回归由 nightly 的 202 题负责，两者不要混用。
 
-### nightly：`schedule`，03:00
+`canary_sha12` 不同 = 换了卷子（`incomparable`）；`judge_sha12` 不同 = 换了尺子
+（`stale_baseline`，动作是重立基线）。产品代码不同**不阻断**比对 —— 2026-11-09 收窄过：
+旧判据要求 `code_sha12` 全同，而它覆盖 prompt/工具/记忆编排，一周改好几次，结果哨兵
+永远停在"该重立基线"，静默失效。
 
-```bash
-python scripts/gate/run_gate.py --agent react      # 25 闸门题，真模型
-python run_eval.py --agent react --case <上面 8 个 id> --out ...
-```
+## 被撤掉的两档（2026-11-18）
 
-- **红灯条件**：闸门报告结构不完整（`n != 25`）、或 8 题报告缺字段。
-  闸门的准确率也不判红——它是人工判定（`human_correct`）驱动的，CI 填不了。
-- 失败时 `gh issue create`（用 `GITHUB_TOKEN`），标题带 commit 短 sha。
-- 产物：两份报告 → artifact，不进仓库。
+| 旧设计 | 为什么撤 |
+|---|---|
+| PR/nightly 的 8 题真模型冒烟 | 不判红、要花钱；名单里的 `mul_005` 在 v7 里 0/3。PR 改为纯 oracle |
+| nightly 的 25 题闸门 | 判据是人工填的 `human_correct`，CI 填不了，只能查结构 —— 那件事由 oracle 覆盖。闸门移到 release 档，需要时手动跑 |
 
-### release：`workflow_dispatch` + tag
-
-```bash
-python run_eval.py --oracle --agent react --case <8 题>      # 先自检判分链路
-python run_eval.py --agent react                              # 183 题全量
-python scripts/gate/run_gate.py --agent react                  # 25 闸门
-python run_eval.py --agent react --canary --repeat 3           # pass^3(10)
-```
-
-- **人工确认**：`environment: release` 需要 reviewer 批准才会跑。**但这一步在 YAML 里做不到**——
-  必须去仓库 Settings → Environments 建一个叫 `release` 的环境并配 Required reviewers，
-  否则 `environment:` 只是给 job 挂个名字，点一下就跑。
-- 产物归档到 `docs/eval/`（**只有这一档提交报告**）。job 里只上传 artifact，**不自动 commit**：
-  自动 push 到 master 会绕过 PR 流程，与"一个 PR 只解决一个问题"的纪律冲突。要入库就人工挑文件提交。
-- **不判红**：`pass^3` 的数字、闸门准确率。看数字的人自己判——这两项都没有可用的小样本门槛。
+release / inject / rerun 保留为手动工具：归档、录注入基线、对历史报告定向复跑。
+它们不在日常三层里，也不产生日常成本。
 
 ## 仓库要配的东西
 
 | 类型 | 名字 | 用途 | 缺了会怎样 |
 |---|---|---|---|
-| Secret | `DATACHAT_LLM_KEY` | 真模型 | PR 档跳过冒烟（正常）；nightly / release **报错退出** |
+| Secret | `DATACHAT_LLM_KEY` | 真模型 | PR 不用（本来就不调）；nightly / canary / release **报错退出** |
 | Variable | `DATACHAT_LLM_BASE_URL` | 网关 | 走代码里的默认值 |
 | Variable | `DATACHAT_LLM_MODEL` | 模型名 | 走代码里的默认值 |
+| Variable | `DATACHAT_CANARY_ENABLED=1` | 周常 canary 的总开关 | schedule 到点跳过（手动 dispatch 不受影响） |
 | Environment | `release` + Required reviewers | 人工确认 | release 档自动开跑，没有把关 |
 | 权限 | Actions 允许 `issues: write` | nightly 失败开 issue | 开 issue 那步失败（job 本身已经红了） |
-
-## 实测（2026-11-04，本机）
-
-| 项 | 结果 |
-|---|---|
-| 全量 oracle（193 题，react） | **193/193 判对，187/193 执行成功**（6 条 clarify 按预期不执行），422 秒 |
-| 8 题名单 oracle | 8/8，27 秒（含启动） |
-| 历史闸门报告走 `--kind gate --expect-n 25` | 通过；当成 eval 报告喂进去会被拒 |
-| workflow 静态检查 | `eval.yml` / `drift.yml` / `tests.yml` 三份无 job 级 if 上下文误用、无悬空 step 引用 |
-
-**没验的那一条**：`gh workflow run eval.yml -f tier=pr`。本机没有推仓库，GitHub 上也没建
-secret / environment，所以"真的在 Actions 里跑一遍"这件事只有推到远端之后才能验。
-`on:` 的四个触发条件、`environment:` 的审批、`gh issue create` 的权限都在这一条里。
-
-## 跳过必须打印原因
-
-GitHub 上 `if:` 跳过的 step 在 UI 里是灰色，和"跑绿了"只差一个眼色。所以每一个可能被跳过的
-真模型 step 后面都跟一个反向 `if` 的 echo step，把原因写进日志：
-
-```
-::notice::跳过真模型：fork PR 拿不到 secret（GitHub 的安全设计，不绕）
-```
-
-## 已知代价
-
-1. **8 题测不出小差异。** 4pp 以下的退化只能靠 canary 的周跑（drift 哨兵）与 release 全量发现。
-2. **PR 上不拦模型退化。** 这是有意的：PR 的红灯必须 100% 指向代码问题，否则大家会学会忽略它。
-3. **multi_turn 只有 1 条。** 记忆编排的回归在 PR/nightly 上基本看不见，`state` 与 `off` 的
-   35pp 差距（LEDGER）只能靠全量发现。
-4. **canary 十条里 `ord_013` / `ord_017` 各错过一轮**，release 的 `pass^3` 可能读到 8/10。
-   那是真实读数，不是 bug——剔除掉题的两轮能得到漂亮的 10/10，但那是拿最好看的样本当锚点
-   （DEVLOG [120] 已经踩过这个）。
