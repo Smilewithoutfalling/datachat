@@ -67,11 +67,14 @@ release / inject / rerun 保留为手动工具：归档、录注入基线、对�
 
 ## 仓库要配的东西
 
+> 2026-11-18 起 LLM 那两层不再由 CI 自动触发，所以下面这些**只影响手动 dispatch**
+> 与 S 在本机跑的两条命令（本机读的是 `.env`，不读仓库变量）。
+
 | 类型 | 名字 | 用途 | 缺了会怎样 |
 |---|---|---|---|
-| Secret | `DATACHAT_LLM_KEY` | 真模型 | PR 不用（本来就不调）；nightly / canary / release **报错退出** |
+| Secret | `DATACHAT_LLM_KEY` | 真模型 | PR 档不用（本来就不调）；nightly / canary / release **报错退出** |
 | Variable | `DATACHAT_LLM_BASE_URL` | 网关 | 走代码里的默认值 |
 | Variable | `DATACHAT_LLM_MODEL` | 模型名 | 走代码里的默认值 |
-| Variable | `DATACHAT_CANARY_ENABLED=1` | 周常 canary 的总开关 | schedule 到点跳过（手动 dispatch 不受影响） |
+| Variable | `DATACHAT_CANARY_ENABLED=1` | canary job 的总开关 | 手动 dispatch 不受影响，其余情况跳过 |
 | Environment | `release` + Required reviewers | 人工确认 | release 档自动开跑，没有把关 |
 | 权限 | Actions 允许 `issues: write` | nightly 失败开 issue | 开 issue 那步失败（job 本身已经红了） |
