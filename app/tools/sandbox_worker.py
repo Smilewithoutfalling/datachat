@@ -163,6 +163,10 @@ def _format_error(e):
     else:
         msg = str(e)
         lines.append(f"{name}: {msg}" if msg else name)
+        from app.tools.sandbox_policy import sandbox_name_hint   # main() 里 sys.path 已就位
+        hint = sandbox_name_hint(e)
+        if hint:
+            lines.append(hint)
     return "\n".join(lines) + "\n"
 
 

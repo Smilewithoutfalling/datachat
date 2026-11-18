@@ -10553,3 +10553,39 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 只在断代或有人提问时手动跑；日常不进 LEDGER、不写 CHANGES。
 
 **本次明确不做**：P14、`mem_006` 的 gold、以及本轮扫出来的其它新发现。
+
+## [待编号] 2026-11-18 · 修复批 1：拒答原因不照抄示例、沙箱边界提示、没赋 result 与「输出的不是代码」交给 reviewer · commit <待提交>
+
+方案：`docs/roadmap/phase7-fixbatch1.md`。S 同意方案和实现放在同一个 PR 里（先例 #49）。题库、gold、判分和 v7 基线都不动，不断代。
+
+### F1 拒答原因照抄示例（mem_003）
+- v7 把 mem_003 记成「植入的口径盖不过先验」，这个判断不对。这道题是反向回归题（`cases_memory.py:91`，`expect_kind=impossible`、`missing_objects=["net_amount"]`）：6 跑都拒答了，但原因写的都是「没有成本字段」，没有点名 net_amount，所以被 `negative.py:99` 判错。
+- 根因：`codegen.py:26`、`reviewer.py:29`、`react_agent.py:261` 里的拒答示例都写成了 `'无法回答：数据中没有成本字段'`，模型照抄了。
+- 改法：三处示例都换成占位写法 `<缺的字段名>`，并要求「计划里已经点名的就照计划写」。`PLANNER_REFUSAL_LINE` 和 `REACT_REFUSAL_LINE` 加了一句：点名口径引用的、表里不存在的那个字段名。
+
+### F2 沙箱边界（N6）
+- a：新增 `sandbox_policy.sandbox_name_hint`。NameError 的名字是 Python 真有、沙箱没给的内置名（globals、open…）时，worker 在错误后面补一行说明。模型自己拼错的名字不补。codegen 和 reviewer 的约定里各加了一行沙箱限制。
+- b：workflow 的 executor 在执行成功后，如果 result 是 None、没有出图、AST 里也没有给 result 赋值，就记为 `NO_RESULT_ERROR`，交给 reviewer。模型自己写了 `result = None` 的不改判。react 不受影响。
+
+### F3 输出的不是代码（P14）
+- 判据 `looks_like_prose`：SyntaxError 是全角或中文字符引起的，并且去掉引号和行尾注释后，至少两行、至少一半非注释行含汉字。正常代码里混进一个全角逗号时不会命中。
+- 命中时：错误改成 `NOT_CODE_ERROR`，`state.not_code=True`；reviewer 不再把那段文字当「出错的代码」，换成占位句，让它按计划重写。
+
+### 哈希重立（行为为什么变了）
+`tests/test_memory_p8.py` 里 BASELINE 和 STATE_BASELINE 全部重立，因为 F1 和 F2 改的是提示词文字。旧值写在注释里。「off 与 state 单轮逐字节相同」这条不变式仍然成立：react_single `b40fb9d3902f7be2`、workflow `46d9b7897a7b981b`，两档同值。
+
+### 测试
+新增 `tests/test_fixbatch1.py`，12 条。全量结果见下面的闸门表。
+
+### 验收（待 S）
+在内网机器上跑一遍命令一：不能比 v7 差，并逐题报出 mem_003、agg_002、corr_006、mul_013 的结果。
+
+### 闸门（2026-11-18，aarch64 沙箱，最后一次改 app 代码之后跑的）
+| 段 | 结果 |
+|---|---|
+| pytest 主段（不含 eval_cases、oracle） | 1853 passed，12 failed，全部是提示词哈希。重立之后，这 4 个文件加上 test_fixbatch1 共 91 passed |
+| tests/test_eval_cases.py | 229 passed |
+| test_oracle_pipeline_all_correct | 2 passed |
+| e2e off / state / full（--grep-invert 视觉） | 各 42 passed |
+| vitest | 没跑，ui/ 没有改动 |
+第一次跑 e2e 时 41 条红，原因是沙箱缺 libatk，跟代码无关。执行 `playwright install-deps chromium` 之后重跑，三档全绿。

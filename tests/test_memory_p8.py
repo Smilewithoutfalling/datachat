@@ -37,12 +37,17 @@ from app.memory.config import resolve_memory_mode
 from tests.test_core_analyze import wf_model
 
 FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
-BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "167addb043be1eda", "workflow": "d4f7e82e2b41e9cf"}
+# 2026-11-18 修复批 1 重立全部哈希（docs/roadmap/phase7-fixbatch1.md F1/F2）：codegen / reviewer / react 的拒答示例
+# 由「没有成本字段」改为占位写法（mem_003 照抄示例），codegen / reviewer 多一行沙箱限制。只动了这些提示词文字；
+# 「off 与 state 单轮逐字节相同」这条不变式仍然成立（react_single、workflow 两档同值）。
+# 旧值：off react_single 691077ae7cccb7bb / react_history 167addb043be1eda / workflow d4f7e82e2b41e9cf；
+#       state react_history a9c62ff882a7728a / workflow_history 7d68bc6d9ac25f29。
+BASELINE = {"react_single": "b40fb9d3902f7be2", "react_history": "fc27585c3118b8e5", "workflow": "46d9b7897a7b981b"}
 # 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
 # workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
-STATE_BASELINE = {"react_single": "691077ae7cccb7bb", "react_history": "a9c62ff882a7728a",
-                  "workflow": "d4f7e82e2b41e9cf", "workflow_history": "7d68bc6d9ac25f29"}
+STATE_BASELINE = {"react_single": "b40fb9d3902f7be2", "react_history": "0584ab68bbef4380",
+                  "workflow": "46d9b7897a7b981b", "workflow_history": "bb9edaee270215c0"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 
