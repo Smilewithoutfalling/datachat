@@ -33,9 +33,14 @@ PR 档唯一的红灯是 `oracle`：假模型的输出就是标准答案，判�
 
 **为什么"不可比"单独一档（退出码 2）**
 
-`agent` / `memory_mode` / `n` / `evalset_sha12` / `judge_sha12` 任一不同，读数与基线
+`agent` / `memory_mode` / `model` / `n` / `evalset_sha12` / `judge_sha12` 任一不同，读数与基线
 就不是同一件事。把它算成红，会逼着人去看一堆假回归；算成绿，则会让尺子悄悄漂走。
 所以单列一档：动作是修流水线或断代，不是查产品代码。
+
+**模型为什么写死。** v7 的三跑是本机 `Qwen3.5-397B-A17B` / temp 0（`fingerprints.model` 会记
+名字）；仓库变量 `DATACHAT_LLM_MODEL` 指向 `GLM-5.2`，CI 的 canary 一直跟的是它。
+nightly 若跟着变量跑，第一次就会拿 GLM 的读数去对 Qwen 的 `pass^3` 名单 —— 差多少都不可解释。
+所以 nightly 在 YAML 里写死 Qwen：**回归门禁固定仪器，漂移哨兵跟变量**，两者问的不是同一件事。
 
 `infra_error` 也归到这一档：网关熔断的题不是能力读数，算成"变错"会在网关打嗝时误报退化。
 

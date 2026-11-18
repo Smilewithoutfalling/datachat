@@ -120,13 +120,17 @@ def test_nightly_workflow_matches_v7_baseline():
     wf = yaml.safe_load(open(os.path.join(ROOT, ".github", "workflows", "eval.yml"),
                              encoding="utf-8"))
     nightly = wf["jobs"]["nightly"]
-    runs = [str(s.get("run") or "") for s in nightly["steps"]]
+    steps = nightly["steps"]
+    runs = [str(s.get("run") or "") for s in steps]
 
-    evals = [r for r in runs if "run_eval.py" in r]
+    evals = [(s, str(s.get("run") or "")) for s in steps if "run_eval.py" in str(s.get("run") or "")]
     assert len(evals) == 1, f"nightly 应当只有一次全量跑，实际 {len(evals)} 次"
-    assert f"--agent {base['agent']}" in evals[0], evals[0]
-    assert f"--memory {base['memory_mode']}" in evals[0], evals[0]
-    assert "--case" not in evals[0], "nightly 是全量，不许挑题"
+    step, cmd = evals[0]
+    assert f"--agent {base['agent']}" in cmd, cmd
+    assert f"--memory {base['memory_mode']}" in cmd, cmd
+    assert "--case" not in cmd, "nightly 是全量，不许挑题"
+    # 模型是仪器的一部分：写死成基线那个，不从 vars 读（vars 指向 GLM，v7 是 Qwen）。
+    assert (step.get("env") or {}).get("DEEPSEEK_MODEL") == base["model"], step.get("env")
     assert any("nightly_gate.py" in r for r in runs), "nightly 没接门禁"
 
 

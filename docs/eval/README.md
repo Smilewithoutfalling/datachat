@@ -21,14 +21,19 @@ inject 录注入基线、rerun 对历史报告定向复跑。五档对照（`off
 ### nightly 的两条红线是写死的
 
 锚点是 `docs/eval/baseline_v7.json`：v7 的 workflow+state 三跑（194 / 192 / 192，取中位 **192**），
-`pass^3` 名单 **188** 道。`scripts/eval/nightly_gate.py` 只判两件事：
+`pass^3` 名单 **188** 道，**模型 `Qwen3.5-397B-A17B` / temp 0**。
+`scripts/eval/nightly_gate.py` 只判两件事：
 
 1. 本次通过数 **≤ 186**（192 − 6）；
 2. 188 道三跑全对的题里，有 **≥2 道**变错。
 
+**模型名在 workflow 里写死，不从仓库变量读。** 变量指向 `GLM-5.2`（canary 跟的是它 ——
+那是「网关默认模型有没有被换」的另一个问题），而 v7 是在 Qwen 上量的。回归门禁要固定仪器：
+换模型 = 重立基线，不是改一行 YAML。
+
 「不可比」不等于「红」，退 **2**，动作是修流水线或断代，不是查回归：
 
-- `agent` / `memory_mode` 与基线不同（换了被测对象）；
+- `agent` / `memory_mode` / **`model`** 与基线不同（换了被测对象）；
 - 题数不是 202（没跑完，或题集改过）；
 - `evalset_sha12` / `judge_sha12` 与基线不同（**尺子动过**）；
 - 报告里有 `infra_error`（网关熔断/超时，不是能力读数）。
@@ -65,7 +70,8 @@ nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条
 
 ## 当前读数（v7，2026-11-17，各 3 跑）
 
-`code 996020ad8a04` / `evalset 672b52a3a6b0`。详细分解见 `v7.md` 与 `v7-report-20261117.md`。
+`code 996020ad8a04` / `evalset 672b52a3a6b0` / 模型 `Qwen3.5-397B-A17B`（temp 0）。
+详细分解见 `v7.md` 与 `v7-report-20261117.md`。
 
 | agent | memory_mode | n | 3 跑均值 | pass^3 | 备注 |
 |---|---|---|---|---|---|

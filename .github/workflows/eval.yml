@@ -147,11 +147,16 @@ jobs:
           exit 1
 
       # `--no-fail`：准确率不进退出码，由门禁统一判。真崩溃仍走异常路径退出码非零。
+      #
+      # **模型名写死，不读 vars**：v7 基线的三跑是在 Qwen3.5-397B-A17B / temp 0 上量的，
+      # 而仓库变量指向 GLM-5.2（canary 跟的是它，那是"网关默认模型有没有被换"的另一个问题）。
+      # 回归门禁要固定仪器：模型一变，读数差就分不清是代码退化还是换了模型。
+      # 要换模型 = 重立基线，不是改这一行。
       - name: 全量 202 题（workflow + state，真模型，跑 1 次）
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DATACHAT_LLM_KEY }}
           DEEPSEEK_BASE_URL: ${{ vars.DATACHAT_LLM_BASE_URL }}
-          DEEPSEEK_MODEL: ${{ vars.DATACHAT_LLM_MODEL }}
+          DEEPSEEK_MODEL: Qwen3.5-397B-A17B
         run: python run_eval.py --agent workflow --memory state --no-fail --out outputs/nightly_v7.json
 
       # 简报里的"对应的是哪次提交"：从上次绿的 nightly 到本次。没有历史绿就跑基线断代提交。

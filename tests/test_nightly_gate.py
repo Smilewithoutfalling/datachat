@@ -20,10 +20,10 @@ def _ids(n):
 
 
 def _baseline(n=30, pass3=16, correct=24, *, agent="workflow", memory="state",
-              evalset="set123", judge="judge123", max_drop=6, max_flips=2):
+              model="m1", evalset="set123", judge="judge123", max_drop=6, max_flips=2):
     ids = _ids(n)
     return {
-        "agent": agent, "memory_mode": memory, "n": n,
+        "agent": agent, "memory_mode": memory, "model": model, "n": n,
         "runs": [correct] * 3, "correct": correct,
         "pass3": pass3, "pass3_ids": ids[:pass3],
         "unstable_ids": ids[pass3:pass3 + 4],
@@ -33,7 +33,7 @@ def _baseline(n=30, pass3=16, correct=24, *, agent="workflow", memory="state",
     }
 
 
-def _report(wrong_ids=(), *, n=30, agent="workflow", memory="state",
+def _report(wrong_ids=(), *, n=30, agent="workflow", memory="state", model="m1",
             evalset="set123", judge="judge123", infra=(), overall=None):
     wrong = set(wrong_ids) | set(infra)
     cases = [{"id": i, "category": "aggregation", "correct": i not in wrong,
@@ -42,7 +42,7 @@ def _report(wrong_ids=(), *, n=30, agent="workflow", memory="state",
              for i in _ids(n)]
     correct = sum(1 for c in cases if c["correct"])
     return {
-        "agent": agent, "memory_mode": memory,
+        "agent": agent, "memory_mode": memory, "model": model,
         "overall": {"n": n, "correct": correct if overall is None else overall},
         "fingerprints": {"evalset_sha12": evalset, "judge_sha12": judge},
         "cases": cases,
@@ -117,6 +117,13 @@ def test_agent_or_memory_mismatch_is_config():
     assert G.evaluate(_report(memory="off"), _baseline())["verdict"] == "config"
 
 
+def test_model_mismatch_is_config():
+    """换模型不是回归：v7 的 pass^3 名单是 Qwen 上量的，GLM 跑出来的差不能算代码退化。"""
+    r = G.evaluate(_report(model="other-model"), _baseline())
+    assert r["verdict"] == "config"
+    assert any("模型不同" in x for x in r["reasons"])
+
+
 def test_short_report_is_config():
     """少跑题 = 没跑完。不能拿 199 题的读数去比 202 题的基线。"""
     r = G.evaluate(_report(n=19), _baseline())
@@ -184,6 +191,7 @@ def test_repo_baseline_is_self_consistent():
     d = json.load(open(os.path.join(ROOT, "docs", "eval", "baseline_v7.json"),
                        encoding="utf-8"))
     assert d["agent"] == "workflow" and d["memory_mode"] == "state"
+    assert d["model"], "基线必须记模型名：模型不同读数就不可比"
     assert d["n"] == 202
     assert len(d["runs"]) == 3
     assert d["correct"] == sorted(d["runs"])[1], "单跑基线应是三跑中位数"

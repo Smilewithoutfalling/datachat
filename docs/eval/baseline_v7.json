@@ -3,6 +3,8 @@
  "created": "2026-11-18",
  "agent": "workflow",
  "memory_mode": "state",
+ "model": "Qwen3.5-397B-A17B",
+ "temperature": 0.0,
  "n": 202,
  "runs": [
   194,

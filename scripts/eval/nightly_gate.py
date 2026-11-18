@@ -83,6 +83,11 @@ def evaluate(report: dict, baseline: dict) -> dict:
     if report.get("memory_mode") != baseline.get("memory_mode"):
         reasons.append(f"memory_mode 不同：基线 `{baseline.get('memory_mode')}`，"
                        f"本次 `{report.get('memory_mode')}`")
+    # 模型也是"被测对象"的一部分：v7 的三跑是在 Qwen3.5-397B-A17B 上量的，
+    # 换模型（哪怕名字只差一个快照）读出来的差不能算到代码头上。
+    if report.get("model") != baseline.get("model"):
+        reasons.append(f"模型不同：基线 `{baseline.get('model')}`，本次 `{report.get('model')}`"
+                       " —— 读数不可比；nightly 必须跑基线用的那个模型")
     cases = _case_map(report)
     n = len(cases)
     if n != baseline.get("n"):
