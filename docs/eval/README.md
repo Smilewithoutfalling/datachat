@@ -55,7 +55,7 @@ echo "退出码=$?"
 
 ```bash
 python run_eval.py --canary --agent react --repeat 1 --out outputs/canary_check.json
-python scripts/eval/canary.py outputs/canary_check_run1.json
+python scripts/eval/canary.py outputs/canary_check.json
 echo "退出码=$?"
 ```
 

@@ -226,7 +226,7 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
     lines += ["", "## 怎么处置", "",
               "- **不自动修，也不改尺子。** 修由改产品的一侧做：先看上面翻的题对应哪类能力，"
               "再回到提交区间里找改动。",
-              "- 修完推 master，nightly 自动重跑；绿了就不用管。",
+              "- 修完重跑同一条命令；绿了就不用管。翻转题一直会列在这儿，它不参与判定。",
               "- 只有在**题库/gold/判分**动过时才断代（新基线 + 文档），那是另一件事。"]
     return "\n".join(lines) + "\n"
 
