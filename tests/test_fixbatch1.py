@@ -115,3 +115,9 @@ def test_plan_as_code_is_flagged_and_reviewer_does_not_see_it():
 def test_normal_success_clears_not_code():
     out = execute({"code": "result = 1", "not_code": True}, _cfg())
     assert out["not_code"] is False and out["error"] == ""
+
+
+def test_planner_refusal_rule_says_name_the_real_missing_field():
+    # mem_003：planner 的拒答示例也写着「没有成本字段」，workflow 先过 planner，示例同样会被照抄
+    from app.nodes import planner
+    assert "本题真正缺的那个字段名" in planner.REFUSAL_RULE and "不要照抄「成本」" in planner.REFUSAL_RULE

@@ -9,7 +9,7 @@
 **现象**：mem_003 是反向回归题。口径写的是「净销售额 = net_amount 列合计」，但表里没有 net_amount，正确做法是拒答，并且点名缺的是 net_amount（`app/eval/negative.py:99`）。
 v7 里 state 和 full 两档的 6 跑都拒答了，但给出的原因都是「没有成本字段」，所以全部判错。
 
-**根因**：codegen、reviewer、react 三处提示词里拒答的示例都写成了 `'无法回答：数据中没有成本字段'`（`codegen.py:26`、`reviewer.py:29`、`react_agent.py:261`）。
+**根因**：codegen、reviewer、react 三处提示词里拒答的示例都写成了 `'无法回答：数据中没有成本字段'`（`codegen.py:26`、`reviewer.py:29`、`react_agent.py:261`）。planner 的 `REFUSAL_RULE` 里也有一句同样的示例（`planner.py:43`，例子是毛利率缺成本）。workflow 先过 planner，所以这里同样可能被照抄。
 codegen 本身看不到口径块，只能看到计划，于是模型直接照抄了示例原文。
 v7 报告里把它归为「植入盖不过先验」，这个说法不对：拒答本身是对的，错的只是原因。
 
