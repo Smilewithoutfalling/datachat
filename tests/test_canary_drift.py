@@ -173,25 +173,32 @@ def test_answer_mention_does_not_accept_substring(tmp_path):
     assert not drift._mentions("合计 6600 笔", "660")
 
 
-def test_usage_ratio_moving_over_20_percent_is_drift(tmp_path):
-    """out 占比从 9.1% 涨到 18.2%：相对 +100%，超容忍度。"""
+def test_usage_ratio_moving_over_20_percent_is_not_drift(tmp_path):
+    """out 占比从 9.1% 涨到 18.2%（相对 +100%）：**只列不拦**（2026-11-18 降级）。
+
+    实测依据：11-16 与 11-18 两次周常红，红的都是同样三条（out 升 / cache_read 降 /
+    reasoning 升），同时十条探针 10/10 全对、canary 与 judge 指纹一致。基线是 6 跑聚合比、
+    周常判读是单跑，形态不匹配 → 必红。它不是模型或 judge 在漂。
+    """
     base = drift.summarize(_runs(tmp_path))
     heavy = {i: {"tokens_in": 100, "tokens_out": 100} for i in CANARY_IDS}
     cur = drift.summarize(_runs(tmp_path, usage=heavy))
     v = drift.compare(base, cur)
-    assert v["verdict"] == "drift"
-    assert any("tokens_out" in r for r in v["reasons"])
+    assert v["verdict"] == "clean"
+    assert drift._EXIT[v["verdict"]] == 0
+    assert any("tokens_out" in r and "不拦" in r for r in v["reasons"])
 
 
-def test_usage_coverage_change_is_not_a_ratio_jump(tmp_path):
+def test_usage_coverage_change_is_reported_but_does_not_gate(tmp_path):
     """网关开始回 cache_read：这是"字段变了"，不是"比例涨了 100%"。
-    算成比例会给出一个假数值，把真信号淹没。"""
+    算成比例会给出一个假数值，把真信号淹没 —— 所以单独说"覆盖变化"，仍然只列不拦。"""
     base = drift.summarize(_runs(tmp_path))
     with_cache = {i: {"tokens_in": 100, "tokens_out": 10, "tokens_cache_read": 50}
                   for i in CANARY_IDS}
     cur = drift.summarize(_runs(tmp_path, usage=with_cache))
     v = drift.compare(base, cur)
-    assert v["verdict"] == "drift"
+    assert v["verdict"] == "clean"
+    assert drift._EXIT[v["verdict"]] == 0
     assert any("覆盖变化" in r and "tokens_cache_read" in r for r in v["reasons"])
 
 

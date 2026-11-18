@@ -144,3 +144,29 @@ def test_pr_tier_does_not_call_the_model():
     blob = yaml.safe_dump(pr, allow_unicode=True)
     assert "DEEPSEEK_API_KEY" not in blob
     assert "DATACHAT_LLM_KEY" not in blob
+
+
+def _triggers(name):
+    """YAML 1.1 会把裸 `on` 解析成布尔 True，两种键都得认。"""
+    import yaml
+
+    wf = yaml.safe_load(open(os.path.join(ROOT, ".github", "workflows", name),
+                             encoding="utf-8"))
+    return set(wf.get("on") or wf.get(True) or {})
+
+
+def test_llm_workflows_have_no_automatic_triggers():
+    """2026-11-18：CI 不再自动跑 LLM 评测。
+
+    公网 runner 到不了内网网关（`grg-aikits-test` 是 10.62.27.32，公网 DNS NXDOMAIN），
+    自动触发只会得到「202 题全是 infra_error」。谁把 push / schedule / pull_request
+    加回来，这条会拦下来 —— 真模型评测在内网机器上手工跑，命令见 docs/eval/README.md。
+    """
+    for name in ("eval.yml", "drift.yml"):
+        assert _triggers(name) == {"workflow_dispatch"}, (name, _triggers(name))
+
+
+def test_tests_workflow_still_runs_on_every_commit():
+    """tests 层不受影响：每次推 master 与每个 PR 都要跑，它不调模型。"""
+    t = _triggers("tests.yml")
+    assert "push" in t and "pull_request" in t

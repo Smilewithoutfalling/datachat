@@ -6,68 +6,111 @@
 > **任何读数表必须同时标出 `agent=` 与 `memory_mode=`**（2026-11-17，P1）。缺一个就不许贴：
 > react 与 workflow 是两条线，`off` 与 `state` 是两种呈现方式，横着比出来的"涨了/崩了"全是假的。
 
-## 三层，日常只看这三层
+## 谁在跑什么
 
-| 层 | 什么时候跑 | 跑什么 | 红灯 |
+| 谁 | 什么时候跑 | 跑什么 | 要不要模型 |
 |---|---|---|---|
-| **PR** | 每次提交 / PR | `pytest`（`tests.yml`）+ `pr_oracle` 全量 oracle（**不调模型**） | oracle 判错、执行失败、题数不对 |
-| **nightly** | **master 每次变更**（只改 `docs/` 或 `*.md` 除外；也可手动） | `agent=workflow` `memory_mode=state` 全量 **202 题，跑 1 次**，对 v7 基线 | ① 通过数比基线低 **6 题及以上**；② v7 三跑全对的题有 **2 题及以上**变错 |
-| **canary-drift** | 周一 01:00 UTC（也可手动） | 十条固定探针，比冻结基线 | 算错 / usage 比例移动 >20%；`stale_baseline` = 该重立基线 |
+| **GitHub CI**（`tests.yml`） | 每次推 master、每个 PR | `pytest` 四个 job + `gate-oracle` ×2 + web | 不要 |
+| **S（内网 Ubuntu）** | 改完代码、要确认没退步时 | 下面两条命令 | 要 |
+| 手动工具 | 断代 / 归档 / 有人提问 | `release` / `inject` / `rerun` | 看档位 |
 
-三层之外还有 `release` / `inject` / `rerun` 三个**手动工具**，不在日常：release 归档、
-inject 录注入基线、rerun 对历史报告定向复跑。五档对照（`off` / `full` / `react`）也不在日常，
-只在断代或有人提问时手动跑。
+**CI 不再自动跑任何 LLM 评测（2026-11-18 改）。** `eval.yml` 与 `drift.yml` 现在只有
+`workflow_dispatch`，没有 `push` / `pull_request` / `schedule`。原因很硬：GitHub 托管 runner
+是公网机器，而基线是在内网 `grg-aikits-test.grgbanking.com`（`10.62.27.32`，公网 DNS
+`NXDOMAIN`）上用 `Qwen3.5-397B-A17B` 量的。公网 runner 永远够不着那台网关 —— 自动跑只会
+得到「202 题全是 `infra_error`」，白烧 token 还判不出任何东西。真模型评测改在内网手工跑。
 
-### nightly 的两条红线是写死的
+## S 的两条命令
+
+前置：内网的 Ubuntu；仓库根目录；能 `curl` 到 `https://grg-aikits-test.grgbanking.com/v1/models`
+（不通就是不在内网，别往下走）。模型配置走 `.env`（`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` /
+`DEEPSEEK_MODEL`，取值见 `.env.example`），`run_eval.py` 启动时自己加载。
+
+### 一条：全量 202 题对比 v7（约 22 分钟）
+
+```bash
+cd <仓库根目录>
+git pull
+python -m pip install -r requirements.txt
+
+python run_eval.py --agent workflow --memory state --no-fail \
+    --out outputs/nightly_v7.json
+
+python scripts/eval/nightly_gate.py \
+    --report outputs/nightly_v7.json \
+    --baseline docs/eval/baseline_v7.json \
+    --out outputs/nightly_brief.md
+echo "退出码=$?"
+```
+
+| 退出码 | 意思 | 你做什么 |
+|---|---|---|
+| **0** | 绿：通过数没比基线低 6 题 | 不用管。翻了几道题照样在简报里，看都不用看 |
+| **1** | 红：通过数掉了 6 题及以上 | 打开 `outputs/nightly_brief.md`，按「翻了的题」回去找改动 |
+| **2** | 不可比：模型/题数/指纹不对，或有 `infra_error` | 先修环境（多半是没在内网或 `n` 不是 202），不是查回归 |
+
+简报固定给三样：触发了什么、**翻了的题**（id / 分类 / 题面 / gold / 本次答案）、提交区间。
+
+### 二条：canary 漂移（约 3 分钟）
+
+```bash
+python run_eval.py --canary --agent react --repeat 1 --out outputs/canary_check.json
+python scripts/eval/canary.py outputs/canary_check_run1.json
+echo "退出码=$?"
+```
+
+| 退出码 | 意思 | 你做什么 |
+|---|---|---|
+| **0** | 干净 | 不用管 |
+| **1** | 漂移：有探针**算错**了 | 看输出里点名的那几条题；十条全对过就重跑一次再判 |
+| **2** | `incomparable`（题单变了）或 `stale_baseline`（判分器/数据表动过） | 前者改题单，后者 `--init --force` 重立基线 |
+
+**usage 三条比例（in/out/cache_read/reasoning）只列不拦**，越界只写一行「提示（不拦）」。
+基线是 6 跑聚合比、这里跑的是 1 跑，两者形态不同，比例的抖动是结构性的，不是模型在漂。
+
+## 判据是写死的
 
 锚点是 `docs/eval/baseline_v7.json`：v7 的 workflow+state 三跑（194 / 192 / 192，取中位 **192**），
 `pass^3` 名单 **188** 道，**模型 `Qwen3.5-397B-A17B` / temp 0**。
-`scripts/eval/nightly_gate.py` 只判两件事：
 
-1. 本次通过数 **≤ 186**（192 − 6）；
-2. 188 道三跑全对的题里，有 **≥2 道**变错。
+`scripts/eval/nightly_gate.py` **判红只看一条**：本次通过数 **≤ 186**（192 − 6）。
 
-**模型名在 workflow 里写死，不从仓库变量读。** 变量指向 `GLM-5.2`（canary 跟的是它 ——
-那是「网关默认模型有没有被换」的另一个问题），而 v7 是在 Qwen 上量的。回归门禁要固定仪器：
-换模型 = 重立基线，不是改一行 YAML。
+翻转题（v7 三跑全对、本次变错）**只列不拦**，2026-11-18 降级。证据：同一个 master、同一基线，
+连续两跑给出相反结论（193 翻 2 → 红、195 翻 0 → 绿），而判红那跑的通过数还**高于**基线。
+根因是网关 temp 0 并不确定（canary 基线 `answer_varied=10`，十题六跑答案文本全不同），
+`pass^3` 只是三次抽样，证不了「这题永远对」。详见 `BACKLOG.md` N7。
 
-「不可比」不等于「红」，退 **2**，动作是修流水线或断代，不是查回归：
+模型名必须与基线一致，**换模型 = 重立基线**。
+
+「不可比」不等于「红」，退 **2**，动作是修环境或断代，不是查回归：
 
 - `agent` / `memory_mode` / **`model`** 与基线不同（换了被测对象）；
 - 题数不是 202（没跑完，或题集改过）；
 - `evalset_sha12` / `judge_sha12` 与基线不同（**尺子动过**）；
 - 报告里有 `infra_error`（网关熔断/超时，不是能力读数）。
 
-> 按 v7 的数，**规则 1 一响，规则 2 必然也响**：从 192 掉到 186 以下就是错 ≥16 题，
-> 而 `pass^3` 名单之外只有 14 题（8 道不稳定 + 6 道已失败），16 题错里至少 2 题只能落在
-> 那 188 道稳定题上。两条都留着是因为**余量随断代变化**：不稳定题变多、失败题变少之后，
-> 规则 1 就可能单独响。**别因为规则 2 先响就把规则 1 删了。**
-
 ## 红了怎么看
 
-**nightly 红**：看同一次运行的 artifact `eval-nightly-<run_id>` 里的 `nightly_brief.md`
-（同时贴在 job summary）。简报固定给三样：
+**nightly 红（退出码 1）**：开 `outputs/nightly_brief.md`。
 
 1. 触发了哪条规则、差多少；
 2. **翻了的题**：id、分类、题面、gold、本次答案；
 3. **提交区间**：上次绿的 nightly 到本次的所有提交（最多 20 条）。
 
-处置：**不自动修，也不改尺子。** 由改产品的一侧回到提交区间里找改动，修完推 master，
-nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条 issue。
+处置：**不自动修，也不改尺子。** 回到提交区间里找改动，修完重跑这条命令；绿了就不用管。
 
-**PR 红**：oracle 判错只可能是判分链路/执行器坏了，不是模型不会 —— 修代码。
-**canary 红**：`drift`（退出码 1）指向权重或网关回包；`stale_baseline`（2）是判分器/数据表
-动过，该重立基线；`incomparable`（2）是题单变了。细节见 `CANARY.md`。
+**canary 红（退出码 1）**：只可能是探针**算错**。`stale_baseline`（2）是判分器/数据表动过，
+该重立基线；`incomparable`（2）是题单变了。细节见 `CANARY.md`。
 
 ## 什么时候断代
 
 只有这三样动过才断代：**题库（题面/增删题）**、**gold**、**判分口径**。
 
 - 日常发现的问题先记 `BACKLOG.md`「下一轮」，**不单题改**；攒够一次（预计一个月至多一次）一起做。
-- 断代 = 出新基线文件（`baseline_v7.json` → `baseline_v8.json`，把 `eval.yml` 的
-  `--baseline` 指过去）+ 在 `CHANGES.md` 记一条 + 更新 `baselines.json` 与本文的读数表。
-- **只有断代才写 `CHANGES.md` 与 `LEDGER.md`。** 日常 nightly 不进台账 —— 报告留在 Actions 工件里。
-- 尺子一动，旧基线立刻不可比：nightly 会以退出码 2 明确报「先断代」，不会把差异算成回归。
+- 断代 = 出新基线文件（`baseline_v7.json` → `baseline_v8.json`，把命令里的 `--baseline`
+  指过去）+ 在 `CHANGES.md` 记一条 + 更新 `baselines.json` 与本文的读数表。
+- **只有断代才写 `CHANGES.md` 与 `LEDGER.md`。** 日常不进台账。
+- 尺子一动，旧基线立刻不可比：门禁会以退出码 2 明确报「先断代」，不会把差异算成回归。
 
 ## 当前读数（v7，2026-11-17，各 3 跑）
 
@@ -76,7 +119,7 @@ nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条
 
 | agent | memory_mode | n | 3 跑均值 | pass^3 | 备注 |
 |---|---|---|---|---|---|
-| **workflow** | **`state`** | **202** | **95.4%** | **93.1%** | 产品主线，nightly 的对象 |
+| **workflow** | **`state`** | **202** | **95.4%** | **93.1%** | 产品主线，门禁的对象 |
 | workflow | `off` | 195 | 85.1% | 83.6% | 对照：无状态块 |
 | workflow | `full` | 202 | 95.7% | 94.6% | 对照：与 state 分不出高低 |
 | react | `off` | 195 | 87.4% | 85.1% | 对照 |
@@ -86,13 +129,13 @@ nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条
 五条理由（n=1、网关缓存、自造数据、比较器放宽、题面会变）都在那个文件里。
 
 **差多少才算降**：同题集、同一份代码（只差 recall 断言，不进单轮判定路径）跑两批，
-`single_off` 94.4% → 92.5%，差 1.9pp。**1.9pp 以内的差当噪声**，这也是 nightly 把阈值定在
-6 题（≈3pp）的依据。
+`single_off` 94.4% → 92.5%，差 1.9pp。再加上 2026-11-18 连续两跑的实测（193 / 195，
+跨 3 题），所以把红线定在掉 6 题（≈3pp）。
 
 **`off` 不等于"没记忆"**：`off` 把历史以对话消息回灌，`state` 折叠成结构化状态块。
 85.1% vs 95.4% 量的是两种呈现方式，不是"有记忆 vs 没记忆"。
 
-## 手动工具（不在日常三层）
+## 手动工具（都不在 S 那两条命令里）
 
 | 工具 | 干什么 | 入口 |
 |---|---|---|
@@ -101,6 +144,7 @@ nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条
 | 合并器 | 补跑后按 case id 覆盖主报告并重算 | `eval_merge.py` |
 | 台账 | 全量 outputs → `LEDGER.md` + `runs/` | `eval_ledger.py` |
 | 五档对照 | 断代或有疑问时重跑 off/full/react | `run_eval.py --agent X --memory Y --repeat 3` |
+| oracle 自检（不调模型） | 只验评测流水线通不通 | `eval.yml` 手动 dispatch，`tier=pr` |
 
 ## 怎么验这套资产本身
 

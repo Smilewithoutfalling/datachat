@@ -1,43 +1,36 @@
-# 评测三层（2026-11-18 起稳态运行，见 docs/eval/README.md）：
+# 评测（2026-11-18 改）：**只在手动 dispatch 时跑，没有任何自动触发。**
 #
-#   1. PR（不调 LLM）：pytest + oracle。判「评测流水线还通不通」，不判准确率。
-#   2. nightly（真模型）：**master 每次变更**跑一次 workflow+state 全量 202 题，
-#      与 v7 基线（docs/eval/baseline_v7.json）比。两条红灯写死：
-#        · 通过数比基线低 6 题及以上；
-#        · v7 三跑全对的题里有 2 题及以上变错。
-#      红了只出简报（哪些题翻了 + 上次绿到这次的提交），不自动修、不改尺子。
-#   3. canary-drift（drift.yml）：同题多跑，只盯模型与 judge 的漂移，不管代码。
+# 为什么去掉 push / pull_request / schedule：CI 的 runner 是 GitHub 托管的公网机器，
+# 而 v7 基线是在内网 `grg-aikits-test.grgbanking.com`（10.62.27.32，公网 DNS NXDOMAIN）
+# 上用 `Qwen3.5-397B-A17B` 量的。公网 runner 永远够不着那台网关 —— 自动跑只会得到
+# 「202 题全是 infra_error」，一晚上白烧 token 还判不出任何东西。
+# 真模型评测改在**内网机器上手工跑**，命令见 docs/eval/README.md「S 的两条命令」。
 #
-# release / inject / rerun 是**手动工具，不在日常三层里**：只在断代、归档或有人提问时用。
+#   1. pr      —— oracle 全量（不调 LLM），判「评测流水线还通不通」，不判准确率。
+#   2. nightly —— workflow+state 全量 202 题，对 v7 基线。判红只看一条：
+#                 通过数比基线低 6 题及以上。翻转题照样列进简报，但不影响退出码。
+#   3. 真模型那一档需要 DATACHAT_LLM_KEY 与能到内网的 runner，见上。
+#
+# canary 的漂移哨兵在 drift.yml，同样只剩手动 dispatch。
+# release / inject / rerun 是**手动工具**：只在断代、归档或有人提问时用。
 #
 # 配置（与 drift.yml 共用同一套 secret/variable 名）：
-#   Secret   DATACHAT_LLM_KEY                 真 Key；fork PR 拿不到，这是 GitHub 的安全设计
+#   Secret   DATACHAT_LLM_KEY                 真 Key
 #   Variable DATACHAT_LLM_BASE_URL / DATACHAT_LLM_MODEL
-#   Environment `release`                     手动档，要 reviewer 批准；不影响 nightly
+#   Environment `release`                     手动档，要 reviewer 批准
 #
 # 两条刻意的写法：
-#   1) secret 不进 job 级 env —— 只有真模型那一步注入。PR 来自同仓库分支时 step 能读环境
-#      变量，job 级注入等于把 Key 交给每一条 `run:`。
+#   1) secret 不进 job 级 env —— 只有真模型那一步注入。job 级注入等于把 Key 交给每一条 `run:`。
 #   2) 红灯用 `continue-on-error: true` 接住门禁的退出码，先把简报写进 step summary 与
 #      artifact，最后再用一步 `exit 1` 把 job 判红 —— 直接让门禁 exit 1 的话，
 #      后面的总结与上传全被跳过，红了就只剩一行报错。
 name: eval
 
 on:
-  pull_request:
-  push:
-    branches: [master]
-    tags: ["v*"]
-    # 只改文档不跑 nightly：它测的是产品行为，docs/ 与 *.md 不影响读数，
-    # 而一次全量 202 题 ≈ 70 万 token。混着代码一起推时照常触发（paths-ignore 只在
-    # **所有**改动都命中忽略规则时跳过）。
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   workflow_dispatch:
     inputs:
       tier:
-        description: "跑哪一档（pr/nightly 是日常；release/inject 是手动工具）"
+        description: "跑哪一档（全部需要手动；真模型那一档要找能到内网的机器，见 README）"
         type: choice
         options: [pr, nightly, release, inject]
         default: pr
@@ -70,11 +63,10 @@ env:
   PYTHONUTF8: "1"
 
 jobs:
-  # ---------------------------------------------------------------- PR：不花钱，25 分钟内出结论
+  # ---------------------------------------------------------------- pr：手动档（不调 LLM，25 分钟内出结论）
   pr:
     if: >
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr' && (inputs.rerun_report || '') == '')
+      github.event_name == 'workflow_dispatch' && inputs.tier == 'pr' && (inputs.rerun_report || '') == ''
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -115,8 +107,7 @@ jobs:
   # ---------------------------------------------------------------- nightly：master 每次变更，对 v7 基线
   nightly:
     if: >
-      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
-      (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly' && (inputs.rerun_report || '') == '')
+      github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly' && (inputs.rerun_report || '') == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

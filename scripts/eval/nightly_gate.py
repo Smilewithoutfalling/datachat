@@ -2,12 +2,19 @@
 
 ## 它回答什么
 
-「master 上的代码改动，有没有把已经答对的题弄错」。**只判这两件事**：
+「master 上的代码改动，有没有把已经答对的题弄错」。**判红只看一条**：
 
 1. **通过数比基线低 6 题及以上**（`max_drop`）。v7 三跑是 194/192/192，
-   单跑自然抖动实测 2 题（8 道题在 1/3~2/3 之间晃），6 题是 3 倍抖动。
-2. **v7 里三跑全对的 188 道题，本次有 2 题及以上变错**（`max_pass3_flips`）。
-   这条抓的是"幅度小但集中"的退化 —— 掉 2 道稳定题而总数只少 2 题时，规则 1 不会响。
+   单跑自然抖动实测 2–3 题，6 题是 2 倍以上抖动。
+
+**规则 2 只提示，不拦**（2026-11-18 定）：v7 里三跑全对的题本次变错时，
+照样逐题列进简报（id/分类/题面/gold/本次答案），但**不影响退出码**。
+
+为什么降级 —— 有实测：同一个 master、同一基线，连续两跑 193（翻 2）/195（翻 0），
+两次结论相反；而且判红那跑的通过数还**高于**基线。根因是网关 temp 0 并不确定
+（canary 基线 `answer_varied=10`，十题六跑答案文本全不同），`pass^3` 只是三次抽样，
+证不了「这题永远对」。188 道「三跑全对」里每跑翻 1–2 道属于正常抖动。
+详见 BACKLOG N7。
 
 ## 它不回答什么
 
@@ -30,8 +37,8 @@
 
 | 码 | 含义 | 动作 |
 |---|---|---|
-| 0 | 绿 | 不用管 |
-| 1 | 红（规则 1 或 2） | 看简报：哪些题翻了、这段区间有哪些提交 |
+| 0 | 绿（通过数没掉够 6 题） | 不用管；翻转题在简报里备查 |
+| 1 | 红（通过数掉了 6 题及以上） | 看简报：哪些题翻了、这段区间有哪些提交 |
 | 2 | 不可比 / 跑不完整 | 先修流水线；尺子变了就断代 |
 """
 from __future__ import annotations
@@ -47,8 +54,9 @@ sys.path.insert(0, ROOT)
 DEFAULT_BASELINE = os.path.join("docs", "eval", "baseline_v7.json")
 DEFAULT_REPORT = os.path.join("outputs", "nightly_v7.json")
 
-# 两条红灯的默认值。**写死在代码里，不从环境变量读** —— 能随手改的门槛等于没有门槛。
-# 改这两个数 = 改判定口径，要同时改 baseline 的 `rules` 与 docs/eval/README.md。
+# 判红阈值。**写死在代码里，不从环境变量读** —— 能随手改的门槛等于没有门槛。
+# 改这个数 = 改判定口径，要同时改 baseline 的 `rules` 与 docs/eval/README.md。
+# `MAX_PASS3_FLIPS` 保留只为简报里显示"翻转了几道"，**不参与判定**（2026-11-18 降级为提示）。
 MAX_DROP = 6
 MAX_PASS3_FLIPS = 2
 
@@ -115,7 +123,7 @@ def evaluate(report: dict, baseline: dict) -> dict:
                             + ("…" if len(infra) > 8 else "")],
                 "flips": [], "metrics": {}}
 
-    # ---- 两条红灯 ---------------------------------------------------------
+    # ---- 判红只看规则 1；规则 2 只提示 --------------------------------
     correct = sum(1 for c in cases.values() if c.get("correct"))
     overall = (report.get("overall") or {}).get("correct")
     if isinstance(overall, int) and overall != correct:
@@ -135,10 +143,12 @@ def evaluate(report: dict, baseline: dict) -> dict:
     if drop >= max_drop:
         fired.append(f"规则 1：通过数 {correct}/{n}，比基线 {base_correct} 低 {drop} 题"
                      f"（阈值 {max_drop}）")
-    if len(flips) >= max_flips:
-        fired.append(f"规则 2：v7 三跑全对的题里有 {len(flips)} 题变错"
-                     f"（阈值 {max_flips}）：{'、'.join(flips[:8])}"
-                     + ("…" if len(flips) > 8 else ""))
+
+    # 提示不拦：列出来备查，不进退出码、也不进 `fired`。
+    notes: list[str] = []
+    if flips:
+        notes.append(f"提示（不拦）：v7 三跑全对的题里有 {len(flips)} 题变错 —— "
+                     + "、".join(flips[:8]) + ("…" if len(flips) > 8 else ""))
 
     metrics = {
         "n": n,
@@ -151,10 +161,10 @@ def evaluate(report: dict, baseline: dict) -> dict:
         "max_pass3_flips": max_flips,
     }
     if fired:
-        return {"verdict": "red", "reasons": fired, "flips": flips, "metrics": metrics}
+        return {"verdict": "red", "reasons": fired + notes, "flips": flips, "metrics": metrics}
     return {"verdict": "green",
             "reasons": [f"通过 {correct}/{n}（基线 {base_correct}，{_delta(drop)}），"
-                        f"三跑全对的题掉 {len(flips)} 道（阈值 {max_flips}）"],
+                        f"未触发规则 1（阈值掉 {max_drop} 题）"] + notes,
             "flips": flips, "metrics": metrics}
 
 
@@ -183,12 +193,14 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
                   "| 项 | 本次 | 基线 v7 | 差 |", "|---|---|---|---|",
                   f"| 通过数 | {m['correct']}/{m['n']} | {m['baseline_correct']}/{m['n']} | "
                   f"{_delta(m['drop'])} |",
-                  f"| 三跑全对的题变错 | {m['pass3_flips']} | 0 | +{m['pass3_flips']} |",
-                  f"| 阈值 | 掉 {m['max_drop']} 题 / 翻 {m['max_pass3_flips']} 题 | — | — |"]
+                  f"| 三跑全对的题变错 | {m['pass3_flips']} | 0 | +{m['pass3_flips']}"
+                  "（只列，不拦） |",
+                  f"| 判红阈值 | 掉 {m['max_drop']} 题 | — | — |"]
 
     cases = _case_map(report)
     if result["flips"]:
-        lines += ["", f"## 翻了的题（{len(result['flips'])} 道，v7 三跑全对 → 本次错）", "",
+        lines += ["", f"## 翻了的题（{len(result['flips'])} 道，v7 三跑全对 → 本次错；"
+                  "**只列不拦**）", "",
                   "| id | 分类 | 题面 | gold | 本次答案 |", "|---|---|---|---|---|"]
         for cid in result["flips"]:
             c = cases[cid]
@@ -199,7 +211,7 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
 
     old = [i for i, c in cases.items() if not c.get("correct") and i in set(baseline.get("unstable_ids") or [])]
     if old:
-        lines += ["", f"另有 {len(old)} 道错题是 v7 里本来就晃的（1/3~2/3），不计入规则 2："
+        lines += ["", f"另有 {len(old)} 道错题是 v7 里本来就晃的（1/3~2/3），不影响判定："
                   + "、".join(f"`{i}`" for i in sorted(old))]
 
     lines += ["", "## 提交区间（上次绿 → 本次；是嫌疑范围，不是归因）", ""]

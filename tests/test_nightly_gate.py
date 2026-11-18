@@ -65,7 +65,7 @@ def test_green_at_five_question_drop():
 
 
 def test_green_with_one_pass3_flip():
-    """翻 1 道稳定题：绿。规则 2 的门槛是 2 道。"""
+    """翻 1 道稳定题：绿 —— 规则 2 已经不拦了。"""
     r = G.evaluate(_report(["c00"]), _baseline())
     assert r["verdict"] == "green", r
     assert r["metrics"]["pass3_flips"] == 1
@@ -81,21 +81,28 @@ def test_rule1_fires_at_six_question_drop():
     assert not any("规则 2" in x for x in r["reasons"])
 
 
-def test_rule2_fires_on_two_pass3_flips():
-    """只掉 2 题，但两道都是 v7 三跑全对的：规则 2 单独响。"""
+def test_two_pass3_flips_no_longer_gate():
+    """**2026-11-18 降级**：翻 2 道稳定题只进简报，不影响退出码。
+
+    实测依据（BACKLOG N7）：同一 master 连续两跑 193（翻 2）/195（翻 0），
+    结论相反，且判红那跑通过数还高于基线；根因是网关 temp 0 并不确定。
+    """
     r = G.evaluate(_report(["c00", "c01"]), _baseline())
-    assert r["verdict"] == "red", r
-    assert any("规则 2" in x for x in r["reasons"])
-    assert not any("规则 1" in x for x in r["reasons"])
+    assert r["verdict"] == "green", r
     assert r["flips"] == ["c00", "c01"]
+    assert r["metrics"]["pass3_flips"] == 2
+    assert any("提示" in x and "不拦" in x for x in r["reasons"]), r["reasons"]
 
 
-def test_both_rules_can_fire_together():
+def test_rule1_fires_even_when_flips_are_also_present():
+    """规则 1 单独决定红；翻转仍然列在 reasons 里备查。"""
     r = G.evaluate(_report(["c00", "c01"] + [f"c{i:02d}" for i in range(16, 27)]),
                    _baseline())
     assert r["verdict"] == "red"
-    assert r["metrics"]["drop"] >= 6 and r["metrics"]["pass3_flips"] >= 2
-    assert sum("规则" in x for x in r["reasons"]) == 2
+    assert r["metrics"]["drop"] == 5 + 2
+    assert sum("规则 1" in x for x in r["reasons"]) == 1
+    assert sum("规则 2" in x for x in r["reasons"]) == 0
+    assert any("提示" in x for x in r["reasons"])
 
 
 # ---------------------------------------------------------------- 不可比
@@ -146,13 +153,26 @@ def test_overall_disagreeing_with_cases_is_config():
 
 # ---------------------------------------------------------------- 简报
 def test_brief_lists_flips_and_commits():
+    """翻转题照样列进简报 —— 只是不再影响退出码（绿也要看见它们）。"""
     base, rep = _baseline(), _report(["c00", "c01"])
-    brief = G.render_brief(G.evaluate(rep, base), base, rep, "outputs/nightly_v7.json",
+    res = G.evaluate(rep, base)
+    assert res["verdict"] == "green"
+    brief = G.render_brief(res, base, rep, "outputs/nightly_v7.json",
                            ["abc123 feat: 改 prompt", "def456 fix: 修执行器"])
-    assert "🔴 RED" in brief
+    assert "🟢 GREEN" in brief
     assert "`c00`" in brief and "`c01`" in brief
+    assert "只列不拦" in brief
     assert "abc123" in brief and "def456" in brief
     assert "不自动修" in brief
+
+
+def test_brief_on_red_still_shows_flips_and_rule1():
+    base, rep = _baseline(), _report(["c00", "c01"] + [f"c{i:02d}" for i in range(16, 28)])
+    res = G.evaluate(rep, base)
+    assert res["verdict"] == "red"
+    brief = G.render_brief(res, base, rep, "outputs/nightly_v7.json", [])
+    assert "🔴 RED" in brief and "规则 1" in brief
+    assert "`c00`" in brief and "`c01`" in brief
 
 
 def test_cli_exit_codes(tmp_path):
@@ -167,10 +187,10 @@ def test_cli_exit_codes(tmp_path):
                    "--out", str(out), "--quiet"]) == 0
 
     red = tmp_path / "red.json"
-    red.write_text(json.dumps(_report(["c00", "c01"])), encoding="utf-8")
+    red.write_text(json.dumps(_report([f"c{i:02d}" for i in range(16, 28)])), encoding="utf-8")
     assert G.main(["--report", str(red), "--baseline", str(bp),
                    "--out", str(out), "--quiet"]) == 1
-    assert "`c00`" in out.read_text(encoding="utf-8")
+    assert "规则 1" in out.read_text(encoding="utf-8")
 
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps(_report(judge="other")), encoding="utf-8")

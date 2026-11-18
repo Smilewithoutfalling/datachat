@@ -13,8 +13,15 @@
 |---|---|---|
 | `canary_sha12` 与基线不同 | `incomparable`：换了卷子，读数不是同一件事 | 2 |
 | `judge_sha12` 与基线不同 | `stale_baseline`：判分器或数据表动过，**不能**把差异算到权重头上 | 2 |
-| 任何一轮判对数 < 基线，或 usage 比例移动 > 20% | `drift`：这才叫漂移 | 1 |
+| 任何一轮判对数 < 基线（"算错"，不含"没交卷"） | `drift`：这才叫漂移 | 1 |
 | 以上都不是 | `clean` | 0 |
+
+**usage 三条只列不拦（2026-11-18）**：`tokens_in` / `tokens_out` /
+`tokens_cache_read` / `tokens_reasoning` 的比例移动**不再影响退出码**，只写进 reason 备查。
+理由有实测：基线是 6 跑聚合比、周常判读是单跑，形态不匹配 —— 11-16 与 11-18 两次周常红，
+红的都是同样的三条（`out` 升、`cache_read` 降、`reasoning` 升），而同时十条探针 **10/10 全对**、
+`canary_sha12` 与 `judge_sha12` 都与基线一致。那不是模型或 judge 在漂，是缓存在冷热之间跳。
+基线**不动**（不因为降级而重立）。
 
 **为什么可比性判据是 `judge_sha12` 而不是 `code_sha12`（2026-11-09 收窄）。**
 旧判据要求 `code_sha12` 全同，而它覆盖 `app/**/*.py` 的全部 A 组文件 —— 含
@@ -310,8 +317,10 @@ def compare(base: dict, cur: dict) -> dict:
             reasons.append("（本次仍然观察到：" + "；".join(changed + usage_notes) + "）")
         return {"verdict": "stale_baseline", "reasons": reasons}
 
-    # usage 动了就是动了：它不看判定，是网关回包本身的形状，跟"没交卷"没关系。
-    if wrong or usage_notes:
+    # 判红只看「算错的题」：那才叫能力漂移。
+    # usage 三条只列不拦（2026-11-18）：它们是网关回包的形状，与模型/judge 不是同一件事；
+    # 且基线是 6 跑聚合比、周常判读是单跑，形态不匹配时必红（见模块说明与 CANARY.md）。
+    if wrong:
         extra = changed + usage_notes
         if code_changed:
             # 不把 code_changed 单独当 drift 条件：改了 prompt 但十条读数没动，那是"改动
@@ -322,11 +331,15 @@ def compare(base: dict, cur: dict) -> dict:
         return {"verdict": "drift", "reasons": extra}
     if contract:
         # 不算漂移，但也不许静默：3.3% 的题次挂在这上面，是真实的输出契约数字。
-        return {"verdict": "contract", "reasons": changed + [
+        return {"verdict": "contract", "reasons": changed + usage_notes + [
             "这批掉题都是「算对了没交卷」，不指向权重；但它是真实的输出契约问题，"
             "别当没发生 —— 需要时去看 outputs/ 里那几轮的 code"]}
     tail = [f"{cur['runs']} 跑全 {cur['n']}/{cur['n']}，翻转 {cur['flips']}，"
-            f"usage 比例在 ±{RATIO_TOL:.0%} 内"]
+            "判对数没掉（判红只看这一条）"]
+    if usage_notes:
+        tail.append("提示（不拦）：" + "；".join(usage_notes))
+    else:
+        tail.append(f"usage 比例在 ±{RATIO_TOL:.0%} 内")
     if code_changed:
         tail.append(f"产品代码不同（`{base.get('code_sha12')}` → `{cur.get('code_sha12')}`）"
                     "但判分口径与十条读数都没动 —— 这批改动对这些探针无影响")
