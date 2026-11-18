@@ -10454,3 +10454,102 @@ react 只在 7 道记忆专项上领先，而那 2 道正是 `mem_003`（真失�
   desktop(PR) / sidecar。「release 连续 3 天全绿」指哪条需要 H 指认。
 - **`mem_006` 没改**：改 gold 就是又一次断代，按"BACKLOG 冻结"原则放到下一轮。
 
+
+## [187] 2026-11-18 · 评测转稳态：三层门禁落地，v7 冻结为基线 · commit <本次>
+
+### 为什么动
+
+v7 断代（[186]）之后评测仍是「边跑边修」：每发现一道题判错就去改尺子，改一次尺子
+所有历史读数作废一次，于是永远在断代、永远没有可比的长序列。
+
+H 2026-11-18 定调：**到 v7 为止不再扩张，转稳态运行**。稳态不是「测得更多」，
+是「产品一有变化就自动报出退步」。原话：「产品改完推 master，nightly 自动跑；
+绿了不用管；红了看简报，由改产品的一侧去修。」
+
+### 三层，各问一件事
+
+| 层 | 什么时候跑 | 跑什么 | 调不调模型 |
+|---|---|---|---|
+| PR | 每次提交 | pytest + `pr_oracle`（桩判逻辑，不判准确率） | 不调 |
+| nightly | push 到 master（跳过纯文档） | workflow+state 全量 202 题 × **1 跑**，对 v7 基线 | 调，≈70 万 token |
+| canary-drift | 周常 / 手动 dispatch | 同 10 题 ×6 跑，只判权重哈希与 judge 漂移 | 少量 |
+
+### 阈值为什么是 6 和 2
+
+v7 三跑 194 / 192 / 192 —— **单跑自然抖动实测 2 题**。
+
+- **规则 1**：通过数比基线低 **≥6 题**。基线取三跑**中位数 192**，不用均值（不是整数），
+  也不用最好那跑（等于把抖动算进容忍度）。6 = 3 倍抖动。
+- **规则 2**：v7 里 pass^3 全对的 188 题中 **≥2 题**变错。这条抓「总数只掉 1 题、
+  但掉的都是稳定题」，规则 1 会漏，规则 2 不会。
+
+两条写死在 `scripts/eval/nightly_gate.py` 的常量里、**不从环境变量读**——
+能随手改的门槛等于没有门槛。
+
+### 「不可比」单独一档（退出码 2，不叫红）
+
+`agent` / `memory_mode` / `model` / `n` / `evalset_sha12` / `judge_sha12` 任一不同，
+或报告含 `infra_error`，或 `overall.correct` 与逐题矛盾，或题号集合对不上 —— 判「不可比」。
+动作是修流水线或断代，不是去查回归。
+
+反例就发生在落地当天：第一次 nightly 用了仓库变量指向的 `GLM-5.2`，而 v7 基线是
+`Qwen3.5-397B-A17B`，那跑读数没有任何意义（已主动取消 run `44217916038`）。
+修法不是「改一行 YAML 换模型」，而是 **`DEEPSEEK_MODEL` 在 workflow 里写死**，
+`baseline_v7.json` 记下 `model`/`temperature`，门禁拒绝跨模型比对。
+**nightly 固定仪器，canary 跟仓库变量** —— 两者问的不是同一件事。
+
+### 红了只出一份简报
+
+`nightly_gate.py` 出 `nightly_brief.md`：判定 / 读数表 / **翻了的题（id｜分类｜题面｜gold｜本次答案）**
+/ 提交区间（上次绿的提交 → 本次）/ 怎么处置。进 job summary + artifact（留 30 天），
+**不自动修、不改尺子、不回流提交到仓库**。job 最后一步 `exit 1`，
+靠 `continue-on-error` 保证简报先落盘再判红。
+
+### canary 重立（先导出观察，再重立）
+
+11-16 那次红的三条观察先进 `CANARY.md` 才重立，否则被新基线冲掉：judge
+`18c5e432eff2 → 289474f4d943`；探针 10/10 说明模型本体没换；usage 三个越界
+`tokens_out +20.5%` / `cache_read −21.6%` / `reasoning +25.0%`。
+
+重立在 `d8f2eae` 上 dispatch（`init=true, repeat=6`）→ run `44217934239`，bot 提交 `cb8bb8f`：
+**6 跑 × 10/10、flips 0**，`canary 592b9f3baa7e` / `judge 289474f4d943` / `code 996020ad8a04`，
+usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
+
+### 被撤掉的两档（说清楚，别回头再加）
+
+- **PR 里的 8 题真模型冒烟**：与 nightly 同源但样本太小，2 题抖动在 8 题上就是 25%，
+  实际效用是「看运气」。PR 层退回纯 oracle。
+- **nightly 的 25 题闸门**：全量 202 题只贵一倍，覆盖从 12% 到 100%；而且 25 题抽不到
+  `mem_*` 长会话，恰是最容易退的那块。
+- **报告回流提交**：每次 nightly 往 master 塞一个 json，把提交历史搅成 bot 夹心饼干，
+  本次落地就因此挡了一次推送（见下）。
+
+### 验证
+
+- **门禁用真数据过了一遍**：v7 run1 原报告 → 🟢（194/202，比基线差 2，pass3 翻 0）；
+  手工把 `mul_029` / `biz_019` 改错 → 🔴，规则 2 单独响，简报正确列出题面/gold/答案与提交区间。
+  顺带发现 `biz_019` 是「答案几乎相同却判错」的形态 —— 真回归长这样。
+- **29 passed**：`tests/test_nightly_gate.py` 17 条 + `tests/test_tier_check.py` 改写 2 条
+  （钉死 nightly 只有一条 `run_eval.py` 调用、参数与基线一致、`DEEPSEEK_MODEL` 必须等于
+  基线的 model、PR job 的 blob 里不许出现任何 LLM key）。
+- **全量 pytest**：`ba0ad05` 树上 **2079 passed / 1 warning / 0 failed / 2387 s**。
+  同一棵树连跑两遍（`0cde838` 那遍 2078 项，多的一项来自 `test_tier_check` 的重写），
+  两遍都零失败 —— 不是只跑新增的那几条。
+
+### 踩到的坑
+
+- **Git Data API 只吃全 sha**：`GET /git/commits/9be9eb583621`（缩写）返回 404。
+- **`message` 会吞尾部 `\n`**：REST 建 commit 时 sha 逐字节对不上，得 `msg` 与 `msg+"\n"` 都试。
+- **bot 提交挡推送**：远端被 `9be9eb58`（github-actions 回流 gate json）推进，本地不复刻就
+  rebase 会分叉。用 `read-tree` + `update-index --cacheinfo` + `write-tree` + `commit-tree`
+  复刻 author/committer 与日期，再 `git update-ref refs/remotes/origin/master`，才 rebase 得动。
+- **bot 用 `GITHUB_TOKEN` 推送不触发 workflow**：`cb8bb8f`（canary 基线）在 Actions 列表里
+  没有任何 run —— 不是漏跑，是防递归。
+
+### 尺子冻结（这次的另一半）
+
+题库、gold、判分口径的改动一律先进 `BACKLOG.md` 的「下一轮」，攒够一次性断代
+（预计一个月至多一次，不按单题断代）；五档对照（off / full / react）不列入日常，
+只在断代或有人提问时手动跑；日常不进 LEDGER、不写 CHANGES。
+
+**本次明确不做**：P14、`mem_006` 的 gold、以及本轮扫出来的其它新发现。

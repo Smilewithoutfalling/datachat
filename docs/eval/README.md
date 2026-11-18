@@ -38,9 +38,10 @@ inject 录注入基线、rerun 对历史报告定向复跑。五档对照（`off
 - `evalset_sha12` / `judge_sha12` 与基线不同（**尺子动过**）；
 - 报告里有 `infra_error`（网关熔断/超时，不是能力读数）。
 
-> 按 v7 的数，规则 1 是规则 2 的超集：中位 192 与 pass^3 188 之间只有 4 题余量，
-> 掉 6 题必然已经翻了 2 道稳定题。两条都留着是因为余量会随断代变化 ——
-> **别因为规则 2 先响就把规则 1 删了。**
+> 按 v7 的数，**规则 1 一响，规则 2 必然也响**：从 192 掉到 186 以下就是错 ≥16 题，
+> 而 `pass^3` 名单之外只有 14 题（8 道不稳定 + 6 道已失败），16 题错里至少 2 题只能落在
+> 那 188 道稳定题上。两条都留着是因为**余量随断代变化**：不稳定题变多、失败题变少之后，
+> 规则 1 就可能单独响。**别因为规则 2 先响就把规则 1 删了。**
 
 ## 红了怎么看
 
@@ -106,10 +107,11 @@ nightly 自动重跑；绿了就不用管。同一故障连续失败只留一条
 评测代码有自己的单测，改判据 / 改台账 / 改题集之后要跑：
 
 ```bash
-CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 2000+ 项 / 约 48 分钟
+CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 2000+ 项 / 约 40 分钟
 ```
 
-**必须带这个阈值，否则进程会被杀。** 本机（Windows + WorkBuddy）注入了一层 safe-delete
+**必须带这个阈值，否则进程会被杀。** 本机实测（2026-11-18，`ba0ad05`）：**2079 passed /
+0 failed / 2387 s**。本机（Windows + WorkBuddy）注入了一层 safe-delete
 （`cli/vendor/shim/sitecustomize.py`，经 `PYTHONPATH` 自动加载），它把 `shutil.rmtree` 换成
 "送回收站"版本，并在**单次工具调用**内删除数超过 50 时 `raise SystemExit(1)`。
 `SystemExit` 不是普通异常，pytest 的 teardown 保护（`onerror` / `ignore_errors`）拦不住它 ——
