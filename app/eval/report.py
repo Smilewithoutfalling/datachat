@@ -177,24 +177,16 @@ def evalset_fingerprint(datasets: dict | None = None) -> dict:
     if datasets is None:
         from app.eval.cases import DATASETS
         datasets = DATASETS
-    from app.tools.dataset import is_dict_file
-    from app.tools.dictionary import dict_path_for
     files = [os.path.join(_REPO, f) for f in EVALSET_FILES]
-    for path in datasets.values():
-        # 多表数据集是一个目录，直接 open 会 PermissionError；展开成逐表文件（含各自字典）。
-        tables = _dataset_files(path, is_dict_file)
-        if tables is None:
-            files += [path, dict_path_for(path)]
-        else:
-            for f in tables:
-                files += [f, dict_path_for(f)]
+    # 多表数据集是一个目录，直接 open 会 PermissionError；展开成逐表文件（含各自字典）。
+    files += dataset_fingerprint_files(datasets)
     h, parts = hashlib.sha256(), {}
     for f in sorted(set(files)):
         if not os.path.exists(f):
             continue
-        data = open(f, "rb").read().replace(b"\r\n", b"\n")
+        data, sha12 = fingerprint_record(f)
         rel = os.path.relpath(f, _REPO).replace(os.sep, "/")
-        parts[rel] = hashlib.sha256(data).hexdigest()[:12]
+        parts[rel] = sha12
         h.update(rel.encode() + b"\0" + data + b"\0")
     from app.eval.cases import ALL_CASES
     return {"sha256": h.hexdigest()[:12], "n_cases": len(ALL_CASES), "files": parts}
@@ -208,17 +200,16 @@ def datasets_metadata(datasets: dict) -> dict:
     单表报告的形状不变——报告是要被人和脚本同时读的，加字段可以，改旧字段不行。
     """
     from app.tools.dataset import is_dict_file
-    from app.tools.dictionary import dict_path_for
     out = {}
     for name, dataset in datasets.items():
         files = _dataset_files(dataset, is_dict_file)
         if files is None:
             if not os.path.exists(dataset):
                 continue
-            d = dict_path_for(dataset)
             out[name] = {"path": os.path.relpath(dataset, _REPO).replace(os.sep, "/"),
                          "sha256": hashlib.sha256(open(dataset, "rb").read()).hexdigest()[:12],
-                         "dictionary_file": os.path.exists(d)}   # 文件是否存在；本次是否使用看顶层 use_dictionary
+                         # 文件是否存在；本次是否使用看顶层 use_dictionary
+                         "dictionary_file": any(os.path.exists(d) for d in _dict_files_for(dataset))}
             continue
         h = hashlib.sha256()
         tables, with_dict = [], []
@@ -226,9 +217,9 @@ def datasets_metadata(datasets: dict) -> dict:
             if not os.path.exists(f):
                 continue
             tname = os.path.splitext(os.path.basename(f))[0]
-            h.update(tname.encode() + b"\0" + open(f, "rb").read().replace(b"\r\n", b"\n") + b"\0")
+            h.update(tname.encode() + b"\0" + fingerprint_record(f)[0] + b"\0")
             tables.append(tname)
-            if os.path.exists(dict_path_for(f)):
+            if any(os.path.exists(d) for d in _dict_files_for(f)):
                 with_dict.append(tname)
         if not tables:
             continue
@@ -240,13 +231,61 @@ def datasets_metadata(datasets: dict) -> dict:
 
 
 def _dataset_files(dataset, is_dict_file):
-    """多表返回 CSV 路径列表；单表（或不是多表）返回 None。"""
+    """多表返回表文件路径列表（CSV 和 xlsx；xlsx 不展开 sheet，一个文件一项）；单表（或不是多表）返回 None。"""
     if isinstance(dataset, (list, tuple)):
         return [os.fspath(p) for p in dataset]
     if isinstance(dataset, (str, os.PathLike)) and os.path.isdir(dataset):
         return sorted(os.path.join(dataset, f) for f in os.listdir(dataset)
-                      if f.lower().endswith(".csv") and not is_dict_file(f))
+                      if f.lower().endswith(_TABLE_SUFFIXES) and not is_dict_file(f))
     return None
+
+
+_TABLE_SUFFIXES = (".csv", ".xlsx")
+
+
+def _is_xlsx(path) -> bool:
+    return os.fspath(path).lower().endswith(".xlsx")
+
+
+def _dict_files_for(table_path) -> list[str]:
+    """一张表文件可能用到的字典文件。CSV：foo.dict.csv。
+    xlsx：foo.dict.csv，再加同目录下全部 foo.<任意>.dict.csv（各 sheet 的专属字典）。按文件名找、不打开工作簿；
+    可能多认别的文件的字典（如 foo.bar.xlsx 的 foo.bar.dict.csv），多认只会让指纹更敏感，是安全方向。"""
+    import glob
+
+    from app.tools.dictionary import dict_path_for
+    p = os.fspath(table_path)
+    out = [dict_path_for(p)]
+    if _is_xlsx(p):
+        stem = os.path.splitext(p)[0]
+        out += sorted(glob.glob(glob.escape(stem) + ".*.dict.csv"))
+    return out
+
+
+def dataset_fingerprint_files(datasets: dict) -> list[str]:
+    """数据指纹要覆盖的文件：每张表文件 + 它的字典。evalset_fingerprint 和 fingerprint.judge_fingerprint 共用。
+    不存在的文件由调用方跳过。"""
+    from app.tools.dataset import is_dict_file
+    files: list[str] = []
+    for path in datasets.values():
+        tables = _dataset_files(path, is_dict_file)
+        for f in ([os.fspath(path)] if tables is None else tables):
+            files += [f, *_dict_files_for(f)]
+    return files
+
+
+def fingerprint_record(path) -> tuple[bytes, str]:
+    """返回（喂进总指纹的字节, 该文件的 sha256 前 12 位）。
+
+    CSV / 字典：内容本身，CRLF 统一成 LF（Windows / Linux 同值）。与加 xlsx 之前逐字节一致，CSV 指纹值不变。
+    xlsx：zip 二进制，不能做换行归一（会改坏字节），也不展开 sheet；登记原始字节的 sha256 和文件大小。
+    """
+    raw = open(path, "rb").read()
+    if _is_xlsx(path):
+        digest = hashlib.sha256(raw).hexdigest()
+        return f"xlsx\0sha256={digest}\0size={len(raw)}".encode(), digest[:12]
+    data = raw.replace(b"\r\n", b"\n")
+    return data, hashlib.sha256(data).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------- 结果对象的可还原存储

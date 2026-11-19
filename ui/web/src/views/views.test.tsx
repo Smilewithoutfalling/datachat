@@ -73,6 +73,17 @@ test("预览：表头、单元格按文本渲染，注入串不变成元素；�
   expect(hint).toContain("2 处方向控制符已从预览中去掉");
 });
 
+test("xlsx 预览：读取提示逐条显示，编码提示不出现（阶段 7.5）", async () => {
+  const XT = { ...PREVIEW.tables[0], filename: "sales.xlsx", encoding: "xlsx",
+    warnings: ["工作表「Sheet2」是空的，已跳过", "数据区有 1 处合并单元格（B5:B6）"] };
+  setup({ "GET /datasets/d1?rows=20": { ...DS, summary: "100 行 × 3 列，编码 xlsx", tables: {}, preview: { ...PREVIEW, tables: [XT] } } });
+  fireEvent.click(await screen.findByRole("button", { name: /^销量/ }));
+  const view = await screen.findByTestId("dataset-view");
+  const list = within(view).getByRole("list", { name: "读取提示" });
+  expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual(XT.warnings);
+  expect(within(view).queryByText(/这张表按 xlsx 读取/)).toBeNull();
+});
+
 test("详情与预览只发一个请求；上传后直接用响应里的预览，不再请求", async () => {
   const be = setup({
     "POST /datasets": { ...DS, id: "d2", name: "新上传", tables: {}, preview: PREVIEW },

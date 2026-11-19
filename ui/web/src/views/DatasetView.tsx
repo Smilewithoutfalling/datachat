@@ -155,8 +155,14 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
                 )
               ) : null}
               {/* 验收 P1-13：只在识别出非 UTF-8 编码时提示 */}
-              {current && current.error === undefined && !/^(utf-8|utf-8-sig|ascii)$/i.test(current.encoding) ? (
+              {current && current.error === undefined && !/^(utf-8|utf-8-sig|ascii|xlsx)$/i.test(current.encoding) ? (
                 <p className="enc-note">这张表按 {current.encoding} 读取。预览里出现乱码时，请在 Excel 里另存为 CSV（UTF-8）后重新上传。</p>
+              ) : null}
+              {/* 阶段 7.5：xlsx 的读取提示（合并单元格、跳过的 sheet、百分比格式等），读到了什么、没改什么都写明 */}
+              {current && current.error === undefined && current.warnings?.length ? (
+                <ul className="enc-note" aria-label="读取提示">
+                  {current.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
               ) : null}
               {/* 批 4b M2：口径与规则在数据预览下方；读取失败的数据集（allFailed）走上面的失败卡，不显示这一节（视觉 24 不变） */}
               <NotesSection c={c} datasetId={id} />
@@ -222,5 +228,7 @@ function failTip(err: string): string {
   if (err.includes("文件是空的")) return "打开文件看看是否有内容，或者换一个文件。";
   if (err.includes("编码")) return "在 Excel 里另存为 CSV（UTF-8）后重新上传，通常能解决。";
   if (err.includes("无法解析")) return "检查报错的那一行：引号是否成对、列数是否和表头一致。";
+  if (err.includes("公式单元格没有计算结果")) return "用 Excel 或 WPS 打开文件、保存一次（让公式算出结果），再重新上传。";
+  if (err.includes("xlsx")) return "确认文件能用 Excel 正常打开；也可以另存为 CSV（UTF-8）后上传。";
   return "确认文件是逗号分隔的 CSV，再重新上传。";
 }

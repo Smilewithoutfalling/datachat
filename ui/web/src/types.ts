@@ -15,6 +15,7 @@ export type PreviewTable =
       rows: PreviewCell[][];
       bidi_stripped: number; // 去掉的方向控制符个数（只影响显示）
       truncated_cells: number; // 超长截断的单元格数
+      warnings?: string[]; // xlsx 的读取提示（合并单元格、跳过的 sheet 等，阶段 7.5）；CSV 没有
       error?: undefined;
     }
   | { name: string; filename: string; error: string };
@@ -24,6 +25,7 @@ export type DatasetDetail = Dataset & {
   tables?: Record<string, string[]>;
   summary?: string;
   error?: string;
+  warnings?: string[]; // 全部表的读取提示（只有 xlsx 有）
   preview?: Preview;
 };
 

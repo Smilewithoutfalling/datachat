@@ -64,6 +64,10 @@ def dtype_name(dtype) -> str:
     return "str"   # object / string / str 统一为 str
 
 
+# xlsx 读取时写进 df.attrs 的结构注解（合并单元格、百分比格式等，见 app/tools/excel_io.py）。只含列名、不含取值。
+MODEL_NOTES_ATTR = "datachat_model_notes"
+
+
 def describe_df(df: pd.DataFrame, n: int = 3) -> str:
     """生成表结构描述（列名 + 稳定类型名 + 截断后的样例行），已包进数据分隔块。"""
     lines = [f"表共有 {len(df)} 行、{len(df.columns)} 列。", "列信息："]
@@ -81,6 +85,8 @@ def describe_df(df: pd.DataFrame, n: int = 3) -> str:
         lines.append(f"\n{shape}")
     note = _summary_note(df)
     if note:
+        lines.append(f"\n{note}")
+    for note in df.attrs.get(MODEL_NOTES_ATTR) or ():   # 只有 xlsx 读出的表有（excel_io）；CSV 的 prompt 不变
         lines.append(f"\n{note}")
     return data_block("\n".join(lines))
 

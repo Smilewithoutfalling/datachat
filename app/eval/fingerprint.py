@@ -248,23 +248,14 @@ def judge_fingerprint(datasets: dict | None = None) -> dict:
     if datasets is None:
         from app.eval.cases import DATASETS
         datasets = DATASETS
-    from app.eval.report import _dataset_files
-    from app.tools.dataset import is_dict_file
-    from app.tools.dictionary import dict_path_for
-    files: list[str] = []
-    for path in datasets.values():
-        tables = _dataset_files(path, is_dict_file)
-        if tables is None:
-            files += [path, dict_path_for(path)]
-        else:
-            for f in tables:
-                files += [f, dict_path_for(f)]
-    for f in sorted(set(files)):
+    # 表文件 + 字典，与 evalset_fingerprint 同一份清单和同一种登记方式（xlsx 记原始字节的 sha256 和大小）
+    from app.eval.report import dataset_fingerprint_files, fingerprint_record
+    for f in sorted(set(dataset_fingerprint_files(datasets))):
         if not os.path.exists(f):
             continue
-        data = open(f, "rb").read().replace(b"\r\n", b"\n")
+        data, sha12 = fingerprint_record(f)
         rel = os.path.relpath(f, _REPO).replace(os.sep, "/")
-        parts[rel] = _sha12(data)
+        parts[rel] = sha12
         h.update(rel.encode() + b"\0" + data + b"\0")
 
     return {"sha12": h.hexdigest()[:12], "files": parts}

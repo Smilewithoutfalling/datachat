@@ -173,11 +173,23 @@ test("重名数据集：名称后追加创建时间，只改显示", async () =>
   expect(within(nav).getByText("warm.csv")).toBeTruthy();
 });
 
-test("上传区：非 .csv 前端拦下，不发请求", async () => {
+test("上传区：非 .csv / .xlsx 前端拦下，不发请求", async () => {
   const be = shell([]);
-  const file = new File(["x"], "a.xlsx");
+  const file = new File(["x"], "a.txt");
   fireEvent.change(await screen.findByLabelText("选择 CSV 文件"), { target: { files: [file] } });
-  expect(screen.getByRole("alert").textContent).toBe("只支持 .csv；a.xlsx 不支持");
+  expect(screen.getByRole("alert").textContent).toBe("只支持 .csv 和 .xlsx；a.txt 不支持");
   expect(screen.queryByRole("button", { name: "上传" })).toBeNull();
+  expect(be.calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test("上传区：旧版 .xls 单独说明另存为 .xlsx；.xlsx 放行到上传对话框（阶段 7.5）", async () => {
+  const be = shell([]);
+  const input = await screen.findByLabelText("选择 CSV 文件");
+  expect(input.getAttribute("accept")).toBe(".csv,.xlsx");
+  fireEvent.change(input, { target: { files: [new File(["x"], "old.xls")] } });
+  expect(screen.getByRole("alert").textContent).toBe("不支持旧版 .xls：old.xls，请在 Excel 里另存为 .xlsx 或 CSV");
+  fireEvent.change(input, { target: { files: [new File(["x"], "book.xlsx")] } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(await screen.findByRole("button", { name: "上传" })).toBeTruthy();
   expect(be.calls.some((c) => c.method === "POST")).toBe(false);
 });
