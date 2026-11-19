@@ -2,12 +2,15 @@
 
 dataset 的三种形式：
 - 一个 CSV 路径                → 单表，代码里用变量 df；
-- 一个目录                     → 目录下每个 *.csv（不含 *.dict.csv）是一张表，表名 = 文件名去扩展名；
-- 一个 CSV 路径的 list / tuple → 同上，多表。
+- 一个 xlsx 路径               → 读出一张表时同单表 CSV（df）；读出多张时每个 sheet 一张表，表名 = 文件名.sheet名（dfs）；
+- 一个目录                     → 目录下每个 *.csv（不含 *.dict.csv）和 *.xlsx 是表，表名 = 文件名去扩展名
+                                 （多 sheet 的 xlsx 展开成 文件名.sheet名）；
+- 一个 CSV / xlsx 路径的 list / tuple → 同上，多表。
 多表时代码里用 dict 变量 dfs（表名 → DataFrame），没有 df。
+xlsx 的读取规则（结构检测、告知、拒绝）在 app/tools/excel_io.py；.xls 不支持（理由见该文件）。
 
 刻意不做的事（留给阶段 4/7）：不声明表间关联（join key 由模型从列名和样例自己判断，
-这正是外部验证闸门要测的"schema 理解"）；不做 DuckDB；不支持 Excel。
+这正是外部验证闸门要测的"schema 理解"）；不做 DuckDB。
 """
 from __future__ import annotations
 
@@ -51,6 +54,16 @@ def is_dict_file(path: str) -> bool:
     return os.path.basename(path).lower().endswith(".dict.csv")
 
 
+def is_excel_file(path) -> bool:
+    from app.tools.excel_io import is_excel
+    return is_excel(path)
+
+
+def _is_table_file(f: str) -> bool:
+    low = f.lower()
+    return (low.endswith(".csv") and not is_dict_file(f)) or is_excel_file(low)
+
+
 def table_paths(dataset) -> list[tuple[str, str]] | None:
     """多表数据集返回 [(表名, 路径), ...]（按表名排序）；单个 CSV 返回 None。"""
     if isinstance(dataset, (list, tuple)):
@@ -59,8 +72,7 @@ def table_paths(dataset) -> list[tuple[str, str]] | None:
         dataset = os.fspath(dataset)
         if not os.path.isdir(dataset):
             return None
-        paths = [os.path.join(dataset, f) for f in os.listdir(dataset)
-                 if f.lower().endswith(".csv") and not is_dict_file(f)]
+        paths = [os.path.join(dataset, f) for f in os.listdir(dataset) if _is_table_file(f)]
         if not paths:
             raise NoCSVError("目录里没有 CSV 文件")
     out = {}
@@ -79,21 +91,64 @@ def dataset_label(dataset) -> str:
     return os.fspath(dataset)
 
 
+def excel_tables(name: str, path: str):
+    """读一个 xlsx，返回 [(表名, SheetTable), ...]。表名规则见 excel_io.table_names。"""
+    from app.tools.excel_io import read_xlsx, table_names
+    book = read_xlsx(path)
+    return list(zip(table_names(name, [t.sheet for t in book.tables]), book.tables))
+
+
+def load_warnings(df) -> list[str]:
+    """一张表的读取提示（只有 xlsx 有；CSV 返回空列表）。"""
+    from app.tools.excel_io import WARNINGS_ATTR
+    return list(df.attrs.get(WARNINGS_ATTR) or [])
+
+
+def _warn_suffix(dfs) -> str:
+    n = sum(len(load_warnings(d)) for d in dfs)
+    return f"；读取提示 {n} 条" if n else ""
+
+
 def load_data(dataset, encoding: str | None = None):
-    """返回 (data, 说明文本)。data 是 DataFrame（单表）或 {表名: DataFrame}（多表）。"""
+    """返回 (data, 说明文本)。data 是 DataFrame（单表）或 {表名: DataFrame}（多表）。
+    encoding 只对 CSV 生效；xlsx 不涉及文本编码。"""
     tables = table_paths(dataset)
     if tables is None:
-        df, enc = read_csv_with_encoding(os.fspath(dataset), encoding)
-        return df, f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}"
+        path = os.fspath(dataset)
+        if not is_excel_file(path):
+            df, enc = read_csv_with_encoding(path, encoding)
+            return df, f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}"
+        stem = os.path.splitext(os.path.basename(path))[0]
+        named = excel_tables(stem, path)
+        if len(named) == 1:
+            t = named[0][1]
+            return t.df, (f"{len(t.df)} 行 × {len(t.df.columns)} 列，xlsx 工作表「{t.sheet}」"
+                          + _warn_suffix([t.df]))
+        data = {n: t.df for n, t in named}
+        return data, (f"{len(data)} 张表：" + "，".join(f"{n} {len(d)}×{len(d.columns)}（xlsx）" for n, d in data.items())
+                      + _warn_suffix(data.values()))
     data, parts = {}, []
     for name, path in tables:
+        if is_excel_file(path):
+            try:
+                named = excel_tables(name, path)
+            except Exception as e:  # T11：同 CSV，只带文件名
+                raise TableReadError(str(e), filename=os.path.basename(path)) from e
+            for tname, t in named:
+                if tname in data:
+                    raise DuplicateTableError(f"表名重复：{tname}（{os.path.basename(path)} 里的工作表与另一张表同名）")
+                data[tname] = t.df
+                parts.append(f"{tname} {len(t.df)}×{len(t.df.columns)}（xlsx）")
+            continue
+        if name in data:
+            raise DuplicateTableError(f"表名重复：{name}（{os.path.basename(path)} 与 xlsx 里的工作表同名）")
         try:
             df, enc = read_csv_with_encoding(path, encoding)
         except Exception as e:  # T11：多表里定位到是哪张表，只带文件名
             raise TableReadError(str(e), filename=os.path.basename(path)) from e
         data[name] = df
         parts.append(f"{name} {len(df)}×{len(df.columns)}（{enc}）")
-    return data, f"{len(data)} 张表：" + "，".join(parts)
+    return data, f"{len(data)} 张表：" + "，".join(parts) + _warn_suffix(data.values())
 
 
 def is_multi(data) -> bool:

@@ -36,3 +36,7 @@ starlette==1.7.0
 uvicorn==0.54.0
 python-multipart==0.0.32
 SQLAlchemy==2.1.4
+# 阶段 7.5 第 2 步：xlsx 输入（app/tools/excel_io.py）。原是 dev 依赖（闸门读 UCI 原件），版本不变；
+# venv 实测 openpyxl 2.1 MB + et-xmlfile 0.08 MB，sidecar 会随之变大（打包后增量未量）
+openpyxl==3.1.5
+et-xmlfile==2.0.0

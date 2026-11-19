@@ -106,17 +106,51 @@ def _entries(path: str, prefix: str = ""):
     return [(prefix + f, desc) for f, desc in zip(d["field"].astype(str), d["description"].astype(str))]
 
 
+def excel_dict_paths(xlsx_path: str, sheet: str) -> list[str]:
+    """xlsx 的字典（待 S 拍板）：先找 foo.<sheet名>.dict.csv，没有再退回 foo.dict.csv（对全部 sheet 生效）。"""
+    stem, _ = os.path.splitext(xlsx_path)
+    return [f"{stem}.{sheet}.dict.csv", stem + ".dict.csv"]
+
+
+def _excel_entries(xlsx_path: str, sheet: str, prefix: str = ""):
+    for p in excel_dict_paths(xlsx_path, sheet):
+        if os.path.exists(p):
+            return _entries(p, prefix)
+    return []
+
+
+def _excel_groups(name: str, xlsx_path: str):
+    from app.tools.excel_io import selected_sheet_names, table_names
+    sheets = selected_sheet_names(xlsx_path)
+    return [(tname, sheet) for tname, sheet in zip(table_names(name, sheets), sheets)]
+
+
 def load_retriever(df_path):
     """若存在同名 .dict.csv 则构建检索器，否则返回 None。
     多表数据集（目录或路径列表）：每张表的 .dict.csv 各自成组（字段写成"表名.字段"），
-    检索时按表分组（见 DictRetriever）；没有字典的表不参与分组。"""
-    from app.tools.dataset import table_paths
+    检索时按表分组（见 DictRetriever）；没有字典的表不参与分组。
+    xlsx：每个读出的 sheet 是一张表，字典按 excel_dict_paths 的顺序找；只读出一张表时与单表 CSV 相同（不分组、无前缀）。"""
+    from app.tools.dataset import is_excel_file, table_paths
     tables = table_paths(df_path)
     groups = None
-    if tables is None:
+    if tables is None and not is_excel_file(df_path):
         entries = _entries(dict_path_for(os.fspath(df_path)))
+    elif tables is None:
+        path = os.fspath(df_path)
+        specs = _excel_groups(os.path.splitext(os.path.basename(path))[0], path)
+        if len(specs) == 1:
+            entries = _excel_entries(path, specs[0][1])
+        else:
+            groups = [(t, es) for t, sheet in specs if (es := _excel_entries(path, sheet, f"{t}."))]
+            entries = [e for _name, es in groups for e in es]
     else:
-        groups = [(name, es) for name, p in tables if (es := _entries(dict_path_for(p), f"{name}."))]
+        groups = []
+        for name, p in tables:
+            if is_excel_file(p):
+                groups += [(t, es) for t, sheet in _excel_groups(name, p)
+                           if (es := _excel_entries(p, sheet, f"{t}."))]
+            elif es := _entries(dict_path_for(p), f"{name}."):
+                groups.append((name, es))
         entries = [e for _name, es in groups for e in es]
     if not entries:
         return None

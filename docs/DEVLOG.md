@@ -10654,7 +10654,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 
 ---
 
-## [192] 2026-11-19 · 阶段 7.5 第 1 步：评估地基 · commit <待提交>
+## [192] 2026-11-19 · 阶段 7.5 第 1 步：评估地基 · commit 9b234ea（PR #107）
 
 方案：`docs/roadmap/phase75-assess.md` §0、§2 第 1 步、§4（本步没有改它）。另外按 PR #105 的待定第 1、2、4 条执行：planner 计划过长只记 WARN、不追加 prompt；reviewer 改口径只检出、标 fail，不拒绝修复也不转 replan；本步不把能力对象注入 prompt。**prompt 文本、流水线行为都没有改**，评估层只做观测。
 
@@ -10735,3 +10735,69 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 | `-k test_oracle_pipeline_all_correct` | 2 passed（2187 deselected），385.74s |
 
 日志：`/workspace/work/logs/p75a2_main.log`、`p75a2_evalcases.log`、`p75a2_oracle.log`；指纹原始输出 `p75a2_fp_master.json` / `p75a2_fp_branch.json`；gold 重核 `p75a2_gold_after.log`。跑完闸门后只追加了本段 DEVLOG。工作区收尾时 code_sha12 仍为 `1ee042e1a269`（本轮只改了 B 组的 app/assess/contracts.py、runner.py），code_all_sha12 变为 `79b0392eabc7`。
+
+---
+
+## [193] 2026-11-19 · 阶段 7.5 第 2 步：Excel 输入 · commit <待提交>
+
+只做了第 2 步的第一部分（xlsx 输入）。导出和 `scipy.stats` 没动。
+
+### 改了什么
+- 新增 `app/tools/excel_io.py`，负责读 xlsx。原则是：读出来的 DataFrame 要和「同一份内容按 CSV 读」**形态一致**。表头命名（空表头读成 `Unnamed: k`，重名读成 `x.1`）、int/float 推断、`na_values`（`#N/A`、`NA` 等读成 NaN）、跳过空行，都走和 `read_csv` 同一套规则。CSV 路径在读取时不清洗的东西，xlsx 也不清洗（标题行、两行表头、合计行、文本千分位/百分号/货币符号、尾部备注），交给分析链路处理，口径和扰动评测一致。xlsx 才有的结构信号（合并区域、公式、单元格格式）只用在两处：能安全修正的就修正，修不了的明确告知。每一项怎么处理，见文件头的表。
+  - **公式没有缓存值时拒绝**（`FormulaNoCacheError`），文案让用户用 Excel/WPS 打开后保存一次再上传。判据看 sheet XML：有 `<f>`，但 `<v>` 缺失或为空。例外是 `t="str"` 加空 `<v>`，这是 Excel 写的真空串，不算缺缓存。openpyxl 生成的文件写的是 `<v />`，会被判成缺缓存。
+  - 横跨全表的**合并**标题行会跳过，标题文字截断后作为模型注解附上（单位常写在标题里）。表头里的合并单元格会把多行表头合成一行列名（`上层-下层`）。表头只有横向合并、下一行就是数据时，表头仍按一行处理，合并格的名字填到它覆盖的每一列。数据区的合并**不填充**（与 read_excel 一致），但会给出提示和模型注解。
+  - 日期格式的单元格读成 ISO 文本（与 CSV 一样是文本列）。没有日期格式、但列名像日期且值在序列号范围内的整数，不做转换，只给提示和注解。百分比格式的数字读底层小数，给提示和注解。
+  - 空 sheet、隐藏 sheet 都跳过并提示。`INCLUDE_HIDDEN_SHEETS` 可以改。全部不可读时拒绝。
+  - 解压后体积按 zip 各成员 `file_size` 之和判，超过 `MAX_XLSX_UNCOMPRESSED_BYTES` 就拒绝（默认 300 MB，可用环境变量 `DATACHAT_MAX_XLSX_BYTES` 改；CSV 单文件 1 GB 上限不变）。zipfile 读成员时不会读出超过声明长度的数据，所以伪造头部也撑不爆内存。
+  - 性能：先做一遍字节级快扫，没有公式、错误值、合并区域的 sheet 跳过逐格 XML 解析。实测 10 万行 × 10 列：本实现 15.9 s，`pd.read_excel` 14.3 s（2 核 aarch64，机器上另有 pytest 在跑）。
+- `app/tools/dataset.py`：单个 xlsx 路径、目录、路径列表都支持 xlsx。读出一张表时和单表 CSV 一样用 `df`，多张时用 `dfs`。xlsx 展开后的表名和 CSV 撞名时拒绝。新增 `excel_tables`、`load_warnings`、`is_excel_file`。docstring 里「不支持 Excel」一句已删。
+- `app/tools/dictionary.py`：xlsx 的字典按 `excel_dict_paths` 的顺序找。只读出一张表时与单表 CSV 相同（不分组、不加前缀）。
+- `app/tools/schema.py`：`describe_df` 末尾追加 `df.attrs["datachat_model_notes"]`。只有 xlsx 读出的表有这个键，所以 CSV 的 prompt 逐字节不变。注解只写列名、不写取值（出境口径）。唯一的例外是被跳过的标题行，按 `MAX_CELL_CHARS` 截断后附上。
+- `app/server/app.py`：上传放行 `.xlsx`。`.xls` 单独给 400 文案；写盘后对 xlsx 做解压体积检查，超限 413，坏 zip 400。详情和预览按 sheet 展开；xlsx 的读取提示放在顶层 `warnings` 和每张表的 `preview.tables[].warnings`。CSV 的响应不多出这两个键。
+- `requirements.txt`：openpyxl 3.1.5、et-xmlfile 2.0.0 从 dev 依赖移到运行依赖，版本不变，没装新包。venv 实测分别占 2.1 MB 和 0.08 MB；sidecar 打包后会增大多少，没量。
+- 前端：上传框 `accept=".csv,.xlsx"`；前端检查放行 .xlsx，.xls 给单独文案；上传区说明改成「CSV 或 xlsx」；预览下逐条显示读取提示；xlsx 不显示编码提示；`failTip` 加了公式缓存和 xlsx 两类建议。
+
+### 待 S 定
+1. **表名规则**：单 sheet 用文件名，多 sheet 用 `文件名.sheet名`。「几张」按**实际读出**的算：新建工作簿默认带的空 Sheet2/Sheet3、隐藏的辅助表，不会让单表文件变成多表。连接符在 `excel_io.SHEET_NAME_SEP`。
+2. **字典挂法**：先找 `foo.<sheet>.dict.csv`，找不到再退回 `foo.dict.csv`（对所有 sheet 生效），见 `dictionary.excel_dict_paths`。
+3. **体积上限**：S 11-19 定为解压后 300 MB（`excel_io.MAX_XLSX_UNCOMPRESSED_BYTES`）。1 GB 解压后约千万级单元格，sidecar 内存会到 GB 级；先按 300 MB 上线，量完真实大文件的内存峰值再谈放宽。
+4. 隐藏 sheet 默认跳过（`INCLUDE_HIDDEN_SHEETS=False`）；多行表头的连接符 `-`（`HEADER_JOIN`）。
+
+### 偏离和理由
+- **文本单元格里的纯数字（如 `00123`）保持文本**，CSV 会读成整数。这是唯一一处有意和 CSV 不一致：Excel 里存成文本是用户的明确意图，读成整数会丢前导零，静默出错。
+- Excel 不区分整数和浮点（录入 2463.0 存的就是 2463），所以数值列可能是 int64，而对应 CSV 是 float64。验收比对对这一点放宽，只要求数值列两边都是数值。
+- 用户可见的「读取提示」只放在上传预览和加载说明里（`load` 步骤的 content 末尾写「读取提示 N 条」），**没有**进每轮的 `res.warnings`，免得同一条提示每轮都重复一遍。影响计算的几项通过模型注解交给模型。
+- 改了前端说明文字（上传区那两行），视觉快照基线可能需要重登。本次 e2e 按要求带 `--grep-invert 视觉`，没跑视觉。
+
+### 测试
+新增 `tests/test_excel_io.py`，33 条。fixture 全部用 openpyxl 在 tmp_path 里现场生成，仓库里不放二进制。
+- perturb 的 9 个变体：`test_perturb_variant_xlsx_matches_csv[<kind>]`，以 orders.csv 为底。断言 xlsx 版读出的 DataFrame 和 CSV 版全等（数值列 int/float 除外，原因见上），并断言每个变体的读取提示。另有 `test_perturb_expectations_cover_all_kinds`。
+- xlsx 独有项：`test_real_merged_title_and_header`、`test_model_notes_reach_prompt_without_cell_values`、`test_header_not_in_first_row`、`test_unmerged_title_row_kept_like_csv`、`test_header_horizontal_merge_over_data`、`test_formula_without_cached_value_is_rejected`、`test_formula_with_cached_value_reads_cache`、`test_total_row_from_sum_formula`、`test_date_serials`、`test_number_formats_and_text_numbers`、`test_error_values`、`test_empty_and_hidden_sheets`、`test_multi_sheet_tables`、`test_dictionary_mounting`、`test_size_limit_uses_uncompressed_size`、`test_default_limit_is_300mb`、`test_two_blank_rows_inside_data_skipped`。
+- 上传接口：`test_upload_xlsx_preview_and_warnings`、`test_upload_multi_sheet_xlsx`、`test_upload_formula_without_cache_shows_error`、`test_upload_rejects_xls_bad_zip_and_oversize`、`test_csv_upload_response_has_no_new_keys`。
+- 分析链路（用假模型）：`test_analyze_xlsx_single_and_multi`。
+- vitest：改 `v2a.test.tsx`「上传区：非 .csv / .xlsx 前端拦下」，新增「旧版 .xls 单独说明…」；`views.test.tsx` 新增「xlsx 预览：读取提示逐条显示」。
+
+### 闸门（2026-11-19，aarch64 沙箱，worktree feat/p75-excel，基于 f8167d3）
+所有代码改动完成后，每段各跑一次，一次只跑一段（dc_assess 同时也在跑 pytest）。日志在 `/workspace/work/logs/p75e_*.log`。
+| 段 | 结果 |
+|---|---|
+| pytest 主段（`--ignore=tests/test_eval_cases.py -k "not oracle"`） | 1882 passed，0 failed，28 deselected（其中新增 33 条），1025 s |
+| tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`，worktree 环境问题，同 [189] |
+| `-k test_oracle_pipeline_all_correct` | 2 passed，692 s |
+| vitest（ui/web，node24） | 27 个文件，898 passed；另 `tsc --noEmit` 和改动文件的 eslint 都无报错 |
+| e2e（`--grep-invert 视觉`） | **没跑通，环境问题**：沙箱缺 `libatk-1.0.so.0`，chromium 起不来，用例全部在 1–12 ms 内红，只有 1 条不开浏览器的用例通过。要修复得跑 `npx playwright install-deps chromium`（apt 装系统库，见 HANDOVER:102）。按「装新包先问」的约定没有装，待 S 定 |
+
+### 11-19 补丁（按 S 11-19 的决定）
+- **xlsx 上限改为解压后 300 MB**（`excel_io.MAX_XLSX_UNCOMPRESSED_BYTES` 默认值，注释写了理由）。CSV 单文件 1 GB 不动。前端文案里的「单个文件不超过 1 GB」说的是上传文件本身的上限（CSV 和 xlsx 都适用），没改；xlsx 解压后超限由后端 413 报出，文案里带「超过上限 300 MB」。
+- **数据指纹覆盖 xlsx**：`report._dataset_files` 的目录扫描认 `.csv` 和 `.xlsx`。xlsx 不展开 sheet，登记原始字节的 sha256 和文件大小（`report.fingerprint_record`），不做 CRLF 归一（会改坏 zip 字节）。字典除了 `foo.dict.csv`，再按文件名找同目录的 `foo.*.dict.csv`（各 sheet 专属字典，不打开工作簿；可能多认，多认只让指纹更敏感）。`evalset_fingerprint`、`fingerprint.judge_fingerprint` 改为共用 `report.dataset_fingerprint_files` + `fingerprint_record`，`datasets_metadata` 同步。之前全是 xlsx 的目录数据集，数据指纹里一个文件都没有。
+  - CSV 指纹值不变：现有评测数据集改前改后实测都是 `evalset 672b52a3a6b0`、`judge 289474f4d943`，`datasets_metadata` 逐字段相同；`tests/test_fingerprint_xlsx.py` 用改动前的算法原样重算，逐值比对钉住。
+- **多行表头的模型注解**：表头用 `-` 连接成列名时，注解点名这些列，提醒列名本身含 `-`，取值写 `df['金额-线上']`（多表时 `dfs[表名][...]`）。只写列名，不写取值。
+- **字典路径**：`excel_dict_paths` 是拼出来的（`去扩展名的文件名.sheet名.dict.csv`），不从文件名反解析，所以 sheet 名带点、文件名带点都不会错配。已知的歧义（不修）：`foo.xlsx` 的 sheet `bar` 和另一个 `foo.bar.xlsx` 共用 `foo.bar.dict.csv`；这两者展开后的表名本来也撞，`foo.bar.csv` 那种情况已按撞名拒绝。
+- 新增测试：`test_dictionary_dotted_sheet_and_file_names`、`test_multirow_header_note_tells_bracket_access`、`test_xlsx_text_cell_keeps_leading_zeros`；`test_default_limit_is_1gb` 改名 `test_default_limit_is_300mb`；新文件 `tests/test_fingerprint_xlsx.py` 5 条。
+- 闸门（2026-11-19 补丁后重跑，每段开跑前确认没有别的 pytest；日志 `/workspace/work/logs/p75e2_*.log`）：
+  | 段 | 结果 |
+  |---|---|
+  | pytest 主段 | 1890 passed，0 failed，28 deselected（比上一轮多 8 条：excel_io 3 条、fingerprint_xlsx 5 条），812 s |
+  | tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`，worktree 环境问题，同上 |
+  | `-k test_oracle_pipeline_all_correct` | 2 passed，413 s |
+  | vitest / e2e | 前端没改，未跑 |

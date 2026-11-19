@@ -3,7 +3,8 @@
 接口（除 /health 和前端静态文件外都要 Authorization: Bearer <token>；图表另可用 ?token=，方便 <img>）：
     GET    /health
     POST   /shutdown                     桌面壳退出前请求后端自行退出（202；未挂退出钩子时 503）
-    POST   /datasets                     multipart：files（一个或多个 CSV，可含 *.dict.csv 字典）、name
+    POST   /datasets                     multipart：files（一个或多个 CSV / xlsx，可含 *.dict.csv 字典）、name；
+                                         .xls 拒绝；xlsx 另按解压后体积限（app/tools/excel_io.py）
     GET    /datasets                     列表
     GET    /datasets/{id}?rows=20        详情（文件、每张表的列与概要）；带 rows（1–100）时加每张表前 N 行预览，
                                          单元格一律字符串或 null（阶段 5 F1.1：预览与详情合并，每个文件只读一遍）
@@ -80,6 +81,8 @@ from app.server.db import (ChatSession, Dataset, DatasetFile, DatasetNote, Event
                            make_sessionmaker, now)
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024        # 单个文件 1 GB
+# xlsx 另按解压后体积限（app/tools/excel_io.MAX_XLSX_UNCOMPRESSED_BYTES，默认 300 MB，可用 DATACHAT_MAX_XLSX_BYTES 改）
+UPLOAD_SUFFIXES = (".csv", ".xlsx")
 MAX_FILES = 50
 SETTING_KEYS = ("model", "base_url", "timeout")
 TIMEOUT_RANGE = (5.0, 600.0)
@@ -258,7 +261,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         if not detail:
             return out
         from app.tools.csv_io import read_csv_with_encoding
-        from app.tools.dataset import is_dict_file, table_paths
+        from app.tools.dataset import excel_tables, is_dict_file, is_excel_file, load_warnings, table_paths
         target = dataset_target(ds)
         try:
             tp = table_paths(target)
@@ -267,11 +270,23 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                                       context=f"dataset={ds.id}")
             return out
         multi = tp is not None
-        cols, parts, errors, previews = {}, [], [], []
+        cols, parts, errors, previews, warns = {}, [], [], [], []
+
+        def read_file(name, path):
+            """→ [(表名, df, 编码说明)]。CSV 一个文件一张表；xlsx 每个读出的 sheet 一张表（阶段 7.5 第 2 步）。"""
+            if not is_excel_file(path):
+                df, enc = read_csv_with_encoding(path)
+                return [(name, df, enc)]
+            stem = os.path.splitext(os.path.basename(path))[0]
+            named = excel_tables(name if multi else stem, path)
+            if not multi and len(named) == 1:
+                return [("df", named[0][1].df, "xlsx")]
+            return [(t, st.df, "xlsx") for t, st in named]
+
         for name, path in tp or [("df", target)]:
             filename = os.path.basename(path)
             try:
-                df, enc = read_csv_with_encoding(path)
+                read = read_file(name, path)
             except Exception as e:  # noqa: BLE001
                 msg = user_error("dataset", e, trace_id=secrets.token_hex(16),
                                  context=f"dataset={ds.id} file={filename}")
@@ -279,14 +294,22 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 parts.append(f"{name} 读取失败")
                 previews.append({"name": name, "filename": filename, "error": msg})
                 continue
-            cols[name] = [str(c) for c in df.columns]
-            parts.append(f"{name} {len(df)}×{len(df.columns)}（{enc}）" if multi
-                         else f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}")
-            if rows is not None:
-                previews.append(preview_table(name, filename, df, enc, rows))
-            del df
+            if not multi and len(read) > 1:     # 单个 xlsx 读出多张表 = 多表数据集
+                multi = True
+            for tname, df, enc in read:
+                cols[tname] = [str(c) for c in df.columns]
+                parts.append(f"{tname} {len(df)}×{len(df.columns)}（{enc}）" if multi
+                             else f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}")
+                w = load_warnings(df)
+                if w:
+                    warns += [f"{tname if multi else filename}：{x}" for x in w]
+                if rows is not None:
+                    previews.append(preview_table(tname, filename, df, enc, rows, w))
+            del read
         out["tables"] = cols
         out["summary"] = (f"{len(parts)} 张表：" + "，".join(parts)) if multi else parts[0]
+        if warns:                        # 只有 xlsx 有读取提示；CSV 数据集的响应不多这个键
+            out["warnings"] = warns
         if errors:                       # 任一张读坏，分析（load_data）整体会失败，所以在顶层也报
             out["error"] = "；".join(errors)
         if rows is not None:
@@ -295,7 +318,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         return out
 
     def dataset_target(ds: Dataset) -> str:
-        """单表 → CSV 路径（同目录的同名 .dict.csv 自动作字典）；多表 → 目录。"""
+        """单个数据文件 → 它的路径（CSV 或 xlsx；同目录的同名 .dict.csv 自动作字典）；多个 → 目录。"""
         tables = [f for f in ds.files if not f.filename.lower().endswith(".dict.csv")]
         return tables[0].path if len(tables) == 1 else os.path.dirname(ds.files[0].path)
 
@@ -363,13 +386,16 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             s = s[:PREVIEW_CELL_MAX] + "…"
         return s
 
-    def preview_table(name, filename, df, enc, rows):
+    def preview_table(name, filename, df, enc, rows, warnings=None):
         stats = {"bidi_stripped": 0, "truncated_cells": 0}
         columns = [preview_cell(c, stats) or "" for c in df.columns]
         body = [[preview_cell(v, stats) for v in r] for r in df.head(rows).itertuples(index=False, name=None)]
-        return {"name": name, "filename": filename, "encoding": enc,
-                "total_rows": int(len(df)), "total_columns": int(len(df.columns)),
-                "columns": columns, "dtypes": [str(t) for t in df.dtypes], "rows": body, **stats}
+        out = {"name": name, "filename": filename, "encoding": enc,
+               "total_rows": int(len(df)), "total_columns": int(len(df.columns)),
+               "columns": columns, "dtypes": [str(t) for t in df.dtypes], "rows": body, **stats}
+        if warnings:                     # xlsx 的读取提示（合并单元格、跳过的 sheet 等）；CSV 没有这个键
+            out["warnings"] = [preview_cell(w, {"bidi_stripped": 0, "truncated_cells": 0}) for w in warnings]
+        return out
 
     # ------------------------------------------------------------------ 路由
     @app.get("/health")
@@ -416,6 +442,16 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         logger.info("导出 PNG：%s（%d 字节）", os.path.basename(path), len(data))
         return {"path": path}
 
+    def check_xlsx(path, fn):
+        """xlsx 上传后按解压后体积判（zip 头里各成员 file_size 之和）；坏文件 400，超限 413。"""
+        from app.tools.excel_io import XlsxInvalidError, XlsxTooLargeError, check_size
+        try:
+            check_size(path)
+        except XlsxTooLargeError as e:
+            raise HTTPException(413, f"{e}：{fn}") from None
+        except XlsxInvalidError as e:
+            raise HTTPException(400, f"{e}：{fn}") from None
+
     @app.post("/datasets", dependencies=[Depends(auth)])
     def create_dataset(files: list[UploadFile] = File(...), name: str = Form(""), db=Depends(db_dep)):
         if not files or len(files) > MAX_FILES:
@@ -423,8 +459,10 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         names = []
         for f in files:
             fn = os.path.basename((f.filename or "").replace("\\", "/"))
-            if not fn or fn.startswith(".") or not fn.lower().endswith(".csv"):
-                raise HTTPException(400, f"只支持 CSV 文件：{f.filename!r}")
+            if fn.lower().endswith(".xls"):
+                raise HTTPException(400, f"不支持旧版 .xls 文件：{fn}。请在 Excel 里另存为 .xlsx 或 CSV 后上传")
+            if not fn or fn.startswith(".") or not fn.lower().endswith(UPLOAD_SUFFIXES):
+                raise HTTPException(400, f"只支持 CSV 或 xlsx 文件：{f.filename!r}")
             if fn.lower() in {n.lower() for n in names}:
                 raise HTTPException(400, f"文件名重复：{fn}")
             names.append(fn)
@@ -445,6 +483,8 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                             raise HTTPException(413, f"文件超过 {MAX_FILE_BYTES // 1024 ** 2} MB：{fn}")
                         h.update(chunk)
                         out.write(chunk)
+                if fn.lower().endswith(".xlsx"):
+                    check_xlsx(path, fn)
                 ds.files.append(DatasetFile(filename=fn, path=path, size=size, sha256=h.hexdigest()))
             db.commit()
         except BaseException:

@@ -14,7 +14,7 @@ import { ThemePicker } from "./ThemePicker";
 type View = { kind: "home" } | { kind: "dataset"; id: string } | { kind: "session"; id: string } | { kind: "settings" };
 
 const isDict = (f: string) => /\.dict\.csv$/i.test(f);
-const stem = (f: string) => f.replace(/\.csv$/i, "");
+const stem = (f: string) => f.replace(/\.(csv|xlsx)$/i, "");
 
 export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client; initialKey: KeyStatus; desktop?: boolean }) {
   // 阶段 6 收尾：桌面壳里导出 PNG 改由后端写进「下载」文件夹（charts/pngSaver.ts）；浏览器模式不注册，照旧 <a download>
@@ -287,10 +287,13 @@ function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
 
 const MAX = 1024 ** 3; // 与后端 MAX_FILE_BYTES 一致（app.py），前端只做提示，后端仍会拒
 
-/** 选中的文件先过前端检查：非 .csv、超过 1 GB 直接拦下（后端仍会再拒一次）。返回错误文案或 null。 */
+/** 选中的文件先过前端检查：非 .csv / .xlsx、超过 1 GB 直接拦下（后端仍会再拒一次；xlsx 解压后体积只有后端能判）。
+ *  返回错误文案或 null。 */
 function checkFiles(list: File[]): string | null {
-  const bad = list.filter((f) => !/\.csv$/i.test(f.name));
-  if (bad.length) return `只支持 .csv；${bad.map((f) => f.name).join("、")} 不支持`;
+  const xls = list.filter((f) => /\.xls$/i.test(f.name));
+  if (xls.length) return `不支持旧版 .xls：${xls.map((f) => f.name).join("、")}，请在 Excel 里另存为 .xlsx 或 CSV`;
+  const bad = list.filter((f) => !/\.(csv|xlsx)$/i.test(f.name));
+  if (bad.length) return `只支持 .csv 和 .xlsx；${bad.map((f) => f.name).join("、")} 不支持`;
   const huge = list.find((f) => f.size > MAX);
   if (huge) return `${huge.name} 超过 1 GB`;
   return null;
@@ -313,9 +316,9 @@ function Upload({ onPick, err, setErr }: { onPick: (f: File[]) => void; err: str
         <span className="upload-icon"><IconUpload size={15} /></span>
         <span className="upload-text">
           <span className="upload-main">拖入文件或点击上传</span>
-          <span className="upload-sub">仅 CSV，单个文件不超过 1 GB</span>
+          <span className="upload-sub">CSV 或 xlsx，单个文件不超过 1 GB</span>
         </span>
-        <input type="file" accept=".csv" multiple aria-label="选择 CSV 文件"
+        <input type="file" accept=".csv,.xlsx" multiple aria-label="选择 CSV 文件"
           onChange={(e) => (pick(Array.from(e.target.files ?? [])), (e.target.value = ""))} />
       </label>
       {err ? <p className="upload-err" role="alert">{err}</p> : null}
@@ -421,11 +424,11 @@ function HeroUpload({ onPick }: { onPick: (f: File[]) => void }) {
       onDragLeave={() => setDrag(false)} onDrop={(e) => (e.preventDefault(), setDrag(false), send(Array.from(e.dataTransfer.files)))}>
       <span className="upload-icon"><IconUpload size={18} /></span>
       <span className="em-main">拖入文件到此处</span>
-      <span className="em-sub">CSV · 可多选 · 单个文件不超过 1 GB</span>
+      <span className="em-sub">CSV / xlsx · 可多选 · 单个文件不超过 1 GB</span>
       <button type="button" className="primary" onClick={() => input.current?.click()}>
         <IconPlus size={13} />选择文件
       </button>
-      <input ref={input} type="file" accept=".csv" multiple hidden aria-label="选择文件（首屏）"
+      <input ref={input} type="file" accept=".csv,.xlsx" multiple hidden aria-label="选择文件（首屏）"
         onChange={(e) => (send(Array.from(e.target.files ?? [])), (e.target.value = ""))} />
       {err ? <p className="upload-err" role="alert">{err}</p> : null}
     </div>
