@@ -254,6 +254,12 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
         return
 
     notes_text = format_notes(notes) if notes else ""
+    # 阶段 7 A3：问题里的词在数据里的实际写法。没有命中时是空串，prompt 不变
+    from app.tools.value_hints import value_hints
+    hints = value_hints(question, df, schema)
+    if hints:
+        res.value_hints = hints
+        notes_text = f"{notes_text}\n{hints}" if notes_text else hints
     from app.memory import context as memctx
     mc = memctx.build(res.memory_mode, history, token_budget=tracker.usage.budget,
                       history_messages=history_messages, prev_clarify=prev_clarify,
@@ -356,6 +362,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 res.steps.append(_workflow_step(node, upd, dt))
                 if node == "executor":
                     res.executed = not upd.get("error")
+                    if upd.get("sanity_issue") and not res.sanity_issue:
+                        res.sanity_issue = upd["sanity_issue"]
                     _tally_charts(res, upd)
                     if res.executed:   # 工作流只在失败时重试，最后一次成功的执行就是展示图的那次
                         res.chart_errors_shown = list(upd.get("chart_errors") or [])
