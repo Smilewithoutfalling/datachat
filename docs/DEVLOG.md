@@ -10597,7 +10597,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 | vitest | 没跑，ui/ 没有改动 |
 第一次跑 e2e 时 41 条红，原因是沙箱缺 libatk，跟代码无关。执行 `playwright install-deps chromium` 之后重跑，三档全绿。
 
-## [189] 2026-11-18 · 阶段 7 A2 结果合理性校验 + A3 枚举值召回 · commit <待提交>
+## [189] 2026-11-18 · 阶段 7 A2 结果合理性校验 + A3 枚举值召回 · commit b1c6745（PR #104）
 
 方案：`docs/roadmap/phase7-a2a3.md`（方案与实现同 PR，基于 #103）。题库、判分、基线都不动。
 
@@ -10633,7 +10633,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 
 ---
 
-## [待编号] 阶段 7.5 方案：评估与评测分层 <待提交>
+## [190] 2026-11-19 · 阶段 7.5 方案：评估与评测分层 · commit <待提交>
 
 - 新增 `docs/roadmap/phase75-assess.md`（只有方案，没有代码）。编号定为 7.5，因为 HANDOVER §11 的阶段 8 已经留给 Web 上线。BACKLOG 新开「阶段 7.5」分区，11-17 的冻结只约束评测条目。
 - 决策：
