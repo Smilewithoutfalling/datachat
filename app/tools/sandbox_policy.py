@@ -1,20 +1,13 @@
 """沙箱里模型代码可用的 builtins 与 import 白名单（主进程的 run_trusted 与子进程 worker 共用）。"""
 
-_SAFE_NAMES = [
-    "abs", "min", "max", "sum", "len", "range", "round", "sorted",
-    "list", "dict", "set", "tuple", "str", "int", "float", "bool",
-    "enumerate", "zip", "map", "filter", "print", "isinstance",
-    "any", "all", "reversed", "repr",
-    "ValueError", "KeyError", "TypeError", "IndexError", "ZeroDivisionError", "Exception",
-]
+from app.tools.sandbox_caps import CAPS
+
+# 阶段 7.5 第 1 步：两份名单都从沙箱能力对象派生（app/tools/sandbox_caps.py 是唯一来源），语义与派生前逐字一致。
+_SAFE_NAMES = list(CAPS.safe_builtins)
 
 # 允许 import 的模块（按顶层包名）。模型（如 Qwen）常无视"不要 import"写 import numpy/matplotlib；
 # pandas 的部分方法也会在运行时延迟导入（B28）。这些包本身已在命名空间里，放行不扩大攻击面。
-ALLOWED_IMPORTS = frozenset({
-    "numpy", "pandas", "matplotlib", "math", "statistics", "datetime", "calendar",
-    "re", "collections", "itertools", "functools", "decimal", "json", "warnings",
-    "time", "locale", "_strptime",
-})
+ALLOWED_IMPORTS = CAPS.allowed_imports
 
 
 def make_safe_builtins(builtins_module) -> dict:

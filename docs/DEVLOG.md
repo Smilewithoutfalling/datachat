@@ -10651,3 +10651,50 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 - 图层的问题（「图N」编号、图例、红绿语义、「14」被裁掉）归到 M13 图表小批。其中 `bbox_inches="tight"` 会改变 PNG 的字节，按字节契约变更处理，需要重新生成 chart_fixtures 和视觉基线。
 - 补记 [190]：#105 squash 时 commit body 用了 GitHub 默认的提交列表，没有承接 PR 描述，违反了刚定的 §5。从 #106 起，合并时显式传入 PR 描述作为 commit body。
 - S 已定三点：会话标题用本地规则生成（jieba），不调模型；实施顺序为图表小批 → U1 → U2 → U3 → U4；只改设置页的右侧留白，聊天页的 max-width 不动。
+
+---
+
+## [待编号] 2026-11-19 · 阶段 7.5 第 1 步：评估地基 · commit <待提交>
+
+方案：`docs/roadmap/phase75-assess.md` §0、§2 第 1 步、§4（本步没有改它）。另外按 PR #105 的待定第 1、2、4 条执行：planner 计划过长只记 WARN、不追加 prompt；reviewer 改口径只检出、标 fail，不拒绝修复也不转 replan；本步不把能力对象注入 prompt。**prompt 文本、流水线行为都没有改**，评估层只做观测。
+
+### 改了什么
+- **沙箱能力对象**（`app/tools/sandbox_caps.py`，新增）：纯数据的 frozen dataclass，作为唯一来源。内容包括 allowed_imports、safe_builtins、单表和多表分别注入的数据变量（df / dfs）、公共变量（pd、np、plt、chart、chart_path）、result_var，以及 forbidden_builtins（Python builtins 里有、沙箱不给的公开名字）。`sandbox_policy._SAFE_NAMES` / `ALLOWED_IMPORTS` 改为从它派生，旧字面量钉在测试里，逐字比对一致。
+- **节点快照**（`app/assess/snapshot.py`，新增；`app/core/service.py` 接线）：`analyze(..., snapshot_dir=)` 或环境变量 `DATACHAT_SNAPSHOT_DIR` 打开，默认关闭。每次运行写一个 JSONL 文件，分三类行：run / node / end。node 行记录节点名、第几次出现、输入 AgentState（df 不存，存数据集路径 + sha256 指纹；result 用 wire 编码）、updates、耗时、token 增量（取 UsageTracker 前后两次的差）、本节点模型调用的 prompt sha256 和原始响应、today。run 行记录 today、today_source（param / local_date）、列名、改写记录。写快照失败只记日志，不影响分析。开关关闭时 service 里只多一次 `start()` 调用（返回 None），其余快照分支都不进入。
+- **单节点回放**（`app/assess/replay.py` + `scripts/assess/replay_node.py`）：模型节点重建 prompt 后比 sha256，默认现调模型，`--recorded` 用录下的响应，这时还比较 updates。executor 先核对数据指纹，不一致就拒绝回放，一致再执行同一段代码。「一致」的口径写在 `results_equal` 的 docstring 里：列名、行数、索引一致，数值满足 rel 1e-9 / abs 1e-12，NaN 视为相等，行序必须一致。today 一律取快照里的值，快照里没有 today 就拒绝回放。
+- **节点契约**（`app/assess/contracts.py`、`app/assess/code_refs.py`，新增）：planner.length / planner.columns / codegen.parse / codegen.columns / codegen.result / codegen.imports / codegen.names / executor.shape / executor.sanity / reviewer.scope / summarizer.grounding，共 11 条，都标为 step=1。每条返回 ok / warn / fail 和原因。summarizer 直接调用 `grounding.unverified_numbers`，证据口径与 `service._run_workflow` 末尾一致。
+- **assess / --diff**（`app/assess/runner.py` + `scripts/assess/assess.py`）：对快照目录跑全部契约，输出 JSON 和 markdown。`--diff` 按「题 → 环（节点#次）→ 契约」对齐，列出状态变化，以及只在一边出现的题和环。只列不判，退出码恒为 0。
+- `app/eval/fingerprint.py`：`app/assess/snapshot.py` 归 A 组（它在 analyze 执行路径上，按「宁可误判不可比」处理），`app/assess/` 其余文件归 B 组。不做这一步，`_assert_partition` 会让 `run_eval.py` 直接报错。
+
+### 偏离和理由
+- `sandbox_worker.py:216-220` **没改**。worker 在子进程里按名字逐个构造对象，名字只能写字面量。一致性靠两条测试保证：用 AST 读 worker 源码比对 ns 的键，再真跑一次子进程探测单表和多表的注入名。
+- forbidden_builtins 按当前解释器的 `dir(builtins)` 现算，没有写成静态表（`sandbox_caps.py:34-39`）。这样换 Python 版本后不会漏掉新增的内建，也和 `sandbox_name_hint` 的 `hasattr(builtins, name)` 口径一致。
+- today：截至本步，图里的 5 个节点都**不读** today，读它的只有图之前的问题改写（M7）。改写结果已经体现在 node 行的 input_state.question 里。快照和回放都带着 today，但单节点回放用不到它。改写本身不是图节点，本步不支持回放它。
+- 快照只存 prompt 的 sha256，不存全文（`snapshot.py` attach）。全文可以从 state 重算，存哈希就够做逐字节比对，同时避免样例数据重复落盘。
+- 只有 workflow 记节点；react 只记 run / end 两行（react 没有节点边界）。
+- reviewer.scope 有一条明确的口径（`contracts.py` reviewer_scope 的 docstring）：修复前引用了 k 个不存在的列时，修复后最多可以新增 k 个真实列，因为把拼错的列名改对不算换口径。除此之外，列或过滤条件的任何增删都判 fail。**已知后果**：A2 场景下把筛选值改成数据里的实际写法（「华东」→「华东区」）也会判 fail。第 3 步要据此决定「拒绝修复」的边界。
+- planner.columns 只检查引号里「列名形状」的词（ASCII snake_case、带下划线），中文列名一律不查。在表结构、字段说明、口径块、问题原文里出现过的词不算缺失，拒答计划和反问也不查。
+- executor.shape 遇到报错或没有结果时判 fail（「有结果」是形态契约的前提）。
+- 快照的「题键」是 `数据集文件名::原问题`，评测 runner 没有传 case_id（本步不改评测）。同一个键出现多次时依次加 #2、#3。
+- `replay_node.py` 不一致时退出码为 1：它是回放验收，不是差分。
+
+### 测试（新增 5 个文件，69 条）
+- `tests/test_assess_caps.py`：派生名单与旧字面量一致；worker 的 ns 与能力对象一致（AST + 实跑子进程，单表和多表）；forbidden_builtins 的口径。
+- `tests/test_assess_snapshot.py`：`test_snapshot_off_is_byte_identical`（关闭时不建记录器、不落文件；打开时事件、结果、每个 prompt 都与关闭时一致）；节点、state、token、today 的记录；env 开关；一次运行一个文件；写失败不影响分析；指纹分区。
+- `tests/test_assess_replay.py`：planner / codegen / reviewer / summarizer 在 recorded 模式下 prompt 逐字节一致、updates 一致；live 模式下重建同一个 prompt；上游被篡改时能检出；executor 两次出现的回放都一致，篡改代码后能检出；today 取快照值（把 `date.today` 改成会抛异常也照样通过），没有 today 就拒绝；数据被改后拒绝回放；多表场景；`results_equal` 的口径。
+- `tests/test_assess_contracts.py`：11 条契约各至少一正一反。
+- `tests/test_assess_cli.py`：assess 的 JSON 和 markdown；`--diff` 逐题逐环列出 fail→ok 和 absent，退出码 0；同一目录自比为空；坏文件会列出来。
+
+### 离线核对（契约自身的误报，不是准确率）
+- 217 份 gold 代码（ground_truth + alt）跑 codegen 的 5 条契约：217/217 全部 ok，误报 0。
+- 把每份 gold 里第一个被识别出的列名改坏：176 份里有 162 份被 codegen.columns 抓到；另有 26 份没有识别出任何列引用（拒答，或只用到派生变量）。
+
+### 闸门（2026-11-19，aarch64 沙箱，worktree feat/p75a-assess，最后一次改代码之后跑的）
+| 段 | 结果 |
+|---|---|
+| pytest 主段（`--ignore=tests/test_eval_cases.py -k "not oracle"`） | 1918 passed，0 failed（28 deselected），用时 17:51 |
+| tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`。worktree 里 `.git` 是文件，属环境问题，与 #104 相同 |
+| `-k test_oracle_pipeline_all_correct` | 2 passed |
+| e2e / vitest | 没跑，ui/ 没有改动 |
+
+日志：`/workspace/work/logs/p75a_main.log`、`p75a_evalcases.log`、`p75a_oracle.log`。跑完闸门之后只追加了本条 DEVLOG，没有任何测试读取它。
