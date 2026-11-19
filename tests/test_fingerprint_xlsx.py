@@ -12,6 +12,7 @@ import hashlib
 import os
 
 import openpyxl
+import pytest
 
 from app.eval import fingerprint as fp
 from app.eval import report as rp
@@ -68,6 +69,19 @@ def _legacy_evalset(datasets):
     return {"sha256": h.hexdigest()[:12], "files": parts}
 
 
+
+@pytest.fixture
+def repo_tmp():
+    """指纹按相对仓库根的路径记文件（os.path.relpath）。Windows CI 上 pytest 的 tmp_path 在 C:、仓库在 D:，
+    跨盘 relpath 抛 ValueError —— 生产里数据集都在仓库内，不会跨盘；测试数据集因此也建在仓库里，用完删掉。"""
+    import shutil, tempfile
+    from pathlib import Path
+    d = Path(tempfile.mkdtemp(prefix=".fp_tmp_", dir=fp._REPO))
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
 def _csv_datasets(tmp_path):
     single = tmp_path / "one.csv"
     single.write_bytes(b"a,b\r\n1,2\r\n")                    # CRLF：归一规则也要保持
@@ -93,8 +107,8 @@ def test_csv_data_fingerprint_identical_to_pre_xlsx_algorithm_on_real_datasets()
     assert new["sha256"] == old["sha256"]
 
 
-def test_csv_data_fingerprint_identical_on_single_dir_and_list(tmp_path):
-    ds = _csv_datasets(tmp_path)
+def test_csv_data_fingerprint_identical_on_single_dir_and_list(repo_tmp):
+    ds = _csv_datasets(repo_tmp)
     assert fp.judge_fingerprint(ds) == _legacy_judge(ds)
     new = rp.evalset_fingerprint(ds)
     old = _legacy_evalset(ds)
@@ -110,9 +124,9 @@ def _book(path, value):
     wb.save(path)
 
 
-def test_xlsx_dataset_fingerprint_nonempty_and_tracks_content(tmp_path):
+def test_xlsx_dataset_fingerprint_nonempty_and_tracks_content(repo_tmp):
     """只有 xlsx 的目录数据集：数据指纹非空（xlsx 文件在 files 里）；改一个单元格，三处指纹都变。"""
-    d = tmp_path / "xl"
+    d = repo_tmp / "xl"
     d.mkdir()
     book = d / "sales.xlsx"
     _book(book, 1)
@@ -144,9 +158,9 @@ def test_xlsx_record_includes_sha256_and_size(tmp_path):
     assert rp.fingerprint_record(str(csv)) == (b"a\n1\n", hashlib.sha256(b"a\n1\n").hexdigest()[:12])
 
 
-def test_xlsx_sheet_dictionary_in_fingerprint(tmp_path):
+def test_xlsx_sheet_dictionary_in_fingerprint(repo_tmp):
     """xlsx 的字典（foo.dict.csv 和 foo.<sheet>.dict.csv，sheet 名带点也算）改了，数据指纹要变。"""
-    d = tmp_path / "xl"
+    d = repo_tmp / "xl"
     d.mkdir()
     _book(d / "fy.2024.xlsx", 1)
     ds = {"x": str(d)}

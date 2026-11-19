@@ -10801,3 +10801,4 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
   | tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`，worktree 环境问题，同上 |
   | `-k test_oracle_pipeline_all_correct` | 2 passed，413 s |
   | vitest / e2e | 前端没改，未跑 |
+- 11-19 CI 补丁：Windows CI 上 tests 75db322（run 44487294865）有 3 条 test_fingerprint_xlsx 失败。原因是 pytest 的 tmp_path 在 C: 盘、仓库在 D: 盘，指纹调用 os.path.relpath 跨盘时抛 ValueError。生产环境的数据集都在仓库内，不会跨盘，所以改测试不改实现：测试数据集改建在仓库内的临时目录（fixture repo_tmp），用完删除。
