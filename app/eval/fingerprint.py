@@ -64,6 +64,9 @@ _AFFECTS_RESULTS = (
     #      评测里跑 state 只跑了一半，mul_013 因此把「研发部」丢成「全公司」。
     # 它改的是模型输入本身，不是读数方式，必须进 A。
     "app/eval/runner.py",
+    # 阶段 7.5 第 1 步：节点快照。开关关闭时只读一次环境变量、不建记录器，但它在 analyze 的执行路径上
+    # （service 每次都调 start()），按「宁可误判不可比」归 A。app/assess/ 其余文件归 B（见 _EXEMPT_PREFIXES）。
+    "app/assess/snapshot.py",
 )
 
 # 用例模块按前缀吞掉：新加 cases_memory.py 时不必回来改这张表。
@@ -134,6 +137,9 @@ _EXEMPT = {
 }
 _EXEMPT_PREFIXES = {
     "app/server/": "HTTP / 会话存储层，评测不经它",
+    # 阶段 7.5 第 1 步：评估层（契约、单节点回放、assess --diff）。只读快照文件，analyze 不 import 它们，
+    # 不进模型输入、不参与 score_detail。snapshot.py 例外，已在上面归 A（A 优先）。
+    "app/assess/": "评估层，只读快照，不进模型输入也不改判分",
 }
 
 

@@ -67,6 +67,7 @@ def analyze(
     accepted_pairs=None,
     run_suffix: str | None = None,
     prev_clarify: bool = False,
+    snapshot_dir: str | None = None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -105,6 +106,9 @@ def analyze(
     prev_clarify：上一轮是反问（workflow 多轮的 clarify 出口，2026-11-16）。产品从上一条 assistant
              消息的 result_json.clarify 取，评测里 runner 逐轮记录。只给 planner 的 may_clarify，
              不进任何 prompt —— 用户这轮答的就是上一轮要的口径，不该再问。
+    snapshot_dir：阶段 7.5 第 1 步的节点快照目录（app/assess/snapshot.py）；None 时看环境变量
+             DATACHAT_SNAPSHOT_DIR，都没有时不记快照，行为与输出逐字节不变。只观测，不改任何 prompt 与流程；
+             目前只有 workflow 记节点（react 只记 run / end 两行）。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
@@ -113,7 +117,7 @@ def analyze(
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
                              trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today,
                              dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                             run_suffix=run_suffix, prev_clarify=prev_clarify):
+                             run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot_dir=snapshot_dir):
         if ev.type == "done":
             res = ev.result
     return res
@@ -144,6 +148,7 @@ def analyze_stream(
     accepted_pairs=None,
     run_suffix: str | None = None,
     prev_clarify: bool = False,
+    snapshot_dir: str | None = None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -168,6 +173,8 @@ def analyze_stream(
         dataset = os.fspath(dataset)
     res = AnalysisResult(agent=agent, dataset=dataset_label(dataset), question=question, trace_id=trace_id)
     tracker = UsageTracker(budget=token_budget())
+    from app.assess import snapshot as _snapshot
+    snapshot = _snapshot.start(snapshot_dir, trace_id, today)   # 阶段 7.5：默认 None，下面的快照分支都不走
     from app.memory.config import resolve_memory_mode
     # 测试专用的 checkpointer 多轮（memory）不走记忆模块：它自己带着全部消息
     res.memory_mode = "off" if memory is not None else resolve_memory_mode(memory_mode)
@@ -185,7 +192,7 @@ def analyze_stream(
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                  memory=memory, thread_id=thread_id, history=history, encoding=encoding,
                  rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                 run_suffix=run_suffix, prev_clarify=prev_clarify)
+                 run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot=snapshot)
     try:
         for ev in inner:
             if cancelled():
@@ -202,6 +209,8 @@ def analyze_stream(
             res.result_digest = digest(res.result)
         if res.error_kind != "llm":   # 停止可能盖掉先前的 llm 错误：llm_kind 只跟随最终的 error_kind
             res.llm_kind = None
+        if snapshot is not None:
+            snapshot.end(res)
     if log:
         from app.tools.persist import log_run
         log_run({**res.to_record(), "df_path": res.dataset})
@@ -215,7 +224,7 @@ def analyze_stream(
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
          rewrite=None, today=None, dataset_notes=None, accepted_pairs=None, run_suffix=None,
-         prev_clarify=False):
+         prev_clarify=False, snapshot=None):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -267,10 +276,14 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     res.history_tokens, res.memory_trimmed = mc.history_tokens, list(mc.trimmed)
     res.warnings += mc.warnings
     metrics_block, pairs_block = _memory_blocks(res, agent, question, dataset_notes, accepted_pairs)
+    if snapshot is not None:
+        snapshot.begin(original_question=res.question, question=question, dataset=dataset, encoding=encoding,
+                       df=df, agent=agent, memory_mode=res.memory_mode, rewrite=res.rewrite,
+                       max_attempts=max_attempts, exec_timeout=exec_timeout, tracker=tracker)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
                       dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup,
-                      mc.prev_clarify, planner_history=mc.planner_history)
+                      mc.prev_clarify, planner_history=mc.planner_history, snapshot=snapshot)
     else:
         yield from _run_react(em, res, tracker, cfg, chat_model, df, notes_text, question, dataset,
                    recursion_limit, exec_timeout, memory, thread_id, history, mc, metrics_block, pairs_block,
@@ -322,9 +335,11 @@ def _evidence_with_original(res, question, evidence):
 # ------------------------------------------------------------------ 工作流版
 def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question, dataset,
                   max_attempts, exec_timeout, state_block="", metrics_block="", followup=False,
-                  prev_clarify=False, planner_history=""):
+                  prev_clarify=False, planner_history="", snapshot=None):
     client = LLMClient(cfg, model=chat_model if chat_model is not None
                        else build_chat_model(cfg, sdk_retries=0), tracker=tracker)
+    if snapshot is not None:
+        snapshot.attach(client)     # 阶段 7.5：记下每次模型调用的 prompt 哈希与原始响应（供 --recorded 回放）
     from app.tools.dataset import access_rule, dataset_label, review_access_rule
     state = {
         "question": question, "df_path": dataset_label(dataset), "schema": schema,
@@ -357,6 +372,7 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 now = time.perf_counter()
                 dt, last = now - last, now
                 upd = upd or {}
+                node_input = dict(state) if snapshot is not None else None   # 该节点的输入 = 合并本次 updates 之前的 state
                 state.update(upd)
                 node_time[node] += dt
                 res.steps.append(_workflow_step(node, upd, dt))
@@ -367,6 +383,10 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                     _tally_charts(res, upd)
                     if res.executed:   # 工作流只在失败时重试，最后一次成功的执行就是展示图的那次
                         res.chart_errors_shown = list(upd.get("chart_errors") or [])
+                if snapshot is not None:
+                    t_snap = time.perf_counter()
+                    snapshot.node(node, node_input, upd, dt, tracker)
+                    last += time.perf_counter() - t_snap   # 写快照的时间不算进下一个节点的耗时
                 ev = _workflow_event(em, node, upd, dt, state)
                 if ev is not None:
                     yield ev

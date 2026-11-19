@@ -10645,9 +10645,93 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
   - 交付形态是单机桌面，知识资产按团队共享来设计；团队版另开方案。
 - 依据：评测代码约 1.11 万行，产品代码约 0.99 万行；门禁噪声约 ±6 题，判红线也正好是 6 题。
 
-## [191] 2026-11-19 · 阶段 7.6 方案：页面改造 · commit <待提交>
+## [191] 2026-11-19 · 阶段 7.6 方案：页面改造 · commit 8e189a0（PR #106）
 
 - 新增 docs/roadmap/phase76-ui.md：本次只写方案，不改代码。参照 Folio 首页，只借它的结构。归纳出三处缺口：产品叙事、数据理解、可信度展示（现有的 `partialSignals` 把 warnings 和未核实数字挤在同一条黄条里，要拆开）。改造项分 U1 到 U5，每项附可自动判定的验收。
 - 图层的问题（「图N」编号、图例、红绿语义、「14」被裁掉）归到 M13 图表小批。其中 `bbox_inches="tight"` 会改变 PNG 的字节，按字节契约变更处理，需要重新生成 chart_fixtures 和视觉基线。
 - 补记 [190]：#105 squash 时 commit body 用了 GitHub 默认的提交列表，没有承接 PR 描述，违反了刚定的 §5。从 #106 起，合并时显式传入 PR 描述作为 commit body。
 - S 已定三点：会话标题用本地规则生成（jieba），不调模型；实施顺序为图表小批 → U1 → U2 → U3 → U4；只改设置页的右侧留白，聊天页的 max-width 不动。
+
+---
+
+## [192] 2026-11-19 · 阶段 7.5 第 1 步：评估地基 · commit <待提交>
+
+方案：`docs/roadmap/phase75-assess.md` §0、§2 第 1 步、§4（本步没有改它）。另外按 PR #105 的待定第 1、2、4 条执行：planner 计划过长只记 WARN、不追加 prompt；reviewer 改口径只检出、标 fail，不拒绝修复也不转 replan；本步不把能力对象注入 prompt。**prompt 文本、流水线行为都没有改**，评估层只做观测。
+
+### 改了什么
+- **沙箱能力对象**（`app/tools/sandbox_caps.py`，新增）：纯数据的 frozen dataclass，作为唯一来源。内容包括 allowed_imports、safe_builtins、单表和多表分别注入的数据变量（df / dfs）、公共变量（pd、np、plt、chart、chart_path）、result_var，以及 forbidden_builtins（Python builtins 里有、沙箱不给的公开名字）。`sandbox_policy._SAFE_NAMES` / `ALLOWED_IMPORTS` 改为从它派生，旧字面量钉在测试里，逐字比对一致。
+- **节点快照**（`app/assess/snapshot.py`，新增；`app/core/service.py` 接线）：`analyze(..., snapshot_dir=)` 或环境变量 `DATACHAT_SNAPSHOT_DIR` 打开，默认关闭。每次运行写一个 JSONL 文件，分三类行：run / node / end。node 行记录节点名、第几次出现、输入 AgentState（df 不存，存数据集路径 + sha256 指纹；result 用 wire 编码）、updates、耗时、token 增量（取 UsageTracker 前后两次的差）、本节点模型调用的 prompt sha256 和原始响应、today。run 行记录 today、today_source（param / local_date）、列名、改写记录。写快照失败只记日志，不影响分析。开关关闭时 service 里只多一次 `start()` 调用（返回 None），其余快照分支都不进入。
+- **单节点回放**（`app/assess/replay.py` + `scripts/assess/replay_node.py`）：模型节点重建 prompt 后比 sha256，默认现调模型，`--recorded` 用录下的响应，这时还比较 updates。executor 先核对数据指纹，不一致就拒绝回放，一致再执行同一段代码。「一致」的口径写在 `results_equal` 的 docstring 里：列名、行数、索引一致，数值满足 rel 1e-9 / abs 1e-12，NaN 视为相等，行序必须一致。today 一律取快照里的值，快照里没有 today 就拒绝回放。
+- **节点契约**（`app/assess/contracts.py`、`app/assess/code_refs.py`，新增）：planner.length / planner.columns / codegen.parse / codegen.columns / codegen.result / codegen.imports / codegen.names / executor.shape / executor.sanity / reviewer.scope / summarizer.grounding，共 11 条，都标为 step=1。每条返回 ok / warn / fail 和原因。summarizer 直接调用 `grounding.unverified_numbers`，证据口径与 `service._run_workflow` 末尾一致。
+- **assess / --diff**（`app/assess/runner.py` + `scripts/assess/assess.py`）：对快照目录跑全部契约，输出 JSON 和 markdown。`--diff` 按「题 → 环（节点#次）→ 契约」对齐，列出状态变化，以及只在一边出现的题和环。只列不判，退出码恒为 0。
+- `app/eval/fingerprint.py`：`app/assess/snapshot.py` 归 A 组（它在 analyze 执行路径上，按「宁可误判不可比」处理），`app/assess/` 其余文件归 B 组。不做这一步，`_assert_partition` 会让 `run_eval.py` 直接报错。
+
+### 偏离和理由
+- `sandbox_worker.py:216-220` **没改**。worker 在子进程里按名字逐个构造对象，名字只能写字面量。一致性靠两条测试保证：用 AST 读 worker 源码比对 ns 的键，再真跑一次子进程探测单表和多表的注入名。
+- forbidden_builtins 按当前解释器的 `dir(builtins)` 现算，没有写成静态表（`sandbox_caps.py:34-39`）。这样换 Python 版本后不会漏掉新增的内建，也和 `sandbox_name_hint` 的 `hasattr(builtins, name)` 口径一致。
+- today：截至本步，图里的 5 个节点都**不读** today，读它的只有图之前的问题改写（M7）。改写结果已经体现在 node 行的 input_state.question 里。快照和回放都带着 today，但单节点回放用不到它。改写本身不是图节点，本步不支持回放它。
+- 快照只存 prompt 的 sha256，不存全文（`snapshot.py` attach）。全文可以从 state 重算，存哈希就够做逐字节比对，同时避免样例数据重复落盘。
+- 只有 workflow 记节点；react 只记 run / end 两行（react 没有节点边界）。
+- reviewer.scope 有一条明确的口径（`contracts.py` reviewer_scope 的 docstring）：修复前引用了 k 个不存在的列时，修复后最多可以新增 k 个真实列，因为把拼错的列名改对不算换口径。除此之外，列或过滤条件的任何增删都判 fail。**已知后果**：A2 场景下把筛选值改成数据里的实际写法（「华东」→「华东区」）也会判 fail。第 3 步要据此决定「拒绝修复」的边界。
+- planner.columns 只检查引号里「列名形状」的词（ASCII snake_case、带下划线），中文列名一律不查。在表结构、字段说明、口径块、问题原文里出现过的词不算缺失，拒答计划和反问也不查。
+- executor.shape 遇到报错或没有结果时判 fail（「有结果」是形态契约的前提）。
+- 快照的「题键」是 `数据集文件名::原问题`，评测 runner 没有传 case_id（本步不改评测）。同一个键出现多次时依次加 #2、#3。
+- `replay_node.py` 不一致时退出码为 1：它是回放验收，不是差分。
+
+### 测试（新增 5 个文件，69 条）
+- `tests/test_assess_caps.py`：派生名单与旧字面量一致；worker 的 ns 与能力对象一致（AST + 实跑子进程，单表和多表）；forbidden_builtins 的口径。
+- `tests/test_assess_snapshot.py`：`test_snapshot_off_is_byte_identical`（关闭时不建记录器、不落文件；打开时事件、结果、每个 prompt 都与关闭时一致）；节点、state、token、today 的记录；env 开关；一次运行一个文件；写失败不影响分析；指纹分区。
+- `tests/test_assess_replay.py`：planner / codegen / reviewer / summarizer 在 recorded 模式下 prompt 逐字节一致、updates 一致；live 模式下重建同一个 prompt；上游被篡改时能检出；executor 两次出现的回放都一致，篡改代码后能检出；today 取快照值（把 `date.today` 改成会抛异常也照样通过），没有 today 就拒绝；数据被改后拒绝回放；多表场景；`results_equal` 的口径。
+- `tests/test_assess_contracts.py`：11 条契约各至少一正一反。
+- `tests/test_assess_cli.py`：assess 的 JSON 和 markdown；`--diff` 逐题逐环列出 fail→ok 和 absent，退出码 0；同一目录自比为空；坏文件会列出来。
+
+### 离线核对（契约自身的误报，不是准确率）
+- 217 份 gold 代码（ground_truth + alt）跑 codegen 的 5 条契约：217/217 全部 ok，误报 0。
+- 把每份 gold 里第一个被识别出的列名改坏：176 份里有 162 份被 codegen.columns 抓到；另有 26 份没有识别出任何列引用（拒答，或只用到派生变量）。
+
+### 闸门（2026-11-19，aarch64 沙箱，worktree feat/p75a-assess，最后一次改代码之后跑的）
+| 段 | 结果 |
+|---|---|
+| pytest 主段（`--ignore=tests/test_eval_cases.py -k "not oracle"`） | 1918 passed，0 failed（28 deselected），用时 17:51 |
+| tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`。worktree 里 `.git` 是文件，属环境问题，与 #104 相同 |
+| `-k test_oracle_pipeline_all_correct` | 2 passed |
+| e2e / vitest | 没跑，ui/ 没有改动 |
+
+日志：`/workspace/work/logs/p75a_main.log`、`p75a_evalcases.log`、`p75a_oracle.log`。跑完闸门之后只追加了本条 DEVLOG，没有任何测试读取它。
+
+### 合并前补充（S 定的三项，2026-11-19，未提交）
+
+**① entry_sha12 / 代码指纹新旧对照**（master `f8167d3` 用临时 worktree 算，用完已删；本分支取 `f10847d`；算法：`report.EvalReport.fingerprint()` 同源函数）
+
+| 字段 | master f8167d3 | 本分支 f10847d | 是否相同 | 说明 |
+|---|---|---|---|---|
+| entry_sha12（run_eval.py） | c44fcc754331 | c44fcc754331 | 相同 | run_eval.py 没动；也等于 baseline_v7.json 里记的值 |
+| evalset_sha12 | 672b52a3a6b0 | 672b52a3a6b0 | 相同 | 题面 / 数据生成脚本没动；= v7 |
+| judge_sha12 | 289474f4d943 | 289474f4d943 | 相同 | comparator / negative / 数据表没动；= v7 |
+| registry_sha12 | 44136fa355b3 | 44136fa355b3 | 相同 | |
+| canary_sha12 | 592b9f3baa7e | 592b9f3baa7e | 相同 | |
+| rendered_set_sha12（react，202 题 system prompt） | ec053f0b6770 | ec053f0b6770 | 相同 | 逐题渲染串逐字未变 |
+| code_sha12（A 组） | 931d30e86d7f | 1ee042e1a269 | **不同** | 见下 |
+| code_all_sha12（全量） | 937576f13a88 | 49e9a0eaaee3 | **不同** | 新增 B 组文件 app/assess/{__init__,code_refs,contracts,replay,runner}.py + fingerprint.py 自身改动，预期内 |
+
+- **「代码不变 → 指纹不变」的证明**：把本分支的 `fingerprint.py` 放进 master 树里重算，code_sha12 = `931d30e86d7f`，与 master 原算法逐字相同。也就是说分区表的改动本身不挪动任何 A 组值；code_all 那次是 `c6b468e949c6`（≠ 937576f13a88），差异只来自 fingerprint.py 自身属 B 组、其内容进全量哈希。反向：master 的 fingerprint.py 放到本分支树里，`_assert_partition` 直接报 app/assess/* 6 个文件未归类，不会静默算出一个值。
+- **code_sha12 为什么变**：A 组有 4 个文件变化——新增 `app/assess/snapshot.py`、新增 `app/tools/sandbox_caps.py`、改了 `app/core/service.py`（快照接线）、`app/tools/sandbox_policy.py`（改为从能力对象派生）。反事实：把 snapshot.py 挪回 B 组，code_sha12 = `efdfb26765fe`，仍 ≠ master。所以 A 组变化不是「snapshot.py 进组」单独造成的，即便不进组也会变。
+- **对 v7 可比性的影响**：`scripts/eval/nightly_gate.py:103` 对 v7 的「尺子」只比 `evalset_sha12` 和 `judge_sha12`，两者在两边相同且都等于 baseline_v7.json；code_sha12 与 entry_sha12 只记录不判（GATE_KEYS 里的 code_sha12 只用于 `run_eval.py --baseline` 的 comparable，nightly 不用）。另外 baseline_v7.json 的 code_sha12 是 `996020ad8a04`，master 本身已是 `931d30e86d7f`（#103/#104 改过 A 组），本 PR 并不是第一次让它偏离 v7。结论：本 PR 合并后 nightly 对 v7 仍可比；code_sha12 变化按惯例要求动了 service 的改动合并前跑一次全量对比 v7。
+
+**② test_git_sha_without_git_binary**：它要测的是 git 命令不可用时 `report._sha_from_files()` 解析 `.git/HEAD → refs` 的兜底。原写法读真实仓库的 `.git`，在 worktree（`.git` 是 `gitdir:` 文件）里必红。改为 monkeypatch `report._REPO` 指向 tmp_path 下手搭的 .git 目录，参数化覆盖 loose ref / packed-refs / 分离头三种布局，并断言具体 SHA；另加一条「没有 .git → unknown 不抛异常」。与运行环境完全隔离，worktree、普通 clone、CI 结果一致。产品代码未改；`_sha_from_files` 不认 worktree 的 `.git` 文件是已知限制（只影响 git 不可用时的兜底），本步不动。
+
+**③ 契约三态（ok / warn / fail / not_checked）**：契约没有可判断的材料时落 not_checked，不再记 ok（也不再借用 warn）。
+- 落 not_checked 的情形：codegen 四条在代码解析不了时（原 warn）；codegen.columns 一个列引用都没认出；planner.columns 的反问、拒答计划、计划里没有任何可核对的列名（只有中文 / 非列名形状的词被跳过时原因里写明）；executor.sanity 执行出错；reviewer.scope 修复前不是完整代码或解析不了（原 warn）；summarizer.grounding 反问 / 执行失败 / 拒答或空结论 / 结论里没有要核的数字 / 证据里没有数字。warn 的两处（planner.length 超长、codegen.names 未定义名字）不动。summarizer 复用 `grounding._tokens/_significant` 判断「有没有要核的数字」，没有改 app/core（A 组指纹不动）。
+- assess JSON：`summary.verdicts` 与 `by_contract` 四态全写（含 0），另有 `summary.not_checked`；markdown 多一列 not_checked、一行「未检查」计数和「not_checked 的原因（按契约汇总）」表，非 ok 明细表只列 warn / fail。
+- `--diff`：一边整题没有快照 → `direction=snapshot_missing`，`missing` 写明缺 before 还是 after，另汇总到顶层 `snapshot_missing`；读不出的快照文件列在 `unreadable`，不冒充缺题。ok / warn / fail ↔ not_checked 记为 `now_unchecked` / `now_checked`，与 better / worse 分开。
+- gold 代码重核（217 份 ground_truth + alt，`work/p75a/gold_check.py`）：codegen.parse / result / imports / names 各 217 ok；codegen.columns **190 ok / 27 not_checked / 0 fail**（27 = 原「没认出列引用」的 26 份 ground_truth + 1 份 alt：neg_001–010、emp_021–024、inv_021–023、ord_010/024/025/026/029、agg_003、biz_002、mem_003、mul_025、mul_029）。变异灵敏度不变：176 份可识别的里 162 份抓到。
+- 测试：contracts 新增 / 改 9 处（planner 三态、codegen 无列引用 3 例、解析失败四条改 not_checked、executor.sanity、reviewer 3 例、summarizer 6 例、四态常量）；cli 新增 5 条（summary 四态与 markdown、ok↔not_checked 变化、snapshot_missing 合成与真快照各一、坏文件不冒充缺题）。
+
+**闸门（补充三项之后重跑，2026-11-19，worktree feat/p75-assess，工作区未提交）**
+| 段 | 结果 |
+|---|---|
+| pytest 主段（`--ignore=tests/test_eval_cases.py -k "not oracle"`） | 1929 passed，0 failed（28 deselected），643.90s |
+| tests/test_eval_cases.py | 232 passed，0 failed，401.74s（git_sha 测试已与环境隔离，worktree 下也绿） |
+| `-k test_oracle_pipeline_all_correct` | 2 passed（2187 deselected），385.74s |
+
+日志：`/workspace/work/logs/p75a2_main.log`、`p75a2_evalcases.log`、`p75a2_oracle.log`；指纹原始输出 `p75a2_fp_master.json` / `p75a2_fp_branch.json`；gold 重核 `p75a2_gold_after.log`。跑完闸门后只追加了本段 DEVLOG。工作区收尾时 code_sha12 仍为 `1ee042e1a269`（本轮只改了 B 组的 app/assess/contracts.py、runner.py），code_all_sha12 变为 `79b0392eabc7`。
