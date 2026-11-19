@@ -5,7 +5,8 @@
     python scripts/assess/assess.py --diff <before_dir> <after_dir> [--json OUT] [--md OUT]
 
 功能一：对目录里每个快照（DATACHAT_SNAPSHOT_DIR 写出的 *.jsonl）跑全部节点契约，输出 JSON 与 markdown。
-功能二：--diff 逐题、逐环列出两份快照集之间 ok↔fail（含 warn、出现 / 消失）的变化。只列不判。
+功能二：--diff 逐题、逐环列出两份快照集之间四态（ok / warn / fail / not_checked）的任意变化与环的出现 / 消失；
+一边整题缺快照的报 snapshot_missing（写明缺 before 还是 after）。只列不判。
 
 两种模式退出码都恒为 0：评估回答的是「哪一环变了」，不是「过没过」（§0）；它的数字不是准确率，不进对外报告。
 markdown 默认打到标准输出；--json / --md 给了路径就写文件。

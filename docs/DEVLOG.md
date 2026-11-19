@@ -10698,3 +10698,40 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 | e2e / vitest | 没跑，ui/ 没有改动 |
 
 日志：`/workspace/work/logs/p75a_main.log`、`p75a_evalcases.log`、`p75a_oracle.log`。跑完闸门之后只追加了本条 DEVLOG，没有任何测试读取它。
+
+### 合并前补充（S 定的三项，2026-11-19，未提交）
+
+**① entry_sha12 / 代码指纹新旧对照**（master `f8167d3` 用临时 worktree 算，用完已删；本分支取 `f10847d`；算法：`report.EvalReport.fingerprint()` 同源函数）
+
+| 字段 | master f8167d3 | 本分支 f10847d | 是否相同 | 说明 |
+|---|---|---|---|---|
+| entry_sha12（run_eval.py） | c44fcc754331 | c44fcc754331 | 相同 | run_eval.py 没动；也等于 baseline_v7.json 里记的值 |
+| evalset_sha12 | 672b52a3a6b0 | 672b52a3a6b0 | 相同 | 题面 / 数据生成脚本没动；= v7 |
+| judge_sha12 | 289474f4d943 | 289474f4d943 | 相同 | comparator / negative / 数据表没动；= v7 |
+| registry_sha12 | 44136fa355b3 | 44136fa355b3 | 相同 | |
+| canary_sha12 | 592b9f3baa7e | 592b9f3baa7e | 相同 | |
+| rendered_set_sha12（react，202 题 system prompt） | ec053f0b6770 | ec053f0b6770 | 相同 | 逐题渲染串逐字未变 |
+| code_sha12（A 组） | 931d30e86d7f | 1ee042e1a269 | **不同** | 见下 |
+| code_all_sha12（全量） | 937576f13a88 | 49e9a0eaaee3 | **不同** | 新增 B 组文件 app/assess/{__init__,code_refs,contracts,replay,runner}.py + fingerprint.py 自身改动，预期内 |
+
+- **「代码不变 → 指纹不变」的证明**：把本分支的 `fingerprint.py` 放进 master 树里重算，code_sha12 = `931d30e86d7f`，与 master 原算法逐字相同。也就是说分区表的改动本身不挪动任何 A 组值；code_all 那次是 `c6b468e949c6`（≠ 937576f13a88），差异只来自 fingerprint.py 自身属 B 组、其内容进全量哈希。反向：master 的 fingerprint.py 放到本分支树里，`_assert_partition` 直接报 app/assess/* 6 个文件未归类，不会静默算出一个值。
+- **code_sha12 为什么变**：A 组有 4 个文件变化——新增 `app/assess/snapshot.py`、新增 `app/tools/sandbox_caps.py`、改了 `app/core/service.py`（快照接线）、`app/tools/sandbox_policy.py`（改为从能力对象派生）。反事实：把 snapshot.py 挪回 B 组，code_sha12 = `efdfb26765fe`，仍 ≠ master。所以 A 组变化不是「snapshot.py 进组」单独造成的，即便不进组也会变。
+- **对 v7 可比性的影响**：`scripts/eval/nightly_gate.py:103` 对 v7 的「尺子」只比 `evalset_sha12` 和 `judge_sha12`，两者在两边相同且都等于 baseline_v7.json；code_sha12 与 entry_sha12 只记录不判（GATE_KEYS 里的 code_sha12 只用于 `run_eval.py --baseline` 的 comparable，nightly 不用）。另外 baseline_v7.json 的 code_sha12 是 `996020ad8a04`，master 本身已是 `931d30e86d7f`（#103/#104 改过 A 组），本 PR 并不是第一次让它偏离 v7。结论：本 PR 合并后 nightly 对 v7 仍可比；code_sha12 变化按惯例要求动了 service 的改动合并前跑一次全量对比 v7。
+
+**② test_git_sha_without_git_binary**：它要测的是 git 命令不可用时 `report._sha_from_files()` 解析 `.git/HEAD → refs` 的兜底。原写法读真实仓库的 `.git`，在 worktree（`.git` 是 `gitdir:` 文件）里必红。改为 monkeypatch `report._REPO` 指向 tmp_path 下手搭的 .git 目录，参数化覆盖 loose ref / packed-refs / 分离头三种布局，并断言具体 SHA；另加一条「没有 .git → unknown 不抛异常」。与运行环境完全隔离，worktree、普通 clone、CI 结果一致。产品代码未改；`_sha_from_files` 不认 worktree 的 `.git` 文件是已知限制（只影响 git 不可用时的兜底），本步不动。
+
+**③ 契约三态（ok / warn / fail / not_checked）**：契约没有可判断的材料时落 not_checked，不再记 ok（也不再借用 warn）。
+- 落 not_checked 的情形：codegen 四条在代码解析不了时（原 warn）；codegen.columns 一个列引用都没认出；planner.columns 的反问、拒答计划、计划里没有任何可核对的列名（只有中文 / 非列名形状的词被跳过时原因里写明）；executor.sanity 执行出错；reviewer.scope 修复前不是完整代码或解析不了（原 warn）；summarizer.grounding 反问 / 执行失败 / 拒答或空结论 / 结论里没有要核的数字 / 证据里没有数字。warn 的两处（planner.length 超长、codegen.names 未定义名字）不动。summarizer 复用 `grounding._tokens/_significant` 判断「有没有要核的数字」，没有改 app/core（A 组指纹不动）。
+- assess JSON：`summary.verdicts` 与 `by_contract` 四态全写（含 0），另有 `summary.not_checked`；markdown 多一列 not_checked、一行「未检查」计数和「not_checked 的原因（按契约汇总）」表，非 ok 明细表只列 warn / fail。
+- `--diff`：一边整题没有快照 → `direction=snapshot_missing`，`missing` 写明缺 before 还是 after，另汇总到顶层 `snapshot_missing`；读不出的快照文件列在 `unreadable`，不冒充缺题。ok / warn / fail ↔ not_checked 记为 `now_unchecked` / `now_checked`，与 better / worse 分开。
+- gold 代码重核（217 份 ground_truth + alt，`work/p75a/gold_check.py`）：codegen.parse / result / imports / names 各 217 ok；codegen.columns **190 ok / 27 not_checked / 0 fail**（27 = 原「没认出列引用」的 26 份 ground_truth + 1 份 alt：neg_001–010、emp_021–024、inv_021–023、ord_010/024/025/026/029、agg_003、biz_002、mem_003、mul_025、mul_029）。变异灵敏度不变：176 份可识别的里 162 份抓到。
+- 测试：contracts 新增 / 改 9 处（planner 三态、codegen 无列引用 3 例、解析失败四条改 not_checked、executor.sanity、reviewer 3 例、summarizer 6 例、四态常量）；cli 新增 5 条（summary 四态与 markdown、ok↔not_checked 变化、snapshot_missing 合成与真快照各一、坏文件不冒充缺题）。
+
+**闸门（补充三项之后重跑，2026-11-19，worktree feat/p75-assess，工作区未提交）**
+| 段 | 结果 |
+|---|---|
+| pytest 主段（`--ignore=tests/test_eval_cases.py -k "not oracle"`） | 1929 passed，0 failed（28 deselected），643.90s |
+| tests/test_eval_cases.py | 232 passed，0 failed，401.74s（git_sha 测试已与环境隔离，worktree 下也绿） |
+| `-k test_oracle_pipeline_all_correct` | 2 passed（2187 deselected），385.74s |
+
+日志：`/workspace/work/logs/p75a2_main.log`、`p75a2_evalcases.log`、`p75a2_oracle.log`；指纹原始输出 `p75a2_fp_master.json` / `p75a2_fp_branch.json`；gold 重核 `p75a2_gold_after.log`。跑完闸门后只追加了本段 DEVLOG。工作区收尾时 code_sha12 仍为 `1ee042e1a269`（本轮只改了 B 组的 app/assess/contracts.py、runner.py），code_all_sha12 变为 `79b0392eabc7`。

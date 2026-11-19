@@ -251,15 +251,49 @@ def test_report_metadata_records_model_and_data():
     assert "sk-secret" not in json.dumps(meta)
 
 
-def test_git_sha_without_git_binary(monkeypatch):
-    """B27：git 命令不可用（Windows conda 环境常见）时，从 .git 文件读出 SHA，末尾加 ? 表示未检查改动。"""
+@pytest.mark.parametrize("layout", ["loose_ref", "packed_ref", "detached"])
+def test_git_sha_without_git_binary(monkeypatch, tmp_path, layout):
+    """B27：git 命令不可用（Windows conda 环境常见）时，从 .git 文件读出 SHA，末尾加 ? 表示未检查改动。
+
+    要测的是 `_sha_from_files()` 这条兜底路径会不会解析 .git/HEAD → refs（含 packed-refs、分离头）。
+    原来直接读真仓库的 .git，结果取决于测试跑在哪：git worktree 里 `.git` 是个文件（`gitdir: …`），
+    CI 的 actions/checkout 也可能不是普通目录布局，于是在 worktree 里红。这里把 `_REPO` 指到 tmp_path
+    下手工搭的 .git 目录，和运行环境完全隔离：普通 clone、worktree、CI 都走同一份假仓库。
+    """
+    from app.eval import report as rep
+
+    sha_full = "0123456789abcdef0123456789abcdef01234567"
+    git = tmp_path / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    if layout == "detached":
+        (git / "HEAD").write_text(sha_full + "\n", encoding="utf-8")
+    else:
+        (git / "HEAD").write_text("ref: refs/heads/feat/x\n", encoding="utf-8")
+        if layout == "loose_ref":
+            (git / "refs" / "heads" / "feat").mkdir()
+            (git / "refs" / "heads" / "feat" / "x").write_text(sha_full + "\n", encoding="utf-8")
+        else:
+            (git / "packed-refs").write_text("# pack-refs with: peeled fully-peeled sorted\n"
+                                             f"{'f' * 40} refs/heads/master\n{sha_full} refs/heads/feat/x\n",
+                                             encoding="utf-8")
+
+    def boom(*a, **k):
+        raise FileNotFoundError("git")
+    monkeypatch.setattr(rep, "_git", boom)
+    monkeypatch.setattr(rep, "_REPO", str(tmp_path))
+    assert rep.git_sha() == "0123456?"
+    assert rep.git_sha(short=False) == sha_full + "?"
+
+
+def test_git_sha_without_git_binary_unreadable_is_unknown(monkeypatch, tmp_path):
+    """兜底也读不到（没有 .git）→ "unknown"，不抛异常。"""
     from app.eval import report as rep
 
     def boom(*a, **k):
         raise FileNotFoundError("git")
     monkeypatch.setattr(rep, "_git", boom)
-    sha = rep.git_sha()
-    assert sha != "unknown" and sha.endswith("?") and len(sha) == 8
+    monkeypatch.setattr(rep, "_REPO", str(tmp_path))
+    assert rep.git_sha() == "unknown"
 
 
 def test_ord_030_refund_excluded_alt():

@@ -87,3 +87,70 @@ def test_assess_dir_lists_broken_file(tmp_path):
     (tmp_path / "x.jsonl").write_text("{}\n", encoding="utf-8")
     r = runner.assess_dir(str(tmp_path))
     assert r["runs"][0]["error"] and r["summary"]["runs"] == 1
+
+
+# ---------------------------------------------------------------- 三态（ok / warn / fail / not_checked）
+def test_assess_summary_counts_not_checked_separately(two_sets, tmp_path):
+    """JSON 的 summary 四态都写出（含 0），not_checked 单列；markdown 有 not_checked 列与原因汇总。"""
+    before, _ = two_sets
+    out_json, out_md = tmp_path / "r.json", tmp_path / "r.md"
+    _cli().main([before, "--json", str(out_json), "--md", str(out_md)])
+    s = json.loads(out_json.read_text(encoding="utf-8"))["summary"]
+    assert set(s["verdicts"]) == {"ok", "warn", "fail", "not_checked"}
+    assert s["not_checked"] == s["verdicts"]["not_checked"] > 0          # before 里执行出错 → sanity / grounding 未检查
+    assert all(set(c) == {"ok", "warn", "fail", "not_checked"} for c in s["by_contract"].values())
+    md = out_md.read_text(encoding="utf-8")
+    assert "| 契约 | ok | warn | fail | not_checked |" in md
+    assert "not_checked 的原因" in md and "执行出错，无结果可判" in md
+    assert f"未检查（not_checked）：{s['not_checked']}" in md
+
+
+def _report(runs: dict) -> dict:
+    """{题键: [(环, 契约, 状态)]} → assess_dir 同形的报告。"""
+    return {"directory": "x", "runs": [
+        {"key": k, "verdicts": [{"ring": r, "contract": c, "status": st, "reason": st} for r, c, st in vs]}
+        for k, vs in runs.items()]}
+
+
+def test_diff_ok_not_checked_is_a_change():
+    a = _report({"q1": [("codegen#1", "codegen.columns", "ok"), ("summarizer#1", "summarizer.grounding", "not_checked")]})
+    b = _report({"q1": [("codegen#1", "codegen.columns", "not_checked"), ("summarizer#1", "summarizer.grounding", "fail")]})
+    d = runner.diff(a, b)
+    got = {(c["contract"], c["before"], c["after"], c["direction"]) for c in d["changes"]}
+    assert got == {("codegen.columns", "ok", "not_checked", "now_unchecked"),
+                   ("summarizer.grounding", "not_checked", "fail", "now_checked")}
+    assert d["counts"] == {"now_unchecked": 1, "now_checked": 1}
+    md = runner.diff_markdown(d)
+    assert "now_unchecked" in md and "now_checked" in md
+
+
+def test_diff_snapshot_missing_names_side():
+    same = [("codegen#1", "codegen.columns", "ok")]
+    a = _report({"q1": same, "only_b4": same})
+    b = _report({"q1": same, "only_af": same})
+    d = runner.diff(a, b)
+    assert d["snapshot_missing"] == [{"case": "only_b4", "missing": "after"}, {"case": "only_af", "missing": "before"}]
+    assert d["counts"] == {"snapshot_missing": 2}
+    miss = {c["case"]: (c["before"], c["after"]) for c in d["changes"] if c["direction"] == "snapshot_missing"}
+    assert miss == {"only_b4": ("present", "missing"), "only_af": ("missing", "present")}
+    md = runner.diff_markdown(d)
+    assert "snapshot_missing" in md and "缺 after：only_b4" in md and "缺 before：only_af" in md
+
+
+def test_diff_snapshot_missing_real_dirs(two_sets, sample_path, tmp_path):
+    """真快照：after 目录里少了一道题 → 报 snapshot_missing（缺 after），不是空差分。"""
+    before, _ = two_sets
+    partial = tmp_path / "partial"
+    analyze(sample_path, "总销量", chat_model=_model("result = int(df['units'].sum())", "见结果"),
+            snapshot_dir=str(partial))
+    d = runner.diff(runner.assess_dir(before), runner.assess_dir(str(partial)))
+    assert d["snapshot_missing"] == [{"case": "sample.csv::各地区总销量", "missing": "after"}]
+    assert not any(c["case"] == "sample.csv::总销量" for c in d["changes"])
+
+
+def test_diff_unreadable_file_listed_not_missing(tmp_path):
+    bad = tmp_path / "b"
+    bad.mkdir()
+    (bad / "x.jsonl").write_text("{}\n", encoding="utf-8")
+    d = runner.diff(runner.assess_dir(str(bad)), _report({}))
+    assert d["unreadable"] == {"before": ["x.jsonl"], "after": []} and d["snapshot_missing"] == []

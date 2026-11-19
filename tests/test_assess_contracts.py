@@ -25,8 +25,21 @@ def test_planner_columns_ok():
     st = {"schema": "列 region、units；样例 in_transit", "question": "各地区总销量"}
     assert _st(C.planner_columns(st, {"plan": "1. 按 `region` 分组，对 'units' 求和，用 `value_counts`"}, CTX)) == C.OK
     assert _st(C.planner_columns(st, {"plan": "筛选状态为 'in_transit' 的行"}, CTX)) == C.OK   # 样例值
-    assert _st(C.planner_columns(st, {"plan": "数据不足以回答：缺少 `unit_cost` 字段"}, CTX)) == C.OK
-    assert _st(C.planner_columns(st, {"plan": "", "clarify": "按什么看？"}, CTX)) == C.OK
+    v = C.planner_columns(st, {"plan": "1. 按 `region` 分组，对 'units' 求和，用 `value_counts`"}, CTX)
+    assert v.details["matched"] == ["region", "units"] and v.details["skipped"] == ["value_counts"]
+
+
+def test_planner_columns_not_checked():
+    """三态：拒答计划、反问、计划里没有任何可核对的列名（含只有中文列名被跳过）→ not_checked，不算 ok。"""
+    st = {"schema": "列 region、units", "question": "各地区总销量"}
+    assert _st(C.planner_columns(st, {"plan": "数据不足以回答：缺少 `unit_cost` 字段"}, CTX)) == C.NOT_CHECKED
+    assert _st(C.planner_columns(st, {"plan": "", "clarify": "按什么看？"}, CTX)) == C.NOT_CHECKED
+    assert _st(C.planner_columns(st, {"plan": "按地区分组求和"}, CTX)) == C.NOT_CHECKED          # 没有引号词
+    cn = C.Context(columns={"": ["地区", "销量"]}, question="各地区销量")
+    v = C.planner_columns({"schema": "地区 销量"}, {"plan": "按「区域」分组，对 `销售额` 求和"}, cn)
+    assert v.status == C.NOT_CHECKED and v.details["skipped"] == ["区域", "销售额"] and "中文" in v.reason
+    # 中文列名本身就在表里 → 核过了，ok
+    assert _st(C.planner_columns({}, {"plan": "按「地区」分组，对 `销量` 求和"}, cn)) == C.OK
 
 
 def test_planner_columns_fail():
@@ -99,9 +112,21 @@ def test_codegen_names():
     assert _st(C.codegen_names({}, {"code": "def f(open):\n    return open\nresult = f(1)"}, CTX)) == C.OK
 
 
-def test_codegen_unparsable_other_contracts_warn():
+def test_codegen_unparsable_other_contracts_not_checked():
+    """解析不了时，除 codegen.parse（fail）外的四条都没法判断 → not_checked（原来记 warn）。"""
     for fn in (C.codegen_columns, C.codegen_result, C.codegen_imports, C.codegen_names):
-        assert _st(fn({}, {"code": "按地区求和，"}, CTX)) == C.WARN
+        assert _st(fn({}, {"code": "按地区求和，"}, CTX)) == C.NOT_CHECKED
+
+
+@pytest.mark.parametrize("code", [
+    "result = len(df)",
+    "result = df.iloc[:, 3].sum()",
+    "col = 'units'\nresult = df[col].sum()",
+])
+def test_codegen_columns_no_refs_not_checked(code):
+    """一个列引用都没认出（code_refs 宁漏不误报）→ not_checked，不是 ok。"""
+    v = C.codegen_columns({}, {"code": code}, CTX)
+    assert v.status == C.NOT_CHECKED and "没认出" in v.reason
 
 
 # ---------------------------------------------------------------- executor
@@ -116,6 +141,7 @@ def test_executor_shape():
 
 def test_executor_sanity():
     assert _st(C.executor_sanity({}, {"result": 1, "error": "", "sanity_issue": ""}, CTX)) == C.OK
+    assert _st(C.executor_sanity({}, {"result": None, "error": "KeyError"}, CTX)) == C.NOT_CHECKED
     v = C.executor_sanity({}, {"result": pd.Series([], dtype=float), "error": "", "sanity_issue": "结果是空的（0 行）"}, CTX)
     assert v.status == C.FAIL and "0 行" in v.reason
 
@@ -131,7 +157,9 @@ def test_reviewer_scope_ok():
     assert _st(_rev(base, "x = df[df['region'] == '华东']\nresult = int(x['units'].sum())")) == C.OK
     v = _rev("result = df.groupby('regin')['units'].sum()", "result = df.groupby('region')['units'].sum()")
     assert v.status == C.OK and v.details["columns_added"] == ["region"]  # 拼错的列改对，不是换口径
-    assert _st(_rev("x", "y", not_code=True)) == C.WARN
+    assert _st(_rev("x", "y", not_code=True)) == C.NOT_CHECKED
+    assert _st(_rev("x", "y", truncated=True)) == C.NOT_CHECKED
+    assert _st(_rev("按地区，求和", "result = 1")) == C.NOT_CHECKED                      # 修复前解析不了
 
 
 def test_reviewer_scope_fail_columns_and_filters():
@@ -155,10 +183,25 @@ def test_filter_conditions_normalize():
 def test_summarizer_grounding_ok():
     st = {"question": "华东总销量", "result_text": "1234.5", "error": ""}
     assert _st(C.summarizer_grounding(st, {"answer": "华东总销量为 1,234.5 件"}, CTX)) == C.OK
-    assert _st(C.summarizer_grounding({**st, "clarify": "按什么看？"}, {"answer": "按什么看？"}, CTX)) == C.OK
-    assert _st(C.summarizer_grounding({**st, "error": "x"}, {"answer": "失败了 999 次"}, CTX)) == C.OK
     ctx = C.Context(columns={"": COLS}, question="2024 年 300 单以上的有几个")   # 改写前原话里的数字也算证据
     assert _st(C.summarizer_grounding(st, {"answer": "超过 300 单"}, ctx)) == C.OK
+
+
+def test_summarizer_grounding_not_checked():
+    """反问、执行失败、拒答 / 空结论、结论里没有要核的数字、证据里没有数字 → not_checked。"""
+    st = {"question": "华东总销量", "result_text": "1234.5", "error": ""}
+    assert _st(C.summarizer_grounding({**st, "clarify": "按什么看？"}, {"answer": "按什么看？"}, CTX)) == C.NOT_CHECKED
+    assert _st(C.summarizer_grounding({**st, "error": "x"}, {"answer": "失败了 999 次"}, CTX)) == C.NOT_CHECKED
+    assert _st(C.summarizer_grounding(st, {"answer": ""}, CTX)) == C.NOT_CHECKED
+    assert _st(C.summarizer_grounding(st, {"answer": "无法回答：数据里没有成本字段"}, CTX)) == C.NOT_CHECKED
+    assert _st(C.summarizer_grounding(st, {"answer": "华东销量最高"}, CTX)) == C.NOT_CHECKED
+    nonum = {"question": "哪个地区最好", "result_text": "华东", "error": ""}
+    v = C.summarizer_grounding(nonum, {"answer": "华东最好，达到 1,234.5 件"}, CTX)
+    assert v.status == C.NOT_CHECKED and "证据里没有数字" in v.reason
+
+
+def test_statuses_are_four():
+    assert C.STATUSES == ("ok", "warn", "fail", "not_checked")
 
 
 def test_summarizer_grounding_fail():
