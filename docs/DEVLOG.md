@@ -10554,7 +10554,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 
 **本次明确不做**：P14、`mem_006` 的 gold、以及本轮扫出来的其它新发现。
 
-## [188] 2026-11-18 · 修复批 1：拒答原因不照抄示例、沙箱边界提示、没赋 result 与「输出的不是代码」交给 reviewer · commit <待提交>
+## [188] 2026-11-18 · 修复批 1：拒答原因不照抄示例、沙箱边界提示、没赋 result 与「输出的不是代码」交给 reviewer · commit d508e14（PR #103）
 
 方案：`docs/roadmap/phase7-fixbatch1.md`。S 同意方案和实现放在同一个 PR 里（先例 #49）。题库、gold、判分和 v7 基线都不动，不断代。
 
@@ -10597,7 +10597,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 | vitest | 没跑，ui/ 没有改动 |
 第一次跑 e2e 时 41 条红，原因是沙箱缺 libatk，跟代码无关。执行 `playwright install-deps chromium` 之后重跑，三档全绿。
 
-## [待编号] 2026-11-18 · 阶段 7 A2 结果合理性校验 + A3 枚举值召回 · commit <待提交>
+## [189] 2026-11-18 · 阶段 7 A2 结果合理性校验 + A3 枚举值召回 · commit <待提交>
 
 方案：`docs/roadmap/phase7-a2a3.md`（方案与实现同 PR，基于 #103）。题库、判分、基线都不动。
 
@@ -10614,4 +10614,19 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 - 离线统计：256 轮中有 18 轮出提示，全部在 biz_*。措辞是「仅供对照写法、按题意判断」，这是为了避开 biz_007 / biz_015 中「退款」→「已退款」的误导。
 
 ### 测试
-新增 `tests/test_a2a3.py`，共 11 条。闸门结果见汇报。
+新增 `tests/test_a2a3.py`，11 条。
+
+### 闸门（2026-11-18，aarch64 沙箱，worktree，基于 #103 + 本批改动）
+| 段 | 结果 |
+|---|---|
+| pytest 主段（不含 eval_cases、oracle） | 1877 passed（test_gate 的数据目录软链过去之后，97 条全部跑到） |
+| tests/test_eval_cases.py | 228 passed，1 failed：`test_git_sha_without_git_binary`。原因是 worktree 里的 `.git` 是文件不是目录，属环境问题；在主仓库和 CI 上都是绿的 |
+| test_oracle_pipeline_all_correct | 2 passed |
+| e2e off / state / full（--grep-invert 视觉） | 每组 42 passed |
+| vitest | 没跑，ui/ 没有改动 |
+
+### 验收（2026-11-19，S 在内网 Windows 上跑命令一）
+- 5a2ad4c：197/202，门禁退出码 0，翻转 0。v7 三轮全对的 188 题这次也全对。相对 v7 由错转对的是 mem_003、ts_007、inv_005（inv_005 这次给出了完整的 5 店 Series）。
+- biz_* 20/20，其中 biz_007、biz_014、biz_015 都对；neg_* 10/10。
+- 和只跑修复批 1 那一轮相比，attempts 变多的题有：biz_011 0→1（仍然对）；mul_005 0→1（仍然错，v7 里本来就错）。mul_005 的数据里 dept 的取值是「市场」，题面写的是「市场部」。这一列有 6 个取值，样例里已经露出 3 个，按出境合同 A3 不能再补提示；结果是空表，A2 送去复查，reviewer 把它改成了拒答。见 BACKLOG N9。
+- CI（5a2ad4c，rebase 前）：tests 44337495393、sidecar 44337495299、desktop 44337495352，全部 success。
