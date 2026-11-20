@@ -155,6 +155,19 @@ def test_runtime_constants_match_excel_io():
     assert rt._DC_MAX_HEADER_ROWS == excel_io.MAX_HEADER_ROWS
 
 
+def test_runtime_prints_chinese_on_non_utf8_pipe(tmp_path):
+    """Windows CI（tests 44658450556）：导出脚本的 stdout 是管道、编码为 cp1252 时，打印中文会抛 UnicodeEncodeError。
+    运行时会把非控制台的流改成 UTF-8；这里用 PYTHONIOENCODING=cp1252 模拟那台机器。"""
+    script = tmp_path / "s.py"
+    script.write_text(runtime_source() + "\nprint('华东 合计')\nprint('注意', file=_dc_sys.stderr)\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
+    env["PYTHONIOENCODING"] = "cp1252"
+    r = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, timeout=120)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    assert r.stdout.decode("utf-8").strip() == "华东 合计"
+    assert r.stderr.decode("utf-8").strip() == "注意"
+
+
 def test_runtime_source_has_no_app_import():
     tree = ast.parse(runtime_source())
     mods = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}

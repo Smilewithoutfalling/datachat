@@ -29,6 +29,15 @@ import sys as _dc_sys
 import numpy as np
 import pandas as pd
 
+# 输出到管道 / 文件时，Python 按系统区域编码写（英文 Windows 是 cp1252），中文的 print 会抛 UnicodeEncodeError、脚本中断。
+# 不是控制台的流一律改成 UTF-8；控制台（isatty）在 Windows 上走宽字符接口，本来就能显示中文，不动。
+for _dc_stream in (_dc_sys.stdout, _dc_sys.stderr):
+    try:
+        if _dc_stream is not None and not _dc_stream.isatty():
+            _dc_stream.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError, ValueError):
+        pass
+
 _DC_NA_STRINGS = frozenset({"", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND",
                             "1.#QNAN", "<NA>", "N/A", "NA", "NULL", "NaN", "None", "n/a", "nan", "null"})
 _DC_INCLUDE_HIDDEN_SHEETS = False
