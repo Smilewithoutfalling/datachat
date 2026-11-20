@@ -209,11 +209,11 @@ describe("F3 第五步：EChart 的开关与换图型", () => {
   });
 
   // F4 迭代 V1 第 2 条（判定表改动）：不兼容的开关从"disabled + title"改为不渲染；工具栏只剩图型 / 排序 / 样式 / 导出
-  test("不兼容的开关不渲染：单系列柱图的形状组只有圆角；工具栏只有四个控件", () => {
+  test("不兼容的开关不渲染：单系列柱图的形状组只有圆角；工具栏只有五个控件（U1 起含主题）", () => {
     render(<EChart spec={spec("bar")} />);
     const ctl = screen.getByTestId("chart-controls");
     expect(within(ctl).queryAllByRole("checkbox")).toEqual([]);
-    expect(within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))).toEqual(["图型", "排序"]);
+    expect(within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))).toEqual(["图型", "排序", "图表主题"]);
     const shape = group("形状");
     expect(within(shape).queryByRole("switch", { name: "堆叠" })).toBeNull();
     expect(within(shape).queryByRole("switch", { name: "平滑" })).toBeNull();
@@ -559,7 +559,7 @@ describe("F4 迭代 V1：标记卡", () => {
   });
   const tile = (n: string) => screen.getByRole("button", { name: new RegExp("^" + n) });
 
-  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 标记 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
+  test("工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 主题（U1）/ 标记 / 导出；排序只在单系列非时间柱图和饼图出现", () => {
     const want: Record<string, boolean> = {
       bar: true, "bar-series-20": false, line: false, "line-wide": false, "line-time": false,
       area: false, pie: true, scatter: false, "scatter-multi": false,
@@ -567,7 +567,7 @@ describe("F4 迭代 V1：标记卡", () => {
     for (const [id, sort] of Object.entries(want)) {
       render(<EChart spec={spec(id)} />);
       const ctl = screen.getByTestId("chart-controls");
-      expect([id, within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))]).toEqual([id, sort ? ["图型", "排序"] : ["图型"]]);
+      expect([id, within(ctl).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"))]).toEqual([id, sort ? ["图型", "排序", "图表主题"] : ["图型", "图表主题"]]);
       expect([id, within(ctl).getAllByRole("button").map((b) => b.textContent)]).toEqual([id, ["标记", "导出 PNG"]]); // 验收 P0-3：按钮名和浮层标题统一为「标记」
       expect(within(ctl).queryAllByRole("checkbox")).toEqual([]);
       cleanup();

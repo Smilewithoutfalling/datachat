@@ -285,6 +285,54 @@ describe("测试连接（两行）", () => {
   });
 });
 
+describe("编辑态的「测试连接」（U1，S 11-20 定 C2 = 方案 A）", () => {
+  const OK: ConnectionTest = { ok: true, model: "deepseek-flash", connect: { ok: true, latency_ms: 812 }, tools: { ok: true, latency_ms: 430 },
+    probe: { model: "deepseek-flash", connect: true, tools: true, checked_at: "t" } };
+  const openEdit = async (extra: Record<string, unknown> = {}) => {
+    const r = settings([conn()], { "POST /connections/c1/test": OK, ...extra });
+    const [a] = await cards();
+    fireEvent.click(within(a).getByRole("button", { name: "编辑" }));
+    return { ...r, form: screen.getByTestId("conn-form") };
+  };
+
+  test("没有改动：按钮顺序「测试连接 · 保存 · 取消」，点了真的发出测试请求，结果显示在表单里", async () => {
+    const { be, form } = await openEdit();
+    const actions = form.querySelector(".form-actions")!;
+    expect([...actions.querySelectorAll("button")].map((x) => x.textContent)).toEqual(["测试连接", "保存", "取消"]);
+    const btn = within(form).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    await act(async () => fireEvent.click(btn));
+    expect(be.calls.filter((x) => x.method === "POST" && x.path === "/connections/c1/test")).toHaveLength(1);
+    expect(be.calls.some((x) => x.method === "PUT")).toBe(false); // 测的是已保存的配置，不先存
+    const f = screen.getByTestId("conn-form");
+    expect(within(f).getByTestId("test-connect").textContent).toBe("连接连接正常 · 0.8s · deepseek-flash");
+  });
+
+  test("有未保存的改动（改字段或填了新 Key）：按钮置灰，title 写「先保存再测试」；改回去恢复可点", async () => {
+    const { be, form } = await openEdit();
+    const btn = () => within(form).getByRole("button", { name: "测试连接" }) as HTMLButtonElement;
+    fireEvent.change(within(form).getByLabelText("模型"), { target: { value: "deepseek-v4-pro" } });
+    expect(btn().disabled).toBe(true);
+    expect(btn().title).toContain("先保存再测试");
+    fireEvent.click(btn());
+    expect(be.calls.some((x) => x.path === "/connections/c1/test")).toBe(false);
+    fireEvent.change(within(form).getByLabelText("模型"), { target: { value: "deepseek-flash" } });
+    expect(btn().disabled).toBe(false);
+    fireEvent.click(within(form).getByRole("button", { name: "更换" }));
+    expect(btn().disabled).toBe(false); // 只点了「更换」没填，不算改动
+    fireEvent.change(within(form).getByLabelText("替换为新的 Key"), { target: { value: "sk-new" } });
+    expect(btn().disabled).toBe(true);
+    expect(btn().title).toContain("先保存再测试");
+  });
+
+  test("新建表单没有「测试连接」（还没有已保存的配置）", async () => {
+    settings([conn()]);
+    await cards();
+    fireEvent.click(screen.getByRole("button", { name: "新建连接" }));
+    expect(within(screen.getByTestId("conn-form")).queryByRole("button", { name: "测试连接" })).toBeNull();
+  });
+});
+
 describe("ReAct 置灰（probe.tools === false）", () => {
   const DS = { id: "d1", name: "销量", created_at: "t", files: [{ filename: "a.csv", size: 1, sha256: "h" }],
     summary: "", tables: {}, preview: { rows: 20, dicts: [], tables: [] } };

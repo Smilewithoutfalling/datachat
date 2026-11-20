@@ -9,7 +9,6 @@ import { IconChat, IconGear, IconPlus, IconSidebar, IconSpark, IconTable, IconUp
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
 import { createdSuffix, Dialog, MoreMenu, relTime, Topbar } from "./ui";
-import { ThemePicker } from "./ThemePicker";
 
 type View = { kind: "home" } | { kind: "dataset"; id: string } | { kind: "session"; id: string } | { kind: "settings" };
 
@@ -385,7 +384,7 @@ function uploadErr(e: unknown): string {
 function Home({ empty, onPick }: { empty: boolean; onPick: (f: File[]) => void }) {
   return (
     <>
-      <Topbar title="新会话" sub={empty ? "上传一个数据集开始分析" : "选择一个数据集开始分析"} actions={<ThemePicker />} />
+      <Topbar title="新会话" sub={empty ? "上传一个数据集开始分析" : "选择一个数据集开始分析"} />
       <div className="main">
         <div className="empty">
           <h2>把表丢进来，直接问</h2>

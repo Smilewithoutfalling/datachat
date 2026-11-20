@@ -67,7 +67,7 @@ const ALL_ON = { label: true, legend: "top", stack: true, smooth: true, gradient
 for (const [theme, switchesOn] of [["classic", false], ["darkCanvas", false], ["classic", true]] as const)
 test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表各位置、tooltip、警告、结论、代码面板都不执行、不成元素；P4/P5 按位置判定`, async ({ page, baseURL }) => {
   test.setTimeout(180_000);
-  await page.setViewportSize({ width: 1600, height: 1000 }); // 对话列最宽 1214（V2a 照改版前的图宽定），图宽到顶 1174；类目标签隔一个画一个（见 INJECT_ORDER）
+  await page.setViewportSize({ width: 1600, height: 1000 }); // 对话列最宽 1214（V2a 照改版前的图宽定），图宽到顶 1162（U1 卡片 padding 改为 20–24，1174→1162）；类目标签隔一个画一个（见 INJECT_ORDER）
   const origin = new URL(baseURL!).origin;
   const external: string[] = [];
   const sameOriginAssets: string[] = [];
@@ -231,7 +231,7 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
 
   // 前提：P4–P7 都画在宽表的类目轴标签位置上（INJECT_ORDER 的排布），否则类目轴这个位置的结论不完整
   const st0 = all.filter((d) => d.chart === 0 && d.phase === "static");
-  expect(st0[0]?.cw).toBe(1174); // 前提：图宽与改版前一致（V2a 改了对话列宽度，这里钉住）
+  expect(st0[0]?.cw).toBe(1162); // 前提：钉住图宽。U1 卡片 padding 统一到 20–24，所以图宽 1174→1162（有意的布局变化，不改样式凑回）
   const xLabels0 = st0.filter((d) => posOf(d, false, xLabelRow(st0)) === "xAxisLabel").map((d) => d.text);
   // V2c §9：类目标签集合依赖字体度量（hideOverlap）。Windows 字体下 P5「{x|富文本}」更宽会被丢掉，前提先红、判定没执行到。
   // 以 CI（linux）为准，和视觉基线一个口径（HANDOVER §6）：非 linux 上缺标签就跳过并写明原因；linux 上照旧严格断言。

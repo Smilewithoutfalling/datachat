@@ -12,6 +12,7 @@
 // 回读只读 getOption() 的 dataZoom[0].start/end 和 legend[0].selected 两处（公开 API）；selected 的名字当场换成 index，
 // 不往外带。view 不持久化。
 import { IconChevronDown, IconDownload } from "../views/icons";
+import { ThemePicker } from "../views/ThemePicker";
 import { init } from "echarts/core";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { download, exportPng } from "./exportPng";
@@ -276,6 +277,7 @@ export function EChart({ spec, editKey }: { spec: ChartSpec; editKey?: string })
               </select>
             </label>
           )}
+          <ThemePicker />
           <button type="button" className={`marks-toggle${marksOpen ? " on" : ""}`} aria-expanded={marksOpen}
             onClick={() => setMarksOpen(!marksOpen)}>标记<IconChevronDown size={9} /></button>
           {zoomOn && <span className="chart-hint">Shift + 滚轮缩放，拖动平移，双击空白处还原</span>}

@@ -1,13 +1,14 @@
-// F3 第四步：全局图表主题选择（存 localStorage，所有图立即 setTheme）。V2a：顶栏胶囊「主题 经典 ▾」。
+// F3 第四步：全局图表主题选择（存 localStorage，所有图立即 setTheme）。V2a：顶栏胶囊「主题 经典 ▾」；
+// 阶段 7.6 U1：移到每张图的工具栏（.chart-controls），选的仍是全局主题，改一张所有图一起变。
 import { useSyncExternalStore } from "react";
 import { getChartTheme, setChartTheme, subscribeChartTheme, THEME_NAMES, THEMES } from "../charts/themes";
 import { IconPalette } from "./icons";
 
 export function ThemePicker() {
   const theme = useSyncExternalStore(subscribeChartTheme, getChartTheme);
-  // 验收术语统一：这个东西全产品只叫「主题」（顶栏这里、文档里都是），不叫样式、不叫配色
+  // 验收术语统一：这个东西全产品只叫「主题」（图表工具栏这里、文档里都是），不叫样式、不叫配色
   return (
-    <label className="theme-picker pill">
+    <label className="theme-picker">
       <IconPalette size={13} />
       主题
 

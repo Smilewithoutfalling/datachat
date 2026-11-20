@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { type Client, errText } from "../client";
 import type { Catalog, Connection, ConnectionIn, Protocol, Provider, ProviderGroup, Quirks, ThinkingParam } from "../types";
 
@@ -32,9 +32,12 @@ type Props = {
   onCancel: () => void;
   onSaved: (text: string, warn?: string) => void;
   onError: (e: unknown) => void;
+  /** 阶段 7.6 U1（S 11-20 定 C2 = 方案 A）：编辑态的「测试连接」。测的是**已保存**的配置，复用 SettingsView 的 runTest；
+   *  新建时没有已保存的配置，不传。running = 这一条正在测，busy = 有任意一条在测（和卡片上的按钮同一口径）。 */
+  test?: { run: () => void; running: boolean; busy: boolean; result: ReactNode };
 };
 
-export function ConnectionForm({ c, catalog, conn, first, onCancel, onSaved, onError }: Props) {
+export function ConnectionForm({ c, catalog, conn, first, onCancel, onSaved, onError, test }: Props) {
   const ids = useId();
   const byId = (id: string) => catalog.providers.find((p) => p.id === id);
   const initial = byId(conn?.provider ?? "deepseek") ?? catalog.providers[0];
@@ -54,6 +57,10 @@ export function ConnectionForm({ c, catalog, conn, first, onCancel, onSaved, onE
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [localErr, setLocalErr] = useState("");
+  // 打开表单时的样子；和它不一样（含填了新 Key）就是有未保存的改动，「测试连接」置灰——它测的是已保存的配置
+  const snap = () => JSON.stringify([provider, name, protocol, baseUrl, model, deployment, quirks, thinking]);
+  const [initialSnap] = useState(snap);
+  const dirty = snap() !== initialSnap || newKey.trim() !== "";
 
   const p = byId(provider) ?? initial;
   const custom = p.id === "custom";
@@ -239,9 +246,16 @@ export function ConnectionForm({ c, catalog, conn, first, onCancel, onSaved, onE
         <p className="hint">只在遇到对应报错时才需要改；默认值来自服务商预设。</p>
       </details>
       <div className="form-actions">
+        {conn && test ? (
+          <button type="button" disabled={dirty || test.busy || saving} onClick={test.run}
+            title={dirty ? "先保存再测试：测试用的是已保存的配置" : "测试已保存的配置"}>
+            {test.running ? "测试中…" : "测试连接"}
+          </button>
+        ) : null}
         <button type="submit" className="primary" disabled={saving}>{saving ? "保存中…" : conn ? "保存" : "新建并保存"}</button>
         <button type="button" onClick={onCancel}>取消</button>
       </div>
+      {conn && test ? test.result : null}
     </form>
   );
 }

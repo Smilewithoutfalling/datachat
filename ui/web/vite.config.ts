@@ -23,5 +23,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.{ts,tsx}"],
+    // U1：typeScale.test.ts 用 ?raw 读 styles.css 原文；vitest 默认不处理 CSS（?raw 也读成空串），只放开这一个文件
+    css: { include: [/styles\.css/] },
   },
 });

@@ -128,6 +128,8 @@ export function SettingsView({ c, onKeyChange, onBack }: { c: Client; onKeyChang
                 editing?.id === x.id ? (
                   <li key={x.id} className="conn-card editing">
                     <ConnectionForm c={c} catalog={catalog} conn={x} onCancel={() => setEdit(null)}
+                      test={{ run: () => runTest(x.id), running: testFor(x)?.state === "running", busy: test?.state === "running",
+                        result: <TestOutput test={testFor(x)} /> }}
                       onSaved={(text, warn) => refresh().then(() => (setEdit(null), done(text), warn ? setError(warn) : undefined), fail)} onError={fail} />
                   </li>
                 ) : (
@@ -261,8 +263,14 @@ function ConnCard({ x, providerName, test, busy, onTest, onActivate, onEdit, onD
         {!x.readonly ? <button type="button" onClick={onEdit}>编辑</button> : null}
         {!x.readonly ? <ConfirmButton label="删除" confirmLabel="确认删除（Key 一并删除）" onConfirm={onDelete} /> : null}
       </div>
-      {test?.state === "done" ? <TestResult r={test.r} /> : null}
-      {test?.state === "error" ? <p className="banner danger test-fail" role="alert">{test.text}</p> : null}
+      <TestOutput test={test} />
     </li>
   );
+}
+
+/** 测试结果：卡片和编辑态表单共用。 */
+function TestOutput({ test }: { test: TestState | null }) {
+  if (test?.state === "done") return <TestResult r={test.r} />;
+  if (test?.state === "error") return <p className="banner danger test-fail" role="alert">{test.text}</p>;
+  return null;
 }

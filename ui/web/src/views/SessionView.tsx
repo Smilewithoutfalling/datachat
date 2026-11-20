@@ -5,11 +5,10 @@ import { emptyTurn, reduce, replay, settle, type Turn } from "../turn";
 import type { Message, Session, SessionDetail } from "../types";
 import { FeedbackBar } from "./FeedbackBar";
 import { IconArrowUp, IconStop, IconTable, IconTrash, IconWarn } from "./icons";
-import { ThemePicker } from "./ThemePicker";
 import { TurnView } from "./TurnView";
 import { Dialog, MoreMenu, Topbar } from "./ui";
 
-// 会话：顶栏（标题原地编辑、主题、···）、历史（重放）、提问（SSE 实时）、停止、重新生成、👍👎。
+// 会话：顶栏（标题原地编辑、···；主题在图表工具栏，U1）、历史（重放）、提问（SSE 实时）、停止、重新生成、👍👎。
 // status 是最终真相源（phase5-frontend.md §1）：流结束后重新拉会话，用库里的 status 收尾本页实时收到的轮次。
 type Live = { question: string; messageId: string; turn: Turn; startedAt: number };
 export function SessionView({ c, id, datasetName, title: titleProp, keyConfigured = true, onGoSettings, onChanged, onDeleted }: {
@@ -237,7 +236,6 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
         sub={`${datasetName} · ${turns} 轮对话`}
         actions={
           <>
-            <ThemePicker />
             <MoreMenu label="会话操作" items={[
               { label: "重命名", onClick: () => titleRef.current?.focus() },
               { label: "删除会话", onClick: () => setConfirmDelete(true), danger: true },

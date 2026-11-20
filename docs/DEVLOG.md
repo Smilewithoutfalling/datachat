@@ -10933,10 +10933,80 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 
 自动入库无人标闸（红线 4）；同家族 judge 冒充异家族达标。
 
-## [197] 2026-11-20 · scipy.stats 方案 + 待决事项清单 · commit <待提交>
+## [197] 2026-11-20 · scipy.stats 方案 + 待决事项清单 · commit 4a10444（PR #112）
 
 - 新增 `docs/roadmap/phase75-scipy.md`：建议先不加 scipy.stats，等有题需要再加。依据：202 题里检索检验类关键词，只命中 `cases_multi.py:195` 的一处注释；`import scipy.stats` 会连带加载 12 个子包，未压缩约 148 MB（aarch64 实测）；sidecar zip 89 MB（sidecar run 44660448032）。另外写好了「如果要加」的规则：白名单精确到 `scipy.stats`，导出、打包、selftest 同步，跑全量 202 题。
 - 新增 `docs/roadmap/decisions-pending-1120.md`：把等 S 拍板的事项按 A 合并相关 / B scipy / C U1 / D 早先挂起的分类列出，每条附建议。
 - 只有文档，没有代码改动，闸门不受影响。
 - 11-20 更新：根据 #112 评论修正事实（D6、D1④ 已解决，D5 只剩 live 模式，红线改为配对翻转判读），填写已定的事项（A1 顺序改为 #111 → #109 → #110；A2–A4、B1、B3、C1–C3、E1、E2），phase75-scipy §3④ 补上 probe 批和下界的说明。
 - 回填：[196] 的 SHA 写为 103eb54（#111 squash）。
+
+## [198] 2026-11-20 · 阶段 7.6 U1：工艺层 · commit <待提交>
+
+方案：`docs/roadmap/phase76-ui.md` §2 U1（第 40 行）和 §2.1 第 52–54 行。主要改 token 表和样式；JSX 动了主题下拉的位置，以及编辑态表单加「测试连接」（S 11-20 定 C2 = 方案 A）。
+
+### 改了什么
+- **字阶表**：`styles.css` 的 `:root` 新增 `--fs-aux` 12、`--fs-body` 13、`--fs-read` 14、`--fs-title` 20、`--fs-title-lg` 22（仍写成 `calc(N * var(--px))`，N 是根字号 13 时的设计像素）；同值的常量 `src/typeScale.ts`（`TYPE_SCALE`）。全文件 149 处 `font-size` 改成引用这五个变量，只剩 `:root` 的根字号 14px（`--px` 的锚）是字面值。`--fs-read` 是 S 11-20 定的（C1）：只给聊天阅读区用，允许的选择器列在 `READ_SELECTORS`。
+  | 旧值 | 新值 | 处数 | 说明 |
+  |---|---|---|---|
+  | 9.5 | 12 | 2 | |
+  | 10 | 12 | 4 | 方案里没列，也并进辅助 |
+  | 10.5 | 12 | 18 | |
+  | 11 | 12 | 37 | |
+  | 11.5 | 12 | 10 | |
+  | 12 | 12 | 46 | 值不变，改成引用变量 |
+  | 12.5 | 13 | 8 | 名称、正文类（`.ds-line` `.acard-name` `.ev .text` `.dialog p` `.errcard-title` `.failcard .reason` `.cmd code` `.conn-name`）。按角色归正文，没有归辅助：归 12 的话卡片标题会比正文还小 |
+  | 12.5 | 20 | 2 | 卡片 / 区块标题：`.card-title`、`.settings .sec-head h3`（§2.1「卡片标题和正文分不开」） |
+  | 13 | 13 | 7 | |
+  | 13.5 | 13 | 1 | `.outcome-text` |
+  | 14 | 14（`--fs-read`） | 4 | 聊天阅读区：`.bubble` `.answer`（回答里 Markdown 的段落、列表继承它）`.composer textarea` `.md h3, .md h4`。U1 初版降到 13，S 11-20 定（C1）退回 14。`.md h3, .md h4` 不算正文，但它只出现在回答里，留 13 会比正文还小，所以一并用 `--fs-read` |
+  | 14 | 13 | 2 | `.empty-card .em-main` `.empty-session p`（不在聊天阅读区） |
+  | 15 | 13 | 1 | `.brand-name` |
+  | 15 | 20 | 2 | `.topbar-title`、`.title-input`（`.title-input` 高 24 → 30，否则 20 号字被裁） |
+  | 16 | 20 | 1 | `.md h1, .md h2` |
+  | 18 | 20 | 1 | `.dialog h2` |
+  | 18 | 22 | 1 | `.failcard h2` |
+  | 22 | 22 | 1 | `.expired h1` |
+  | 30 | 22 | 1 | `.empty h2`（首屏大标题） |
+  标题两档的分工：20 = 顶栏标题、卡片 / 区块标题、对话框标题、Markdown h1/h2；22 = 独立页大标题（首屏、会话失效页、数据集读取失败页）。
+- **卡片栅格 token**：`--card-pad` 20、`--card-pad-lg` 24、`--card-gap` 12、`--card-gap-lg` 16、`--grid-max` 1214px。
+  - padding：`.acard` 16/18 → 20/24；`.side-card` 16 → 20；`.settings form` 20 → 20/24；`.settings .conn-card` 14/16 → 20/24；`.failcard` 28 → 24；`.expired` 34/36/30 → 24；`.empty-card` 18 → 20。菜单、对话框、标记浮层、错误卡（`.errcard`，卡内提示条）不算卡片，没动。
+  - 间距：`.messages` 14 → 16；`.ds-layout` 22 → 16；`.ds-col` 14 → 16；`.settings` 14 → 16；`.charts` 12（改引用变量）；`.notes-card` 8 → 12；`.settings form`、`.conn-card` 内部 14/10 → 12；`.conn-section`、`.conn-list` 10 → 12。
+- **设置页宽度**：`.settings { max-width: 778px }` → `max-width: var(--grid-max); margin: 0 auto`，和消息列（`.messages`）、输入区（`.composer`）同一条 1214px 栅格。`.messages`、`.composer` 只是改成引用同一个变量，值仍是 1214px，聊天页布局不动。
+- **主题下拉移到图表工具栏**：`ThemePicker` 从会话顶栏（`SessionView.tsx`）和首屏顶栏（`Shell.tsx` Home）拿掉，放进 `EChart.tsx` 的 `.chart-controls`（排序之后、「标记」之前）。仍是全局主题，改任一张图的下拉，所有图一起变；`aria-label="图表主题"` 不变，e2e 的定位器照用。去掉了 `.pill` 胶囊外观，下拉沿用工具栏 select 的样式。首屏没有图，因此不再显示主题入口。
+- `vite.config.ts`：`test.css.include` 只放开 `styles.css`。vitest 默认不处理 CSS，`?raw` 也会读成空串。
+
+### 测试
+- 新增 `src/typeScale.test.ts`（describe「字阶表（U1）」，5 条）：
+  - 「字阶表四级五档：标题 20/22，正文 13，聊天阅读 14，辅助 12」：原名「字阶表只有三级…」，C1 加了 `read` 一档，断言随之改成五档
+  - 「--fs-read 只用在聊天阅读区：气泡、回答正文、回答里的 Markdown 小标题、输入框」：用到 `var(--fs-read)` 的选择器必须正好是 `READ_SELECTORS`，防止 14 扩散到别处
+  - 「:root 的 --fs-* 与 TYPE_SCALE 一一对应，值写成 calc(N * var(--px))」
+  - 「styles.css 的 font-size 只取字阶表里的值（var(--fs-*)）」：例外只有 `:root` 的 14px。另断言解析出的声明超过 100 条，防止解析器漏读后空过。往文件末尾临时加一条 `calc(11 * var(--px))`，这条确实会变红（已还原）。
+  - 「自检：直接写数字的 font-size 会被抓出来」
+- `src/views/connections.test.tsx` 新增 describe「编辑态的「测试连接」（U1，S 11-20 定 C2 = 方案 A）」，3 条：
+  - 「没有改动：按钮顺序「测试连接 · 保存 · 取消」，点了真的发出测试请求，结果显示在表单里」：断言发出 1 次 `POST /connections/c1/test`、没有 PUT
+  - 「有未保存的改动（改字段或填了新 Key）：按钮置灰，title 写「先保存再测试」；改回去恢复可点」
+  - 「新建表单没有「测试连接」（还没有已保存的配置）」
+  - 反证：去掉 `dirty` 置灰，第 2 条变红；把 onClick 换成空函数，第 1 条变红（均已还原）。
+- 改 `EChart.test.tsx` 两条：工具栏控件集合加上「图表主题」（「不兼容的开关不渲染…工具栏只有五个控件（U1 起含主题）」「工具栏控件集合：只有图型 / 排序（按 COMPAT）/ 主题（U1）/ 标记 / 导出…」）。
+
+### 闸门（2026-11-20，aarch64 沙箱，worktree feat/u1-craft，基于 549431f，node 24.22.1）
+日志在 `/workspace/work/logs/u1_*.log`；C1/C2 之后重跑的在 `u1b_*.log`。
+| 段 | 结果 |
+|---|---|
+| vitest 全量（分两段跑：`src/charts`，以及 `src/views` 加根目录各 test 文件） | 28 个文件，906 passed（775 + 131），0 failed；比 [193] 多 8 条：typeScale 5 条、编辑态测试连接 3 条（11-20 C1/C2 后重跑，日志 `u1b_*.log`） |
+| `tsc --noEmit` | 0 错误 |
+| `npm run build`（tsc + vite build + check-dist） | 通过，`dist/index.html` 检查通过 |
+| eslint（改动文件） | 0 报错 |
+| e2e（`--grep-invert 视觉`） | **没跑通，环境问题，同 [193]**：沙箱缺 `libatk-1.0.so.0`，chromium-headless-shell 起不来。41 failed（1–2 ms 内红），1 passed（不开浏览器的那条）。交给 CI |
+
+### S 的决定与遗留
+- ~~「测试连接」和「保存设置」（§2.1 第 53 行）~~ **已按 A 实现**（S 11-20 定）：编辑态表单（`ConnectionForm.tsx` 的 `.form-actions`）按钮排成「测试连接 · 保存 · 取消」。测的是已保存的配置：表单和打开时不一样（任一字段改过，或填了新 Key）就置灰，title 写「先保存再测试：测试用的是已保存的配置」。点击走 `SettingsView` 原有的 `runTest(id)`（`c.testConnection`，和卡片上的「测试连接」同一套，包括「有一条在测时都不可点」和测完刷新 probe），没有另写请求；结果用卡片同一个 `TestOutput`（`TestResult` / 错误横幅）显示在表单底部。新建表单没有这个按钮。卡片动作区和「请求」卡的「保存设置」没动。
+- **视觉基线**：字号、padding、设置页宽度、顶栏都变了，`f4-visual` 的快照一定会红。按约定没在本地重取，等 CI x64 重取。
+- ~~聊天正文 14 → 13~~ **已按 C1 处理**（S 11-20 定）：字阶表加 `--fs-read` 14，聊天阅读区退回 14，见上面字阶表一行。
+
+### CI 修复（2026-11-20，PR #113 web job，run 44742904080 的 7 条 e2e 失败）
+- **`e2e/f3-inject.spec.ts:234` 图宽 1174 → 1162**（classic、darkCanvas、开关全开三条）：U1 把卡片 padding 统一到 20–24，图表宽度少了 12px，属于有意的布局变化，不改样式凑回 1174。断言改为 `toBe(1162)` 并写明原因；第 70 行 viewport 注释里的「图宽到顶 1174」同步改为 1162。核对过后面的判定：类目列坐标由画出来的标签线性推出、饼图坐标按图块尺寸算，`posOf` 只用画布高度，没有按 1174 推算的常数，其余不用改。（`src/charts/headroom.test.ts` 里的 640/880/1174 是单测的取样宽度，与这条断言无关，未动。）
+- **`f4-visual` 08、11、24、25 重取基线**：字阶和 padding 改了，四张截图是预期的视觉变化。从 run 44742904080 的 artifact `playwright-results`（id 14632132146）取 CI x64 的 `*-actual.png`，覆盖 `e2e/f4-visual.spec.ts-snapshots/` 下的 `08-running-fake-linux.png`、`11-marks-card-fake-linux.png`、`24-narrow-dataset-failed-fake-linux.png`、`25-narrow-session-fake-linux.png`；逐张看过，都是正常页面。
+- 本地快速确认：vitest `typeScale` + `connections` 2 个文件 28 passed。e2e 仍因沙箱缺 libatk 交给 CI。
+- 回填：[197] 的 SHA 为 4a10444（#112 squash）。
