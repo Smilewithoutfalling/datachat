@@ -11099,3 +11099,8 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | `-k test_oracle_pipeline_all_correct` | 2 passed，395 s |
 | test_export slow（拷贝装包） | 7 passed，118 s |
 | vitest / e2e | 前端没改，未跑 |
+
+### CI 补丁（11-20）
+- tests df49646（run 44658450556）在 Windows 上红了 6 条 `test_clean_venv_*`，报 `UnicodeEncodeError: 'charmap'`。原因：干净 venv 用 `-I` 运行，`-I` 会忽略 PYTHONIOENCODING/PYTHONUTF8，stdout 是管道，于是按 cp1252 写，导出脚本一打印中文就中断。这在英文 Windows 上把输出重定向到文件时也会真实发生。
+- 修法：`export_runtime.py` 把不是控制台的 stdout/stderr 改成 UTF-8；控制台（isatty）不动。
+- 新增 `test_runtime_prints_chinese_on_non_utf8_pipe`，用 PYTHONIOENCODING=cp1252 模拟这种情况。不加修复时这条测试红，加上后绿。`tests/test_export.py` 本地 42 passed（含 slow）。
