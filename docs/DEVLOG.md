@@ -11056,3 +11056,5 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | `python -m app.sidecar --selftest`（非冻结） | ok，9 项全过，含新增 xlsx |
 | vitest | 27 个文件 899 passed |
 | e2e（`--grep-invert 视觉`） | **没跑通，环境问题**：沙箱缺 `libatk-1.0.so.0`（同 [193]），off / state 各 41 failed、1 passed（唯一不开浏览器的那条），full 没跑。交给 CI |
+
+- 11-20 补丁（A4，S 同意，见 #112 评论）：上传文案改为「Excel 解压后不超过 300 MB」，与后端 413 报错的说法（按解压后体积判）一致。改了 `Shell.tsx` 的两处文案和 `v2a.test.tsx` 的断言。vitest v2a 35 passed。
