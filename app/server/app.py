@@ -32,6 +32,10 @@
                                          sources 给出每项当前生效值的来源 settings | env | default（阶段 6 收尾）
     POST   /exports/png?filename=        桌面模式（--desktop）：请求体是 PNG 字节，写进「下载」文件夹，返回 {"path"}；
                                          浏览器模式 404（前端走 <a download>）。见 app/server/exports.py
+    POST   /messages/{id}/export/code    把这一轮最终执行的代码导出成独立 .py（自带数据加载、chart()、savefig 落盘），
+                                         写进下载文件夹，返回 {"path", "filename"}；代码含沙箱拦下的操作时 422
+    POST   /messages/{id}/export/result?format=csv|xlsx  在沙箱里重跑同一段代码拿 result，导出 CSV（UTF-8 BOM）或 xlsx，
+                                         返回 {"path", "filename", "rows", "columns", "matches_original"}。见 app/tools/export.py
     GET    /settings/api-key             {"configured", "source"}——从不返回 Key 本身
     PUT    /settings/api-key             {"api_key"} → 存进系统钥匙串
     DELETE /settings/api-key
@@ -89,6 +93,7 @@ TIMEOUT_RANGE = (5.0, 600.0)
 PREVIEW_MAX_ROWS = 100
 PREVIEW_DEFAULT_ROWS = 20    # 上传后随响应带回的预览行数
 PREVIEW_CELL_MAX = 200       # 单元格超长截断（按文本渲染，T9）
+EXPORT_TIMEOUT = 60          # 导出结果表时在沙箱里重跑代码的超时（秒）；分析时默认 20，导出放宽
 CHART_NAME = re.compile(r"^chart_[0-9_]+_[0-9a-f]{6}\.png$")
 FEEDBACK_NOTE_MAX = 1000
 # 去掉控制字符（保留 \t \n）和双向文本控制符：note 会原样回显到前端（THREAT_MODEL T9）。
@@ -441,6 +446,99 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(500, "写入下载文件夹失败") from None
         logger.info("导出 PNG：%s（%d 字节）", os.path.basename(path), len(data))
         return {"path": path}
+
+    # 阶段 7.5 第 2 步：代码导出（独立 .py）与结果表导出（CSV / xlsx），见 app/tools/export.py。
+    # 鉴权与 /exports/png 相同（请求头 token）；写进 app.state.export_dir（桌面模式），没挂时写 default_export_dir()
+    # ——内容由后端生成、不收前端字节，所以不像 PNG 那样只限桌面模式。文件名复用 clean_filename，重名编号、不覆盖。
+    def export_source(db, message_id: str):
+        """→ (消息, 会话, 数据集, 结果记录)。只有执行成功、带代码的助手消息能导出。"""
+        m = get_or_404(db, Message, message_id)
+        if m.role != "assistant":
+            raise HTTPException(400, "只能导出助手消息")
+        if m.status == "running":
+            raise HTTPException(409, "这条消息还在分析中")
+        try:
+            rec = json.loads(m.result_json) if m.result_json else None
+        except ValueError:
+            rec = None
+        if not rec or not rec.get("executed") or not (rec.get("code") or "").strip():
+            raise HTTPException(409, "这一轮没有执行成功的代码，无法导出")
+        s = get_or_404(db, ChatSession, m.session_id)
+        ds = get_or_404(db, Dataset, s.dataset_id)
+        return m, s, ds, rec
+
+    def export_dir_now() -> str:
+        from app.server.exports import default_export_dir
+        return app.state.export_dir or default_export_dir()
+
+    def export_stem(s: ChatSession, m: Message) -> str:
+        return f"{s.title or 'DataChat 分析'}_{m.id[:6]}"
+
+    def write_export(stem: str, data: bytes, suffix: str) -> str:
+        from app.server.exports import ExportError, save_file
+        try:
+            return save_file(export_dir_now(), stem, data, suffix)
+        except ExportError as e:
+            raise HTTPException(400, str(e)) from None
+        except OSError as e:
+            logger.warning("导出写盘失败：%s", type(e).__name__)
+            raise HTTPException(500, "写入下载文件夹失败") from None
+
+    @app.post("/messages/{message_id}/export/code", dependencies=[Depends(auth)])
+    def export_code(message_id: str, db=Depends(db_dep)):
+        from app.tools.dataset import is_dict_file
+        from app.tools.export import ExportError, build_script, unsafe_reasons
+        m, s, ds, rec = export_source(db, message_id)
+        code = rec["code"]
+        bad = unsafe_reasons(code)
+        if bad:
+            raise HTTPException(422, "代码里有沙箱拦下的操作，导出后会在沙箱外执行，所以不导出：" + "；".join(bad[:5]))
+        tables = [f for f in ds.files if not is_dict_file(f.filename)]
+        msgs = list(s.messages)
+        i = next((k for k, x in enumerate(msgs) if x.id == m.id), 0)
+        q = msgs[i - 1] if i > 0 and msgs[i - 1].role == "user" else None      # 这一轮的提问（紧挨在前的用户消息）
+        try:
+            text = build_script(code, files=[(f.filename, f.sha256) for f in tables],
+                                data_dir=os.path.dirname(tables[0].path) if tables else "",
+                                multi_source=len(tables) > 1,
+                                meta={"session_id": s.id, "session_title": s.title, "message_id": m.id,
+                                      "question": q.content if q else "", "dataset_name": ds.name,
+                                      "agent": rec.get("agent") or s.agent, "exported_at": now()})
+        except ExportError as e:
+            raise HTTPException(500, str(e)) from None
+        path = write_export(export_stem(s, m), text.encode("utf-8"), ".py")
+        logger.info("导出代码：%s", os.path.basename(path))
+        return {"path": path, "filename": os.path.basename(path)}
+
+    @app.post("/messages/{message_id}/export/result", dependencies=[Depends(auth)])
+    def export_result(message_id: str, format: Literal["csv", "xlsx"] = Query("csv"), db=Depends(db_dep)):
+        import tempfile
+        from app.core.result import format_result
+        from app.tools.dataset import load_data
+        from app.tools.export import ExportError, result_table, to_csv_bytes, to_xlsx_bytes
+        from app.tools.sandbox import run_code
+        m, s, ds, rec = export_source(db, message_id)
+        try:
+            data, _ = load_data(dataset_target(ds))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(409, user_error("dataset", e, trace_id=secrets.token_hex(16),
+                                                context=f"export dataset={ds.id}")) from None
+        # result 不存库（只存 result_text），用同一段代码、同一份数据在沙箱里重跑拿原对象
+        with tempfile.TemporaryDirectory(prefix="datachat-export-") as tmp:
+            result, _chart, err = run_code(rec["code"], data, os.path.join(tmp, "chart.png"), timeout=EXPORT_TIMEOUT)
+        if err:
+            logger.warning("导出结果表时重跑失败：%s", err.splitlines()[-1][:200] if err else "")
+            raise HTTPException(409, "重新执行这段代码失败，无法导出结果表")
+        try:
+            payload = to_xlsx_bytes(result) if format == "xlsx" else to_csv_bytes(result)
+        except ExportError as e:
+            raise HTTPException(413, str(e)) from None
+        frame, _ = result_table(result)
+        path = write_export(export_stem(s, m), payload, "." + format)
+        logger.info("导出结果表：%s（%d 字节）", os.path.basename(path), len(payload))
+        return {"path": path, "filename": os.path.basename(path), "rows": int(frame.shape[0]),
+                "columns": int(frame.shape[1]),
+                "matches_original": format_result(result) == (rec.get("result_text") or "")}
 
     def check_xlsx(path, fn):
         """xlsx 上传后按解压后体积判（zip 头里各成员 file_size 之和）；坏文件 400，超限 413。"""
