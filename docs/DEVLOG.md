@@ -11108,3 +11108,37 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 冲突只有 `docs/DEVLOG.md`（都在末尾追加）。解法：保留 base 的全部内容（master 到 [198]，加 #109 的 `[待编号]` 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`packaging/build_sidecar.py` 与 #109 的 `--hidden-import openpyxl` 相邻，自动合并，两项都在。
   - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #109 新 head（691cbd9）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#109 仍 `ded1326738a8`，本 PR 仍 `997e3217d054`，全量 sha 仍 `b3b8e89c3759`。
+
+## [待编号] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit <待提交>
+方案：docs/roadmap/phase76-ui.md §2 U2（第 41 行）、§2.1（第 56 行：在「N 个表」和表名 chip 上扩展）、§4（第 70 行：口径导入导出入口）。worktree `feat/u2-asset`，基于 origin/master 549431f。
+
+### 做了什么
+- **后端只加字段**：`GET /datasets/{id}`（带不带 `rows` 都有）和上传响应新增 `profile`：`table_count`、`rows`（各表之和）、`columns`（各表之和）、`missing_columns`（含真缺失值 NaN 的列数，各表之和）、`time_range: {min, max} | null`（各表范围的并集），逐表明细在 `profile.tables[]`（每张带 `name/rows/columns/missing_columns/time_range{column,min,max}`）。原有字段一个没改，`GET /datasets` 列表不带。
+- 计算在 `app/tools/schema.py`：`profile_df`（单表）、`profile_dataset`（汇总）。行数、列数与 `describe_df` 第一行「表共有 N 行、M 列」同源（`len(df)`、`len(df.columns)`）；`dataset_out` 里对已经读进来的同一个 df 算，不多读文件。**`describe_df` 一个字没改**（prompt 字节不变）。
+  - 说明：`describe_df` 本身只算行数、列数、类型，没有时间范围和缺失列；这两项是在同一个 df 上新算的。
+  - 时间范围：第一个「日期形态」的列（datetime 类型，或前 200 个非空取值里 ≥95% 匹配「年在前」的日期文本：`2024-01-05`、`2010/12/1 8:26`、`2024.3.15`、`2024年4月2日`）；按全列唯一值取最早 / 最晚，精确到日。`01/05/2024` 这类月日有歧义的不认，宁可给 null。零售明细 54 万行实测 0.16 s。
+  - 缺失列：只算真缺失值；「未登记」这类哨兵词不算（那是 B65 注解管的）。
+- **前端**：侧栏数据集条目（Shell.tsx 原有的 `ds-row`、「N 个表」、表名 chip）外面包一层 `li.ds-card`，没有另起组件。卡片上：数据集名、使用中 / 读取失败标记、「N 个表」（有 profile 时用 `table_count`，否则按文件数，同原来）、多表的表名 chip、单表且文件名与数据集名不同时的文件名 chip、概要行（「R 行 · C 列 · K 列有缺失 / 无缺失列」「min ~ max / 没有日期列」），以及三个按钮：
+  - **剖析**：`GET /datasets/{id}`（不带 rows，不要预览）真实读一遍文件，把 profile 填进卡片；读坏了卡片转成「读取失败」。复用现有详情接口，没有新后端动作。
+  - **提问**：复用现有「新建会话」流程，`POST /sessions {dataset_id, agent: "workflow"}`，打开新会话。
+  - **口径**：进数据集页并滚到「口径与规则」（导入 / 导出按钮在那里，NotesSection.tsx:78）。
+- 侧栏不为卡片逐个去读文件（保持 F1.1「每个文件只读一遍」，`views.test.tsx` 的请求计数照旧）：卡片只用已经拿到的详情——上传响应、打开数据集页、点「剖析」。还没拿到时写「还没读取概要，点「剖析」」。
+- 样式：`.ds-card` 1px 边框、无阴影；**没有新增任何 font-size**，概要沿用 `.ds-meta`，按钮沿用 `button.link`（U1 字阶未合并）。
+- docs/sidecar-contract.md 记了新字段。
+
+### 双向钉住
+契约文件 `ui/web/src/fixtures/asset_card.json`（一份 CSV + 期望的 profile）。后端断言接口返回与它逐字相等；前端用它渲染卡片，断言卡片上每个数字（日期整体算一个、去千分位）都在 profile 里，且 profile 的数据集级标量都出现在卡片上。
+
+### 新增测试
+- pytest `tests/test_u2_asset_card.py`（13 条）：`test_profile_rows_and_columns_match_describe_df_header`、`test_profile_missing_columns_counts_real_nan_only`、`test_profile_time_range_mixed_text_formats_by_full_column`、`test_profile_time_range_datetime_dtype_and_first_date_column_wins`、`test_profile_no_time_range`（4 组参数）、`test_profile_dataset_sums_and_unions_ranges`、`test_describe_df_prompt_text_unchanged_by_profile`、`test_detail_profile_equals_contract_fixture`、`test_detail_profile_agrees_with_preview_and_old_fields_unchanged`、`test_detail_profile_multi_table_skips_broken_table`。
+- vitest `ui/web/src/views/u2-asset-card.test.tsx`（7 条）：没概要时的说法 + 「剖析」发 `GET /datasets/d1`；双向钉住；千分位 / 多表 / 无日期列 / 无缺失列；上传响应自带 profile 时不再请求；「提问」发 `POST /sessions`；「口径」进数据集页并滚到口径区；「剖析」读到坏文件转读取失败。
+
+### 闸门（2026-11-20，aarch64 沙箱 2 核，串行；日志 `/workspace/work/logs/u2_*.log`）
+| 段 | 结果 |
+|---|---|
+| pytest 相关文件（test_u2_asset_card、test_web_f1、test_schema、test_server、test_dataset_notes_api、test_excel_io、test_dataset_notes_lifecycle） | 111 passed，0 failed（新增 13 条）。按约定没跑全量和 oracle |
+| vitest 全量（node24） | 28 个文件，905 passed（比 [193] 多 7 条，即新增的 7 条） |
+| `tsc --noEmit` | 0 错误 |
+| web build（`vite build` + `check-dist.mjs`） | 通过；chunk 超 500 kB 的提示是原有的 |
+| eslint | 改动的 5 个文件 0 警告；全量 eslint 在 100 s 内没跑完（超时），没有结论 |
+| e2e | **没跑**：沙箱缺 `libatk-1.0.so.0`，chromium 起不来（同 [193]），交给 CI。侧栏卡片会改变含侧栏的视觉基线（f4-visual），需要用 CI x64 actual 重取 |

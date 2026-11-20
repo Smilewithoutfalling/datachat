@@ -16,9 +16,10 @@ type Props = {
   onDeleted: () => void;
   onNewSession: (datasetId: string, agent: Agent) => void;
   onBack?: () => void; // V2c §3
+  focusNotes?: boolean; // 阶段 7.6 U2：从侧栏资产卡的「口径」进来，加载完滚到口径与规则（导入 / 导出在那里）
 };
 
-export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onLoaded, onDeleted, onNewSession, onBack }: Props) {
+export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onLoaded, onDeleted, onNewSession, onBack, focusNotes = false }: Props) {
   // Shell 按 id 设了 key，换数据集会重新挂载，这里不用手动复位状态
   const [detail, setDetail] = useState<DatasetDetail | null>(initial?.id === id && initial.preview ? initial : null);
   const [tab, setTab] = useState(0);
@@ -54,6 +55,10 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
       live = false;
     };
   }, [c, id, have]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (focusNotes && have) document.querySelector('[data-testid="notes-section"]')?.scrollIntoView?.({ block: "start" });
+  }, [focusNotes, have]);
 
   if (error && !detail) return <div className="main"><p className="banner danger" role="alert">加载数据集失败：{error}</p></div>;
   if (!detail) return <div className="main" aria-busy="true">加载中…</div>;

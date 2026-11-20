@@ -38,6 +38,7 @@
 - `GET /settings` 新增 `memory: {mode, setting, env}`：`mode` 是实际生效值，`env` 非空表示被环境变量 `DATACHAT_MEMORY` 覆盖。`PUT /settings` 接受 `memory_mode: "off" | "state"`；没存过设置时 `setting` 与 `mode` 都落默认档 —— **2026-11-16 起是 `state`**（C-021；此前是 `off`），`off` 仍是可选项且行为逐字节不变。
 - 批 4a / 4b：`PUT /settings` 的 `memory_mode` 另可取 `"full"`，并接受 `memory_rewrite: bool`（追问前改写，默认关）；`GET /settings` 的 `memory` 段另有 `rewrite`（改写开关实际生效值）、`rewrite_setting`（设置页存的值）、`rewrite_env`（被环境变量 `DATACHAT_REWRITE` 覆盖时的值，否则 null）。
 - 批 4b 口径与规则：`GET/POST /datasets/{id}/notes`、`PUT/DELETE /datasets/{id}/notes/{note_id}`、`POST /datasets/{id}/notes/import`（请求体是 CSV 或 JSON 数组）、`GET /datasets/{id}/notes/export?format=csv|json`。新表 `dataset_notes` 由 `create_all` 自动建，旧表不动；`DELETE /datasets/{id}` 时口径随外键级联删除。分析结果（`result_json`）新增 `memory_notes: [{name, sha}]`，记忆 off 时为 `[]`。
+- 阶段 7.6 U2 数据资产卡：`GET /datasets/{id}`（带不带 `rows` 都有）和 `POST /datasets` 的响应新增 `profile: {table_count, rows, columns, missing_columns, time_range: {min, max} | null, tables: [{name, rows, columns, missing_columns, time_range: {column, min, max} | null}]}`。只算读成功的表；日期精确到日（YYYY-MM-DD）。原有字段不变；`GET /datasets` 列表不带。
 - 数据库空间回收：新库使用 `auto_vacuum=INCREMENTAL`；旧库只在启动时、开始监听之前，并且空闲页超过 25% 时转换一次；`POST /shutdown` 只执行有上限的 `incremental_vacuum`。
 
 ## 端口独占（不要改）

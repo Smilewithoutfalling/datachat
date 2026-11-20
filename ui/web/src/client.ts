@@ -22,6 +22,8 @@ export function client(api: Api) {
     datasets: () => api.json<Dataset[]>("/datasets"),
     dataset: (id: string, rows = PREVIEW_ROWS) =>
       api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}?rows=${rows}`),
+    /** 阶段 7.6 U2「剖析」：不带 rows 的详情——读一遍文件，只要概要（profile），不要预览。 */
+    datasetProfile: (id: string) => api.json<DatasetDetail>(`/datasets/${encodeURIComponent(id)}`),
     upload: (files: File[], name: string, onProgress?: (p: number) => void) => {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f, f.name));
