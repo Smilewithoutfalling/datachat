@@ -20,6 +20,18 @@ export type PreviewTable =
     }
   | { name: string; filename: string; error: string };
 export type Preview = { rows: number; tables: PreviewTable[]; dicts: string[] };
+// 阶段 7.6 U2：数据资产卡的概要（GET /datasets/{id} 的 profile，app/tools/schema.py profile_dataset）。
+// 只算读成功的表；时间范围取第一个日期形态的列，精确到日（YYYY-MM-DD），没有日期列时为 null。
+export type TimeRange = { min: string; max: string };
+export type TableProfile = { name: string; rows: number; columns: number; missing_columns: number; time_range: (TimeRange & { column: string }) | null };
+export type DatasetProfile = {
+  table_count: number;
+  rows: number; // 各表行数之和
+  columns: number; // 各表列数之和
+  missing_columns: number; // 含真缺失值（NaN）的列数，各表之和
+  time_range: TimeRange | null; // 各表时间范围的并集
+  tables: TableProfile[];
+};
 // GET /datasets/{id}?rows=N（F1.1：预览并入详情，每个文件只读一遍）；POST /datasets 的响应也带 preview
 export type DatasetDetail = Dataset & {
   tables?: Record<string, string[]>;
@@ -27,6 +39,7 @@ export type DatasetDetail = Dataset & {
   error?: string;
   warnings?: string[]; // 全部表的读取提示（只有 xlsx 有）
   preview?: Preview;
+  profile?: DatasetProfile; // 阶段 7.6 U2；旧后端没有
 };
 
 export type Agent = "workflow" | "react";
