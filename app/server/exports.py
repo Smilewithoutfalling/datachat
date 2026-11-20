@@ -8,6 +8,9 @@
 - 文件名后端再清一遍（不信任前端 safeFilename）：删控制符和 bidi、换掉路径分隔符和 Windows 非法字符、限长、保留名前加 _、
   一律以 .png 结尾；只取 basename，写入路径必须仍在 export_dir 里；
 - 重名自动编号「名字 (1).png」，用 open(..., "xb") 独占创建，不覆盖已有文件。
+
+阶段 7.5 第 2 步：代码导出（.py）和结果表导出（.csv / .xlsx）复用同一套文件名清洗与独占创建（save_file）；
+这两种不限只在桌面模式——写的是后端自己生成的内容，不收前端的字节。
 """
 from __future__ import annotations
 
@@ -87,11 +90,19 @@ def save_png(export_dir: str, filename: str | None, data: bytes) -> str:
         raise ExportError("图片太大")
     if not data.startswith(PNG_MAGIC):
         raise ExportError("只接受 PNG 图片")
+    return save_file(export_dir, filename, data, ".png")
+
+
+def save_file(export_dir: str, filename: str | None, data: bytes, suffix: str) -> str:
+    """把 data 写进 export_dir，文件名 = clean_filename(去掉 suffix 的 filename) + suffix，重名自动编号、不覆盖。"""
     root = os.path.realpath(export_dir)
     os.makedirs(root, exist_ok=True)
-    stem = clean_filename(os.path.basename((filename or "").replace("\\", "/")))
+    base = os.path.basename((filename or "").replace("\\", "/"))
+    if suffix != ".png" and base.lower().endswith(suffix):
+        base = base[: -len(suffix)]
+    stem = clean_filename(base)
     for i in range(MAX_SUFFIX + 1):
-        name = f"{stem}.png" if i == 0 else f"{stem} ({i}).png"
+        name = f"{stem}{suffix}" if i == 0 else f"{stem} ({i}){suffix}"
         path = os.path.join(root, name)
         if os.path.dirname(os.path.realpath(path)) != root:   # 纵深防御：清洗后不应出现，出现就拒绝
             raise ExportError("文件名无效")
