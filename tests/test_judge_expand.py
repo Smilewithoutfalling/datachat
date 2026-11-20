@@ -109,8 +109,9 @@ def _eval_case(cid, correct, match):
 
 
 def test_pool_wide_detects_clash_as_p0(tmp_path):
-    _write_gate(tmp_path, "gate_a.json", [_gate_case("g1", True, False),   # P0 逆反
-                                           _gate_case("g2", True, True)])  # 无逆反 → P3
+    _write_gate(tmp_path, "gate_a.json", [_gate_case("g1", True, False),    # P0 逆反
+                                           _gate_case("g2", True, True),    # 一致对 → P4 补位
+                                           _gate_case("g3", False, False)])  # 双侧判错 → P3
     _write_eval(tmp_path, "eval_a.json", [_eval_case("e1", True, "value:scaled"),   # P1 放水
                                           _eval_case("e2", True, "value:strict"),   # P2 清晰对
                                           _eval_case("e3", False, "value:strict")])  # P3 清晰错
@@ -119,10 +120,30 @@ def test_pool_wide_detects_clash_as_p0(tmp_path):
         out_glob=str(tmp_path / "eval_*.json"))
     by_id = {v["id"]: v for v in pool.values()}
     assert by_id["g1"]["priority"] == 0 and by_id["g1"]["clash"]
-    assert by_id["g2"]["priority"] == 3
+    assert by_id["g2"]["priority"] == 4            # 闸门一致对不占清晰错配额
+    assert by_id["g3"]["priority"] == 3            # 闸门双侧判错是清晰负样本
     assert by_id["e1"]["priority"] == 1
     assert by_id["e2"]["priority"] == 2
     assert by_id["e3"]["priority"] == 3
+
+
+def test_collect_priorities_filter_negatives_only(tmp_path, monkeypatch):
+    # 负样本加厚专档：--priorities 3 只收清晰错，模糊/一致对一律不进清单。
+    _write_gate(tmp_path, "gate_a.json", [_gate_case("g1", True, False),
+                                          _gate_case("g2", True, True),
+                                          _gate_case("g3", False, False)])
+    _write_eval(tmp_path, "eval_a.json",
+                [_eval_case(f"s{i}", True, "value:scaled") for i in range(3)]
+                + [_eval_case(f"k{i}", True, "value:strict") for i in range(3)]
+                + [_eval_case(f"w{i}", False, "value:strict") for i in range(3)])
+    monkeypatch.setattr(judge_collect, "_alt_values", lambda cid: [])
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text("", encoding="utf-8")
+    rows, stats = judge_collect.collect(5, gate_glob=str(tmp_path / "gate_*.json"),
+                                        out_glob=str(tmp_path / "eval_*.json"),
+                                        gold_path=str(gold), priorities={3})
+    assert rows and all(r["priority"] == 3 for r in rows)
+    assert all(r["suggested_label"] is False for r in rows)   # 清晰错的建议标签是错
 
 
 def test_collect_round_robin_quota(tmp_path, monkeypatch):
@@ -139,6 +160,7 @@ def test_collect_round_robin_quota(tmp_path, monkeypatch):
                                         out_glob=str(tmp_path / "eval_*.json"),
                                         gold_path=str(gold))
     assert len(rows) == 9
+    assert len({(r["id"], r["answer"]) for r in rows}) == 9   # 轮转不许重复候选
     pr_counts = {}
     for r in rows:
         pr_counts[r["priority"]] = pr_counts.get(r["priority"], 0) + 1

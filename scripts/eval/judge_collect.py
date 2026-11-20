@@ -15,7 +15,9 @@
     P0 闸门题 human_correct 与 auto_correct 逆反——两把尺子当面打架，必须人裁；
     P1 match 层级 scaled/extras/relaxed（被宽容放水过的 True）或 alt: 前缀（歧义变体）；
     P2 strict/rounded/refusal/impossible 的 True（清晰对）；
-    P3 比较器 False 且 match 非 None（清晰错）。
+    P3 比较器 False 且 match 非 None（清晰错）；闸门双侧判错（人工+自动都说错）
+        或人工缺席但自动判错的闸门题，同为 P3；
+    P4 闸门一致对（人工与自动都说对）——低信息量，只做补位填充，不占清晰错配额。
 
 用法：
     python scripts/eval/judge_collect.py                      # 采集 → outputs/judge_candidates.jsonl
@@ -77,8 +79,16 @@ def load_pool_wide(gate_glob=GATE_GLOB, out_glob=OUT_GLOB, exclude=None):
             key = (c["id"], _sha12(ans))
             if key in exclude or key in pool:
                 continue
-            # P0：两把尺子打架（人工 vs 比较器逆反）。没打架的按 auto 给建议标签。
+            # P0：两把尺子打架（人工 vs 比较器逆反）。
+            # P3：闸门双侧判错（人工+自动都说错）或人工缺席但自动判错——清晰负样本。
+            # P4：闸门一致对——低信息量，只做补位填充，不占清晰错的配额。
             clash = h is not None and a is not None and bool(h) != bool(a)
+            if clash:
+                pr = 0
+            elif a is False and (h is None or h is False):
+                pr = 3
+            else:
+                pr = 4
             pool[key] = {
                 "id": c["id"], "source": os.path.basename(f),
                 "question": c["question"], "note": c.get("note") or "",
@@ -86,7 +96,7 @@ def load_pool_wide(gate_glob=GATE_GLOB, out_glob=OUT_GLOB, exclude=None):
                 "category": c.get("category"),
                 "comparator_correct": bool(a),
                 "match": None, "alt_hit": False,
-                "priority": 0 if clash else 3,
+                "priority": pr,
                 "clash": clash,
                 "suggested_label": bool(h) if h is not None else bool(a),
             }
@@ -160,8 +170,13 @@ def _alt_values(case_id):
     return vals
 
 
-def collect(target, gate_glob=GATE_GLOB, out_glob=OUT_GLOB, gold_path=GOLD_PATH):
-    """返回 (候选行列表, 池统计)。行含 gold_summary，可直接人标。"""
+def collect(target, gate_glob=GATE_GLOB, out_glob=OUT_GLOB, gold_path=GOLD_PATH,
+            priorities=None):
+    """返回 (候选行列表, 池统计)。行含 gold_summary，可直接人标。
+
+    priorities：可选档位集合（如 {0, 3}）——只从这些档采样，其余整档跳过。
+    负样本加厚专档：--priorities 3 只收清晰错候选。
+    """
     from scripts.eval.build_judge_gold import gold_summary
 
     done = set()
@@ -171,22 +186,33 @@ def collect(target, gate_glob=GATE_GLOB, out_glob=OUT_GLOB, gold_path=GOLD_PATH)
                 r = json.loads(line)
                 done.add((r["id"], _sha12(r["answer"])))
     pool = load_pool_wide(gate_glob, out_glob, exclude=done)
-    # 轮转取：P0 全收后，P1/P2/P3 轮流补齐——校准集需要对/错两侧、清晰/模糊两侧
+    # 轮转取：P0 全收后，P1/P2/P3/P4 轮流补齐——校准集需要对/错两侧、清晰/模糊两侧
     # 都有代表，100 条全落在"模糊 True"上会让 judge 只学会放行。
     by_pr = {}
     for v in sorted(pool.values(), key=lambda x: (x["priority"], x["id"])):
         by_pr.setdefault(v["priority"], []).append(v)
+    if priorities:
+        by_pr = {pr: v for pr, v in by_pr.items() if pr in priorities}
     if not target:
         picked = [v for pr in sorted(by_pr) for v in by_pr[pr]]
     else:
-        picked = by_pr.get(0, [])[:target]
+        picked = []
         others = [pr for pr in sorted(by_pr) if pr != 0]
+        # P0 全收（不占 others 的配额）；extend 后必须把已取的从桶里删掉，
+        # 不然补位 while 循环会把同一条再 pop 一遍——重复候选（实测踩过）。
+        p0 = by_pr.get(0, [])
+        take0 = min(len(p0), target)
+        picked.extend(p0[:take0])
+        del p0[:take0]
         rest = target - len(picked)
         share = max(1, rest // len(others)) if others else 0
         for pr in others:
             if len(picked) >= target:
                 break
-            picked.extend(by_pr[pr][:share])
+            bucket = by_pr[pr]
+            take = min(share, len(bucket))
+            picked.extend(bucket[:take])
+            del bucket[:take]
         while len(picked) < target:
             progressed = False
             for pr in others:
@@ -198,6 +224,8 @@ def collect(target, gate_glob=GATE_GLOB, out_glob=OUT_GLOB, gold_path=GOLD_PATH)
                     progressed = True
             if not progressed:
                 break
+    assert len({(v["id"], v["answer"]) for v in picked}) == len(picked), \
+        "轮转产生了重复候选（同一 (id, answer) 被取了两次）"
     rows = picked
     out = []
     for v in rows:
@@ -264,6 +292,8 @@ def ingest(cand_path, gold_path=GOLD_PATH, confirm=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", type=int, default=100, help="候选目标条数（0=全收）")
+    ap.add_argument("--priorities", default=None,
+                    help="只从这些档采样，逗号分隔（如 0,3=只收逆反+清晰错）")
     ap.add_argument("--out", default=os.path.join("outputs", "judge_candidates.jsonl"))
     ap.add_argument("--ingest", default=None, help="人标后的候选文件（干跑）")
     ap.add_argument("--confirm", action="store_true", help="与 --ingest 连用：真写库")
@@ -282,13 +312,14 @@ def main():
             print(f"已追加进 {GOLD_PATH}。校准集现共 {len(existing) + len(accepted)} 条。")
         sys.exit(0)
 
-    rows, stats = collect(args.target)
+    pr_set = {int(x) for x in args.priorities.split(",")} if args.priorities else None
+    rows, stats = collect(args.target, priorities=pr_set)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8", newline="\n") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"池 {stats['pool']} 条（已入库 {stats['already_in_gold']} 排除后）；选出 {len(rows)} 条 → {args.out}")
-    print("按优先级分布（P0 逆反 / P1 模糊 / P2 清晰对 / P3 清晰错）：")
+    print("按优先级分布（P0 逆反 / P1 模糊 / P2 清晰对 / P3 清晰错 / P4 闸门一致对补位）：")
     from collections import Counter
     picked = Counter(r["priority"] for r in rows)
     for p in sorted(stats["by_priority"]):

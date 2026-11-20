@@ -10888,7 +10888,7 @@ A 组动了 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.
 
 ---
 
-## [195] 2026-11-20 · 阶段 7.5b B4 备脚本：judge 校准集扩容采集 + 两段判读统计层 · commit <待提交>
+## [195] 2026-11-20 · 阶段 7.5b B4 备脚本：judge 校准集扩容采集 + 两段判读统计层 · commit 51e6bbd
 
 GLM/opencode Key 到位前先把 B4 的无 Key 部分做完（用户拍板「先备脚本、钥匙后到」）。真跑校准与两段结论等 Key 走 env 交接后收尾。
 
@@ -10910,3 +10910,26 @@ GLM/opencode Key 到位前先把 B4 的无 Key 部分做完（用户拍板「先
 ### 指纹
 
 `scripts/` 与 `tests/` 不进扫描，本批指纹不动。剩余待 Key：judge_calibrate 真跑校准 → judge/comparator 不一致样本再采一轮人标 → 两段判据出结论。Key 走 env，不进仓库。
+
+## [196] 2026-11-20 · 阶段 7.5b B4 真跑：人标入库 100 条 + GLM-5.2 两段校准全过 + judge_collect 采样修复 · commit <待提交>
+
+Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 校准——与被测 Qwen3.5 异家族，符合 phase7 §1「judge 异家族」纪律。
+
+### 改了什么?
+
+- **`docs/eval/judge_gold.jsonl` 35 → 135 条**：`judge_label_100.xlsx`（人标 Excel，P0 7 条置顶）100 条全标（对 97 / 错 3），`judge_collect.py --ingest --confirm` 入库，`human_labeled` 标记来源、order 接续交替。机器建议 vs 人标分歧仅 3 条（agg_001 / agg_002 / m01，全部「建议对→人标错」；m01 即老 DEVLOG 里 unverified_numbers 那题，新人标推翻旧闸门记录）。
+- **`scripts/eval/judge_collect.py` 两处采样修复**（真跑暴露的缺陷）：
+  ① P3/P4 分档——原 P3 混入「闸门一致对」样本且 id 排序靠前挤占配额，100 条候选的机器建议全 True、负样本进不了候选；改四档：clash→P0、双侧判错（或人工缺席自动判错）→P3、闸门一致对→P4（低信息量补位）；`collect()` 加 priorities 参数、CLI 加 `--priorities`（负样本补充批用 "0,3"）。
+  ② 轮转消费 bug——原 `extend(bucket[:share])` 不消费桶，补位循环把同条重复选出（实测 P3 桶 6 条选出 12 条全重复）；改 `take = min(share, len(bucket))` + `del bucket[:take]` 消费语义 + 选中集唯一性 assert。
+  `tests/test_judge_expand.py` 同步：P0/P3/P4 分档断言、`--priorities` 只取负样本档、轮转唯一性。
+- **GLM-5.2 校准读数**（`judge_calibrate.py --segments --out outputs/judge_cal_glm.json`）：样本 135、有效 132、弃权/低置信 3（mem_007 / agg_001 / agg_002 各 1，全是 label=True 上 abstain 不进分母）、调用失败 0；混淆矩阵 TP=116 FP=0 FN=0 TN=16；一致率 100.0% [0.972, 1.000]（Wilson 95%）；Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）；calibration n=66 κ=1.000 过 / generalization n=66 κ=1.000 过 → **两段均过，GLM-5.2 judge 可用**（B4 判据：两段各 κ≥0.7 且一致率≥90%）。明细 `outputs/judge_cal_glm.json`（gitignore；`--replay --segments` 可无 Key 复算）。
+- **诚实保留**：负侧仅 16 有效 TN——清晰错全库只剩 6 条可采（补充批 `judge_label_p3.xlsx` 待标，标完二次入库可加厚）；κ=1.000 测的是「judge 对照同一份 gold_summary 执行同一判分规则」，方向正确但负侧检验强度有限；opencode 第二家族交叉校验仍挂账（grg Qwen3.5 与被测同家族，只能当临时干跑不算达标）。
+
+### 指纹断代登记（后合者 rebase 时用）
+
+**本批不动任何指纹**：`judge_gold.jsonl` 是校准材料不是判分规则——`JUDGE_FILES = (comparator.py, negative.py)`（`app/eval/fingerprint.py:226`）不含它；scripts/tests 不进扫描。code / entry / judge / canary 四层全不变，基线 51e6bbd 可直接延续。
+
+### 明确不做
+
+自动入库无人标闸（红线 4）；同家族 judge 冒充异家族达标。
+
