@@ -11040,7 +11040,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 前端 `ui/web/src/views/Shell.tsx`：侧栏上传卡「CSV 不超过 1 GB，Excel 不超过 300 MB」，首屏「CSV 不超过 1 GB · Excel 不超过 300 MB · 可多选」。前端拦截逻辑不变（仍只拦 > 1 GB；xlsx 300 MB 是解压后体积，由后端判）。
 - `app/sidecar.py` selftest 加 `xlsx` 一项：openpyxl 写两 sheet 小表（含文本 00123），走 `dataset.load_data → excel_io.read_xlsx`，断言表名 `book.客户`/`book.销售`、编号 `["00123", "00456"]`。`packaging/build_sidecar.py` 加 `--hidden-import openpyxl`（openpyxl 只在函数体里 import；无数据文件、无动态 import）。`smoke_sidecar.py` 按 selftest 退出码判，新项自动纳入。
 - 文档：`docs/roadmap/phase76-ui.md` §1 表「14」一行、§2.1 上传文案一行、§5 第 1、2 条改写。
-- **提示词哈希重立**：`tests/test_memory_p8.py` 的 BASELINE / STATE_BASELINE 五个值全部重立（旧值写在注释里），只因 CHART_GUIDE 文字变了；「off 与 state 单轮逐字节相同」仍成立：react_single `d92ac56752d710c0`、workflow `fd0b47816facfe40`，两档同值。`code_sha12`（A 组）`eb5e7235dc70 → dae602eb9bf0`，变的只有 `app/tools/plotting.py`（A）；`app/sidecar.py` 属 B 组，只动全量 sha。evalset / judge 指纹不动。
+- **提示词哈希重立**：`tests/test_memory_p8.py` 的 BASELINE / STATE_BASELINE 五个值全部重立（旧值写在注释里），只因 CHART_GUIDE 文字变了；「off 与 state 单轮逐字节相同」仍成立：react_single `d92ac56752d710c0`、workflow `fd0b47816facfe40`，两档同值。`code_sha12`（A 组）：master 103eb54/4a10444 的 A 组值 `c94c66aaf559` → 本 PR 的 A 组值 `ded1326738a8`（rebase 后在 head 上用 `app/eval/fingerprint.py` 的 `code_fingerprint()["affects_results_sha256"]` 重算；rebase 前记的是 `eb5e7235dc70 → dae602eb9bf0`，起点因 #111 改了 A 组的 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.py` 而变）。与 master 相比 A 组只有 `app/tools/plotting.py` 变了；`app/sidecar.py` 属 B 组，只动全量 sha（`5623e20bcc68 → f56543f9b457`）。evalset / judge 指纹不动。
 - 测试：`tests/test_sandbox.py` +3（worker 内 rcParams 是 tight/200；四种保存写法字节相同；收尾重存覆盖模型 savefig 参数），`tests/test_chart_slot.py` +1（CHART_GUIDE 新规则），`ui/web/src/views/v2a.test.tsx` +1（上传文案）。
 
 ### 已知未做
@@ -11058,3 +11058,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | e2e（`--grep-invert 视觉`） | **没跑通，环境问题**：沙箱缺 `libatk-1.0.so.0`（同 [193]），off / state 各 41 failed、1 passed（唯一不开浏览器的那条），full 没跑。交给 CI |
 
 - 11-20 补丁（A4，S 同意，见 #112 评论）：上传文案改为「Excel 解压后不超过 300 MB」，与后端 413 报错的说法（按解压后体积判）一致。改了 `Shell.tsx` 的两处文案和 `v2a.test.tsx` 的断言。vitest v2a 35 passed。
+- 11-20 rebase 到 origin/master（#111 103eb54、#112 4a10444 之后）：
+  - 冲突只有 `docs/DEVLOG.md` 一处（两边都在文件末尾追加）。解法：保留 master 的全部内容（[194]–[197]），本条目整段接在文件末尾，编号仍 `[待编号]`、SHA 仍 `<待提交>`。原分支对 [193] 标题的回填（`549431f（#108）`）master 已有（写作 `PR #108`），以 master 为准。代码文件无冲突：#111 改的 `app/core/service.py`、`app/assess/*`、`app/eval/runner.py`、`scripts/`、`tests/` 与本 PR 的文件无交集。
+  - 提示词哈希：#111 没改提示词，`tests/test_memory_p8.py` 里本 PR 重立过的值不用动，rebase 后 23 passed。
+  - 本地闸门（rebase 后 head，日志 `/workspace/work/logs/c109_*.log`，串行，未跑全量与 oracle）：test_memory_p8 23、test_chart_slot 29、test_chart_check 13、test_chart_coverage 4、test_chart_fixtures 3、test_charts 76、test_sandbox 33、test_sidecar_contract 4、test_pairs 22、test_nightly_gate 20（#111 改过的测试里没有直接引用 `code_sha12` 的；它是唯一涉及指纹的那个），共 227 passed，0 failed；`python -m app.sidecar --selftest` ok，9 项全过。
