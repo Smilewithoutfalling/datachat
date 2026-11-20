@@ -10848,7 +10848,7 @@ CI：`a3298a3` 的 `tests` 7/7 全绿。
 
 ---
 
-## [194] 2026-11-20 · 阶段 7.5b：评测/评估优化批（B1/B2/B3/B5）· commit <待提交>
+## [194] 2026-11-20 · 阶段 7.5b：评测/评估优化批（B1/B2/B3/B5）· commit 79ae04b
 
 方案 `phase75b-eval-assess.md` 五项中的四项（B4 judge 校准扩容等 GLM/opencode Key，另行收尾）。
 
@@ -10885,3 +10885,28 @@ A 组动了 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.
 ### 明确不做（方案五条 + 本批顺延）
 
 缩题库（配对已换统计量，缩样本只会更差）；自愈回路处熔断（codegen/executor 异常是 replan 的输入）；强制 JSON 证据链（驯化模型）；自动入库无人工闸；CI 真模型评测（公网 runner 够不着内网网关）。B4 judge 校准扩容（≥100，calibration/generalization 两段各报 κ+95%CI）待 GLM/opencode Key 走 env 交接后做。
+
+---
+
+## [195] 2026-11-20 · 阶段 7.5b B4 备脚本：judge 校准集扩容采集 + 两段判读统计层 · commit <待提交>
+
+GLM/opencode Key 到位前先把 B4 的无 Key 部分做完（用户拍板「先备脚本、钥匙后到」）。真跑校准与两段结论等 Key 走 env 交接后收尾。
+
+### 改了什么
+
+- **新脚本 `scripts/eval/judge_collect.py`**：候选采集 + 人标入库两步，人不缺席。候选口径比 build_judge_gold 宽（B4 采样源就是模糊样本）：P0 闸门 human/auto 逆反全收（两把尺子打架必须人裁）；P1 soft match（scaled/extras/relaxed 被放水的 True）或 alt 命中；P2 strict True；P3 清晰错。真实报告池 5674 条，轮转配额防 100 条全落「模糊 True」：选出 100 = P0 7 + P1/P2/P3 各 31 → `outputs/judge_candidates.jsonl`，行含 gold_summary + suggested_label + 空 label 待人标。`--ingest` 人标闸：label 非 true/false 一条不进（红线 4：不自动入库），干跑 / `--confirm` 两步，order 接续交替防位置偏，`human_labeled` 标记来源与人标产物可区分。
+- **`scripts/eval/judge_calibrate.py` 加统计层**：一致率 Wilson 95% CI（n 小不跑出界）；κ bootstrap 95% CI（2000 次、seed 固定可复现）；`--segments` 校准/泛化两段分开各报 κ+CI，**两段各过 κ ≥ 0.7 才算 judge 可用**（B4 口径——防小样本 κ 的运气成分，先按 (label, idx) 稳定排序再交替分配保两段标签比例）；`--replay` 从上次 `--out` 明细重算统计，无 Key 验证统计层与存档可复算。
+- **新测试 `tests/test_judge_expand.py`** 10 条：Wilson 锚点（1/1→0.2066、60/60→0.940）、完美一致 bootstrap=(1,1)、seed 复现、两段标签比例守恒、P0 逆反识别、轮转配额、人标闸/干跑/重复跳过。
+
+### 验证（2026-11-20，S 本机 dc 环境）
+
+| 段 | 结果 |
+|---|---|
+| judge 两文件（test_judge.py + test_judge_expand.py） | 24 passed |
+| 评测面回归（judge/gate/nightly/rescore/tier 五文件） | 67 passed |
+| `--replay --segments` 冒烟（合成 60 有效明细） | 一致率 100% [0.940,1.000]、κ 1.000 [1.000,1.000]，两段各 30 条均过，exit 0 |
+| 候选采集（真实报告，无 Key） | 池 5674，选出 100 → outputs/judge_candidates.jsonl |
+
+### 指纹
+
+`scripts/` 与 `tests/` 不进扫描，本批指纹不动。剩余待 Key：judge_calibrate 真跑校准 → judge/comparator 不一致样本再采一轮人标 → 两段判据出结论。Key 走 env，不进仓库。

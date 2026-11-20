@@ -77,12 +77,104 @@ def kappa_2x2(cm):
     return (p_o - p_e) / (1 - p_e)
 
 
+def wilson_ci(k, n, z=1.96):
+    """一致率的 Wilson score 置信区间。k=一致数，n=有效样本数。
+
+    为什么用 Wilson 不用正态近似：n 小（校准集就几十条）时正态近似会跑出
+    [0,1] 外或宽度失真，Wilson 在 p 靠近 0/1 时也表现正常。
+    """
+    if n == 0:
+        return (None, None)
+    p = k / n
+    d = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / d
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def bootstrap_kappa_ci(pairs, n_boot=2000, seed=0):
+    """κ 的 bootstrap 95% percentile 区间。pairs = [(judge_pass, label), ...]。
+
+    为什么 bootstrap：κ 没有可闭式表达的方差（边缘比例的比），重抽样是仓库
+    手写代码里最省事也最不引依赖的路。seed 固定 → 同输入必同输出（可复现，
+    回放断言用）。手写 random.Random，不引 numpy（仓库不背这个依赖）。
+    """
+    if not pairs:
+        return (None, None)
+    import random
+    rng = random.Random(seed)
+    n = len(pairs)
+    kappas = []
+    for _ in range(n_boot):
+        cm = Counter(pairs[rng.randrange(n)] for _ in range(n))
+        k = kappa_2x2(cm)
+        if k is not None:
+            kappas.append(k)
+    if not kappas:
+        return (None, None)
+    kappas.sort()
+    lo = kappas[int(0.025 * len(kappas))]
+    hi = kappas[min(len(kappas) - 1, int(0.975 * len(kappas)))]
+    return (lo, hi)
+
+
+def split_segments(details):
+    """把有效样本拆成校准段 / 泛化段，各报 κ。
+
+    拆法：先按 (label, idx) 稳定排序再交替分配——不是随机对半。排序保证两段的
+    标签比例接近（一段全对、一段全错的分割会让段结论没意义）；idx 打散保证
+    两段的采集时间 / 来源也混匀。方案 §1 B4：两段各过 κ ≥ 0.7 才算 judge 可用
+    （防止 25 题小样本上 κ 的运气成分——单段 κ 可能被几条边样本顶上去）。
+    """
+    ordered = sorted(details, key=lambda d: (d["label"], d["idx"]))
+    calib, gen = [], []
+    for i, d in enumerate(ordered):
+        (calib if i % 2 == 0 else gen).append(d)
+    return calib, gen
+
+
+def summarize(details):
+    """从明细算全套统计：一致率+Wilson CI、κ+bootstrap CI、混淆矩阵。"""
+    valid = [d for d in details if not d["abstain"] and d["confidence"] == "high"]
+    cm = Counter((d["judge_pass"], d["label"]) for d in valid)
+    n = len(valid)
+    n_agree = sum(1 for d in valid if d["judge_pass"] == d["label"])
+    agree = n_agree / n if n else None
+    kap = kappa_2x2(cm)
+    pairs = [(d["judge_pass"], d["label"]) for d in valid]
+    w_lo, w_hi = wilson_ci(n_agree, n)
+    b_lo, b_hi = bootstrap_kappa_ci(pairs)
+    return {"n": n, "n_agree": n_agree, "agree": agree, "kappa": kap,
+            "confusion": {f"{j}|{l}": c for (j, l), c in cm.items()},
+            "agree_ci": [w_lo, w_hi], "kappa_ci": [b_lo, b_hi]}
+
+
+def fmt_ci(ci):
+    if ci is None or ci[0] is None:
+        return "—"
+    return f"[{ci[0]:.3f}, {ci[1]:.3f}]"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold", default="docs/eval/judge_gold.jsonl")
     ap.add_argument("--limit", type=int, default=None, help="只跑前 N 条（冒烟用）")
     ap.add_argument("--out", default=None, help="明细 JSON 输出路径")
+    ap.add_argument("--segments", action="store_true",
+                    help="拆校准/泛化两段各报 κ+CI，两段各过 κ≥0.7 才算达标（B4 口径）")
+    ap.add_argument("--replay", default=None,
+                    help="从上次 --out 的明细 JSON 重算统计（不调 judge、无需 Key）——"
+                         "用来验证统计层本身与存档可复算")
     args = ap.parse_args()
+
+    if args.replay:
+        d = json.load(open(args.replay, encoding="utf-8"))
+        details = d["details"]
+        print(f"重算模式：{args.replay}（{d.get('gold', '?')}，{len(details)} 条明细，不调模型）")
+        sys.exit(report(details, args.segments,
+                        {"gold": d.get("gold"), "n": d.get("n", len(details)),
+                         "failed": d.get("failed", 0), "fails": d.get("fails", []),
+                         "elapsed_s": d.get("elapsed_s")}))
 
     rows = [json.loads(l) for l in open(args.gold, encoding="utf-8") if l.strip()]
     if args.limit:
@@ -111,37 +203,71 @@ def main():
         print(f"  [{i+1}/{len(rows)}] {row['id']:10s} label={row['label']} judge={r['pass']} "
               f"conf={r['confidence']} abstain={r['abstain']} {mark}")
 
-    valid = [d for d in details if not d["abstain"] and d["confidence"] == "high"]
-    low_or_abstain = [d for d in details if d["abstain"] or d["confidence"] != "high"]
-    cm = Counter((d["judge_pass"], d["label"]) for d in valid)
-    agree = (sum(1 for d in valid if d["judge_pass"] == d["label"]) / len(valid)) if valid else None
-    k = kappa_2x2(cm)
+    sys.exit(report(details, args.segments,
+                    {"gold": args.gold, "n": len(rows), "failed": len(fails),
+                     "fails": fails, "elapsed_s": round(time.time() - t0, 1)},
+                    out=args.out))
+
+
+def report(details, segments, ctx, out=None):
+    """算统计、打印、（可选）落盘、返回退出码。live 跑批与 --replay 共用一套口径。"""
+    s = summarize(details)
+    n_valid, agree, k = s["n"], s["agree"], s["kappa"]
+    low_or_abstain = sum(1 for d in details if d["abstain"] or d["confidence"] != "high")
 
     print("\n===== 校准结果 =====")
-    print(f"样本 {len(rows)}：有效 {len(valid)}  弃权/低置信 {len(low_or_abstain)}  调用失败 {len(fails)}")
-    if valid:
-        print(f"混淆矩阵（judge, label）：TP={cm[(True, True)]} FP={cm[(True, False)]} "
-              f"FN={cm[(False, True)]} TN={cm[(False, False)]}")
-        print(f"一致率 {agree:.1%}   Cohen's κ {k:.3f}")
+    print(f"样本 {ctx['n']}：有效 {n_valid}  弃权/低置信 {low_or_abstain}  调用失败 {ctx['failed']}")
+    if n_valid:
+        cm = s["confusion"]
+        print(f"混淆矩阵（judge, label）：TP={cm.get('True|True', 0)} FP={cm.get('True|False', 0)} "
+              f"FN={cm.get('False|True', 0)} TN={cm.get('False|False', 0)}")
+        print(f"一致率 {agree:.1%} {fmt_ci(s['agree_ci'])}   "
+              f"Cohen's κ {k:.3f} {fmt_ci(s['kappa_ci'])}（bootstrap 95%）")
+        gate_ok = k >= JUDGE_THRESHOLD_KAPPA and agree >= JUDGE_THRESHOLD_AGREE
         print(f"判据：κ ≥ {JUDGE_THRESHOLD_KAPPA} 且 一致率 ≥ {JUDGE_THRESHOLD_AGREE:.0%} → "
-              + ("达标，可启用" if (k >= JUDGE_THRESHOLD_KAPPA and agree >= JUDGE_THRESHOLD_AGREE) else "未达标，只记录不判定"))
+              + ("达标，可启用" if gate_ok else "未达标，只记录不判定"))
     else:
+        gate_ok = False
         print("无有效样本，判不了。")
 
-    if args.out:
-        json.dump({"gold": args.gold, "n": len(rows), "valid": len(valid),
-                   "abstain_or_low": len(low_or_abstain), "failed": len(fails),
-                   "agree": agree, "kappa": k,
-                   "thresholds": {"kappa": JUDGE_THRESHOLD_KAPPA, "agree": JUDGE_THRESHOLD_AGREE},
-                   "confusion": {f"{j}|{l}": n for (j, l), n in cm.items()},
-                   "details": details, "fails": fails,
-                   "elapsed_s": round(time.time() - t0, 1)},
-                  open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print(f"明细已存 {args.out}")
+    seg_summary = None
+    if segments:
+        seg_summary = {}
+        print("\n----- 校准段 / 泛化段（B4：两段各过 κ ≥ 0.7 才算可用） -----")
+        segs_ok = True
+        for name, seg in zip(("calibration", "generalization"), split_segments(details)):
+            ss = summarize(seg)
+            seg_summary[name] = ss
+            if ss["n"] == 0:
+                print(f"  {name:14s} 无有效样本")
+                segs_ok = False
+                continue
+            seg_ok = ss["kappa"] >= JUDGE_THRESHOLD_KAPPA
+            segs_ok = segs_ok and seg_ok
+            print(f"  {name:14s} n={ss['n']:3d}  一致率 {ss['agree']:.1%} {fmt_ci(ss['agree_ci'])}  "
+                  f"κ {ss['kappa']:.3f} {fmt_ci(ss['kappa_ci'])}  "
+                  + ("过" if seg_ok else "不过"))
+        if n_valid:
+            gate_ok = gate_ok and segs_ok
+            print("两段判据 → " + ("两段均过，judge 可用" if segs_ok else "至少一段未过，judge 不可用"))
 
-    if not valid:
-        sys.exit(2)
-    sys.exit(0 if (k >= JUDGE_THRESHOLD_KAPPA and agree >= JUDGE_THRESHOLD_AGREE) else 1)
+    if out:
+        payload = {"gold": ctx.get("gold"), "n": ctx["n"], "valid": n_valid,
+                   "abstain_or_low": low_or_abstain, "failed": ctx["failed"],
+                   "agree": agree, "agree_ci": s["agree_ci"], "kappa": k,
+                   "kappa_ci": s["kappa_ci"],
+                   "thresholds": {"kappa": JUDGE_THRESHOLD_KAPPA, "agree": JUDGE_THRESHOLD_AGREE},
+                   "confusion": s["confusion"],
+                   "details": details, "fails": ctx.get("fails", []),
+                   "elapsed_s": ctx.get("elapsed_s")}
+        if seg_summary is not None:
+            payload["segments"] = seg_summary
+        json.dump(payload, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print(f"明细已存 {out}")
+
+    if not n_valid:
+        return 2
+    return 0 if gate_ok else 1
 
 
 if __name__ == "__main__":
