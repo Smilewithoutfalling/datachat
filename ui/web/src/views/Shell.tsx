@@ -287,6 +287,7 @@ function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
 const MAX = 1024 ** 3; // 与后端 MAX_FILE_BYTES 一致（app.py），前端只做提示，后端仍会拒
 
 /** 选中的文件先过前端检查：非 .csv / .xlsx、超过 1 GB 直接拦下（后端仍会再拒一次；xlsx 解压后体积只有后端能判）。
+ *  文案上的「Excel 不超过 300 MB」对应后端 excel_io.MAX_XLSX_UNCOMPRESSED_BYTES（按解压后体积判），前端不拦。
  *  返回错误文案或 null。 */
 function checkFiles(list: File[]): string | null {
   const xls = list.filter((f) => /\.xls$/i.test(f.name));
@@ -315,7 +316,7 @@ function Upload({ onPick, err, setErr }: { onPick: (f: File[]) => void; err: str
         <span className="upload-icon"><IconUpload size={15} /></span>
         <span className="upload-text">
           <span className="upload-main">拖入文件或点击上传</span>
-          <span className="upload-sub">CSV 或 xlsx，单个文件不超过 1 GB</span>
+          <span className="upload-sub">CSV 不超过 1 GB，Excel 不超过 300 MB</span>
         </span>
         <input type="file" accept=".csv,.xlsx" multiple aria-label="选择 CSV 文件"
           onChange={(e) => (pick(Array.from(e.target.files ?? [])), (e.target.value = ""))} />
@@ -423,7 +424,7 @@ function HeroUpload({ onPick }: { onPick: (f: File[]) => void }) {
       onDragLeave={() => setDrag(false)} onDrop={(e) => (e.preventDefault(), setDrag(false), send(Array.from(e.dataTransfer.files)))}>
       <span className="upload-icon"><IconUpload size={18} /></span>
       <span className="em-main">拖入文件到此处</span>
-      <span className="em-sub">CSV / xlsx · 可多选 · 单个文件不超过 1 GB</span>
+      <span className="em-sub">CSV 不超过 1 GB · Excel 不超过 300 MB · 可多选</span>
       <button type="button" className="primary" onClick={() => input.current?.click()}>
         <IconPlus size={13} />选择文件
       </button>

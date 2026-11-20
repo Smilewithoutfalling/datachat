@@ -42,12 +42,17 @@ FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
 # 「off 与 state 单轮逐字节相同」这条不变式仍然成立（react_single、workflow 两档同值）。
 # 旧值：off react_single 691077ae7cccb7bb / react_history 167addb043be1eda / workflow d4f7e82e2b41e9cf；
 #       state react_history a9c62ff882a7728a / workflow_history 7d68bc6d9ac25f29。
-BASELINE = {"react_single": "b40fb9d3902f7be2", "react_history": "fc27585c3118b8e5", "workflow": "c87c495b73b05267"}
+# 2026-11-20 M13 图表小批重立全部哈希（docs/roadmap/phase76-ui.md §5 第 2 条）：只改了 CHART_GUIDE（app/tools/plotting.py）
+# 的文字——多张图分别 chart()、plt 理由删「多子图」、plt 段补编号/图例/红色/标注余量/不调 rcdefaults。三个 Agent 模板都内嵌
+# CHART_GUIDE，所以五个哈希都变；「off 与 state 单轮逐字节相同」仍然成立（react_single、workflow 两档同值）。
+# 旧值：off react_single b40fb9d3902f7be2 / react_history fc27585c3118b8e5 / workflow c87c495b73b05267；
+#       state react_history 0584ab68bbef4380 / workflow_history b566dc62d6c47413。
+BASELINE = {"react_single": "d92ac56752d710c0", "react_history": "12eb67995866e6fa", "workflow": "fd0b47816facfe40"}
 # 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
 # workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
-STATE_BASELINE = {"react_single": "b40fb9d3902f7be2", "react_history": "0584ab68bbef4380",
-                  "workflow": "c87c495b73b05267", "workflow_history": "b566dc62d6c47413"}
+STATE_BASELINE = {"react_single": "d92ac56752d710c0", "react_history": "1c1d8bde2aa6d0c3",
+                  "workflow": "fd0b47816facfe40", "workflow_history": "23f82db265846844"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 
