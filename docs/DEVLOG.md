@@ -10738,7 +10738,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 
 ---
 
-## [193] 2026-11-19 · 阶段 7.5 第 2 步：Excel 输入 · commit <待提交>
+## [193] 2026-11-19 · 阶段 7.5 第 2 步：Excel 输入 · commit 549431f（PR #108）
 
 只做了第 2 步的第一部分（xlsx 输入）。导出和 `scipy.stats` 没动。
 
@@ -10802,3 +10802,43 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
   | `-k test_oracle_pipeline_all_correct` | 2 passed，413 s |
   | vitest / e2e | 前端没改，未跑 |
 - 11-19 CI 补丁：Windows CI 上 tests 75db322（run 44487294865）有 3 条 test_fingerprint_xlsx 失败。原因是 pytest 的 tmp_path 在 C: 盘、仓库在 D: 盘，指纹调用 os.path.relpath 跨盘时抛 ValueError。生产环境的数据集都在仓库内，不会跨盘，所以改测试不改实现：测试数据集改建在仓库内的临时目录（fixture repo_tmp），用完删除。
+
+---
+
+## [194] 2026-11-20 · 阶段 7.5b：评测/评估优化批（B1/B2/B3/B5）· commit <待提交>
+
+方案 `phase75b-eval-assess.md` 五项中的四项（B4 judge 校准扩容等 GLM/opencode Key，另行收尾）。
+
+### 改了什么
+
+- **B1 契约覆盖修复后代码**（`app/assess/contracts.py`）：reviewer 节点判定时追加跑 codegen 五条，contract id 加 `after_fix.` 前缀。只观测不拦截（评估不判红）。动机：#107 记档的 scope 盲区——修复只改了列引用时 `reviewer.scope` 看不出 codegen 五条该看的东西；k 豁免天然同口径（`codegen.columns` 只查不存在列，与 scope 的「真列不算账」一致）。
+- **B2 case_id 贯通 + fake_llm 全管线回放进 CI**：`analyze/analyze_stream/_run`（`app/core/service.py`）加 `case_id` 参数，只进快照 run 行、不进 prompt（不传时快照逐字节不变，有测试钉）；`SnapshotRecorder.begin`（`app/assess/snapshot.py`）落键；`EvalRunner` 加 `snapshot_dir`（`app/eval/runner.py`），_run_one 传 `case_id=case.id`。新脚本 `scripts/assess/record_batch.py`（fake_llm 进程内起服务、全 202 题落快照、EV-B6 扰动题数据缺失自动跳过）与 `scripts/assess/replay_batch.py`（目录全快照逐节点 `--recorded` 回放，无 node 行的快照计跳过）。`tests.yml` 加 `replay-batch` job：record→replay→assess 三步，验证**管线不变性**，不验证答案质量。新测试 `tests/test_b2_batch_pipeline.py` 4 条（含篡改一处 prompt_sha256 必须抓出漂移的哨兵测试）。
+- **B3 comparator 放宽规则留一消融**（新脚本 `scripts/eval/rule_ablation.py`，只产报告不改代码）：monkeypatch 关单条规则 → rescore 复打 → 翻转清单按承重归档（≥5 承重 / 1–4 人工复核 / 零翻转）。两份 11-13 真实报告上翻转集完全一致：r6_22 月份键对齐 9 翻转（唯一承重）；r11=4；r20/r14_18_m/r12/r8 各 2；r17/r19_dict 各 1；7 个单元零翻转；异常方向 0。3c 三条（18/19/20）现在只救 3 题 ≠ 3b 时代 +4.6pp——历史读数在旧答案上，报告带对账段。CHANGES 候选攒给下一次断代。
+- **B5 门禁配对判读**（`scripts/eval/nightly_gate.py`）：判红从「通过数掉 6 题」（规则 1）换成**配对净退步**——pass3 全对变错=退步、failed 全错变对=进步、unstable 噪声带不算，净退步 ≥6 才红；规则 1 与规则 2 一样降为只列不拦。依据：门禁分辨率=噪声宽度（±6 题），判红线画在噪声带里（N7：同一 master 两跑 193 翻 2 / 195 翻 0 结论相反）。CI `eval.yml` 调用点不用改（退出码语义不变）。
+
+### 验证（2026-11-20，S 本机 dc 环境）
+
+| 段 | 结果 |
+|---|---|
+| B1 单测 + assess 六文件回归 | 40 passed；85→89 passed |
+| B1 gold 误报检查（217 份 gold 当 reviewer 输出跑契约） | after_fix 五条 0 fail；columns 190 ok / 27 not_checked，27 题名单与 #107 记档逐一对上 |
+| B2 全量 record/replay | 256 快照；1156 处回放 1156 一致，exit 0；assess 报告 256 题键全带 case_id |
+| 全仓 pytest | 2231 passed，8 failed 全为 GBK 控制台 ✗ 编码假红（PYTHONUTF8=1 复跑 115 全绿）；73 分钟 |
+| B3 双报告消融 | 两份翻转集完全一致（185/195 与 175/195 基线差 10 题，被规则救的题一模一样） |
+| B5 门禁测试 | 20 passed（更新 4 个旧语义测试，新增配对红/进步抵消 2 条） |
+| B5 真实读数验收 | 本机两份 nightly（194：退 2 进 2 净 0；195：退 0 进 1 净 -1）同判绿，exit 均 0 |
+
+### 指纹断代登记（后合者 rebase 时用）
+
+| 层 | master 549431f | 本分支 |
+|---|---|---|
+| code（A 组 affects_results） | eb5e7235dc70 | c94c66aaf559 |
+| code_all（含 B 组） | 5561bfbd4199 | 5623e20bcc68 |
+| entry | c44fcc754331 | 不变 |
+| judge | 289474f4d943 | 不变 |
+
+A 组动了 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.py`（B2 case_id 贯通）；B 组动 `app/assess/contracts.py`（B1）。新文件全在 `scripts/`、`tests/`，不进指纹扫描。**判分与题库未动，评测基线不断代**；A 组变更按「合并前在内网跑命令一」纪律由 S 执行（本批只加参数不进 prompt，渲染层逐字节等价）。
+
+### 明确不做（方案五条 + 本批顺延）
+
+缩题库（配对已换统计量，缩样本只会更差）；自愈回路处熔断（codegen/executor 异常是 replan 的输入）；强制 JSON 证据链（驯化模型）；自动入库无人工闸；CI 真模型评测（公网 runner 够不着内网网关）。B4 judge 校准扩容（≥100，calibration/generalization 两段各报 κ+95%CI）待 GLM/opencode Key 走 env 交接后做。

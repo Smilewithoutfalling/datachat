@@ -68,6 +68,7 @@ def analyze(
     run_suffix: str | None = None,
     prev_clarify: bool = False,
     snapshot_dir: str | None = None,
+    case_id: str | None = None,
 ) -> AnalysisResult:
     """对一个 CSV 数据集回答一个自然语言问题。
 
@@ -109,6 +110,9 @@ def analyze(
     snapshot_dir：阶段 7.5 第 1 步的节点快照目录（app/assess/snapshot.py）；None 时看环境变量
              DATACHAT_SNAPSHOT_DIR，都没有时不记快照，行为与输出逐字节不变。只观测，不改任何 prompt 与流程；
              目前只有 workflow 记节点（react 只记 run / end 两行）。
+    case_id：评测侧的用例 id（7.5b B2）。只进快照 run 行（app/assess/runner.py 的 case_key 靠它把快照
+              归到题，多轮题一轮一个快照文件也归得拢），不进任何 prompt、不进日志。None 时快照 run 行里
+              不出现这个键，快照字节与之前完全一致。
     """
     res = None
     for ev in analyze_stream(dataset, question, agent=agent, llm_config=llm_config, chat_model=chat_model,
@@ -117,7 +121,8 @@ def analyze(
                              memory=memory, thread_id=thread_id, history=history, encoding=encoding, log=log,
                              trace_id=trace_id, memory_mode=memory_mode, rewrite=rewrite, today=today,
                              dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                             run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot_dir=snapshot_dir):
+                             run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot_dir=snapshot_dir,
+                             case_id=case_id):
         if ev.type == "done":
             res = ev.result
     return res
@@ -149,6 +154,7 @@ def analyze_stream(
     run_suffix: str | None = None,
     prev_clarify: bool = False,
     snapshot_dir: str | None = None,
+    case_id: str | None = None,
 ):
     """analyze() 的流式版本：一个生成器，按发生顺序产出 Event（类型见 app/core/events.py）。
 
@@ -192,7 +198,7 @@ def analyze_stream(
                  recursion_limit=recursion_limit, use_dictionary=use_dictionary,
                  memory=memory, thread_id=thread_id, history=history, encoding=encoding,
                  rewrite=rewrite, today=today, dataset_notes=dataset_notes, accepted_pairs=accepted_pairs,
-                 run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot=snapshot)
+                 run_suffix=run_suffix, prev_clarify=prev_clarify, snapshot=snapshot, case_id=case_id)
     try:
         for ev in inner:
             if cancelled():
@@ -224,7 +230,7 @@ def analyze_stream(
 def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, max_attempts,
          exec_timeout, recursion_limit, use_dictionary, memory, thread_id, history, encoding,
          rewrite=None, today=None, dataset_notes=None, accepted_pairs=None, run_suffix=None,
-         prev_clarify=False, snapshot=None):
+         prev_clarify=False, snapshot=None, case_id=None):
     from app.tools.dataset import describe_data, load_data
     from app.tools.dictionary import format_notes, load_retriever, retrieve_notes
 
@@ -279,7 +285,8 @@ def _run(em, res, tracker, dataset, question, *, agent, llm_config, chat_model, 
     if snapshot is not None:
         snapshot.begin(original_question=res.question, question=question, dataset=dataset, encoding=encoding,
                        df=df, agent=agent, memory_mode=res.memory_mode, rewrite=res.rewrite,
-                       max_attempts=max_attempts, exec_timeout=exec_timeout, tracker=tracker)
+                       max_attempts=max_attempts, exec_timeout=exec_timeout, tracker=tracker,
+                       case_id=case_id)
     if agent == "workflow":
         yield from _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, question,
                       dataset, max_attempts, exec_timeout, mc.state_block, metrics_block, mc.followup,

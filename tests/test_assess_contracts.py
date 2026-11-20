@@ -216,3 +216,61 @@ def test_check_dispatch_covers_every_node():
     assert [v.contract for v in vs] == ["codegen.parse", "codegen.columns", "codegen.result",
                                          "codegen.imports", "codegen.names"]
     assert all(v.step == 1 for v in vs)
+
+
+# ---------------------------------------------------------------- reviewer 修复后代码（7.5b B1）
+def test_check_reviewer_runs_after_fix_contracts():
+    """reviewer 的输出再过一遍 codegen 五条，id 加 after_fix. 前缀；其他节点不受影响。"""
+    st = {"code": "result = df.groupby('regin')['units'].sum()"}
+    upd = {"code": "result = df.groupby('region')['units'].sum()"}
+    vs = C.check("reviewer", st, upd, CTX)
+    assert [v.contract for v in vs] == ["reviewer.scope", "after_fix.codegen.parse",
+                                        "after_fix.codegen.columns", "after_fix.codegen.result",
+                                        "after_fix.codegen.imports", "after_fix.codegen.names"]
+    assert all(v.step == 1 for v in vs)
+    assert all(not v.contract.startswith("after_fix.")
+               for v in C.check("codegen", {}, {"code": "result = 1"}, CTX))
+
+
+def test_after_fix_ok_when_fix_only_corrects_typo():
+    """只改对拼错列名的修复：scope ok（不算换口径），修复后代码五条全过。"""
+    vs = {v.contract: v for v in C.check(
+        "reviewer",
+        {"code": "result = df.groupby('regin')['units'].sum()"},
+        {"code": "result = df.groupby('region')['units'].sum()"}, CTX)}
+    assert vs["reviewer.scope"].status == C.OK
+    assert all(vs[c].status == C.OK for c in
+               ("after_fix.codegen.parse", "after_fix.codegen.columns", "after_fix.codegen.result",
+                "after_fix.codegen.imports", "after_fix.codegen.names"))
+
+
+def test_after_fix_fail_when_fix_introduces_missing_column():
+    """修复改出了新的错列：scope 看不见（它只算 schema 里真有的列，contracts.py:281），
+    after_fix.codegen.columns 抓得住——两条契约各管一段，正好互补。"""
+    vs = {v.contract: v for v in C.check(
+        "reviewer",
+        {"code": "result = df['units'].sum()"},
+        {"code": "result = df.groupby('area')['units'].sum()"}, CTX)}
+    assert vs["reviewer.scope"].status == C.OK
+    v = vs["after_fix.codegen.columns"]
+    assert v.status == C.FAIL and v.details["missing"] == ["area"]
+
+
+def test_after_fix_result_missing_while_scope_ok():
+    """scope 看不到的：修复把 result 赋值弄丢了——口径没变（scope ok），after_fix.codegen.result 抓得住。"""
+    vs = {v.contract: v for v in C.check(
+        "reviewer",
+        {"code": "result = df[df['region'] == '华东']['units'].sum()"},
+        {"code": "x = df[df['region'] == '华东']['units'].sum()"}, CTX)}
+    assert vs["reviewer.scope"].status == C.OK
+    assert vs["after_fix.codegen.result"].status == C.FAIL
+
+
+def test_after_fix_still_checked_when_state_not_code():
+    """P14 形态（修复前是计划文字）：scope 让位 not_checked，修复后的代码照常核。"""
+    vs = {v.contract: v for v in C.check(
+        "reviewer", {"code": "按地区求和", "not_code": True},
+        {"code": "result = df.groupby('region')['units'].sum()"}, CTX)}
+    assert vs["reviewer.scope"].status == C.NOT_CHECKED
+    assert vs["after_fix.codegen.parse"].status == C.OK
+    assert vs["after_fix.codegen.columns"].status == C.OK

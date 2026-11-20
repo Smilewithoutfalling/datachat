@@ -148,3 +148,37 @@ jobs:
         run: |
           python scripts/gate/verify_gate.py
           git diff --exit-code docs/gate/answers.json
+
+  # 7.5b B2：fake_llm 全管线跑批 → 快照 → --recorded 全量回放。**验证管线不变性，不验证答案质量**
+  # （ok 场景的答案不是对题的，判分只是让 run_all 不改路径）。回放对不上 = prompt 拼装 / 快照记录 /
+  # 回放器三者有漂移 —— 真模型评测撤出 CI 之后，这是唯一自动化盯「管线自己变了没有」的哨兵。
+  # 单格 ubuntu：回放是确定性的（fake_llm 场景固定 + --recorded 拿录下的响应），OS 差异由 pytest 矩阵管。
+  # EV-B6 扰动题指向 outputs/ 下的脏表，CI 里不生成 → record_batch 自己跳过并打印，属预期。
+  replay-batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+      - name: 跑批落快照（fake_llm，全部用例）
+        run: python scripts/assess/record_batch.py snapshot
+      - name: recorded 全量回放（管线不变性）
+        run: python scripts/assess/replay_batch.py snapshot --recorded
+      - name: 契约报告能产出
+        run: python scripts/assess/assess.py snapshot --json assess.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: replay-batch-snapshots
+          path: |
+            snapshot
+            assess.json
+          retention-days: 7

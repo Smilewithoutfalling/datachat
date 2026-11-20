@@ -21,6 +21,10 @@
 | executor.sanity | executor | A2 的 sanity_issue 为空 |
 | reviewer.scope | reviewer | 修复前后，代码引用的（schema 内）列名集合与过滤条件集合不变（修复前引用了 k 个不存在的列时，最多可新增 k 个真实列） |
 | summarizer.grounding | summarizer | 结论里的数字都能在 result 里找到（app/core/grounding.py 的 unverified_numbers，证据口径与 service 一致） |
+
+reviewer 节点除上表一条外，还会把**修复后的代码**再过一遍 codegen 五条（7.5b B1，只观测）：判定 id 加
+`after_fix.` 前缀（after_fix.codegen.parse …）。codegen.columns 只查「不存在的列」，修复后新增的真列
+天然不算缺失——与 reviewer.scope 的 k 豁免自动同口径，不需要豁免代码。
 """
 from __future__ import annotations
 
@@ -350,4 +354,12 @@ CONTRACTS = {
 
 
 def check(node: str, state: dict, upd: dict, ctx: Context) -> list[Verdict]:
-    return [fn(state or {}, upd or {}, ctx) for fn in CONTRACTS.get(node, [])]
+    verdicts = [fn(state or {}, upd or {}, ctx) for fn in CONTRACTS.get(node, [])]
+    if node == "reviewer":
+        # 7.5b B1：reviewer 修复后的代码再过一遍 codegen 五条（只观测，不拦截）。id 加 after_fix. 前缀
+        # 与 codegen 节点自身的判定区分；差分按 (ring, contract) 对齐，前缀稳定所以两边可比。
+        for fn in CONTRACTS["codegen"]:
+            v = fn(state or {}, upd or {}, ctx)
+            v.contract = f"after_fix.{v.contract}"
+            verdicts.append(v)
+    return verdicts

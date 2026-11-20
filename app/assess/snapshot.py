@@ -7,7 +7,8 @@ service 里一个 SnapshotRecorder 都不建，所有快照分支都是 `if snap
 一次运行一个 JSONL 文件（`<UTC 时间>_<trace_id>.jsonl`），三类行：
 
 - `kind=run`（第一行）：版本、trace_id、原问题与改写后的问题、数据集（原样 + 绝对路径 + 每张表的
-  sha256 指纹）、列名、today、编码、记忆模式、重试与超时参数。
+  sha256 指纹）、列名、today、编码、记忆模式、重试与超时参数；评测批带 `case_id`（7.5b B2，
+  `analyze(..., case_id=...)` 传入，产品调用不传就没有这个键）。
 - `kind=node`（每个节点结束一行）：节点名、第几次出现、该节点的**输入 AgentState**（可序列化部分；
   df 不存，存的是数据集路径和指纹）、输出的 updates、耗时、token 增量（从本轮 UsageTracker 取差）、
   本节点的模型调用（prompt 的 sha256 与字符数、模型原始响应文本、是否截断），以及 today。
@@ -174,14 +175,14 @@ class SnapshotRecorder:
 
     # -------------------------------------------------------------- 公开
     def begin(self, *, original_question, question, dataset, encoding, df, agent, memory_mode, rewrite,
-              max_attempts, exec_timeout, tracker=None) -> None:
+              max_attempts, exec_timeout, tracker=None, case_id=None) -> None:
         try:
             ds = dataset if isinstance(dataset, str) else [os.fspath(p) for p in dataset]
             fp = dataset_fingerprint(dataset)
             self._dataset_fp = fp["sha256"]
             if tracker is not None:
                 self._prev_usage = dataclasses.asdict(tracker.snapshot())
-            self._write({
+            rec = {
                 "kind": "run", "version": VERSION, "trace_id": self.trace_id,
                 "started_at_utc": self.started_at_utc,
                 "today": self.today.isoformat(), "today_source": self.today_source,
@@ -192,7 +193,10 @@ class SnapshotRecorder:
                 "dataset_fingerprint": fp, "columns": dataset_columns(df),
                 "multi": isinstance(df, dict),
                 "max_attempts": max_attempts, "exec_timeout": exec_timeout,
-            })
+            }
+            if case_id is not None:      # 7.5b B2：评测批的题号。不传就不写这个键——
+                rec["case_id"] = case_id  # 产品调用不传，快照字节与之前完全一致
+            self._write(rec)
             self._begun = True
         except Exception as e:  # noqa: BLE001
             self._broken = True
