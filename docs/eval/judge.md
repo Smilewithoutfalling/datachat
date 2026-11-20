@@ -1,7 +1,7 @@
 # LLM Judge（EV-B8 / phase7 E4）
 
 > 用途：给"结论对不对"提供第二把尺子，判**结论文字与数值是否一致**；数值对错仍以比较器 + 人工判定为准。
-> 状态：**已校准达标，可启用**（2026-11-12）。校准读数见 §3。
+> 状态：**已校准达标，可启用**（2026-11-12 首校；2026-11-20 扩容到 135 条并以 GLM-5.2 复校，两段均过，读数见 §3.1）。
 
 ## 1. 契约（预登记，来自 spec EV-B8）
 
@@ -11,7 +11,7 @@
 - rubric 只来自题面与 gold，**不许把被评答案喂回去让它"解释"**。
 - 防偏差：gold 与 answer 呈现顺序一半 `gold_first` / 一半 `answer_first`（固定 seed 可复现）；
   prompt 明写"长度、文风不作依据"。
-- judge 模型与被评模型**不同家族**。当前：judge = `Qwen3.5-397B-A17B`，主评测模型 = `GLM-5.2`（CI）。
+- judge 模型与被评模型**不同家族**。当前部署：judge = `GLM-5.2`（JD 网关，`.env` 配置），被测主模型 = `Qwen3.5-397B-A17B`（内网）。两方向配对均满足异家族；换 judge 模型必须重新校准（见 §6）。
 - judge **不进 CI 门禁**（要 Key、有成本、有随机性），只服务离线校准与报告复核。
 
 ## 2. 文件
@@ -19,10 +19,12 @@
 | 文件 | 职责 |
 |---|---|
 | `app/eval/judge.py` | `judge()` 单次判定 + `judge_model()`（`DATACHAT_JUDGE_MODEL/API_KEY/BASE_URL` 配置，缺省回退 `DEEPSEEK_*`） |
-| `scripts/eval/judge_calibrate.py` | 跑校准集，算一致率 / Cohen's κ / 混淆矩阵 / 弃权数；退出码 0=达标 1=未达标 2=有效样本不足 |
+| `scripts/eval/judge_calibrate.py` | 跑校准集，算一致率 / Cohen's κ（+Wilson / bootstrap 95% CI）/ 混淆矩阵 / 弃权数；`--segments` 校准段/泛化段两段各过 κ≥0.7 才算可用；`--replay` 从上次 `--out` 明细无 Key 复算；退出码 0=达标 1=未达标 2=有效样本不足 |
+| `scripts/eval/judge_collect.py` | 候选采集（宽口径含模糊样本，P0 闸门逆反 / P1 soft / P2 strict / P3 清晰错 / P4 一致对补位，`--priorities` 可只取指定档）+ 人标入库两步（`--ingest` 人标闸：label 非 true/false 一条不进，干跑 / `--confirm` 真写） |
 | `scripts/eval/build_judge_gold.py` | 从历史报告构建校准集（带 match 阶梯过滤与 alt 纳入，见 §4） |
-| `docs/eval/judge_gold.jsonl` | 校准集：35 条（20 对 / 15 错），跨 16 个类别，顺序 20/15 平衡 |
+| `docs/eval/judge_gold.jsonl` | 校准集：135 条（117 对 / 18 错；其中 100 条人工标注 `human_labeled=true`），跨 16 个类别，order 交替防位置偏差 |
 | `tests/test_judge.py` | 13 条契约测试（二元/弃权/重试/异常/temperature 锁死/κ 手算对照） |
+| `tests/test_judge_expand.py` | B4 扩容配套：wilson / bootstrap 锚点、两段分割比例守恒、judge_collect 分档 / 轮转唯一性 / 人标闸 |
 
 ## 3. 校准读数（2026-11-12，judge=`Qwen3.5-397B-A17B`，temp=0.0）
 
@@ -34,6 +36,23 @@
 ```
 
 弃权 1 条（mem_007）：模型回答只引用前轮结果没给数值，judge 按契约 abstain——这是**正确行为**。
+
+## 3.1 复校读数（2026-11-20，judge=`GLM-5.2`（JD 网关），temp=0.0，B4 扩容后 n=135）
+
+```
+样本 135：有效 132   弃权/低置信 3   调用失败 0
+混淆矩阵（judge, label）：TP=116  FP=0  FN=0  TN=16
+一致率 100.0% [0.972, 1.000]（Wilson 95%）   Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）
+校准段 calibration n=66 κ=1.000 过   泛化段 generalization n=66 κ=1.000 过
+判据：两段各 κ ≥ 0.7 且一致率 ≥ 90% → 达标，可启用
+```
+
+弃权 3 条（mem_007 / agg_001 / agg_002 各 1）：全部 label=True 上 abstain，按契约不进分母。
+
+**负侧保留**：18 错里有效 TN=16，负侧检验强度有限（judge_collect 池读数：清晰错全库可采仅 6 条，
+已生成补充批待人标）。跑批累积新错样本继续经人标闸入库加厚；opencode 第二家族交叉校验待 Key。
+**人标分歧参考**：机器建议 vs 人工 100 条仅 3 条分歧（全部「建议对→人标错」），其中 m01 推翻了旧闸门记录——
+人标闸存在的意义。
 
 **解读纪律**：这个 100% 是三轮修正**校准集标签**后的读数，judge prompt 从第一版起一字未改。
 三轮修正的全是标签侧问题（见 §4）——结论是 judge 本体稳定，但 35 条样本量下 100% 仍有
@@ -60,10 +79,17 @@
 # 重建校准集（历史报告变化后）
 python scripts/eval/build_judge_gold.py
 
-# 校准（验收命令，与 spec EV-B8 一致）
-python scripts/eval/judge_calibrate.py --gold docs/eval/judge_gold.jsonl
+# B4 扩容流：采集候选（宽口径含模糊样本）→ 人工在 Excel/JSONL 里填 label → 入库（人标闸）
+python scripts/eval/judge_collect.py --target 100 --out outputs/judge_candidates.jsonl
+python scripts/eval/judge_collect.py --ingest outputs/judge_candidates_labeled.jsonl           # 干跑只报数
+python scripts/eval/judge_collect.py --ingest outputs/judge_candidates_labeled.jsonl --confirm # 真写 judge_gold
+python scripts/eval/judge_collect.py --target 6 --priorities "0,3" --out outputs/judge_candidates_p3.jsonl  # 只采逆反+清晰错
+
+# 校准（验收命令；B4 起加两段判读）
+python scripts/eval/judge_calibrate.py --gold docs/eval/judge_gold.jsonl --segments
 python scripts/eval/judge_calibrate.py --gold docs/eval/judge_gold.jsonl --limit 5   # 冒烟
-python scripts/eval/judge_calibrate.py --gold ... --out outputs/judge_cal.json       # 存明细
+python scripts/eval/judge_calibrate.py --gold ... --segments --out outputs/judge_cal_glm.json  # 存明细
+python scripts/eval/judge_calibrate.py --replay outputs/judge_cal_glm.json --segments           # 无 Key 复算统计层
 
 # 单次判定
 from app.eval.judge import judge, judge_model
@@ -72,7 +98,7 @@ r = judge(question, answer, gold_summary, rubric, model=judge_model(), order="go
 
 ## 6. 启用条件与边界
 
-- **已满足**：κ 1.000 ≥ 0.7，一致率 100% ≥ 90%（预登记判据）。
+- **已满足**：2026-11-12 首校 κ 1.000 ≥ 0.7，一致率 100% ≥ 90%（预登记判据）；2026-11-20 B4 扩容到 135 条后以 GLM-5.2 复校，两段各 κ 1.000（两段加强判据）。
 - judge 只复核"结论文字与数值是否一致、有无过度推断"；**数值对错的最终裁定仍是比较器 + 人工**。
 - judge 结果进报告只作参考列，不参与 auto_correct，不进门禁。
 - 换 judge 模型必须重新校准并落新的读数到本文件。

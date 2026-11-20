@@ -10455,7 +10455,7 @@ react 只在 7 道记忆专项上领先，而那 2 道正是 `mem_003`（真失�
 - **`mem_006` 没改**：改 gold 就是又一次断代，按"BACKLOG 冻结"原则放到下一轮。
 
 
-## [187] 2026-11-18 · 评测转稳态：三层门禁落地，v7 冻结为基线 · commit <本次>
+## [187] 2026-11-18 · 评测转稳态：三层门禁落地，v7 冻结为基线 · commit d8f2eae…a3298a3
 
 ### 为什么动
 
@@ -10553,6 +10553,49 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 只在断代或有人提问时手动跑；日常不进 LEDGER、不写 CHANGES。
 
 **本次明确不做**：P14、`mem_006` 的 gold、以及本轮扫出来的其它新发现。
+
+### 收工时的最终形态
+
+上线后第一次全跑（`dca9334`）就撞了两件事，都不是产品问题，但都不能由实施方自己拍：
+
+1. **CI 的 nightly 202 题全报 `1001 模型不存在`。** v7 基线是在内网
+   `grg-aikits-test.grgbanking.com`（`10.62.27.32`，公网 DNS `NXDOMAIN`）上量的，
+   GitHub 托管 runner 走公网，永远够不着。门禁判对了 —— ⚪ 不可比、退出码 2，没当回归。
+   但这也意味着「CI 自动跑真模型评测」这条路本身不成立。
+2. **规则 2 落在噪声带里。** 同一份 master、同一基线，背靠背两跑：`193/202` 翻 2 题 → 🔴、
+   `195/202` 翻 0 题 → 🟢。判红那跑的通过数还**高于**基线 192。根因是网关 temp 0 并不确定
+   （canary 基线 `answer_varied=10`，十题六跑答案文本全不同），`pass^3` 只是三次抽样。
+3. **canary 每周必红**：基线是 6 跑聚合比、判读是 1 跑，形态不匹配；usage 三条结构性越界
+   （11-16 的 +20.5 / −21.6 / +25.0 与 11-18 的 +32.3 / −20.9 / +31.6 同三条同方向），
+   而十条探针 10/10 全对、指纹一致。那不是漂移。
+
+H 的处置（「按最快收工来办」，`777c710`）：
+
+- 判红**只留规则 1**（通过数比基线低 6 题及以上）。翻转题照样逐题列进简报，不进退出码。
+- canary 的 usage 三条只列「提示（不拦）」，基线不动。
+- `eval.yml` / `drift.yml` 去掉 `push` / `pull_request` / `schedule`，只留 `workflow_dispatch`。
+  issue #102 关闭并说明。`tests.yml` 一字未改，照旧每次提交跑。
+- README 给 S 两条命令，带退出码对照表。
+
+**验证（2026-11-18 本机，v7 仪器）**：命令一 🟢 194/202（基线 192，高 2），翻 2 题
+（`mem_007` / `ord_027`）只列不拦、退出码 0；命令二 🟢 1 跑 10/10、翻转 0、退出码 0
+（这一次回包里连 `cache_read` / `reasoning` 两个字段都没有，正好印证把 usage 当红线是自找误报）。
+CI：`a3298a3` 的 `tests` 7/7 全绿。
+
+### 常驻纪律（H 2026-11-18 定）
+
+**动了 prompt / agent / 记忆 / 执行器，合并前必须在内网跑一遍命令一；纯前端与文档不用跑。**
+
+写进 `docs/eval/README.md`「什么时候必须跑命令一」，并给了路径对照表
+（`app/nodes/`、`app/graph.py`、`app/react_agent.py`、`app/memory/`、`app/tools/`、`app/core/`、
+`app/llm.py`、`app/state.py` 要跑；`ui/`、`desktop/`、`docs/`、`tests/`、`.github/` 不跑）。
+另标了一条边界：改 `app/eval/` 不是「跑命令一」，是「动尺子」，正确动作是断代。
+
+代价要写在明处：**从现在起没有任何自动门禁会告诉你产品退步了**，只有人想起来才跑。
+这是撤掉 CI 自动触发换来的，不是白捡的；「拿不准就跑」那一句就是为此写的。
+
+下一轮（不做）：自托管 runner、在 `agentrs` / GLM-5.2 上重立基线、N6（沙箱没有 `globals`，
+修复循环三次都改不掉；以及忘写 `result =`）、N7 的完整方案。全部在 `BACKLOG.md`。
 
 ## [188] 2026-11-18 · 修复批 1：拒答原因不照抄示例、沙箱边界提示、没赋 result 与「输出的不是代码」交给 reviewer · commit d508e14（PR #103）
 
@@ -10738,7 +10781,7 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
 
 ---
 
-## [193] 2026-11-19 · 阶段 7.5 第 2 步：Excel 输入 · commit <待提交>
+## [193] 2026-11-19 · 阶段 7.5 第 2 步：Excel 输入 · commit 549431f（PR #108）
 
 只做了第 2 步的第一部分（xlsx 输入）。导出和 `scipy.stats` 没动。
 
@@ -10802,3 +10845,91 @@ usage in 50.5 / out 5.0 / cache 42.7 / reasoning 1.8。
   | `-k test_oracle_pipeline_all_correct` | 2 passed，413 s |
   | vitest / e2e | 前端没改，未跑 |
 - 11-19 CI 补丁：Windows CI 上 tests 75db322（run 44487294865）有 3 条 test_fingerprint_xlsx 失败。原因是 pytest 的 tmp_path 在 C: 盘、仓库在 D: 盘，指纹调用 os.path.relpath 跨盘时抛 ValueError。生产环境的数据集都在仓库内，不会跨盘，所以改测试不改实现：测试数据集改建在仓库内的临时目录（fixture repo_tmp），用完删除。
+
+---
+
+## [194] 2026-11-20 · 阶段 7.5b：评测/评估优化批（B1/B2/B3/B5）· commit 79ae04b
+
+方案 `phase75b-eval-assess.md` 五项中的四项（B4 judge 校准扩容等 GLM/opencode Key，另行收尾）。
+
+### 改了什么
+
+- **B1 契约覆盖修复后代码**（`app/assess/contracts.py`）：reviewer 节点判定时追加跑 codegen 五条，contract id 加 `after_fix.` 前缀。只观测不拦截（评估不判红）。动机：#107 记档的 scope 盲区——修复只改了列引用时 `reviewer.scope` 看不出 codegen 五条该看的东西；k 豁免天然同口径（`codegen.columns` 只查不存在列，与 scope 的「真列不算账」一致）。
+- **B2 case_id 贯通 + fake_llm 全管线回放进 CI**：`analyze/analyze_stream/_run`（`app/core/service.py`）加 `case_id` 参数，只进快照 run 行、不进 prompt（不传时快照逐字节不变，有测试钉）；`SnapshotRecorder.begin`（`app/assess/snapshot.py`）落键；`EvalRunner` 加 `snapshot_dir`（`app/eval/runner.py`），_run_one 传 `case_id=case.id`。新脚本 `scripts/assess/record_batch.py`（fake_llm 进程内起服务、全 202 题落快照、EV-B6 扰动题数据缺失自动跳过）与 `scripts/assess/replay_batch.py`（目录全快照逐节点 `--recorded` 回放，无 node 行的快照计跳过）。`tests.yml` 加 `replay-batch` job：record→replay→assess 三步，验证**管线不变性**，不验证答案质量。新测试 `tests/test_b2_batch_pipeline.py` 4 条（含篡改一处 prompt_sha256 必须抓出漂移的哨兵测试）。
+- **B3 comparator 放宽规则留一消融**（新脚本 `scripts/eval/rule_ablation.py`，只产报告不改代码）：monkeypatch 关单条规则 → rescore 复打 → 翻转清单按承重归档（≥5 承重 / 1–4 人工复核 / 零翻转）。两份 11-13 真实报告上翻转集完全一致：r6_22 月份键对齐 9 翻转（唯一承重）；r11=4；r20/r14_18_m/r12/r8 各 2；r17/r19_dict 各 1；7 个单元零翻转；异常方向 0。3c 三条（18/19/20）现在只救 3 题 ≠ 3b 时代 +4.6pp——历史读数在旧答案上，报告带对账段。CHANGES 候选攒给下一次断代。
+- **B5 门禁配对判读**（`scripts/eval/nightly_gate.py`）：判红从「通过数掉 6 题」（规则 1）换成**配对净退步**——pass3 全对变错=退步、failed 全错变对=进步、unstable 噪声带不算，净退步 ≥6 才红；规则 1 与规则 2 一样降为只列不拦。依据：门禁分辨率=噪声宽度（±6 题），判红线画在噪声带里（N7：同一 master 两跑 193 翻 2 / 195 翻 0 结论相反）。CI `eval.yml` 调用点不用改（退出码语义不变）。
+
+### 验证（2026-11-20，S 本机 dc 环境）
+
+| 段 | 结果 |
+|---|---|
+| B1 单测 + assess 六文件回归 | 40 passed；85→89 passed |
+| B1 gold 误报检查（217 份 gold 当 reviewer 输出跑契约） | after_fix 五条 0 fail；columns 190 ok / 27 not_checked，27 题名单与 #107 记档逐一对上 |
+| B2 全量 record/replay | 256 快照；1156 处回放 1156 一致，exit 0；assess 报告 256 题键全带 case_id |
+| 全仓 pytest | 2231 passed，8 failed 全为 GBK 控制台 ✗ 编码假红（PYTHONUTF8=1 复跑 115 全绿）；73 分钟 |
+| B3 双报告消融 | 两份翻转集完全一致（185/195 与 175/195 基线差 10 题，被规则救的题一模一样） |
+| B5 门禁测试 | 20 passed（更新 4 个旧语义测试，新增配对红/进步抵消 2 条） |
+| B5 真实读数验收 | 本机两份 nightly（194：退 2 进 2 净 0；195：退 0 进 1 净 -1）同判绿，exit 均 0 |
+
+### 指纹断代登记（后合者 rebase 时用）
+
+| 层 | master 549431f | 本分支 |
+|---|---|---|
+| code（A 组 affects_results） | eb5e7235dc70 | c94c66aaf559 |
+| code_all（含 B 组） | 5561bfbd4199 | 5623e20bcc68 |
+| entry | c44fcc754331 | 不变 |
+| judge | 289474f4d943 | 不变 |
+
+A 组动了 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.py`（B2 case_id 贯通）；B 组动 `app/assess/contracts.py`（B1）。新文件全在 `scripts/`、`tests/`，不进指纹扫描。**判分与题库未动，评测基线不断代**；A 组变更按「合并前在内网跑命令一」纪律由 S 执行（本批只加参数不进 prompt，渲染层逐字节等价）。
+
+### 明确不做（方案五条 + 本批顺延）
+
+缩题库（配对已换统计量，缩样本只会更差）；自愈回路处熔断（codegen/executor 异常是 replan 的输入）；强制 JSON 证据链（驯化模型）；自动入库无人工闸；CI 真模型评测（公网 runner 够不着内网网关）。B4 judge 校准扩容（≥100，calibration/generalization 两段各报 κ+95%CI）待 GLM/opencode Key 走 env 交接后做。
+
+---
+
+## [195] 2026-11-20 · 阶段 7.5b B4 备脚本：judge 校准集扩容采集 + 两段判读统计层 · commit 51e6bbd
+
+GLM/opencode Key 到位前先把 B4 的无 Key 部分做完（用户拍板「先备脚本、钥匙后到」）。真跑校准与两段结论等 Key 走 env 交接后收尾。
+
+### 改了什么
+
+- **新脚本 `scripts/eval/judge_collect.py`**：候选采集 + 人标入库两步，人不缺席。候选口径比 build_judge_gold 宽（B4 采样源就是模糊样本）：P0 闸门 human/auto 逆反全收（两把尺子打架必须人裁）；P1 soft match（scaled/extras/relaxed 被放水的 True）或 alt 命中；P2 strict True；P3 清晰错。真实报告池 5674 条，轮转配额防 100 条全落「模糊 True」：选出 100 = P0 7 + P1/P2/P3 各 31 → `outputs/judge_candidates.jsonl`，行含 gold_summary + suggested_label + 空 label 待人标。`--ingest` 人标闸：label 非 true/false 一条不进（红线 4：不自动入库），干跑 / `--confirm` 两步，order 接续交替防位置偏，`human_labeled` 标记来源与人标产物可区分。
+- **`scripts/eval/judge_calibrate.py` 加统计层**：一致率 Wilson 95% CI（n 小不跑出界）；κ bootstrap 95% CI（2000 次、seed 固定可复现）；`--segments` 校准/泛化两段分开各报 κ+CI，**两段各过 κ ≥ 0.7 才算 judge 可用**（B4 口径——防小样本 κ 的运气成分，先按 (label, idx) 稳定排序再交替分配保两段标签比例）；`--replay` 从上次 `--out` 明细重算统计，无 Key 验证统计层与存档可复算。
+- **新测试 `tests/test_judge_expand.py`** 10 条：Wilson 锚点（1/1→0.2066、60/60→0.940）、完美一致 bootstrap=(1,1)、seed 复现、两段标签比例守恒、P0 逆反识别、轮转配额、人标闸/干跑/重复跳过。
+
+### 验证（2026-11-20，S 本机 dc 环境）
+
+| 段 | 结果 |
+|---|---|
+| judge 两文件（test_judge.py + test_judge_expand.py） | 24 passed |
+| 评测面回归（judge/gate/nightly/rescore/tier 五文件） | 67 passed |
+| `--replay --segments` 冒烟（合成 60 有效明细） | 一致率 100% [0.940,1.000]、κ 1.000 [1.000,1.000]，两段各 30 条均过，exit 0 |
+| 候选采集（真实报告，无 Key） | 池 5674，选出 100 → outputs/judge_candidates.jsonl |
+
+### 指纹
+
+`scripts/` 与 `tests/` 不进扫描，本批指纹不动。剩余待 Key：judge_calibrate 真跑校准 → judge/comparator 不一致样本再采一轮人标 → 两段判据出结论。Key 走 env，不进仓库。
+
+## [196] 2026-11-20 · 阶段 7.5b B4 真跑：人标入库 100 条 + GLM-5.2 两段校准全过 + judge_collect 采样修复 · commit <待提交>
+
+Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 校准——与被测 Qwen3.5 异家族，符合 phase7 §1「judge 异家族」纪律。
+
+### 改了什么?
+
+- **`docs/eval/judge_gold.jsonl` 35 → 135 条**：`judge_label_100.xlsx`（人标 Excel，P0 7 条置顶）100 条全标（对 97 / 错 3），`judge_collect.py --ingest --confirm` 入库，`human_labeled` 标记来源、order 接续交替。机器建议 vs 人标分歧仅 3 条（agg_001 / agg_002 / m01，全部「建议对→人标错」；m01 即老 DEVLOG 里 unverified_numbers 那题，新人标推翻旧闸门记录）。
+- **`scripts/eval/judge_collect.py` 两处采样修复**（真跑暴露的缺陷）：
+  ① P3/P4 分档——原 P3 混入「闸门一致对」样本且 id 排序靠前挤占配额，100 条候选的机器建议全 True、负样本进不了候选；改四档：clash→P0、双侧判错（或人工缺席自动判错）→P3、闸门一致对→P4（低信息量补位）；`collect()` 加 priorities 参数、CLI 加 `--priorities`（负样本补充批用 "0,3"）。
+  ② 轮转消费 bug——原 `extend(bucket[:share])` 不消费桶，补位循环把同条重复选出（实测 P3 桶 6 条选出 12 条全重复）；改 `take = min(share, len(bucket))` + `del bucket[:take]` 消费语义 + 选中集唯一性 assert。
+  `tests/test_judge_expand.py` 同步：P0/P3/P4 分档断言、`--priorities` 只取负样本档、轮转唯一性。
+- **GLM-5.2 校准读数**（`judge_calibrate.py --segments --out outputs/judge_cal_glm.json`）：样本 135、有效 132、弃权/低置信 3（mem_007 / agg_001 / agg_002 各 1，全是 label=True 上 abstain 不进分母）、调用失败 0；混淆矩阵 TP=116 FP=0 FN=0 TN=16；一致率 100.0% [0.972, 1.000]（Wilson 95%）；Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）；calibration n=66 κ=1.000 过 / generalization n=66 κ=1.000 过 → **两段均过，GLM-5.2 judge 可用**（B4 判据：两段各 κ≥0.7 且一致率≥90%）。明细 `outputs/judge_cal_glm.json`（gitignore；`--replay --segments` 可无 Key 复算）。
+- **诚实保留**：负侧仅 16 有效 TN——清晰错全库只剩 6 条可采（补充批 `judge_label_p3.xlsx` 待标，标完二次入库可加厚）；κ=1.000 测的是「judge 对照同一份 gold_summary 执行同一判分规则」，方向正确但负侧检验强度有限；opencode 第二家族交叉校验仍挂账（grg Qwen3.5 与被测同家族，只能当临时干跑不算达标）。
+
+### 指纹断代登记（后合者 rebase 时用）
+
+**本批不动任何指纹**：`judge_gold.jsonl` 是校准材料不是判分规则——`JUDGE_FILES = (comparator.py, negative.py)`（`app/eval/fingerprint.py:226`）不含它；scripts/tests 不进扫描。code / entry / judge / canary 四层全不变，基线 51e6bbd 可直接延续。
+
+### 明确不做
+
+自动入库无人标闸（红线 4）；同家族 judge 冒充异家族达标。
+

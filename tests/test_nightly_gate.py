@@ -1,8 +1,12 @@
-"""nightly 回归门禁：两条红灯 + 三类"不可比"。
+"""nightly 回归门禁：配对判红（B5）+ 三类"不可比"。
 
 这里测的是判定，不是 `run_eval.py` 能不能跑（那是 test_eval_cases / test_runner）。
 判据全部写死在 `docs/eval/baseline_v7.json` 里，改数字要连带改文档 —— 所以另有一条
 测试盯基线文件自身的一致性。
+
+**B5（2026-11-20）**：判红从"总数掉 6 题"（规则 1，含噪最重，判红线画在噪声带里）
+换成**配对净退步**——高置信池同题 before/after（pass3 全对变错=退步、failed 全错
+变对=进步），净退步 ≥6 才红；规则 1 降级为只列不拦，与规则 2 一样进简报不进退出码。
 """
 import json
 import os
@@ -71,14 +75,37 @@ def test_green_with_one_pass3_flip():
     assert r["metrics"]["pass3_flips"] == 1
 
 
-# ---------------------------------------------------------------- 红
-def test_rule1_fires_at_six_question_drop():
-    """掉 6 题、稳定题一道没翻（掉的全是本来就不稳的）：规则 1 单独响。"""
-    r = G.evaluate(_report([f"c{i:02d}" for i in range(16, 28)]), _baseline())
+# ---------------------------------------------------------------- 红（B5：配对净退步）
+def test_paired_net_drop_fires_red():
+    """**B5 判红条件**：三跑全对的题翻 6 道、基线全错的题一道没进步
+    —— 净退步 6，配对口径下这是真把稳定题做坏了。"""
+    r = G.evaluate(_report([f"c{i:02d}" for i in range(6)] + [f"c{i:02d}" for i in range(20, 30)]),
+                   _baseline())
     assert r["verdict"] == "red", r
+    m = r["metrics"]
+    assert m["pass3_flips"] == 6 and m["paired_gains"] == 0 and m["paired_net"] == 6
+    assert any("配对" in x for x in r["reasons"]), r["reasons"]
+
+
+def test_paired_gains_offset_regressions():
+    """净退步才算红：退 6 进 3 = 净 3，进步抵掉一部分，不过阈不红。"""
+    r = G.evaluate(_report([f"c{i:02d}" for i in range(6)] + [f"c{i:02d}" for i in range(23, 30)]),
+                   _baseline())
+    assert r["verdict"] == "green", r
+    m = r["metrics"]
+    assert m["pass3_flips"] == 6 and m["paired_gains"] == 3 and m["paired_net"] == 3
+    assert any("进步（不拦）" in x for x in r["reasons"]), r["reasons"]
+
+
+# ---------------------------------------------------------------- 规则 1 降级（B5）
+def test_rule1_demoted_pure_count_drop_is_not_red():
+    """**B5 降级**：掉 6 题、稳定题一道没翻（掉的全是不稳/全错池），
+    旧规则 1 会红；配对口径下这是噪声带里的总数差，只列不拦。"""
+    r = G.evaluate(_report([f"c{i:02d}" for i in range(16, 28)]), _baseline())
+    assert r["verdict"] == "green", r
     assert r["metrics"]["drop"] == 6 and r["metrics"]["pass3_flips"] == 0
-    assert any("规则 1" in x for x in r["reasons"])
-    assert not any("规则 2" in x for x in r["reasons"])
+    assert any("规则 1" in x and "只列不拦" in x for x in r["reasons"]), r["reasons"]
+    assert not any(x.startswith("配对翻转") for x in r["reasons"]), r["reasons"]
 
 
 def test_two_pass3_flips_no_longer_gate():
@@ -86,23 +113,24 @@ def test_two_pass3_flips_no_longer_gate():
 
     实测依据（BACKLOG N7）：同一 master 连续两跑 193（翻 2）/195（翻 0），
     结论相反，且判红那跑通过数还高于基线；根因是网关 temp 0 并不确定。
+    B5 验收锚：这两份读数在配对口径下必须同判（都不红）。
     """
     r = G.evaluate(_report(["c00", "c01"]), _baseline())
     assert r["verdict"] == "green", r
     assert r["flips"] == ["c00", "c01"]
     assert r["metrics"]["pass3_flips"] == 2
-    assert any("提示" in x and "不拦" in x for x in r["reasons"]), r["reasons"]
+    assert any("退步（不拦）" in x for x in r["reasons"]), r["reasons"]
 
 
-def test_rule1_fires_even_when_flips_are_also_present():
-    """规则 1 单独决定红；翻转仍然列在 reasons 里备查。"""
+def test_rule1_demoted_even_when_flips_are_also_present():
+    """规则 1 只列不拦；配对净退步没过阈就绿，翻转照样列在 reasons 里备查。"""
     r = G.evaluate(_report(["c00", "c01"] + [f"c{i:02d}" for i in range(16, 27)]),
                    _baseline())
-    assert r["verdict"] == "red"
+    assert r["verdict"] == "green", r
     assert r["metrics"]["drop"] == 5 + 2
-    assert sum("规则 1" in x for x in r["reasons"]) == 1
-    assert sum("规则 2" in x for x in r["reasons"]) == 0
-    assert any("提示" in x for x in r["reasons"])
+    assert any("规则 1" in x and "只列不拦" in x for x in r["reasons"]), r["reasons"]
+    assert any("退步（不拦）" in x for x in r["reasons"]), r["reasons"]
+    assert r["metrics"]["paired_net"] == 2 - 3  # 退步 2，进步 3（c27~c29 对了）
 
 
 # ---------------------------------------------------------------- 不可比
@@ -166,13 +194,15 @@ def test_brief_lists_flips_and_commits():
     assert "不自动修" in brief
 
 
-def test_brief_on_red_still_shows_flips_and_rule1():
-    base, rep = _baseline(), _report(["c00", "c01"] + [f"c{i:02d}" for i in range(16, 28)])
+def test_brief_on_red_still_shows_flips_and_paired_reason():
+    """红了（配对净退步过阈）简报照列翻转题与配对理由。"""
+    base, rep = _baseline(), _report([f"c{i:02d}" for i in range(6)]
+                                     + [f"c{i:02d}" for i in range(20, 30)])
     res = G.evaluate(rep, base)
     assert res["verdict"] == "red"
     brief = G.render_brief(res, base, rep, "outputs/nightly_v7.json", [])
-    assert "🔴 RED" in brief and "规则 1" in brief
-    assert "`c00`" in brief and "`c01`" in brief
+    assert "🔴 RED" in brief and "配对翻转" in brief
+    assert "`c00`" in brief and "`c05`" in brief
 
 
 def test_cli_exit_codes(tmp_path):
@@ -187,10 +217,19 @@ def test_cli_exit_codes(tmp_path):
                    "--out", str(out), "--quiet"]) == 0
 
     red = tmp_path / "red.json"
-    red.write_text(json.dumps(_report([f"c{i:02d}" for i in range(16, 28)])), encoding="utf-8")
+    red.write_text(json.dumps(_report([f"c{i:02d}" for i in range(6)]
+                                      + [f"c{i:02d}" for i in range(20, 30)])),
+                   encoding="utf-8")
     assert G.main(["--report", str(red), "--baseline", str(bp),
                    "--out", str(out), "--quiet"]) == 1
-    assert "规则 1" in out.read_text(encoding="utf-8")
+    assert "配对翻转" in out.read_text(encoding="utf-8")
+
+    demoted = tmp_path / "demoted.json"
+    demoted.write_text(json.dumps(_report([f"c{i:02d}" for i in range(16, 28)])),
+                       encoding="utf-8")
+    assert G.main(["--report", str(demoted), "--baseline", str(bp),
+                   "--out", str(out), "--quiet"]) == 0
+    assert "规则 1" in out.read_text(encoding="utf-8")  # 只列不拦
 
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps(_report(judge="other")), encoding="utf-8")

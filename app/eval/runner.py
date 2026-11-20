@@ -74,7 +74,7 @@ class EvalRunner:
     def __init__(self, df_path: str | None = None, *, agent: str = "workflow", llm_config=None,
                  model_factory=None, use_dictionary: bool = True, max_attempts: int = 3,
                  datasets: dict | None = None, memory_mode: str | None = None,
-                 run_suffix: str | None = None):
+                 run_suffix: str | None = None, snapshot_dir: str | None = None):
         """model_factory：可选，case -> ChatModel。用于离线自检（--oracle）和单测；
         为 None 时用真实模型（llm_config 或环境变量）。
         阶段 3：每题按 case.dataset 取数据表（DATASETS）；df_path 若给出，覆盖 "sales" 表的路径（兼容旧的 --data）。
@@ -96,6 +96,9 @@ class EvalRunner:
         self.max_attempts = max_attempts
         self.memory_mode = memory_mode
         self.run_suffix = run_suffix
+        # 7.5b B2：给了就把每题的节点快照落进这个目录（analyze 的 snapshot_dir），run 行带 case_id。
+        # None 时 analyze 不记快照，行为与之前逐字节一致 —— CI 的回放验收（replay_batch.py）走这条路。
+        self.snapshot_dir = snapshot_dir
 
     def path_for(self, case: EvalCase) -> str:
         if case.dataset in self.datasets:
@@ -180,7 +183,10 @@ class EvalRunner:
                        # 跑改写对照要显式设 env，光靠用例字段不够）。
                        rewrite=True if getattr(case, "rewrite", False) else None,
                        # E3：--repeat 破缓存的无语义后缀；None 时不传，prompt 与之前逐字节一致
-                       run_suffix=self.run_suffix or None)
+                       run_suffix=self.run_suffix or None,
+                       # 7.5b B2：题号进快照 run 行（多轮题一轮一个快照文件，靠 case_id 归拢）；
+                       # snapshot_dir 没给时 analyze 不记快照，这里传了也等于没记。
+                       snapshot_dir=self.snapshot_dir or None, case_id=case.id)
 
     @staticmethod
     def _turn_status(res, expect: str) -> str:
