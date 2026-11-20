@@ -10911,7 +10911,7 @@ GLM/opencode Key 到位前先把 B4 的无 Key 部分做完（用户拍板「先
 
 `scripts/` 与 `tests/` 不进扫描，本批指纹不动。剩余待 Key：judge_calibrate 真跑校准 → judge/comparator 不一致样本再采一轮人标 → 两段判据出结论。Key 走 env，不进仓库。
 
-## [196] 2026-11-20 · 阶段 7.5b B4 真跑：人标入库 100 条 + GLM-5.2 两段校准全过 + judge_collect 采样修复 · commit <待提交>
+## [196] 2026-11-20 · 阶段 7.5b B4 真跑：人标入库 100 条 + GLM-5.2 两段校准全过 + judge_collect 采样修复 · commit 103eb54（PR #111）
 
 Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 校准——与被测 Qwen3.5 异家族，符合 phase7 §1「judge 异家族」纪律。
 
@@ -10933,3 +10933,10 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 
 自动入库无人标闸（红线 4）；同家族 judge 冒充异家族达标。
 
+## [197] 2026-11-20 · scipy.stats 方案 + 待决事项清单 · commit <待提交>
+
+- 新增 `docs/roadmap/phase75-scipy.md`：建议先不加 scipy.stats，等有题需要再加。依据：202 题里检索检验类关键词，只命中 `cases_multi.py:195` 的一处注释；`import scipy.stats` 会连带加载 12 个子包，未压缩约 148 MB（aarch64 实测）；sidecar zip 89 MB（sidecar run 44660448032）。另外写好了「如果要加」的规则：白名单精确到 `scipy.stats`，导出、打包、selftest 同步，跑全量 202 题。
+- 新增 `docs/roadmap/decisions-pending-1120.md`：把等 S 拍板的事项按 A 合并相关 / B scipy / C U1 / D 早先挂起的分类列出，每条附建议。
+- 只有文档，没有代码改动，闸门不受影响。
+- 11-20 更新：根据 #112 评论修正事实（D6、D1④ 已解决，D5 只剩 live 模式，红线改为配对翻转判读），填写已定的事项（A1 顺序改为 #111 → #109 → #110；A2–A4、B1、B3、C1–C3、E1、E2），phase75-scipy §3④ 补上 probe 批和下界的说明。
+- 回填：[196] 的 SHA 写为 103eb54（#111 squash）。
