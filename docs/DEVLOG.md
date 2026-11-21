@@ -11183,3 +11183,4 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | vitest 全量（node24，分三批） | 29 个文件 914 passed（含 themes.test.ts） |
 | e2e | 本机缺 `libatk-1.0.so.0`，交给 CI |
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
+- 11-21 CI（a5ff3cf，tests run 44884658291 的 web job）：`f4-visual` **视觉 11 红**（240 像素，ratio 0.01），1 failed / 45 passed。diff 只落在标记浮层「销量」一行色板的第 4 个色块：`#C0392B` 红 → `#199BC3` 天青，是本条预期的视觉变化；08、24、25 不受影响。从该 run 的 artifact `playwright-results`（id 14700225832）取 CI x64 的 `11-marks-card-actual.png`，覆盖 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`；看过，是正常页面，仅第 4 色块变色。
