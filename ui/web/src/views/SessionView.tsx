@@ -11,7 +11,7 @@ import { Dialog, MoreMenu, Topbar } from "./ui";
 // 会话：顶栏（标题原地编辑、···；主题在图表工具栏，U1）、历史（重放）、提问（SSE 实时）、停止、重新生成、👍👎。
 // status 是最终真相源（phase5-frontend.md §1）：流结束后重新拉会话，用库里的 status 收尾本页实时收到的轮次。
 type Live = { question: string; messageId: string; turn: Turn; startedAt: number };
-export function SessionView({ c, id, datasetName, title: titleProp, keyConfigured = true, onGoSettings, onChanged, onDeleted }: {
+export function SessionView({ c, id, datasetName, title: titleProp, keyConfigured = true, onGoSettings, onChanged, onDeleted, initialQuestion, onInitialAsked }: {
   c: Client;
   id: string;
   datasetName: string;
@@ -20,6 +20,8 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
   onGoSettings?: () => void;
   onChanged: (s: Session) => void;
   onDeleted: () => void;
+  initialQuestion?: string; // 阶段 7.6 U4：首页提问卡带来的问题，会话加载完就照常 ask 一次（StarterCards.tsx）
+  onInitialAsked?: () => void;
 }) {
   const [s, setS] = useState<SessionDetail | null>(null);
   const [title, setTitle] = useState("");
@@ -138,6 +140,26 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
     },
     [c, id, onChanged],
   );
+
+  // U4：新会话加载完、还没有消息时发出首页卡片带来的那句话；只发一次（ref 挡住重复挂载的 effect）。没配凭证时照手动发送的规矩拦下，放进输入框
+  const initialDone = useRef(false);
+  useEffect(() => {
+    if (!s || !initialQuestion || initialDone.current) return;
+    initialDone.current = true;
+    onInitialAsked?.();
+    if (s.messages.length > 0) return;
+    const q = initialQuestion;
+    // 提问是异步副作用，放到这一拍之后，不在 effect 体里同步 setState
+    void Promise.resolve().then(() => {
+      if (!mounted.current) return;
+      if (keyConfigured) {
+        void ask(q);
+      } else {
+        setDraft(q);
+        setFlash((n) => n + 1);
+      }
+    });
+  }, [s, initialQuestion, keyConfigured, ask, onInitialAsked]);
 
   // 停止：先等 cancel 返回（CAS 落库 cancelled），不主动断开流，等流里的 error + done 自然结束。
   // 409 = 已经结束，交给流结束后的收尾。顺序反了（先断开）库里会落 interrupted。
