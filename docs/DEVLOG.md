@@ -11150,7 +11150,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #110 新 head（bda232a）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#110 仍 `997e3217d054`，本 PR 仍 `57f5d010ce73`，全量 sha 仍 `ba13c4a3e5cf`。
 
 ## [待编号] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit <待提交>
-决定见 `docs/roadmap/decisions-pending-1120.md` A3（S 同意：改成非红色，按字节契约走）。分支 `feat/a3-palette`，**叠在 #114（feat/u2-asset，4b981ad）上**，链 #109→#110→#114→A3 的链尾；S 内网回归对本条 head 跑一次。本地提交，未推送、未开 PR。
+决定见 `docs/roadmap/decisions-pending-1120.md` A3（S 同意：改成非红色，按字节契约走）。分支 `feat/a3-palette`，**叠在 #114（feat/u2-asset，4b981ad）上**，链 #109→#110→#114→A3 的链尾；S 内网回归对链尾 head 跑一次。11-21 S 同意推送并开 PR（base = feat/u2-asset），U4 接在本条之后成为新链尾。
 
 ### 改了什么
 - `PALETTE[3]` `#C0392B` → **`#199BC3`**（天青）。两份同改：`app/tools/plotting.py`（matplotlib `axes.prop_cycle`）、`app/tools/charts.py`（导出到 `chart_schema.json` 的 palette，前端经典主题读它）；`tests/test_charts.py` 钉住两份相等，只改一边会红。`ui/web/src/generated/chart_schema.json` 由 `scripts/gen_ui_types.py` 重新生成（`--check` ok）。
@@ -11182,3 +11182,4 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | `gen_ui_types.py --check` | ok |
 | vitest 全量（node24，分三批） | 29 个文件 914 passed（含 themes.test.ts） |
 | e2e | 本机缺 `libatk-1.0.so.0`，交给 CI |
+- 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
