@@ -1,4 +1,4 @@
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell } from "../desktop";
@@ -8,6 +8,7 @@ import { DatasetView } from "./DatasetView";
 import { IconChat, IconGear, IconPlus, IconSidebar, IconSpark, IconTable, IconUpload } from "./icons";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
+import { StarterHome } from "./StarterCards";
 import { createdSuffix, Dialog, MoreMenu, relTime, Topbar } from "./ui";
 
 type View = { kind: "home" } | { kind: "dataset"; id: string; focus?: "notes" } | { kind: "session"; id: string } | { kind: "settings" };
@@ -97,6 +98,18 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       .then(noteDetail, (e) => setError(errText(e)))
       .finally(() => setProfiling((x) => (x === id ? null : x)))
   );
+
+  // 阶段 7.6 U4：首页提问卡。建会话（POST /sessions）后把这句话交给 SessionView，由它走现有提问链路发出去（E1）
+  const [starterAsk, setStarterAsk] = useState<{ session: string; question: string } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const askStarter = (datasetId: string, question: string) => (
+    setStarting(true),
+    c.createSession(datasetId, "workflow")
+      .then((s) => (touched(), setSessions((xs) => [s, ...xs]), setStarterAsk({ session: s.id, question }), go({ kind: "session", id: s.id })),
+        (e) => setError(errText(e)))
+      .finally(() => setStarting(false))
+  );
+  const homeDs = datasets.find((d) => !failed[d.id]); // 列表按创建时间倒序：刚上传的在最前；读取失败的不拿来提问
 
   const newSession = (datasetId: string, agent: Agent) =>
     c.createSession(datasetId, agent).then(
@@ -242,7 +255,13 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
             <button type="button" className="link" onClick={() => setError("")}>关闭</button>
           </p>
         )}
-        {view.kind === "home" && <Home empty={datasets.length === 0} onPick={setPending} />}
+        {view.kind === "home" && (
+          <Home empty={datasets.length === 0} onPick={setPending} starter={homeDs ? (
+            <StarterHome name={label[homeDs.id]} profile={profiles[homeDs.id]} busy={starting} profiling={profiling === homeDs.id}
+              tableCount={homeDs.files.filter((f) => !isDict(f.filename.toLowerCase())).length}
+              onAsk={(q) => askStarter(homeDs.id, q)} onProfile={() => profileDataset(homeDs.id)} onOpen={() => go({ kind: "dataset", id: homeDs.id })} />
+          ) : undefined} />
+        )}
         {view.kind === "dataset" && (
           <DatasetView
             key={view.id}
@@ -266,6 +285,8 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
             datasetName={label[current?.dataset_id ?? ""] ?? ""}
             title={current?.title}
             keyConfigured={key.configured}
+            initialQuestion={starterAsk?.session === view.id ? starterAsk.question : undefined}
+            onInitialAsked={() => setStarterAsk(null)}
             onGoSettings={() => go({ kind: "settings" })}
             onChanged={(s) => (touched(), setSessions((xs) => xs.map((x) => (x.id === s.id ? s : x))))}
             onDeleted={() => (touched(), setView({ kind: "home" }), setSessions((xs) => xs.filter((x) => x.id !== view.id)))}
@@ -430,19 +451,19 @@ function uploadErr(e: unknown): string {
 }
 
 /** 首屏（phase5 V2a §7）。有数据集时换一句引导。 */
-function Home({ empty, onPick }: { empty: boolean; onPick: (f: File[]) => void }) {
+function Home({ empty, onPick, starter }: { empty: boolean; onPick: (f: File[]) => void; starter?: ReactNode }) {
   return (
     <>
       <Topbar title="新会话" sub={empty ? "上传一个数据集开始分析" : "选择一个数据集开始分析"} />
       <div className="main">
-        <div className="empty">
+        {starter ?? <div className="empty">
           <h2>把表丢进来，直接问</h2>
           <p className="lead">读表、写代码、出图，一条提问跑完。数据不出本地。</p>
           <HeroUpload onPick={onPick} />
           <p className="tip">
             {empty ? "可多选：多张表一起上传，或者加上 *.dict.csv 作数据字典" : "或者在左侧选一个数据集，新建会话后提问"}
           </p>
-        </div>
+        </div>}
       </div>
       <div className="composer-wrap">
         <div className="composer disabled">
