@@ -11193,10 +11193,10 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 问候：`h2` 问候语 + 一句引导「数据已经就绪。从下面挑一个问题开始，或者新建会话自己问。」
   - 数据资产：数据集名、使用中标记、「打开」（进数据集页）；有 profile 时写「N 个表 · R 行 · C 列 · K 列有缺失 / 无缺失列」和「min ~ max / 没有日期列」，数字全部来自 U2 的 profile（上传响应、打开数据集页、点「剖析」拿到的）；没有时写「N 个表 · 还没读取概要」并给「剖析」（真实发 `GET /datasets/{id}`，同 U2）。不编数字。
   - 三张提问卡：「看看这份数据有什么」「找出异常值」「两期对比」。
-- **新文件 `ui/web/src/views/starter.css`**（组件里 import，打进同一个 CSS 包）：1px 边框、无阴影渐变，卡片 padding 20、间距 12–16；字号一律 `var(--fs-*, 回退)`：title-lg 22 / read 14 / body 13 / aux 12。be164e0 上还没有 U1 的 `--fs-*`，所以都带回退值；styles.css 没动。
+- **新文件 `ui/web/src/views/starter.css`**（组件里 import，打进同一个 CSS 包）：1px 边框、无阴影渐变，卡片 padding 20、间距 12–16；字号一律 `var(--fs-*)`：问候 title-lg 22，其余 body 13 / aux 12（11-21 rebase 后去掉回退值、卡片标题由 read 14 改 body 13，见文末）；styles.css 没动。
 - **点卡 = 真实提问**（E1，复用现有链路，没有新接口）：Shell 先 `POST /sessions {dataset_id, agent: "workflow"}`（与 U2「提问」同一模式），进新会话，把问题交给 SessionView；SessionView 加载完会话、没有消息时照常调用原有 `ask()`，即 `POST /sessions/{id}/messages` + SSE。只发一次（ref 挡住；Shell 收到 `onInitialAsked` 就清掉，回头再进这个会话不会重发）。建会话期间三张卡一起禁用，连点只建一个会话。没配凭证时与手动发送同一规矩：不发请求，问题放进输入框并闪提示条。
 - **首页取哪个数据集**：列表按 `created_at` 倒序（app.py `list_datasets`），取第一个没读取失败的，即刚上传的那个。没有数据集时首页照旧是上传大卡；全部读取失败时也照旧。
-- **Shell.tsx**（+26/−5）：import、`starterAsk`/`starting` 两个 state 和 `askStarter`、Home 多一个 `starter` 插槽（有就替换 `.empty` 上传大卡，Topbar 和底部禁用输入区不变）、给 SessionView 传两个 prop。**SessionView.tsx**（+23/−1）：`initialQuestion`、`onInitialAsked` 两个可选 prop 和一个 effect。上传后仍然进数据集页（f1/f2/f4-* 都依赖这个），回首页看到空态卡。
+- **Shell.tsx**（+26/−5）：import、`starterAsk`/`starting` 两个 state 和 `askStarter`、Home 多一个 `starter` 插槽（有就替换 `.empty` 上传大卡，Topbar 和底部禁用输入区不变）、给 SessionView 传两个 prop。**SessionView.tsx**（+23/−1）：`initialQuestion`、`onInitialAsked` 两个可选 prop 和一个 effect。上传后仍然进数据集页（f1/f2/f4-* 都依赖这个），回首页看到空态卡。**这一点是有意保留的**，上传后是否直接落到空态卡等 S 定。
 - 资产区的数据集名做成纯文本、不做按钮：侧栏条目已是同名按钮，`views.test.tsx` 按 `/^销量/` 找按钮会撞（第一版做成按钮时 6 条红，改掉后全绿）。
 
 ### 新增测试
@@ -11222,3 +11222,8 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | `playwright test --list e2e/f4-starter.spec.ts` | 3 条，都归 fake project |
 | e2e | **没跑**：沙箱缺 `libatk-1.0.so.0`，chromium 起不来，交给 CI。视觉基线（f4-visual 08/11/24/25）不含首页、侧栏整块 mask，预计不受影响 |
 | pytest | 后端没改，未跑 |
+- 11-21 rebase：`git rebase --onto <A3 新 head a5ff3cf> be164e0 feat/u4-empty`，叠到新 U2（#114）+ A3 之上，成为链 #109→#110→#114→A3→U4 的链尾；S 同意推送开 PR（base = feat/a3-palette），内网回归对本条 head 跑一次。
+  - 冲突只有 `docs/DEVLOG.md`：保留 base 全部内容（含 [198] 回填、[199]，与 #109/#110/#114/A3 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`Shell.tsx`、`SessionView.tsx` 自动合并，逐段核过：U2 的 `profiles`/`profileDataset`/`failed`/`label` 与 #109 的上传文案、U1 的字阶都在，U4 的 `starterAsk`/`askStarter`/`Home starter` 插槽/SessionView 两个 prop 原样接上。
+  - `starter.css`：U1 的 `--fs-*` 已在 styles.css，回退值全部去掉，与 styles.css 的写法统一（styles.css 约 150 处 `var(--fs-*)` 都不带回退）。另外 `.starter-asset-name`、`.starter-card-title` 原用 `--fs-read` 14，违反 U1 的 C1 规则（14 只给聊天阅读区，`READ_SELECTORS`），改为 `--fs-body` 13。`typeScale.test.ts` 只扫 styles.css，扫不到 starter.css，所以这条之前没被测试抓到；没扩测试范围。
+  - A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`；本条只改前端，与 A3 同为 `b32b00fd4e5d`，全量 sha `64707239f1f6`。
+  - 本地闸门（日志 `/workspace/work/logs/chain2_u4_*.log`、`chain2_pytest.log`）：vitest 全量（node24，`--pool=threads --maxWorkers=2`）30 个文件 925 passed（A3 的 914 + 本条 11）；`tsc --noEmit` 0 错误；`npm run build`（tsc + vite build + check-dist）通过；eslint 0 警告；pytest（串行，相关文件）test_judge / test_judge_expand / test_nightly_gate / test_charts / test_chart_fixtures 124 passed。e2e 交给 CI。
