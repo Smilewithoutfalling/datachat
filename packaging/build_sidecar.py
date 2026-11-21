@@ -32,6 +32,9 @@ ARGS = [
     "--hidden-import", "openpyxl",
     # 阶段 6.5：服务商预设是数据文件（app/core/providers.py 按 __file__ 旁边读），不是模块，要显式带上
     "--add-data", f"{os.path.join(ROOT, 'app', 'core', 'providers.json')}{os.pathsep}app/core",
+    # 阶段 7.5 第 2 步：代码导出把这个文件的**源码**原样嵌进导出的 .py（app/tools/export.py 按 __file__ 旁边读），
+    # 打包后模块只有字节码，源码要作为数据文件带上
+    "--add-data", f"{os.path.join(ROOT, 'app', 'tools', 'export_runtime.py')}{os.pathsep}app/tools",
     # 用不到、但会被分析器拖进来的大包
     "--exclude-module", "tkinter",
     "--exclude-module", "IPython",
