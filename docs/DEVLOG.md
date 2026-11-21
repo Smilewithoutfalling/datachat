@@ -10941,7 +10941,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-20 更新：根据 #112 评论修正事实（D6、D1④ 已解决，D5 只剩 live 模式，红线改为配对翻转判读），填写已定的事项（A1 顺序改为 #111 → #109 → #110；A2–A4、B1、B3、C1–C3、E1、E2），phase75-scipy §3④ 补上 probe 批和下界的说明。
 - 回填：[196] 的 SHA 写为 103eb54（#111 squash）。
 
-## [198] 2026-11-20 · 阶段 7.6 U1：工艺层 · commit <待提交>
+## [198] 2026-11-20 · 阶段 7.6 U1：工艺层 · commit a194836（PR #113）
 
 方案：`docs/roadmap/phase76-ui.md` §2 U1（第 40 行）和 §2.1 第 52–54 行。主要改 token 表和样式；JSX 动了主题下拉的位置，以及编辑态表单加「测试连接」（S 11-20 定 C2 = 方案 A）。
 
@@ -11010,3 +11010,13 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - **`f4-visual` 08、11、24、25 重取基线**：字阶和 padding 改了，四张截图是预期的视觉变化。从 run 44742904080 的 artifact `playwright-results`（id 14632132146）取 CI x64 的 `*-actual.png`，覆盖 `e2e/f4-visual.spec.ts-snapshots/` 下的 `08-running-fake-linux.png`、`11-marks-card-fake-linux.png`、`24-narrow-dataset-failed-fake-linux.png`、`25-narrow-session-fake-linux.png`；逐张看过，都是正常页面。
 - 本地快速确认：vitest `typeScale` + `connections` 2 个文件 28 passed。e2e 仍因沙箱缺 libatk 交给 CI。
 - 回填：[197] 的 SHA 为 4a10444（#112 squash）。
+
+
+## [199] 2026-11-21 · 阶段 7.5b B4 尾批：负样本入库 + GLM-5.2 141 条复校两段过 · commit <待提交>
+
+- 入库：`judge_label_p3.xlsx` 六条负样本经人标闸 `judge_collect.py --ingest --confirm` 进 `docs/eval/judge_gold.jsonl`，校准集 135→141 条（对 117 / 错 24，人标 106，order 交替保持 gold_first 71 / answer_first 70）。六条全部是 id=s09 的 PAPER CRAFT 陷阱错答（gold=WORLD WAR 2 GLIDERS），judge_collect 池清晰错全库仅此 6 条，负侧一次吃满。
+- 复校：GLM-5.2（JD 网关，命令行 env 注入防 `.env` last-wins）对 141 条全量复跑——有效 138、弃权 3（mem_007 / agg_001 / agg_002，全 label=True 上 abstain）、调用失败 0；TP=116 FP=0 FN=0 TN=22；一致率 100.0% [0.973, 1.000]、Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）；校准段 / 泛化段各 n=69、κ=1.000 双过 → judge 可用，exit 0。读数落 `docs/eval/judge.md` §3.2。
+- 验证：评测面五文件（test_judge / test_judge_expand / test_nightly_gate / test_rescore_ledger / test_tier_check）68 passed；gold 尾部六条抽查 label=false / human_labeled=true / order 交替无误。
+- 指纹：本批只动 docs——judge_gold.jsonl 为校准材料不在任何指纹层（JUDGE_FILES=comparator.py/negative.py），code / entry / judge / canary 四层全不变，基线 a194836 直接延续。
+- 明确不做：opencode 第三家族交叉校验（Key 一次性用完即删，转可选触发项——换 judge / κ 掉到边缘 / 题库大扩容时再跑）；grg Qwen3.5 临时干跑（与被测模型同家族，GLM 已达标无必要）。
+- [198] 回填：a194836（PR #113）。
