@@ -56,7 +56,7 @@ const LIGHT: Tones = {
   tipBg: "#FFFFFF", tipBorder: "#D0D7DE", inactive: "#B8BEC6",
 };
 
-// 暗色画布：bg 不得亮于 #1B1F24（PALETTE 中最弱的 #C0392B 在 #1B1F24 上 3.05、在 #20242A 上 2.87）。本主题用自己的提亮
+// 暗色画布：bg 不得亮于 #1B1F24（PALETTE 前 6 色中最弱的 #1F6FB2 在 #1B1F24 上 3.13、在 #20242A 上 2.95；A3 之前最弱的是 #C0392B，3.05 / 2.87）。本主题用自己的提亮
 // palette，不依赖这条边界，但 bg 仍取 #15181C。文字必须显式改：echarts 默认轴标签灰 #6E7079 在 #15181C 上只有 3.61。
 const DARK: Tones = {
   bg: "#15181C", text: "#E6E8EB", title: "#F0F2F5", label: "#B0B7C0", line: "#59606B", split: "#2A2F36",
