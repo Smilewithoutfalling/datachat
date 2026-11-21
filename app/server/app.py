@@ -8,6 +8,8 @@
     GET    /datasets                     列表
     GET    /datasets/{id}?rows=20        详情（文件、每张表的列与概要）；带 rows（1–100）时加每张表前 N 行预览，
                                          单元格一律字符串或 null（阶段 5 F1.1：预览与详情合并，每个文件只读一遍）
+                                         profile：数据资产卡的概要（表数、总行数、列数、缺失列数、时间范围，
+                                         逐表明细在 profile.tables；阶段 7.6 U2，只加字段）
     DELETE /datasets/{id}                 口径（dataset_notes）随数据集级联删除（批 4b M10）
     GET    /datasets/{id}/notes?history=1 口径与规则（批 4b M2）：默认只给在用的；history=1 带上被取代 / 停用的版本
     POST   /datasets/{id}/notes          {"kind": "metric"|"rule", "name", "body", "unit"?, "synonyms"?}；在用的同名 409
@@ -267,6 +269,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             return out
         from app.tools.csv_io import read_csv_with_encoding
         from app.tools.dataset import excel_tables, is_dict_file, is_excel_file, load_warnings, table_paths
+        from app.tools.schema import profile_dataset, profile_df
         target = dataset_target(ds)
         try:
             tp = table_paths(target)
@@ -275,7 +278,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                                       context=f"dataset={ds.id}")
             return out
         multi = tp is not None
-        cols, parts, errors, previews, warns = {}, [], [], [], []
+        cols, parts, errors, previews, warns, profiles = {}, [], [], [], [], []
 
         def read_file(name, path):
             """→ [(表名, df, 编码说明)]。CSV 一个文件一张表；xlsx 每个读出的 sheet 一张表（阶段 7.5 第 2 步）。"""
@@ -303,6 +306,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 multi = True
             for tname, df, enc in read:
                 cols[tname] = [str(c) for c in df.columns]
+                profiles.append((tname, profile_df(df)))      # 阶段 7.6 U2：数据资产卡，同一个 df，不多读文件
                 parts.append(f"{tname} {len(df)}×{len(df.columns)}（{enc}）" if multi
                              else f"{len(df)} 行 × {len(df.columns)} 列，编码 {enc}")
                 w = load_warnings(df)
@@ -313,6 +317,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             del read
         out["tables"] = cols
         out["summary"] = (f"{len(parts)} 张表：" + "，".join(parts)) if multi else parts[0]
+        out["profile"] = profile_dataset(profiles)   # 只算读成功的表；读坏的表在 error 里
         if warns:                        # 只有 xlsx 有读取提示；CSV 数据集的响应不多这个键
             out["warnings"] = warns
         if errors:                       # 任一张读坏，分析（load_data）整体会失败，所以在顶层也报
