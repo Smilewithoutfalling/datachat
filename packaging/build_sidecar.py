@@ -27,6 +27,9 @@ ARGS = [
     "--collect-data", "jieba",
     "--copy-metadata", "keyring",
     "--collect-submodules", "keyring.backends",
+    # 阶段 7.5：openpyxl 只在 excel_io.read_xlsx 函数体里 import。PyInstaller 的静态分析会扫到函数内的 import，
+    # 这里显式写上，免得以后改成按名字延迟导入时漏掉；冻结包能不能真读 xlsx 由 --selftest 的 xlsx 一项验证
+    "--hidden-import", "openpyxl",
     # 阶段 6.5：服务商预设是数据文件（app/core/providers.py 按 __file__ 旁边读），不是模块，要显式带上
     "--add-data", f"{os.path.join(ROOT, 'app', 'core', 'providers.json')}{os.pathsep}app/core",
     # 用不到、但会被分析器拖进来的大包

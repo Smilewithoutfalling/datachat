@@ -26,7 +26,7 @@
 | 图标题里的「图3」「图4」编号不连续 | 模型自己在 matplotlib 里写的标题 | 规则：禁止在 title 里写「图N」；编号在导出报告时由后端统一加 |
 | 堆叠柱没有图例 | 图表规则 | 多系列的图必须有图例 |
 | 双轴图柱子绿色、折线红色 | 图表规则 | 红色只用于负值或警示 |
-| 图 1 顶部的「14」被切掉 | PNG 自身的边距 | `sandbox_worker.py` 的 `_redirect_savefig` 强制 `bbox_inches="tight"`。不动 prompt，但这是**字节契约变更**：每张 PNG 的字节都会变，要重取 chart_fixtures 和视觉基线，单独走变更流程 |
+| 图 1 顶部的「14」被切掉 | 图表规则（原判「PNG 自身的边距」不成立，M13 图表小批核实） | 不改 worker，**不是**字节契约变更。`plotting.py:74` 的 `savefig.bbox: "tight"` 在 worker 里已经生效：`sandbox_worker.py:190` 在 exec 模型代码之前调 `apply_style()`，rcParams 是进程内全局、worker 一个进程只跑一次代码；显式 `bbox_inches=None` 也回落到 rcParams。实测强制 tight 前后 PNG 字节逐字节相同。会切字的是：标注带 `clip_on=True` 越出坐标轴上沿被裁、`annotate` 的 xy 落在 ylim 外整条不画、模型调 `plt.rcdefaults()` / `plt.style.use('default')` 把 bbox 退回 standard 后标注贴着图边；tight 只救得了最后一种。修法：CHART_GUIDE 的 plt 段要求 y 轴上沿留余量、标注不设 clip_on、不调 rcdefaults / style.use（并入 §5 第 2 条） |
 | 「静态图（由 matplotlib 生成），可右键另存为」 | 界面文案（`TurnView.tsx:233`） | 归本方案：换成「导出 PNG」按钮，复用 `app/server/exports.py` |
 
 **截图核对（S 11-19 聊天页截图）**：四张图其实是**一张** matplotlib 图里的 2×2 子图，「图3/图4」是子图标题。之所以走了 plt，是因为 CHART_GUIDE 把「多子图」列为可以用 plt 的理由（`plotting.py:38`）。后果有三：四张图只能整张另存，不能单独导出；配色、图例、编号全由模型临场决定；子图之间互相挤占空间（图4 的柱顶数字被折线点盖住，横轴标签被迫斜排）。修法：从 plt 理由里**删掉「多子图」**，多张图改为分别调用 chart()（builder 本来就支持每次执行最多 4 张）。这一条是 prompt 变更，归 §5 图表小批，走回归。
@@ -54,7 +54,7 @@
 | 卡片标题和正文分不开 | `.sec-head h3` 12.5，`.stack` 11，`.inline` 11.5（`styles.css:367-370`） | U1 字阶表直接覆盖 |
 | 会话列表里两条都叫「生成你认为重要的分析图表」 | 标题直接用用户原话 | U5 已覆盖；另加一条验收：同一数据集下重名时追加序号或日期 |
 | 侧栏数据源已有「4 个表」和表名 chip | 现成 | U2 在这个基础上扩展，不另起组件 |
-| 上传卡写着「仅 CSV，单个文件不超过 1 GB」 | 文案 | 阶段 7.5 Excel PR 会同步改成 CSV/xlsx 和各自的上限 |
+| 上传卡写着「仅 CSV，单个文件不超过 1 GB」 | 文案 | 已改（M13 图表小批）：「CSV 不超过 1 GB，Excel 不超过 300 MB」，对应 `app/server/app.py` 的 `MAX_FILE_BYTES` 与 `excel_io.MAX_XLSX_UNCOMPRESSED_BYTES` |
 | Folio 首页：问候语加一句引导，下面是聚合卡片，底部三张动作卡 | 参照 | U4 空态采用同样的结构：问候 → 数据资产 → 三张提问卡 |
 
 ## 3. 不做
@@ -71,8 +71,8 @@
 
 ## 5. 图表规则小批（归 M13，单独一个 PR）
 
-1. `_redirect_savefig` 强制 `bbox_inches="tight"`。按**字节契约变更**处理：所有 PNG 字节改变，同一个 PR 里重取 chart_fixtures 和视觉基线（CI x64 actual），PR 描述写明。
-2. CHART_GUIDE：从 plt 理由中删去「多子图」，改为「多张图分别调用 chart()」；plt 段再补三条：禁止在 title 写「图N」；多系列必须有图例；红色只表示负值或警示。按 phase75 §3，这属于作用域限定在图表的规则，回归可以只跑图表题的子集；子集入口补上之前，先跑全量。
+1. ~~`_redirect_savefig` 强制 `bbox_inches="tight"`，按字节契约变更处理~~。**前提不成立，不做**（M13 图表小批核实，DEVLOG 同批条目）：tight 已由 `apply_style()` 全局生效（`plotting.py:74`、`sandbox_worker.py:190`），默认路径强制 tight 不改变任何字节；而且模型 `savefig` 之后图没关时，worker 收尾的 `_orig_savefig(chart_path)`（`sandbox_worker.py:236-237`）会按当时的 rcParams 重存一遍、覆盖模型那次传的参数，所以只在 `_redirect_savefig` 里强制本来也不起作用。「14」按根因修，并入第 2 条的 CHART_GUIDE（y 上沿留余量、标注不设 clip_on、不调 rcdefaults / style.use）。chart_fixtures 是 ECharts spec（JSON），本来就不含 PNG；视觉基线不含 matplotlib 图；两者都不用重取。
+2. CHART_GUIDE：从 plt 理由中删去「多子图」，改为「多张图分别调用 chart()」；plt 段再补三条：禁止在 title 写「图N」；多系列必须有图例；红色只表示负值或警示。（M13 图表小批另补一条：标注不越出坐标轴，见第 1 条。）按 phase75 §3，这属于作用域限定在图表的规则，回归可以只跑图表题的子集；子集入口补上之前，先跑全量。
 3. builder 加 `bar_line` 双轴图型，另起评估。
 
 ## 6. 已定（S 2026-11-19）

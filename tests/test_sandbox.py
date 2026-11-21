@@ -185,3 +185,40 @@ def test_worker_cmd_frozen_dispatches_to_self(monkeypatch):
     # 打包后这个 .py 不在包里，它的路径绝不能出现在命令行上
     assert sandbox._WORKER not in cmd
     assert not {"-I", "-B", "-X"} & set(cmd)
+
+
+# M13 图表小批（phase76-ui §1「14 被切」核实）：worker 里 apply_style() 设的 savefig.bbox="tight" 在模型代码执行时
+# 仍然生效；显式 bbox_inches=None 也回落到 rcParams（matplotlib print_figure 用 _val_or_rc），所以在
+# _redirect_savefig 里再强制 tight 不改变默认路径的字节。另：模型 savefig 之后图没关，worker 收尾的
+# _orig_savefig(chart_path) 会按当时的 rcParams 重存一遍，覆盖模型那次的参数。
+_M13_FIG = ("fig, ax = plt.subplots()\nax.bar([0, 1, 2], [3, 14, 9])\n"
+            "for i, h in enumerate([3, 14, 9]): ax.text(i, h + 0.3, str(h), ha='center', va='bottom')\n")
+
+
+def _png(code, df, path):
+    _, chart, err = run_code(code + "\nresult = 1", df, path)
+    assert err is None and chart == path
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def test_worker_savefig_bbox_is_tight_inside_model_code(sample_df, chart_path):
+    cap = {}
+    run_code("print(plt.rcParams['savefig.bbox'], plt.rcParams['savefig.dpi'])\nresult = 1", sample_df, chart_path,
+             capture=cap)
+    assert cap["stdout"].split() == ["tight", "200.0"]
+
+
+def test_forcing_tight_does_not_change_default_bytes(sample_df, tmp_path):
+    a = _png(_M13_FIG + "plt.savefig(chart_path)", sample_df, str(tmp_path / "a.png"))
+    b = _png(_M13_FIG + "plt.savefig(chart_path, bbox_inches='tight')", sample_df, str(tmp_path / "b.png"))
+    c = _png(_M13_FIG + "plt.savefig(chart_path, bbox_inches=None)", sample_df, str(tmp_path / "c.png"))
+    d = _png(_M13_FIG, sample_df, str(tmp_path / "d.png"))                  # 不调 savefig：worker 收尾时存
+    assert a == b == c == d
+
+
+def test_final_resave_overrides_model_savefig_kwargs(sample_df, tmp_path):
+    kept_open = _png(_M13_FIG + "plt.savefig(chart_path, dpi=50)", sample_df, str(tmp_path / "a.png"))
+    default = _png(_M13_FIG + "plt.savefig(chart_path)", sample_df, str(tmp_path / "b.png"))
+    closed = _png(_M13_FIG + "plt.savefig(chart_path, dpi=50)\nplt.close('all')", sample_df, str(tmp_path / "c.png"))
+    assert kept_open == default and len(closed) < len(default)

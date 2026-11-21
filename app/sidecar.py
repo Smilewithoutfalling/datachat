@@ -74,6 +74,28 @@ def selftest() -> int:
         r, _, err = run_code("x = np.ones(200_000_000); result = float(x.sum())", df, chart, mem_mb=512)
         return err is not None and ("MemoryError" in err or "SandboxError" in err), err
 
+    def xlsx():
+        # 阶段 7.5 的 xlsx 输入在冻结包里能读：openpyxl 写一本两个 sheet 的小表，走 DataChat 自己的读取路径
+        # （dataset.load_data → excel_io.read_xlsx），表名 = 文件名.sheet 名，文本格的 00123 前导零不丢
+        import openpyxl
+        from app.tools.dataset import load_data
+        path = os.path.join(tmp, "book.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "销售"
+        ws.append(["编号", "销量"])
+        ws.append(["00123", 5])
+        ws.append(["00456", 7])
+        ws2 = wb.create_sheet("客户")
+        ws2.append(["客户", "城市"])
+        ws2.append(["甲", "北京"])
+        wb.save(path)
+        data, _summary = load_data(path)
+        names = sorted(data) if isinstance(data, dict) else None
+        ids = data["book.销售"]["编号"].tolist() if names == ["book.客户", "book.销售"] else None
+        return names == ["book.客户", "book.销售"] and ids == ["00123", "00456"], \
+            f"openpyxl={openpyxl.__version__} tables={names} 编号={ids}"
+
     def imports():
         import keyring
         import langchain_openai  # noqa: F401
@@ -88,7 +110,7 @@ def selftest() -> int:
 
     for name, fn in [("compute", compute), ("plot", plot), ("stdout", stdout), ("blocked_read", blocked_read),
                      ("blocked_import", blocked_import), ("timeout", timeout), ("memory", memory),
-                     ("imports", imports)]:
+                     ("xlsx", xlsx), ("imports", imports)]:
         check(name, fn)
     ok = all(c["ok"] for c in checks)
     print(json.dumps({"ok": ok, "frozen": bool(getattr(sys, "frozen", False)), "executable": sys.executable,
