@@ -11104,3 +11104,6 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - tests df49646（run 44658450556）在 Windows 上红了 6 条 `test_clean_venv_*`，报 `UnicodeEncodeError: 'charmap'`。原因：干净 venv 用 `-I` 运行，`-I` 会忽略 PYTHONIOENCODING/PYTHONUTF8，stdout 是管道，于是按 cp1252 写，导出脚本一打印中文就中断。这在英文 Windows 上把输出重定向到文件时也会真实发生。
 - 修法：`export_runtime.py` 把不是控制台的 stdout/stderr 改成 UTF-8；控制台（isatty）不动。
 - 新增 `test_runtime_prints_chinese_on_non_utf8_pipe`，用 PYTHONIOENCODING=cp1252 模拟这种情况。不加修复时这条测试红，加上后绿。`tests/test_export.py` 本地 42 passed（含 slow）。
+- 11-21 rebase：本 PR **叠在 #109（feat/m13-chart，ab3d8f5）上**，链 #109→#110→#114→A3，合并顺序同此；S 同意链尾 head 内网只跑一次回归。
+  - 冲突只有 `docs/DEVLOG.md`（都在末尾追加）。解法：保留 base 的全部内容（master 到 [198]，加 #109 的 `[待编号]` 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`packaging/build_sidecar.py` 与 #109 的 `--hidden-import openpyxl` 相邻，自动合并，两项都在。
+  - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
