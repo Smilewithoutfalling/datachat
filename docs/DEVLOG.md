@@ -11062,3 +11062,6 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 冲突只有 `docs/DEVLOG.md` 一处（两边都在文件末尾追加）。解法：保留 master 的全部内容（[194]–[197]），本条目整段接在文件末尾，编号仍 `[待编号]`、SHA 仍 `<待提交>`。原分支对 [193] 标题的回填（`549431f（#108）`）master 已有（写作 `PR #108`），以 master 为准。代码文件无冲突：#111 改的 `app/core/service.py`、`app/assess/*`、`app/eval/runner.py`、`scripts/`、`tests/` 与本 PR 的文件无交集。
   - 提示词哈希：#111 没改提示词，`tests/test_memory_p8.py` 里本 PR 重立过的值不用动，rebase 后 23 passed。
   - 本地闸门（rebase 后 head，日志 `/workspace/work/logs/c109_*.log`，串行，未跑全量与 oracle）：test_memory_p8 23、test_chart_slot 29、test_chart_check 13、test_chart_coverage 4、test_chart_fixtures 3、test_charts 76、test_sandbox 33、test_sidecar_contract 4、test_pairs 22、test_nightly_gate 20（#111 改过的测试里没有直接引用 `code_sha12` 的；它是唯一涉及指纹的那个），共 227 passed，0 failed；`python -m app.sidecar --selftest` ok，9 项全过。
+- 11-21 再次 rebase 到 origin/master（#113 U1 a194836 之后），作为链 #109→#110→#114→A3 的第一环（S 同意：链尾 head 内网只跑一次回归）：
+  - 冲突只有 `docs/DEVLOG.md`（两边都在末尾追加）。解法同上：保留 master 全部内容（含 [198]），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`ui/web/src/views/Shell.tsx` 与 #113 的改动不重叠，自动合并（本 PR 只动上传文案两处和 `checkFiles` 注释）。
+  - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
