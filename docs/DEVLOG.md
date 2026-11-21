@@ -11065,3 +11065,4 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-21 再次 rebase 到 origin/master（#113 U1 a194836 之后），作为链 #109→#110→#114→A3 的第一环（S 同意：链尾 head 内网只跑一次回归）：
   - 冲突只有 `docs/DEVLOG.md`（两边都在末尾追加）。解法同上：保留 master 全部内容（含 [198]），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`ui/web/src/views/Shell.tsx` 与 #113 的改动不重叠，自动合并（本 PR 只动上传文案两处和 `checkFiles` 注释）。
   - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
+- 11-21 rebase 到 e8ccfe3（#115 纯文档）：冲突只有 `docs/DEVLOG.md`（两边都在末尾追加），保留 master 全部内容（含 [198] 回填 a194836 与新增 [199]），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍为 `c94c66aaf559`（#115 只动 docs），本 PR 仍为 `ded1326738a8`，全量 sha 仍 `f56543f9b457`。
