@@ -11123,7 +11123,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - **提问**：复用现有「新建会话」流程，`POST /sessions {dataset_id, agent: "workflow"}`，打开新会话。
   - **口径**：进数据集页并滚到「口径与规则」（导入 / 导出按钮在那里，NotesSection.tsx:78）。
 - 侧栏不为卡片逐个去读文件（保持 F1.1「每个文件只读一遍」，`views.test.tsx` 的请求计数照旧）：卡片只用已经拿到的详情——上传响应、打开数据集页、点「剖析」。还没拿到时写「还没读取概要，点「剖析」」。
-- 样式：`.ds-card` 1px 边框、无阴影；**没有新增任何 font-size**，概要沿用 `.ds-meta`，按钮沿用 `button.link`（U1 字阶未合并）。
+- 样式：`.ds-card` 1px 边框、无阴影；概要沿用 `.ds-meta`（`--fs-aux`），按钮沿用 `button.link`。11-21 rebase 到 U1 之后：`.ds-actions` 显式 `font-size: var(--fs-aux)`（见文末 rebase 说明）。
 - docs/sidecar-contract.md 记了新字段。
 
 ### 双向钉住
@@ -11142,3 +11142,8 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 | web build（`vite build` + `check-dist.mjs`） | 通过；chunk 超 500 kB 的提示是原有的 |
 | eslint | 改动的 5 个文件 0 警告；全量 eslint 在 100 s 内没跑完（超时），没有结论 |
 | e2e | **没跑**：沙箱缺 `libatk-1.0.so.0`，chromium 起不来（同 [193]），交给 CI。侧栏卡片会改变含侧栏的视觉基线（f4-visual），需要用 CI x64 actual 重取 |
+- 11-21 rebase：本 PR **叠在 #110（feat/p75-export，bc389ba）上**，链 #109→#110→#114→A3，合并顺序同此；S 同意链尾 head 内网只跑一次回归。原先基于 549431f，现在 base 里已有 #111–#113（含 U1 工艺层）。
+  - 冲突：`docs/DEVLOG.md`（都在末尾追加）。解法：保留 base 的全部内容（master 到 [198]，加 #109、#110 的 `[待编号]` 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`。
+  - `ui/web/src/styles.css`、`ui/web/src/views/Shell.tsx` 与 #113 没有文本冲突，git 自动合并，两边的改动都在（U1 的 `--fs-*` 字阶、`--grid-max`、卡片栅格；#109 的上传文案；U2 的 `ds-card` 与卡片内容）。U2 的新样式本来就没写死字号，但「剖析 / 提问 / 口径」三个 `button.link` 会继承根字号 14，落在字阶外（14 只给聊天阅读区，`READ_SELECTORS`），所以 `.ds-actions` 补 `font-size: var(--fs-aux)`，与侧栏其他辅助文字一致。`typeScale.test.ts` 5 条通过。
+  - A 组 `code_sha12`：#110 head bc389ba `997e3217d054` → 本 PR `57f5d010ce73`（A 组只有 `app/tools/schema.py` 变；`app/server/app.py` 属 B 组）。全量 sha `b3b8e89c3759 → ba13c4a3e5cf`。
+  - 本地闸门（rebase 后，串行，日志 `/workspace/work/logs/chain_114_*.log`）：pytest test_u2_asset_card 13、test_schema 21、test_excel_io 36、test_dataset_notes_api 9、test_dataset_notes_lifecycle 8、test_web_f1 10、test_server 14、test_export（非 slow）35、test_sidecar_contract 4，共 150 passed；vitest 全量分三批 29 个文件 914 passed；`tsc --noEmit` 0 错误。e2e 本机缺库，交给 CI；侧栏卡片会改变含侧栏的视觉基线，红了用 CI x64 actual 重取。
