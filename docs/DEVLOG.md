@@ -11012,7 +11012,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 回填：[197] 的 SHA 为 4a10444（#112 squash）。
 
 
-## [199] 2026-11-21 · 阶段 7.5b B4 尾批：负样本入库 + GLM-5.2 141 条复校两段过 · commit <待提交>
+## [199] 2026-11-21 · 阶段 7.5b B4 尾批：负样本入库 + GLM-5.2 141 条复校两段过 · commit e8ccfe3（PR #115）
 
 - 入库：`judge_label_p3.xlsx` 六条负样本经人标闸 `judge_collect.py --ingest --confirm` 进 `docs/eval/judge_gold.jsonl`，校准集 135→141 条（对 117 / 错 24，人标 106，order 交替保持 gold_first 71 / answer_first 70）。六条全部是 id=s09 的 PAPER CRAFT 陷阱错答（gold=WORLD WAR 2 GLIDERS），judge_collect 池清晰错全库仅此 6 条，负侧一次吃满。
 - 复校：GLM-5.2（JD 网关，命令行 env 注入防 `.env` last-wins）对 141 条全量复跑——有效 138、弃权 3（mem_007 / agg_001 / agg_002，全 label=True 上 abstain）、调用失败 0；TP=116 FP=0 FN=0 TN=22；一致率 100.0% [0.973, 1.000]、Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）；校准段 / 泛化段各 n=69、κ=1.000 双过 → judge 可用，exit 0。读数落 `docs/eval/judge.md` §3.2。
@@ -11020,3 +11020,49 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 指纹：本批只动 docs——judge_gold.jsonl 为校准材料不在任何指纹层（JUDGE_FILES=comparator.py/negative.py），code / entry / judge / canary 四层全不变，基线 a194836 直接延续。
 - 明确不做：opencode 第三家族交叉校验（Key 一次性用完即删，转可选触发项——换 judge / κ 掉到边缘 / 题库大扩容时再跑）；grg Qwen3.5 临时干跑（与被测模型同家族，GLM 已达标无必要）。
 - [198] 回填：a194836（PR #113）。
+
+## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit <待提交>
+
+### 结论
+- **phase76-ui §5 第 1 条（`_redirect_savefig` 强制 `bbox_inches="tight"`、按字节契约变更）前提不成立，不做。** 不动 worker，PNG 字节不变，chart_fixtures 与视觉基线都不重取。「14」按根因修，并进 CHART_GUIDE。
+- CHART_GUIDE 改了（prompt 变更，A 组 `code_sha12` 预期变化），需要 S 在内网跑回归。
+
+### 根因核实（matplotlib 3.11.2，走真实 worker `run_code`，复现脚本 `/workspace/work/dc_chart_repro/repro.py`，不入库）
+- `apply_style()` 在 worker 里生效：`sandbox_worker.py:190` 在报 READY、exec 模型代码之前调用；rcParams 是进程内全局，worker 一个进程只跑一次代码（`sandbox.py:99`）。模型代码里读到 `savefig.bbox=tight`、`savefig.dpi=200`。
+- 显式 `bbox_inches=None` 回落到 rcParams（matplotlib `print_figure` 里 `_val_or_rc(bbox_inches, 'savefig.bbox')`），仍是 tight。`bbox_inches='standard'` 在 3.11 直接报 `AttributeError`（执行失败，不出图）。
+- 2×2 子图柱顶标注，同一张图：`savefig(chart_path)`、`savefig(..., bbox_inches='tight')`、`bbox_inches=None`、不调 savefig（worker 收尾存）四种 **sha256 完全相同**（67,541 B，1649×1195）。强制 tight 对默认路径零字节影响。
+- **另一个发现**：模型 `savefig` 之后图没关，worker 收尾的 `_orig_savefig(chart_path)`（`sandbox_worker.py:236-237`）会按当时 rcParams 再存一遍，覆盖模型那次的参数。`savefig(dpi=50)` 不 close 得到的仍是 200 dpi 默认图（同 sha）；加 `plt.close('all')` 才是 412×299。所以「只在 `_redirect_savefig` 里强制」本来就不起作用。
+- 会切掉「14」的写法（都已看图确认）：① 标注 `clip_on=True` 且越出坐标轴上沿：「14」被切掉上半，加 tight 字节不变（tight 救不了）；`ax.margins(y=0.15)` 后完整。② `annotate` 的 xy 落在 ylim 外（如 `set_ylim(0, max)` 后标在 `h+0.3`）：整条标注不画。③ 模型 `plt.rcdefaults()` / `plt.style.use('default')` 把 bbox 退回 standard（1000×700、100 dpi），标注贴图边时被切；这一种 tight 能救，但要连收尾那次重存一起强制。`ax.annotate(offset points)`、`ax.bar_label`、默认 `ax.text` 在默认 rcParams 下都不会被切。
+- S 11-19 截图里图 1 顶部已滚出视口，看不到原图，成因无法从截图坐实；上面三种之外，截图里图 4 的「21」是被折线点盖住（遮挡，不是裁切）。
+
+### 改了什么
+- `app/tools/plotting.py` CHART_GUIDE：新增一行「需要多张图时分别调用 chart()（每次执行最多 4 张），不要用 plt 把几张图拼成子图」；plt 理由删掉「多子图」；plt 段补：不调 `plt.rcdefaults()` / `plt.style.use()`、title 不写「图N」编号、多系列必须有图例、红色只用于负值或警示、标注不越出坐标轴（y 上沿留余量如 `ax.margins(y=0.1)`，不设 `clip_on=True`）。`react_agent.py:202` 的工具描述「五种图型以外才用 plt」与新规则不冲突，没改。
+- 前端 `ui/web/src/views/Shell.tsx`：侧栏上传卡「CSV 不超过 1 GB，Excel 不超过 300 MB」，首屏「CSV 不超过 1 GB · Excel 不超过 300 MB · 可多选」。前端拦截逻辑不变（仍只拦 > 1 GB；xlsx 300 MB 是解压后体积，由后端判）。
+- `app/sidecar.py` selftest 加 `xlsx` 一项：openpyxl 写两 sheet 小表（含文本 00123），走 `dataset.load_data → excel_io.read_xlsx`，断言表名 `book.客户`/`book.销售`、编号 `["00123", "00456"]`。`packaging/build_sidecar.py` 加 `--hidden-import openpyxl`（openpyxl 只在函数体里 import；无数据文件、无动态 import）。`smoke_sidecar.py` 按 selftest 退出码判，新项自动纳入。
+- 文档：`docs/roadmap/phase76-ui.md` §1 表「14」一行、§2.1 上传文案一行、§5 第 1、2 条改写。
+- **提示词哈希重立**：`tests/test_memory_p8.py` 的 BASELINE / STATE_BASELINE 五个值全部重立（旧值写在注释里），只因 CHART_GUIDE 文字变了；「off 与 state 单轮逐字节相同」仍成立：react_single `d92ac56752d710c0`、workflow `fd0b47816facfe40`，两档同值。`code_sha12`（A 组）：master 103eb54/4a10444 的 A 组值 `c94c66aaf559` → 本 PR 的 A 组值 `ded1326738a8`（rebase 后在 head 上用 `app/eval/fingerprint.py` 的 `code_fingerprint()["affects_results_sha256"]` 重算；rebase 前记的是 `eb5e7235dc70 → dae602eb9bf0`，起点因 #111 改了 A 组的 `app/core/service.py`、`app/assess/snapshot.py`、`app/eval/runner.py` 而变）。与 master 相比 A 组只有 `app/tools/plotting.py` 变了；`app/sidecar.py` 属 B 组，只动全量 sha（`5623e20bcc68 → f56543f9b457`）。evalset / judge 指纹不动。
+- 测试：`tests/test_sandbox.py` +3（worker 内 rcParams 是 tight/200；四种保存写法字节相同；收尾重存覆盖模型 savefig 参数），`tests/test_chart_slot.py` +1（CHART_GUIDE 新规则），`ui/web/src/views/v2a.test.tsx` +1（上传文案）。
+
+### 已知未做
+- `PALETTE[3]` 是红色 `#C0392B`：plt 画 4 个及以上系列时第 4 个自动是红色，与「红色只表示负值或警示」冲突。改配色会改 plt 出图字节，本批不动，待 S 定。
+- builder 的 `bar_line` 双轴图型（§5 第 3 条）不在本批。
+
+### 闸门（2026-11-20，最后一次代码改动之后重跑；日志 `/workspace/work/logs/chart2_*.log`）
+| 段 | 结果 |
+|---|---|
+| pytest 前半（49 个文件，oracle 两条 deselect） | 1350 passed，0 failed，425 s（`test_git_sha_without_git_binary` 这次通过） |
+| pytest 后半（49 个文件） | 882 passed，0 failed，247 s。第一轮这里红 12 条，全是提示词哈希（test_memory_p8 ×8、test_metrics ×2、test_pairs ×1、test_workflow_memory ×1），重立后全绿 |
+| `-k test_oracle_pipeline_all_correct` | 2 passed，381 s |
+| `python -m app.sidecar --selftest`（非冻结） | ok，9 项全过，含新增 xlsx |
+| vitest | 27 个文件 899 passed |
+| e2e（`--grep-invert 视觉`） | **没跑通，环境问题**：沙箱缺 `libatk-1.0.so.0`（同 [193]），off / state 各 41 failed、1 passed（唯一不开浏览器的那条），full 没跑。交给 CI |
+
+- 11-20 补丁（A4，S 同意，见 #112 评论）：上传文案改为「Excel 解压后不超过 300 MB」，与后端 413 报错的说法（按解压后体积判）一致。改了 `Shell.tsx` 的两处文案和 `v2a.test.tsx` 的断言。vitest v2a 35 passed。
+- 11-20 rebase 到 origin/master（#111 103eb54、#112 4a10444 之后）：
+  - 冲突只有 `docs/DEVLOG.md` 一处（两边都在文件末尾追加）。解法：保留 master 的全部内容（[194]–[197]），本条目整段接在文件末尾，编号仍 `[待编号]`、SHA 仍 `<待提交>`。原分支对 [193] 标题的回填（`549431f（#108）`）master 已有（写作 `PR #108`），以 master 为准。代码文件无冲突：#111 改的 `app/core/service.py`、`app/assess/*`、`app/eval/runner.py`、`scripts/`、`tests/` 与本 PR 的文件无交集。
+  - 提示词哈希：#111 没改提示词，`tests/test_memory_p8.py` 里本 PR 重立过的值不用动，rebase 后 23 passed。
+  - 本地闸门（rebase 后 head，日志 `/workspace/work/logs/c109_*.log`，串行，未跑全量与 oracle）：test_memory_p8 23、test_chart_slot 29、test_chart_check 13、test_chart_coverage 4、test_chart_fixtures 3、test_charts 76、test_sandbox 33、test_sidecar_contract 4、test_pairs 22、test_nightly_gate 20（#111 改过的测试里没有直接引用 `code_sha12` 的；它是唯一涉及指纹的那个），共 227 passed，0 failed；`python -m app.sidecar --selftest` ok，9 项全过。
+- 11-21 再次 rebase 到 origin/master（#113 U1 a194836 之后），作为链 #109→#110→#114→A3 的第一环（S 同意：链尾 head 内网只跑一次回归）：
+  - 冲突只有 `docs/DEVLOG.md`（两边都在末尾追加）。解法同上：保留 master 全部内容（含 [198]），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`ui/web/src/views/Shell.tsx` 与 #113 的改动不重叠，自动合并（本 PR 只动上传文案两处和 `checkFiles` 注释）。
+  - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
+- 11-21 rebase 到 e8ccfe3（#115 纯文档）：冲突只有 `docs/DEVLOG.md`（两边都在末尾追加），保留 master 全部内容（含 [198] 回填 a194836 与新增 [199]），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍为 `c94c66aaf559`（#115 只动 docs），本 PR 仍为 `ded1326738a8`，全量 sha 仍 `f56543f9b457`。

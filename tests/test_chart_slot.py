@@ -196,6 +196,16 @@ def test_guide_reaches_both_agents(sample_path):
     assert "chart（出图函数" in codegen and "chart(kind, df" in codegen
 
 
+def test_guide_m13_plt_rules():
+    """M13 图表小批（phase76-ui §5 第 2 条）：多张图分别 chart()，plt 不再以「多子图」为理由；plt 段补编号、图例、红色、标注余量。"""
+    from app.tools.plotting import CHART_GUIDE
+    plt_line = [ln for ln in CHART_GUIDE.splitlines() if "才用 plt" in ln][0]
+    assert "多子图" not in plt_line
+    assert "需要多张图时分别调用 chart()（每次执行最多 4 张）" in CHART_GUIDE
+    for rule in ("「图N」", "必须有图例", "红色只用于表示负值或警示", "ax.margins(y=0.1)", "plt.rcdefaults()"):
+        assert rule in plt_line
+
+
 def test_summarizer_sees_chart_titles(sample_path):
     code = "s = df.groupby('region', as_index=False)['units'].sum()\nchart('bar', s, x='region', y='units', title='各地区销量')\nresult = 1"
     wf = wf_model([code])

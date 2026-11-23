@@ -173,6 +173,14 @@ test("重名数据集：名称后追加创建时间，只改显示", async () =>
   expect(within(nav).getByText("warm.csv")).toBeTruthy();
 });
 
+test("上传区文案：CSV 与 Excel 分别标上限（M13 图表小批；后端 app.py MAX_FILE_BYTES、excel_io 300 MB）", async () => {
+  shell([]);
+  const zone = await screen.findByTestId("upload-zone");
+  expect(zone.querySelector(".upload-sub")?.textContent).toBe("CSV 不超过 1 GB，Excel 解压后不超过 300 MB");
+  expect(document.querySelector(".em-sub")?.textContent).toBe("CSV 不超过 1 GB · Excel 解压后不超过 300 MB · 可多选");
+  expect(document.body.textContent).not.toContain("单个文件不超过 1 GB");
+});
+
 test("上传区：非 .csv / .xlsx 前端拦下，不发请求", async () => {
   const be = shell([]);
   const file = new File(["x"], "a.txt");
