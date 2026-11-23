@@ -11229,7 +11229,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 本地闸门（日志 `/workspace/work/logs/chain2_u4_*.log`、`chain2_pytest.log`）：vitest 全量（node24，`--pool=threads --maxWorkers=2`）30 个文件 925 passed（A3 的 914 + 本条 11）；`tsc --noEmit` 0 错误；`npm run build`（tsc + vite build + check-dist）通过；eslint 0 警告；pytest（串行，相关文件）test_judge / test_judge_expand / test_nightly_gate / test_charts / test_chart_fixtures 124 passed。e2e 交给 CI。
 - 11-21 CI（45c9164，tests run 44884664870 的 web job）：vitest 925 passed；e2e `f4-starter.spec.ts` 3 条在 CI 上真的跑了、全过（「看看这份数据有什么」「找出异常值」「两期对比」各 ✓）；49 条里唯一红的是 `f4-visual` 视觉 11（240 像素），与 A3 同源（色板第 4 色），本条没有新的视觉差异。A3 已用 CI x64 actual 重取 11 号基线（1695da1），本条随之 rebase 到 1695da1（DEVLOG 冲突解法同上）。
 
-## [205] 2026-11-23 · result 保持数值（issue #118）· commit <合并后回填>（PR #121）
+## [205] 2026-11-23 · result 保持数值（issue #118）· commit 00e24f9（PR #121）
 worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网回归**（A 组变了，改的是送给模型的提示词）。
 
 ### 现象与根因
@@ -11264,7 +11264,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
 - 内网回归（bd56095，S 回贴 11-23 16:07）：nightly_gate GREEN，canary CLEAN；目标题 corr_002、agg_009、mul_012 全部收复。A 组 `code_sha12` 登记为 `b32b00fd4e5d → 8117bbb25d0a`。CI（bd56095）：tests 45130003747、sidecar 45130003579、desktop 45130003757 全部 success。
 
-## [待编号] 2026-11-23 阶段 7.6 U3 结果卡（issue #120）· commit <待提交>
+## [206] 2026-11-23 阶段 7.6 U3 结果卡（issue #120）· commit <合并后回填>（PR #122）
 
 规格：`docs/roadmap/phase76-ui.md` §2 U3（:42），并照 §3「不加点了没反应的入口」（:58）、§6 第 2 条的顺序约定（:81）。**只改前端**，`app/` 一行没动（A 组 app/core、app/tools、app/nodes 不涉及，不需要内网回归）。
 
@@ -11317,3 +11317,4 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 视觉基线：结果卡多了徽章 / 动作行，静态图卡样式变了，f4-visual 涉及 ok 轮次的截图大概率变，留给 CI 用 x64 actual 重取。
 - 11-23 rebase 到 master 00e24f9（#121）：冲突只有 `docs/DEVLOG.md`，保留 master 的 [204]/[205] 原样，本条目接在末尾，仍 `[待编号]` / `<待提交>`。
 - 11-23 视觉基线重取：CI（b4bb284，tests run 45121843302，web job 137517158148）49 条 e2e 里只有 f4-visual 视觉 11（230066 像素）和视觉 25（135507 像素）红，vitest 952 全过。逐张看了 artifact `playwright-results` 里的 actual / expected / diff：差异全部来自本条结果卡——卡头多了加粗的一句话结论和「✓ 全部可溯源」徽章，图卡下多了「换个口径 / 补一张图 / 导出」动作行，卡片因此变高约 105 px（11）/ 42 px（25），会话区照原逻辑滚到底，于是整卡上移（11 里用户气泡移出视口、标记浮层完整露出；25 里卡头滚到顶栏下）；柱图、标记浮层、控件行、输入区本身没有重叠、截断或空白，输入区仍不压卡片。25 顶部那块品红是 `.stepbar` 的 mask 按元素框画、不受滚动容器裁剪，盖在顶栏标题上，不是页面重叠。据此用这次 CI 的 x64 actual 重取 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`、`25-narrow-session-fake-linux.png` 两张（08、24 不涉及 ok 轮次，未动）。
+- CI（007a513）：tests 45136433804、sidecar 45136433729、desktop 45136433723 全 success。11-23 S 同意合并。下一批：一句话结论与正文第一句去重；后端 key_numbers（A 组，需回归）。
