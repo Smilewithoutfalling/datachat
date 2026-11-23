@@ -11185,7 +11185,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
 - 11-21 CI（a5ff3cf，tests run 44884658291 的 web job）：`f4-visual` **视觉 11 红**（240 像素，ratio 0.01），1 failed / 45 passed。diff 只落在标记浮层「销量」一行色板的第 4 个色块：`#C0392B` 红 → `#199BC3` 天青，是本条预期的视觉变化；08、24、25 不受影响。从该 run 的 artifact `playwright-results`（id 14700225832）取 CI x64 的 `11-marks-card-actual.png`，覆盖 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`；看过，是正常页面，仅第 4 色块变色。
 
-## [204] 2026-11-21 阶段 7.6 U4 空态卡 · commit <待提交>
+## [204] 2026-11-21 阶段 7.6 U4 空态卡 · commit 29ad1bb（PR #117）
 方案：docs/roadmap/phase76-ui.md §2 U4（第 43 行）、§2.1（第 58 行：问候 → 数据资产 → 三张提问卡）、§3（不加点了没反应的入口；只有 1px 边框）。worktree `feat/u4-empty`，基于 feat/u2-asset be164e0（U2 数据资产卡，PR #114）。以后用 rebase --onto 挪到新的 U2 上，所以改动集中在新文件。
 
 ### 做了什么
@@ -11229,7 +11229,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 本地闸门（日志 `/workspace/work/logs/chain2_u4_*.log`、`chain2_pytest.log`）：vitest 全量（node24，`--pool=threads --maxWorkers=2`）30 个文件 925 passed（A3 的 914 + 本条 11）；`tsc --noEmit` 0 错误；`npm run build`（tsc + vite build + check-dist）通过；eslint 0 警告；pytest（串行，相关文件）test_judge / test_judge_expand / test_nightly_gate / test_charts / test_chart_fixtures 124 passed。e2e 交给 CI。
 - 11-21 CI（45c9164，tests run 44884664870 的 web job）：vitest 925 passed；e2e `f4-starter.spec.ts` 3 条在 CI 上真的跑了、全过（「看看这份数据有什么」「找出异常值」「两期对比」各 ✓）；49 条里唯一红的是 `f4-visual` 视觉 11（240 像素），与 A3 同源（色板第 4 色），本条没有新的视觉差异。A3 已用 CI x64 actual 重取 11 号基线（1695da1），本条随之 rebase 到 1695da1（DEVLOG 冲突解法同上）。
 
-## [待编号] 2026-11-23 · result 保持数值（issue #118）· commit <待提交>
+## [205] 2026-11-23 · result 保持数值（issue #118）· commit <合并后回填>（PR #121）
 worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网回归**（A 组变了，改的是送给模型的提示词）。
 
 ### 现象与根因
@@ -11262,3 +11262,4 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 修法：三处约束改成条件句——题目说「百分比/百分数」时用 ×100 后的数值（写 22.30，不写 0.2230）；只说「占比/比例/增长率」时 0–1 或 ×100 均可；要求保留几位小数时 round。仍然禁止拼 `%` 字符串。agg_009 开着 `percent_equiv`，两种刻度都认，不受影响。
 - 哈希再次重立（旧值写在注释里）：off react_single `2ad082e9c02977d5 → d74d988dfa93cd02`、react_history `b4e012557418443b → ddb8615599bcb952`、workflow `e4f9c420904a3582 → 07461170ad5f0832`；state react_history `383f3ecc4a20f1e0 → 9836daaebbd665fc`、workflow_history `8ce5a093ac4584fd → 6cabdb836b86cec6`。
 - A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
+- 内网回归（bd56095，S 回贴 11-23 16:07）：nightly_gate GREEN，canary CLEAN；目标题 corr_002、agg_009、mul_012 全部收复。A 组 `code_sha12` 登记为 `b32b00fd4e5d → 8117bbb25d0a`。CI（bd56095）：tests 45130003747、sidecar 45130003579、desktop 45130003757 全部 success。
