@@ -11109,7 +11109,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #109 新 head（691cbd9）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#109 仍 `ded1326738a8`，本 PR 仍 `997e3217d054`，全量 sha 仍 `b3b8e89c3759`。
 
-## [202] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit <待提交>
+## [202] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit 2f4a7f5（PR #114）
 方案：docs/roadmap/phase76-ui.md §2 U2（第 41 行）、§2.1（第 56 行：在「N 个表」和表名 chip 上扩展）、§4（第 70 行：口径导入导出入口）。worktree `feat/u2-asset`，基于 origin/master 549431f。
 
 ### 做了什么
@@ -11149,7 +11149,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 本地闸门（rebase 后，串行，日志 `/workspace/work/logs/chain_114_*.log`）：pytest test_u2_asset_card 13、test_schema 21、test_excel_io 36、test_dataset_notes_api 9、test_dataset_notes_lifecycle 8、test_web_f1 10、test_server 14、test_export（非 slow）35、test_sidecar_contract 4，共 150 passed；vitest 全量分三批 29 个文件 914 passed；`tsc --noEmit` 0 错误。e2e 本机缺库，交给 CI；侧栏卡片会改变含侧栏的视觉基线，红了用 CI x64 actual 重取。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #110 新 head（bda232a）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#110 仍 `997e3217d054`，本 PR 仍 `57f5d010ce73`，全量 sha 仍 `ba13c4a3e5cf`。
 
-## [待编号] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit <待提交>
+## [203] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit <待提交>
 决定见 `docs/roadmap/decisions-pending-1120.md` A3（S 同意：改成非红色，按字节契约走）。分支 `feat/a3-palette`，**叠在 #114（feat/u2-asset，4b981ad）上**，链 #109→#110→#114→A3 的链尾；S 内网回归对链尾 head 跑一次。11-21 S 同意推送并开 PR（base = feat/u2-asset），U4 接在本条之后成为新链尾。
 
 ### 改了什么
