@@ -11067,7 +11067,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：冲突只有 `docs/DEVLOG.md`（两边都在末尾追加），保留 master 全部内容（含 [198] 回填 a194836 与新增 [199]），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍为 `c94c66aaf559`（#115 只动 docs），本 PR 仍为 `ded1326738a8`，全量 sha 仍 `f56543f9b457`。
 
-## [201] 2026-11-20 · 阶段 7.5 第 2 步：结果表与代码导出（phase75-assess §2 第 40 行） · commit <待提交>
+## [201] 2026-11-20 · 阶段 7.5 第 2 步：结果表与代码导出（phase75-assess §2 第 40 行） · commit 0627280（PR #110）
 
 ### 规则与验收
 - 导出的 .py 在**仓库外、不装 DataChat 的干净 venv**（只装 pandas / numpy / matplotlib / openpyxl）里重跑出与沙箱相同的 result。导出文件自带数据加载、`chart()`、`plt.savefig` 落盘。沙箱（`sandbox_worker.py:205-220`）会注入变量、重定向 savefig，所以在本机直接跑通不算数。
@@ -11109,7 +11109,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #109 新 head（691cbd9）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#109 仍 `ded1326738a8`，本 PR 仍 `997e3217d054`，全量 sha 仍 `b3b8e89c3759`。
 
-## [待编号] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit <待提交>
+## [202] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit <待提交>
 方案：docs/roadmap/phase76-ui.md §2 U2（第 41 行）、§2.1（第 56 行：在「N 个表」和表名 chip 上扩展）、§4（第 70 行：口径导入导出入口）。worktree `feat/u2-asset`，基于 origin/master 549431f。
 
 ### 做了什么
