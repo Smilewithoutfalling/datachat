@@ -61,7 +61,8 @@ const ADJ_DE_MIN = 20;
 const NEW_DE_MIN = ADJ_DE_MIN * 1.1;
 // 豁免按 (主题, 色值) 二元组（PR #48 评审第六条）：只有 classic 沿用的 5 个旧色互相之间按 20 判。别的主题复用同一个色值时
 // 仍按新色 ≥ 22 判——那是它新引入的配对，不该搭 classic 的便车。
-const LEGACY = new Set(["#1F6FB2", "#159A8C", "#C0392B", "#7E57C2", "#3A7D44"].map((h) => `classic:${h}`));
+// A3：#C0392B 已从 PALETTE 换成 #199BC3（新色，按 ≥22 判），不再在豁免表里。
+const LEGACY = new Set(["#1F6FB2", "#159A8C", "#7E57C2", "#3A7D44"].map((h) => `classic:${h}`));
 const isLegacy = (theme: string, hex: string) => LEGACY.has(`${theme}:${hex.toUpperCase()}`);
 
 // 逐键：漏一个就红（不设 backgroundColor 画布透明，暗色画布会透出白页面；深底上不改轴线 / 文字色会黑叠黑）

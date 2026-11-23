@@ -11109,7 +11109,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #109 新 head（691cbd9）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#109 仍 `ded1326738a8`，本 PR 仍 `997e3217d054`，全量 sha 仍 `b3b8e89c3759`。
 
-## [202] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit <待提交>
+## [202] 2026-11-20 · 阶段 7.6 U2 数据资产卡 · commit 2f4a7f5（PR #114）
 方案：docs/roadmap/phase76-ui.md §2 U2（第 41 行）、§2.1（第 56 行：在「N 个表」和表名 chip 上扩展）、§4（第 70 行：口径导入导出入口）。worktree `feat/u2-asset`，基于 origin/master 549431f。
 
 ### 做了什么
@@ -11148,3 +11148,39 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：#110 head bc389ba `997e3217d054` → 本 PR `57f5d010ce73`（A 组只有 `app/tools/schema.py` 变；`app/server/app.py` 属 B 组）。全量 sha `b3b8e89c3759 → ba13c4a3e5cf`。
   - 本地闸门（rebase 后，串行，日志 `/workspace/work/logs/chain_114_*.log`）：pytest test_u2_asset_card 13、test_schema 21、test_excel_io 36、test_dataset_notes_api 9、test_dataset_notes_lifecycle 8、test_web_f1 10、test_server 14、test_export（非 slow）35、test_sidecar_contract 4，共 150 passed；vitest 全量分三批 29 个文件 914 passed；`tsc --noEmit` 0 错误。e2e 本机缺库，交给 CI；侧栏卡片会改变含侧栏的视觉基线，红了用 CI x64 actual 重取。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #110 新 head（bda232a）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#110 仍 `997e3217d054`，本 PR 仍 `57f5d010ce73`，全量 sha 仍 `ba13c4a3e5cf`。
+
+## [203] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit <待提交>
+决定见 `docs/roadmap/decisions-pending-1120.md` A3（S 同意：改成非红色，按字节契约走）。分支 `feat/a3-palette`，**叠在 #114（feat/u2-asset，4b981ad）上**，链 #109→#110→#114→A3 的链尾；S 内网回归对链尾 head 跑一次。11-21 S 同意推送并开 PR（base = feat/u2-asset），U4 接在本条之后成为新链尾。
+
+### 改了什么
+- `PALETTE[3]` `#C0392B` → **`#199BC3`**（天青）。两份同改：`app/tools/plotting.py`（matplotlib `axes.prop_cycle`）、`app/tools/charts.py`（导出到 `chart_schema.json` 的 palette，前端经典主题读它）；`tests/test_charts.py` 钉住两份相等，只改一边会红。`ui/web/src/generated/chart_schema.json` 由 `scripts/gen_ui_types.py` 重新生成（`--check` ok）。
+- `ui/web/src/charts/themes.test.ts`：`LEGACY` 豁免表去掉 `#C0392B`（它已不在 PALETTE；新色按 ≥22 判）。`themes.ts` 暗色画布注释更新：前 6 色最弱的变成 `#1F6FB2`（#1B1F24 上 3.13、#20242A 上 2.95），「bg 不亮于 #1B1F24 / 再亮一档破线」两条断言不用改、照旧成立。
+- CHART_GUIDE 文字不变（提示词哈希不变，test_memory_p8 23 passed 未重立）。
+
+### 为什么是 #199BC3
+- 约束：非红色；对白底 ≥ 3.0（themes.test 的 WCAG 1.4.11）；对循环相邻的 `#CD7D28`、`#7E57C2` ΔE00 ≥ 22（新色）；与其余 9 色色相分得开；与 CHART_GUIDE「红色只用于负值或警示」相容。
+- 现有 9 色的 CIELCh 色相：橙 66、棕 84、绿 144、青 183、主蓝 271、藏青 301、紫 308、品红 350、酒红 356。最大的空档在青 183 与主蓝 271 之间。`#199BC3`（L 60 / C 35 / h 238）落在这个空档里，离青 55°、离主蓝 33°。风格上是 Okabe-Ito 天蓝 `#56B4E9` 往青、往暗挪的版本：原色对白底只有 2.31，不过 3:1。
+- 数据（colorspacious，CIEDE2000；色觉模拟用 Machado 2009 severity 100）：对白底 3.22；对相邻 `#CD7D28` 53.2、`#7E57C2` 32.3；对其余 9 色 ΔE00 最小 16.9（主蓝 16.9、青 17.1，其余 ≥ 32）；绿色弱模拟下最小 14.2，红色弱模拟下最小 16.3。原 `#C0392B` 在红色弱模拟下与其他色最小只差 0.6，换掉后这一项明显好转。
+- 舍弃的候选：橄榄（h≈115，正好在棕和绿之间）对白底能过 3:1，但与棕、绿的 ΔE00 只有 12 左右，绿色弱下不到 3；Okabe-Ito 天蓝 / 纯青（`#56B4E9`、`#00B7E5`）对白底只有 2.3；淡紫（h≈280）离紫太近。
+- 弱项如实写：与主蓝、青的 ΔE00 约 17，略低于原 10 色内部最小的 19.2（不相邻，测试只管循环相邻）。
+
+### 字节契约：依赖 plt 输出字节或颜色的基线（逐项查过）
+- **plt 出图字节**：会变。同一段四系列折线代码走真实 worker `run_code`：#114 head `a7993f118de0`（116,763 B，图上有 `#C0392B` 像素）→ 本条 `da53518499a4`（116,767 B，有 `#199BC3` 像素、没有 `#C0392B`）。只用前 3 色的图字节不变。
+- 仓库里**没有**钉 plt PNG 哈希的基线：`tests/test_sandbox.py` 的字节相同断言是运行时现算（#109 新增那条），`app/sidecar.py --selftest` 的 plot 项只看出没出图，`chart_fixtures.json` 是 ECharts spec、不带 color（F3 第四步配色归主题），`gen_ui_types --check` 通过。
+- **本地重取**：`ui/web/src/generated/chart_schema.json`（palette）。
+- **视觉 e2e 基线**（`ui/web/e2e/f4-visual.spec.ts-snapshots/`，4 张）：留给 CI x64 actual。经典主题第 4 个系列（≥4 系列或饼图 ≥4 块）才会出现这个颜色；若有截图用到，推送后 web job 会红，用 actual 重取。
+- 暗色、柔和等其他主题用各自色板，不受影响。
+
+### 指纹
+- A 组 `code_sha12`：#114 head 4b981ad `57f5d010ce73` → 本条 `b32b00fd4e5d`（A 组变的是 `app/tools/plotting.py` 与 `app/tools/charts.py`）。全量 sha `ba13c4a3e5cf → 64707239f1f6`。evalset / judge 指纹不动。
+
+### 闸门（2026-11-21，aarch64 沙箱 2 核，串行；日志 `/workspace/work/logs/chain_a3_*.log`）
+| 段 | 结果 |
+|---|---|
+| pytest test_charts 76、test_chart_check 13、test_chart_coverage 4、test_chart_fixtures 3、test_memory_p8 23、test_chart_slot 29、test_sandbox 33 | 181 passed，0 failed。按约定没跑全量和 oracle |
+| `python -m app.sidecar --selftest`（非冻结） | ok，9 项全过 |
+| `gen_ui_types.py --check` | ok |
+| vitest 全量（node24，分三批） | 29 个文件 914 passed（含 themes.test.ts） |
+| e2e | 本机缺 `libatk-1.0.so.0`，交给 CI |
+- 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
+- 11-21 CI（a5ff3cf，tests run 44884658291 的 web job）：`f4-visual` **视觉 11 红**（240 像素，ratio 0.01），1 failed / 45 passed。diff 只落在标记浮层「销量」一行色板的第 4 个色块：`#C0392B` 红 → `#199BC3` 天青，是本条预期的视觉变化；08、24、25 不受影响。从该 run 的 artifact `playwright-results`（id 14700225832）取 CI x64 的 `11-marks-card-actual.png`，覆盖 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`；看过，是正常页面，仅第 4 色块变色。
