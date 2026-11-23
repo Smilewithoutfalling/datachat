@@ -274,6 +274,26 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .wbar ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; color: #8A5200; opacity: .9; font-size: var(--fs-aux); }
 .wbar button.link { font-size: var(--fs-aux); flex: none; margin-top: 1px; }
 
+/* 阶段 7.6 U3 结果卡（phase76-ui.md §2 U3）：一句话结论（跟回答正文同属聊天阅读区，挂 .answer 取 --fs-read，不另写字号）、
+   关键数字（--fs-title 大字 + --fs-aux 口径）、校验徽章（替换黄条里的未核实数字；颜色沿用 badge.ok / badge.partial 的 token）。 */
+.result-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--card-gap); }
+.result-lead { margin: 0; font-weight: 700; }
+.key-numbers { display: flex; flex-wrap: wrap; gap: var(--card-gap-lg); margin: 0; }
+.key-numbers .kn { display: flex; flex-direction: column-reverse; gap: 2px; min-width: 96px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.kn-value { margin: 0; font-size: var(--fs-title); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.kn-label { font-size: var(--fs-aux); color: var(--muted); }
+.verify { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border-radius: 9999px; font-size: var(--fs-aux); border: none; white-space: nowrap; }
+.verify.ok { background: var(--accent-bg); color: #0059B3; }
+button.verify.unverified { background: #FFF6E0; color: var(--warn); font-weight: 400; }
+button.verify.unverified:hover:not(:disabled) { background: var(--warn-bg); }
+.verify-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.verify-list { padding: 8px 12px; border-radius: 10px; background: var(--warn-bg); border: 1px solid #F2DFB4; color: #8A5200; font-size: var(--fs-aux); line-height: 1.6; }
+.verify-list p { margin: 0; }
+.verify-list ul { margin: 2px 0 0; padding-left: 1.2em; }
+.result-actions .export-menu { position: relative; display: inline-flex; }
+.result-actions .aside { overflow-wrap: anywhere; white-space: normal; }
+.result-actions .aside.export-failed { color: var(--warn); }
+
 .errcard { display: flex; gap: 10px; padding: 14px; border-radius: 12px; background: #FEF6F6; border: 1px solid #F6D8D8; }
 .errcard > svg { color: #E5484D; flex: none; margin-top: 1px; }
 .errcard-title { font-size: var(--fs-body); font-weight: 700; color: #B3121B; margin: 0 0 4px; }
@@ -420,9 +440,10 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .chart-hint { color: #A0A0A5; font-size: var(--fs-aux); }
 .theme-picker { display: inline-flex; align-items: center; gap: 6px; }
 .chart-png { max-width: 100%; display: block; border-radius: 12px; border: 1px solid #EEEEF0; }
+/* U3：静态图和交互图同一种卡（.echart-wrap 的边框圆角），图片本身不再单独描边；卡底同一行工具栏放「导出 PNG」 */
+.chart-static-wrap .chart-png { border: none; border-radius: 11px 11px 0 0; margin: 0 auto; }
 .chart-export { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .chart-static-wrap { margin: 0; }
-.chart-static { margin: 6px 0 0; font-size: var(--fs-aux); color: #A0A0A5; }
 /* 工具栏和标记卡共用一组 token（F4 迭代 V1 第 9 条）；V2a 改成胶囊 */
 .chart-controls { --ctl-bg: #F5F5F7; --ctl-line: #E0E0E0; --ctl-accent: var(--accent); --ctl-h: 28px; --row-h: 24px; position: relative; }
 .chart-controls select { height: var(--ctl-h); border: none; border-radius: 7px; background: var(--ctl-bg); padding: 0 6px 0 10px; font-size: var(--fs-aux); color: #1D1D1F; cursor: pointer; box-shadow: none; }

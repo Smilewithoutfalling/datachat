@@ -118,9 +118,10 @@ test("TurnView：png 项走 chartSrc（同源 /charts/<name>?token=），给不�
   } as unknown as Turn;
   const { unmount } = render(<TurnView turn={turn} chartSrc={(p) => `${p}?token=t`} />);
   expect(screen.getByAltText("图表").getAttribute("src")).toBe("/charts/a.png?token=t");
-  // F3 第六步：静态图没有导出按钮，标注出来（S 10-19）；交互图有按钮
-  expect(screen.getByTestId("chart-static").textContent).toBe("静态图（由 matplotlib 生成），可右键另存为");
-  expect(screen.getAllByRole("button", { name: "导出 PNG" })).toHaveLength(1);
+  // 阶段 7.6 U3：静态图和交互图同一种卡、同一个「导出 PNG」入口（原来 F3 第六步是「可右键另存为」的说明）
+  expect(within(screen.getByTestId("chart-static")).getByRole("button", { name: "导出 PNG" })).toBeTruthy();
+  expect(screen.getByTestId("chart-static").textContent).not.toContain("右键另存为");
+  expect(screen.getAllByRole("button", { name: "导出 PNG" })).toHaveLength(2);
   unmount();
   render(<TurnView turn={turn} chartSrc={() => null} />);
   expect(screen.queryByAltText("图表")).toBeNull();

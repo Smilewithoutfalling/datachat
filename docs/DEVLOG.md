@@ -11263,3 +11263,55 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 哈希再次重立（旧值写在注释里）：off react_single `2ad082e9c02977d5 → d74d988dfa93cd02`、react_history `b4e012557418443b → ddb8615599bcb952`、workflow `e4f9c420904a3582 → 07461170ad5f0832`；state react_history `383f3ecc4a20f1e0 → 9836daaebbd665fc`、workflow_history `8ce5a093ac4584fd → 6cabdb836b86cec6`。
 - A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
 - 内网回归（bd56095，S 回贴 11-23 16:07）：nightly_gate GREEN，canary CLEAN；目标题 corr_002、agg_009、mul_012 全部收复。A 组 `code_sha12` 登记为 `b32b00fd4e5d → 8117bbb25d0a`。CI（bd56095）：tests 45130003747、sidecar 45130003579、desktop 45130003757 全部 success。
+
+## [待编号] 2026-11-23 阶段 7.6 U3 结果卡（issue #120）· commit <待提交>
+
+规格：`docs/roadmap/phase76-ui.md` §2 U3（:42），并照 §3「不加点了没反应的入口」（:58）、§6 第 2 条的顺序约定（:81）。**只改前端**，`app/` 一行没动（A 组 app/core、app/tools、app/nodes 不涉及，不需要内网回归）。
+
+### 做了什么
+- **结果卡头**（`TurnView.tsx` `ResultHead`，只在 ok 时出）：
+  - 一句话结论：`turn.ts conclusionOf(answer)`。后端没有单独的 summary 字段（`app/core/result.py` 的 `AnalysisResult` 只有 `answer`，summarizer 产出的是自由文本），所以从结论正文**逐字摘第一段的第一句**：跳过 `###` 小标题、去掉列表记号和 `**`/`` ` ``/链接等 Markdown 记号，在 `。！？!?；;` 处断句（小数点不断）；第一块是表格 / 代码块 / 分隔线 / 引用，或句子短于 4 字、长于 120 字（`LEAD_MAX`）时不出。不改写、不补字；正文仍完整显示在下面。反问（`result.clarify`）不出。
+  - 关键数字：`turn.ts keyNumbers` 只认结构化字段 `result.key_numbers = [{value, label}]`，最多 3 个，形状不对的丢掉，`unverified_numbers` 里有的不放大。**后端现在不产出这个字段，所以今天卡片上一个数字都不出**——不从正文里猜数字、猜口径（`grounding.py` 只给出「没找到的」，给不出「核过的」，口径更无处可取）。要让数字出来，得在 summarizer / service 里产出 `key_numbers`，属于 A 组改动，留给 S 定。
+  - 校验徽章：`turn.ts verifyState`。`executed === true` 且不是反问时才出（`grounding.unverified_numbers` 在证据为空时返回 `[]` 但什么都没核，不能写「全部可溯源」）。无未核实 → `✓ 全部可溯源`（span，不可点）；有 → `△ N 个数字未核实`（按钮，N = `result.unverified_numbers.length`），点开列出这几个数字原文。
+- **黄条**：`partialSignals` 不再拼「结论里这些数字在执行结果中没找到…」，只剩可恢复的字典错误 + `warnings`；卡头「部分完成」改看新的 `isPartial`（黄条有条目或有未核实数字，V2a §3.2 口径不变）。
+- **图表统一**：matplotlib 静态图改成和交互图同一种卡（`.echart-wrap` 边框圆角，卡底一行 `.chart-controls`），去掉「可右键另存为」，加「导出 PNG」：浏览器模式同源 `/charts/<name>?token=` 直接 `<a download>`；桌面壳（有 PngSaver）取回字节转 data URL 交给 `/exports/png`，复用 F3 的保存路径提示。文件名 `静态图N.png`（经 `safeFilename`）。交互图沿用 EChart 自己的「导出 PNG」。
+- **底部三个动作**（`ResultActions`，只给已落库、有 messageId 的 ok 轮次）：
+  - 「换个口径」「补一张图」：调 SessionView 的 `ask`（同一条 `POST /sessions/{id}/messages` + SSE 链路），文案是 `turn.ts FOLLOW_UPS` 两句固定追问；有轮次在跑时置灰，没配凭证时照手动发送的规矩前端拦下、闪提示条、不发请求。
+  - 「导出」：下拉三项「分析代码（.py）」「结果表（CSV）」「结果表（Excel）」，分别 `POST /messages/{id}/export/code`、`/export/result?format=csv|xlsx`（#110），显示「已保存到 <path>」或「导出失败：<后端 detail>」。前端按后端同一条件（`executed` 且有 `code`）给按钮，否则置灰。`client.ts` 新增 `exportCode` / `exportResult`。
+- **字号与颜色**：只用 U1 的 `--fs-*`。一句话结论挂在 `.answer` 上继承 `--fs-read` 14（它就是回答正文的一句，属于聊天阅读区），**没有新增 `--fs-read` 的使用处，`READ_SELECTORS` 不变**；关键数字 `--fs-title` 20、口径 `--fs-aux` 12；徽章 / 列表 / 动作行 `--fs-aux`。颜色只用现有 token 和已有色值（徽章 ✓ 同 `.badge.ok`，△ 同 `.badge.partial`，列表同 `.wbar`）。
+
+### 改动文件
+`ui/web/src/turn.ts`、`ui/web/src/client.ts`、`ui/web/src/views/TurnView.tsx`、`ui/web/src/views/SessionView.tsx`、`ui/web/src/styles.css`；测试 `ui/web/src/views/u3-result-card.test.tsx`（新）、`ui/web/src/views/v2a.test.tsx`、`ui/web/src/charts/EChart.test.tsx`、`ui/web/e2e/f4-result-card.spec.ts`（新）、`ui/web/e2e/f3-export.spec.ts`。
+
+### 新增 / 改动的测试
+- vitest `u3-result-card.test.tsx`（26 条）：
+  - `conclusionOf：结论第一句，逐字摘取` 6 条正例（含小标题跳过、Markdown 去记号、列表记号、链接、小数点不断句）+ 5 条取不到（表格、代码块、太短、空、超过 LEAD_MAX）
+  - `verifyState：只在真的核过时出徽章` › `没执行成功（executed 不是 true）、反问、非 ok：不出`、`没有未核实数字 → 全部可溯源；有 → 列出原文`
+  - `keyNumbers：只认结构化字段，不从正文里猜` › `后端没有 key_numbers 字段（现状）→ 不出数字`、`最多 3 个；形状不对的丢掉；未核实的不放大`
+  - `结果卡头：一句话结论与校验徽章` › `一句话结论在卡片顶部，正文照常完整显示`、`反问（clarify）不出一句话结论，也不出徽章`、`全部可溯源：✓ 徽章，不可点`、`△ N 个数字未核实：N = unverified_numbers 条数，点开列出这几个；黄条只放 warnings，不重复列数字`
+  - `静态图：统一的「导出 PNG」` › `浏览器：同源地址直接下载，文件名「静态图1.png」`、`桌面壳：取回字节交给 PngSaver，显示保存路径`
+  - `底部三个动作：各自真实发出一条请求` › `换个口径 / 补一张图：各一次提问，内容是固定的追问；导出代码 / 结果表：各一次 #110 请求`（断言 POST 序列恰为 messages、messages、export/code、export/result?format=csv）、`导出失败：显示后端的 detail`、`没配凭证：换个口径不发请求（与手动发送同一规矩）`、`没有执行成功的代码：导出置灰；…`、`实时轮次不出动作行；有别的轮次在跑时追问置灰`
+- vitest `v2a.test.tsx`：`warnings、unverified_numbers、字典读取失败各算一条…` 改为 `黄条：warnings、字典读取失败各算一条；ReAct 的重跑提示不算；unverified_numbers 不进黄条（U3 挪到校验徽章）`；新增 `只有 unverified_numbers 时卡头仍是「部分完成」，但不出黄条`。
+- vitest `EChart.test.tsx`：`TurnView：png 项走 chartSrc…` 里静态图的断言从「有右键另存为说明、全卡 1 个导出按钮」改为「静态图卡里有导出 PNG、没有右键另存为、全卡 2 个导出按钮」。
+- e2e `f4-result-card.spec.ts`（fake project，2 条）：
+  - `U3 结果卡：徽章 N 等于 unverified_numbers 条数，点开列出这几个；黄条不重复列这些数字`：真跑一轮 ok，`page.route` 把 `GET /sessions/{id}` 里第一条 ok 助手消息的 result 换上桩（`warnings: [1 条]`、`unverified_numbers: 3 条`、`executed: true`），断言徽章 `△ 3 个数字未核实`、点开 3 个 listitem 与桩一致、黄条只有那条 warning 且不含任何一个数字和「没找到」、卡头「部分完成」。
+  - `U3 结果卡：换个口径、补一张图、导出各发出一条请求`：两次追问真跑（fake 模型照常答，助手消息 1→2→3），断言各一次 `POST /sessions/:id/messages` 且请求体就是两句固定追问；导出在网络层截下回桩（不往 CI 的下载文件夹写文件），断言恰好 `export/code`、`export/result?format=csv` 各一次、路径里是第一轮助手消息的 id。
+- e2e `f3-export.spec.ts`：`matplotlib 的静态图：有「静态图」标注，没有导出按钮` 改为 `matplotlib 的静态图：和交互图同一种卡，有「导出 PNG」，下到的是原图字节`（真下载，PNG 签名、文件名 `静态图1.png`、宽高等于 img 的 naturalWidth/Height）。
+
+### 闸门（2026-11-23，aarch64 沙箱 2 核；日志 `/workspace/work/logs/u3_vitest.log`）
+| 段 | 结果 |
+|---|---|
+| vitest 全量（node24，`--pool=threads --maxWorkers=2`） | 31 个文件，952 passed，0 failed（master 29ad1bb 同参数 30 个文件 925 passed；+27 = 新文件 26 + v2a 1），82.7 s |
+| eslint `eslint . --max-warnings 0` | 0 错误 0 警告 |
+| `tsc --noEmit` | 0 错误（e2e 不在 tsconfig 里；单独对两个 spec 跑 tsc 只报缺 @types/node 的 Buffer / node:fs / process，与现有 spec 相同） |
+| web build（`npm run build`） | 通过；CSS 48.90 kB（gzip 9.64）、JS 1,117.10 kB（gzip 364.72），chunk 超 500 kB 的提示是原有的；dist/index.html 0 个内联 script |
+| `playwright test --list` | 51 条 / 19 个文件；新增 `f4-result-card.spec.ts` 2 条和改名后的 f3-export 静态图那条都归 fake project |
+| e2e | **没跑**：沙箱 chromium 起不来，交给 CI |
+| pytest | 后端没改，未跑 |
+
+### 偏离与未做
+- **关键数字今天不显示**：见上。前端已按 `result.key_numbers` 做好渲染和过滤（vitest 钉住），后端产出前不会出现；不从正文猜。
+- **一句话结论是从 `answer` 逐字摘的第一句**，不是后端单独给的字段；和正文第一句重复。模型的第一句不一定是结论（比如「根据分析结果，…」开头），这种情况也照原文摘，不改写。
+- 「换个口径」「补一张图」发的是两句固定追问，依赖会话记忆把上一轮带进来；记忆模式 off 时模型看到的上下文只有历史消息回灌，效果没在真模型上测过。
+- 导出不做浏览器下载：#110 的接口本来就是后端写进下载文件夹、返回路径，前端只显示「已保存到 <path>」；浏览器模式下路径是服务端机器上的（本机部署时就是本机）。
+- 视觉基线：结果卡多了徽章 / 动作行，静态图卡样式变了，f4-visual 涉及 ok 轮次的截图大概率变，留给 CI 用 x64 actual 重取。
