@@ -11185,7 +11185,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
 - 11-21 CI（a5ff3cf，tests run 44884658291 的 web job）：`f4-visual` **视觉 11 红**（240 像素，ratio 0.01），1 failed / 45 passed。diff 只落在标记浮层「销量」一行色板的第 4 个色块：`#C0392B` 红 → `#199BC3` 天青，是本条预期的视觉变化；08、24、25 不受影响。从该 run 的 artifact `playwright-results`（id 14700225832）取 CI x64 的 `11-marks-card-actual.png`，覆盖 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`；看过，是正常页面，仅第 4 色块变色。
 
-## [204] 2026-11-21 阶段 7.6 U4 空态卡 · commit <待提交>
+## [204] 2026-11-21 阶段 7.6 U4 空态卡 · commit 29ad1bb（PR #117）
 方案：docs/roadmap/phase76-ui.md §2 U4（第 43 行）、§2.1（第 58 行：问候 → 数据资产 → 三张提问卡）、§3（不加点了没反应的入口；只有 1px 边框）。worktree `feat/u4-empty`，基于 feat/u2-asset be164e0（U2 数据资产卡，PR #114）。以后用 rebase --onto 挪到新的 U2 上，所以改动集中在新文件。
 
 ### 做了什么
@@ -11228,3 +11228,38 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`；本条只改前端，与 A3 同为 `b32b00fd4e5d`，全量 sha `64707239f1f6`。
   - 本地闸门（日志 `/workspace/work/logs/chain2_u4_*.log`、`chain2_pytest.log`）：vitest 全量（node24，`--pool=threads --maxWorkers=2`）30 个文件 925 passed（A3 的 914 + 本条 11）；`tsc --noEmit` 0 错误；`npm run build`（tsc + vite build + check-dist）通过；eslint 0 警告；pytest（串行，相关文件）test_judge / test_judge_expand / test_nightly_gate / test_charts / test_chart_fixtures 124 passed。e2e 交给 CI。
 - 11-21 CI（45c9164，tests run 44884664870 的 web job）：vitest 925 passed；e2e `f4-starter.spec.ts` 3 条在 CI 上真的跑了、全过（「看看这份数据有什么」「找出异常值」「两期对比」各 ✓）；49 条里唯一红的是 `f4-visual` 视觉 11（240 像素），与 A3 同源（色板第 4 色），本条没有新的视觉差异。A3 已用 CI x64 actual 重取 11 号基线（1695da1），本条随之 rebase 到 1695da1（DEVLOG 冲突解法同上）。
+
+## [205] 2026-11-23 · result 保持数值（issue #118）· commit <合并后回填>（PR #121）
+worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网回归**（A 组变了，改的是送给模型的提示词）。
+
+### 现象与根因
+- 11-23 内网回归（83705c2）agg_009「各产品的总销量占比分别是多少？」答案 result 是 `"48.93%"` 这类字符串 Series，gold 是 `0.4893…`。`percent_equiv` 的 `_scale`（`app/eval/comparator.py:333`）只缩放数值，字符串返回 None，规则 12 接不住。数值本身是对的。
+- 查了 result 的生成和约束：三处模板只有「问多少给数值」（`app/nodes/codegen.py:24`、`app/nodes/reviewer.py:32`、`app/react_agent.py:251`），**没有任何一句要求数值保持数值类型**，也没提占比的写法；结果提取层 `app/core/result.py` 的 `format_result` 只做 `to_string()`/`str()` 给模型看，不做类型约束。问题里的「占比」把模型往人读格式上引，于是在 result 里直接 `f"{x:.2%}"`——提示词没拦，提取层也不管。
+
+### 修法：只做 a（提示词），不做 b（提取层还原）
+- `app/nodes/codegen.py:27`、`app/nodes/reviewer.py:32`、`app/react_agent.py:257-258` 各加一句：result 里的数值答案（含 Series / 表里的数值列）保持数值类型；占比、比例、增长率用 0–1 的小数或 ×100 后的数值，不要 `f'{x:.2%}'`、拼 `'%'` 把数值变字符串；百分号、千分位等格式化交给最终结论。reviewer 也加，因为它重写代码时「规则不变」，不加的话修一轮就丢约束。
+- 不做 b 的理由：(1) `"48.93%"` 还原成 48.93 还是 0.4893 本身有歧义，选哪个都在替模型补口径；(2) `app/core/` 是 A 组公共路径，所有题的 result 都过它，还原规则哪怕很保守也会改动展示给用户和 summarizer 的内容；(3) 这次的问题是约束缺失，不是提取层错，补约束是最小改动。若内网回归仍有 `%` 字符串，再按 issue 讨论保守的 b。
+- 没有任何题目 id 或具体数值的特判；`app/eval/` 一个文件都没动。
+
+### 哈希重立
+- `tests/test_memory_p8.py` 五个提示词哈希全部重立（旧值写在注释里）：原因只有上面那句提示词。off `react_single d92ac56752d710c0 → 2ad082e9c02977d5`、`react_history 12eb67995866e6fa → b4e012557418443b`、`workflow fd0b47816facfe40 → e4f9c420904a3582`；state `react_history 1c1d8bde2aa6d0c3 → 383f3ecc4a20f1e0`、`workflow_history 23f82db265846844 → 8ce5a093ac4584fd`。「off 与 state 单轮逐字节相同」仍成立（react_single、workflow 两档同值）。
+
+### 指纹
+- A 组 `code_sha12`（`code_fingerprint()["affects_results_sha256"]`）：master 29ad1bb `b32b00fd4e5d` → 本 PR `9a8601f116e2`（A 组变的是 `app/nodes/codegen.py`、`app/nodes/reviewer.py`、`app/react_agent.py`）。全量 sha `64707239f1f6 → 06d78ee88d41`。evalset / judge 指纹不动。
+
+### 新增测试
+- `tests/test_result_numeric.py`（4 条）：codegen 渲染后的模板、reviewer 模板、react system（`build_react_agent(..., out_system=)`）都含这条约束，`f'{x:.2%}'` 的花括号经 `.format` 后原样保留；三处都不含 `agg_009` / `48.93`。
+
+### 闸门（2026-11-23，aarch64 沙箱，串行，只跑相关文件；日志 `/workspace/work/logs/num_*.log`）
+| 文件 | 结果 |
+|---|---|
+| test_result_numeric 4、test_memory_p8 23、test_fixbatch1 13、test_fingerprint 32、test_eval_runner 25、test_react_loop 7、test_workflow_mocked 20、test_fake_llm 101、test_core_analyze 22 | 247 passed，0 failed。按约定没跑全量和 oracle |
+
+### 11-23 下午：内网回归（9274793）后补条件句
+- 回归（S 回贴，14:36–14:57）：nightly_gate GREEN，195/202，配对净退步 -1（退步 2，进步 3）；canary CLEAN 10/10。agg_009 通过，match=strict。
+- 退步 corr_002「各地区销售额占总销售额的百分比是多少？」：result 给 0.222997，gold 22.30。该题没开 `percent_equiv`（`app/eval/cases.py:200`），按 comparator 规则 12「题目明确要百分比时按原值比较」只认 ×100 刻度。根因是上一版措辞「0–1 的小数或 ×100 后的数值」任模型挑，问「百分比」时也挑了 0–1。
+- 退步 mul_012：本次 服饰 25.65 / 食品 24.78，gold 食品 25.18 / 服饰 24.45。数值本身就不同、排序也变了，不是刻度或格式问题，和这句约束没有直接关系；要看本次 result 和代码才能定性。条件句里顺带加了「要求保留几位小数时 round」，因为该题有这个要求。
+- 修法：三处约束改成条件句——题目说「百分比/百分数」时用 ×100 后的数值（写 22.30，不写 0.2230）；只说「占比/比例/增长率」时 0–1 或 ×100 均可；要求保留几位小数时 round。仍然禁止拼 `%` 字符串。agg_009 开着 `percent_equiv`，两种刻度都认，不受影响。
+- 哈希再次重立（旧值写在注释里）：off react_single `2ad082e9c02977d5 → d74d988dfa93cd02`、react_history `b4e012557418443b → ddb8615599bcb952`、workflow `e4f9c420904a3582 → 07461170ad5f0832`；state react_history `383f3ecc4a20f1e0 → 9836daaebbd665fc`、workflow_history `8ce5a093ac4584fd → 6cabdb836b86cec6`。
+- A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
+- 内网回归（bd56095，S 回贴 11-23 16:07）：nightly_gate GREEN，canary CLEAN；目标题 corr_002、agg_009、mul_012 全部收复。A 组 `code_sha12` 登记为 `b32b00fd4e5d → 8117bbb25d0a`。CI（bd56095）：tests 45130003747、sidecar 45130003579、desktop 45130003757 全部 success。
