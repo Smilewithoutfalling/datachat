@@ -11012,7 +11012,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 回填：[197] 的 SHA 为 4a10444（#112 squash）。
 
 
-## [199] 2026-11-21 · 阶段 7.5b B4 尾批：负样本入库 + GLM-5.2 141 条复校两段过 · commit <待提交>
+## [199] 2026-11-21 · 阶段 7.5b B4 尾批：负样本入库 + GLM-5.2 141 条复校两段过 · commit e8ccfe3（PR #115）
 
 - 入库：`judge_label_p3.xlsx` 六条负样本经人标闸 `judge_collect.py --ingest --confirm` 进 `docs/eval/judge_gold.jsonl`，校准集 135→141 条（对 117 / 错 24，人标 106，order 交替保持 gold_first 71 / answer_first 70）。六条全部是 id=s09 的 PAPER CRAFT 陷阱错答（gold=WORLD WAR 2 GLIDERS），judge_collect 池清晰错全库仅此 6 条，负侧一次吃满。
 - 复校：GLM-5.2（JD 网关，命令行 env 注入防 `.env` last-wins）对 141 条全量复跑——有效 138、弃权 3（mem_007 / agg_001 / agg_002，全 label=True 上 abstain）、调用失败 0；TP=116 FP=0 FN=0 TN=22；一致率 100.0% [0.973, 1.000]、Cohen's κ 1.000 [1.000, 1.000]（bootstrap 95%）；校准段 / 泛化段各 n=69、κ=1.000 双过 → judge 可用，exit 0。读数落 `docs/eval/judge.md` §3.2。
@@ -11021,7 +11021,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 明确不做：opencode 第三家族交叉校验（Key 一次性用完即删，转可选触发项——换 judge / κ 掉到边缘 / 题库大扩容时再跑）；grg Qwen3.5 临时干跑（与被测模型同家族，GLM 已达标无必要）。
 - [198] 回填：a194836（PR #113）。
 
-## [待编号] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit <待提交>
+## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit <待提交>
 
 ### 结论
 - **phase76-ui §5 第 1 条（`_redirect_savefig` 强制 `bbox_inches="tight"`、按字节契约变更）前提不成立，不做。** 不动 worker，PNG 字节不变，chart_fixtures 与视觉基线都不重取。「14」按根因修，并进 CHART_GUIDE。
