@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { Api } from "../api";
 import { client } from "../client";
 import { fakeBackend } from "../fakeBackend";
-import { type Ev, partialSignals, steps, type Turn } from "../turn";
+import { type Ev, isPartial, partialSignals, steps, type Turn } from "../turn";
 import type { Message } from "../types";
 import { SessionView } from "./SessionView";
 import { Shell } from "./Shell";
@@ -66,12 +66,19 @@ describe("步骤条分段", () => {
 });
 
 describe("部分完成的信号", () => {
-  test("warnings、unverified_numbers、字典读取失败各算一条；ReAct 的重跑提示不算", () => {
+  test("黄条：warnings、字典读取失败各算一条；ReAct 的重跑提示不算；unverified_numbers 不进黄条（U3 挪到校验徽章）", () => {
     const t = turn("ok", [
       ev("error", 0, { message: "数据字典读取失败，已跳过", kind: "dataset", fatal: false }),
       ev("error", 1, { message: "重跑本轮：…", kind: "llm", fatal: false, llm_kind: "gateway_error" }),
     ], { ...OK, warnings: ["图表未生成"], unverified_numbers: ["42"] });
-    expect(partialSignals(t)).toEqual(["数据字典读取失败，已跳过", "图表未生成", "结论里这些数字在执行结果中没找到，请核对：42"]);
+    expect(partialSignals(t)).toEqual(["数据字典读取失败，已跳过", "图表未生成"]);
+  });
+  test("只有 unverified_numbers 时卡头仍是「部分完成」，但不出黄条", () => {
+    render(<TurnView turn={turn("ok", [], { ...OK, unverified_numbers: ["42"] })} />);
+    expect(badge().textContent).toBe("部分完成");
+    expect(document.querySelector(".wbar")).toBeNull();
+    expect(isPartial(turn("ok", [], { ...OK, unverified_numbers: ["42"] }))).toBe(true);
+    expect(isPartial(turn("ok", [], OK))).toBe(false);
   });
   test("都没有时不出黄条", () => {
     render(<TurnView turn={turn("ok", [], OK)} />);

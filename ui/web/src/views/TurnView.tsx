@@ -1,10 +1,19 @@
 // 一轮助手回答（阶段 5 F2/F3；V2a §2、§3）。卡片结构固定：头 → 步骤条（默认折叠，展开是事件流）→ 警示条 → 结论 → 图表 → 尾。
+// 阶段 7.6 U3 结果卡（phase76-ui.md §2 U3）：ok 时结论前面加「一句话结论 · 关键数字 · 校验徽章」，图表统一成同一种卡（都有「导出 PNG」），
+// 尾部前加三个动作「换个口径」「补一张图」「导出」。未核实数字只在徽章里列，黄条只放 warnings（turn.ts partialSignals）。
 // 图表按 result.charts 的顺序：option 项用 EChart，png 项用同源 <img>。截断提示只走后端 result.warnings（单一来源）。
 // 终止原因只按 status / error_kind / llm_kind 分支（turn.ts 的 outcome），不对文案做匹配。所有用户数据按文本渲染（T9）。
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { ApiError } from "../api";
 import { type ChartSpec, EChart } from "../charts/EChart";
-import { answerText, type Ev, MESSAGES, outcome, partialSignals, type Step, steps, totalSeconds, type Turn, turnMeta, turnTokens } from "../turn";
-import { IconAlert, IconChevronDown, IconChevronUp, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
+import { download } from "../charts/exportPng";
+import { safeFilename } from "../charts/filename";
+import { getPngSaver } from "../charts/pngSaver";
+import {
+  answerText, canExport, conclusionOf, type Ev, FOLLOW_UPS, isPartial, keyNumbers, MESSAGES, outcome, partialSignals, type Step, steps,
+  totalSeconds, type Turn, turnMeta, turnTokens, verifyState,
+} from "../turn";
+import { IconAlert, IconChevronDown, IconChevronUp, IconDownload, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
 import { llmErrorText } from "./llmErrorText";
 import { Markdown } from "./Markdown";
 
@@ -87,7 +96,12 @@ export type TurnActions = {
   stopping?: boolean;
   startedAt?: number; // 实时轮次的开始时刻（Date.now），running 时算已用时
   foot?: ReactNode; // 👍👎
+  onFollowUp?: (question: string) => void; // U3「换个口径」「补一张图」：照常提问（SessionView.ask），会话里有轮次在跑时不给
+  onExport?: (what: ExportKind) => Promise<string>; // U3「导出」：#110 的 /messages/{id}/export/code|result，返回保存路径
 };
+
+export type ExportKind = "code" | "csv" | "xlsx";
+const EXPORT_LABEL: Record<ExportKind, string> = { code: "分析代码（.py）", csv: "结果表（CSV）", xlsx: "结果表（Excel）" };
 
 export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
   turn: Turn;
@@ -101,6 +115,9 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
   const r = turn.result;
   const list = steps(turn, agent);
   const partial = partialSignals(turn);
+  const verify = verifyState(turn);
+  const lead = o.kind === "ok" && r?.clarify !== true ? conclusionOf(answer) : null;
+  const nums = keyNumbers(turn);
   const [open, setOpen] = useState(false);
   const [moreWarn, setMoreWarn] = useState(false);
   const now = useTicker(o.kind === "running" && act.startedAt !== undefined);
@@ -113,7 +130,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         ? { cls: "stopping", text: "停止中", icon: <Spinner size={9} /> }
         : { cls: "running", text: "分析中", icon: <Spinner size={9} /> }
       : o.kind === "ok"
-        ? partial.length
+        ? isPartial(turn)
           ? { cls: "partial", text: "部分完成", icon: <IconWarn size={10} /> }
           : { cls: "ok", text: "已完成" }
         : o.kind === "error"
@@ -161,6 +178,10 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
           {meta ? <p className="hint" data-testid="turn-meta">连接：{meta.connection_name} · 模型：<span className="mono">{meta.model}</span></p> : null}
           {turn.events.map((ev) => <EventView key={ev.seq} ev={ev} />)}
         </div>
+      ) : null}
+
+      {o.kind === "ok" && (lead || nums.length || verify) ? (
+        <ResultHead lead={lead} nums={nums} verify={verify} />
       ) : null}
 
       {partial.length ? (
@@ -222,19 +243,18 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
       ) : null}
 
       {o.kind === "ok" && r?.charts?.length ? (
-        <div className="charts">
+        <div className="charts" data-testid="charts">
           {r.charts.map((c, i) => {
             if (c.option) return <EChart key={i} spec={c.option as unknown as ChartSpec} editKey={messageId ? `${messageId}:${i}` : undefined} />;
             const src = c.png && chartSrc ? chartSrc(c.png) : null;
-            // matplotlib 的静态图没有导出按钮：标注出来，免得和旁边带"导出 PNG"的交互图比着以为按钮坏了（F3 第六步，S 10-19）
-            return src ? (
-              <figure key={i} className="chart-static-wrap" data-testid="chart-static">
-                <img className="chart-png" src={src} alt="图表" />
-                <figcaption className="chart-static">静态图（由 matplotlib 生成），可右键另存为</figcaption>
-              </figure>
-            ) : null;
+            // U3：matplotlib 的静态图和交互图同一种卡、同一个「导出 PNG」入口（原来是「可右键另存为」的说明，phase76 §1 最后一行）
+            return src ? <StaticChart key={i} src={src} index={i} /> : null;
           })}
         </div>
+      ) : null}
+
+      {o.kind === "ok" && messageId && (act.onFollowUp || act.onExport || act.busy) ? (
+        <ResultActions turn={turn} act={act} />
       ) : null}
 
       {(o.kind === "ok" || o.kind === "error") && (act.foot || act.onRetry) ? (
@@ -324,4 +344,129 @@ function useTicker(on: boolean): number {
     return () => clearInterval(t);
   }, [on]);
   return now;
+}
+
+/** U3 结果卡的头：一句话结论、最多 3 个关键数字（大字号 + 口径小字）、校验徽章。 */
+function ResultHead({ lead, nums, verify }: {
+  lead: string | null; nums: { value: string; label: string }[]; verify: ReturnType<typeof verifyState>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="result-head" data-testid="result-head">
+      {lead ? <p className="answer result-lead" data-testid="result-lead">{lead}</p> : null}
+      {nums.length ? (
+        <dl className="key-numbers" data-testid="key-numbers">
+          {nums.map((n, i) => (
+            <div key={i} className="kn">
+              <dt className="kn-label">{n.label}</dt>
+              <dd className="kn-value">{n.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {verify ? (
+        verify.kind === "ok" ? (
+          <span className="verify ok" data-testid="verify-badge" title="结论里的数字都能在执行结果里找到">✓ 全部可溯源</span>
+        ) : (
+          <div className="verify-wrap">
+            <button type="button" className="verify unverified" data-testid="verify-badge" aria-expanded={open}
+              onClick={() => setOpen(!open)}>
+              △ {verify.numbers.length} 个数字未核实{open ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
+            </button>
+            {open ? (
+              <div className="verify-list" data-testid="verify-list">
+                <p>结论里这些数字在执行结果中没找到，请核对：</p>
+                <ul>{verify.numbers.map((n, i) => <li key={i} className="mono">{n}</li>)}</ul>
+              </div>
+            ) : null}
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/** matplotlib 静态图：和交互图同一种卡，卡底一行工具栏放「导出 PNG」。
+ *  浏览器：同源 /charts/<name>?token= 直接 <a download>；桌面壳（WebView2 里 <a download> 没反应）：取回字节交给 PngSaver 写进下载文件夹。 */
+function StaticChart({ src, index }: { src: string; index: number }) {
+  const [failed, setFailed] = useState(false);
+  const [savedTo, setSavedTo] = useState("");
+  const name = safeFilename(undefined, `静态图${index + 1}`);
+  const onExport = async () => {
+    setFailed(false);
+    setSavedTo("");
+    const saver = getPngSaver();
+    try {
+      if (!saver) return download(src, name);
+      const bytes = new Uint8Array(await (await fetch(src, { credentials: "omit", referrerPolicy: "no-referrer" })).arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      setSavedTo(await saver(`data:image/png;base64,${btoa(bin)}`, name));
+    } catch {
+      setFailed(true);
+    }
+  };
+  return (
+    <figure className="echart-wrap chart-static-wrap" data-testid="chart-static">
+      <img className="chart-png" src={src} alt="图表" />
+      <figcaption className="chart-controls" data-testid="chart-static-controls">
+        <span className="chart-hint">静态图（matplotlib）</span>
+        <span className="chart-export">
+          <button type="button" onClick={() => void onExport()}><IconDownload size={11} />导出 PNG</button>
+          {failed && <span className="warn small" role="alert">导出失败</span>}
+          {savedTo && <span className="hint small" role="status" data-testid="export-saved" title={savedTo}>已保存到 {savedTo}</span>}
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
+
+/** U3 底部三个动作。每个都真实发出一条请求（phase76 §3「不加点了没反应的入口」）：
+ *  换个口径 / 补一张图 = 一次提问（POST /sessions/{id}/messages）；导出 = POST /messages/{id}/export/code|result。 */
+function ResultActions({ turn, act }: { turn: Turn; act: TurnActions }) {
+  const [menu, setMenu] = useState(false);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "saved"; path: string } | { kind: "failed"; msg: string }>({ kind: "idle" });
+  const box = useRef<HTMLSpanElement>(null);
+  const exportable = canExport(turn) && !!act.onExport;
+  useEffect(() => {
+    if (!menu) return;
+    const down = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setMenu(false);
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [menu]);
+  const run = (what: ExportKind) => {
+    setMenu(false);
+    setState({ kind: "busy" });
+    act.onExport!(what).then(
+      (path) => setState({ kind: "saved", path }),
+      (e: unknown) => setState({ kind: "failed", msg: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) }),
+    );
+  };
+  const follow = act.onFollowUp;
+  return (
+    <div className="actions-row result-actions" data-testid="result-actions">
+      <button type="button" disabled={!follow} onClick={() => follow?.(FOLLOW_UPS.metric)} title={FOLLOW_UPS.metric}>换个口径</button>
+      <button type="button" disabled={!follow} onClick={() => follow?.(FOLLOW_UPS.chart)} title={FOLLOW_UPS.chart}>补一张图</button>
+      <span ref={box} className="export-menu">
+        <button type="button" aria-haspopup="menu" aria-expanded={menu} disabled={!exportable || state.kind === "busy"}
+          title={exportable ? undefined : "这一轮没有执行成功的代码，无法导出"} onClick={() => setMenu(!menu)}>
+          <IconDownload size={11} />{state.kind === "busy" ? "导出中" : "导出"}<IconChevronDown size={9} />
+        </button>
+        {menu ? (
+          <div className="menu" role="menu" style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, top: "auto" }}>
+            {(Object.keys(EXPORT_LABEL) as ExportKind[]).map((k) => (
+              <button key={k} type="button" role="menuitem" onClick={() => run(k)}>{EXPORT_LABEL[k]}</button>
+            ))}
+          </div>
+        ) : null}
+      </span>
+      {state.kind === "saved" ? <span className="aside" role="status" data-testid="export-result" title={state.path}>已保存到 {state.path}</span> : null}
+      {state.kind === "failed" ? <span className="aside export-failed" role="alert" data-testid="export-result">导出失败：{state.msg}</span> : null}
+    </div>
+  );
 }

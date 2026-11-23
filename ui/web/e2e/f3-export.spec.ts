@@ -248,15 +248,21 @@ test("暗色画布：勾「导出为浅色（经典配色）」后左上角 #FFF
   expect(w.bad).toEqual([]);
 });
 
-test("matplotlib 的静态图：有「静态图」标注，没有导出按钮", async ({ page, baseURL }) => {
+// 阶段 7.6 U3：静态图和交互图统一一个「导出 PNG」入口（原来是「可右键另存为」的说明、没有按钮）。浏览器模式走同源 /charts/<name> 的 <a download>
+test("matplotlib 的静态图：和交互图同一种卡，有「导出 PNG」，下到的是原图字节", async ({ page, baseURL }) => {
   test.setTimeout(120_000);
   const w = watch(page, new URL(baseURL!).origin);
   await page.goto(`/#token=${E2E_TOKEN}`);
   const sv = await ask(page, CSV, "mpl.csv", "chart-matplotlib", "静态图");
   const fig = sv.getByTestId("chart-static");
   await expect(fig).toHaveCount(1);
-  await expect(fig).toContainText("静态图（由 matplotlib 生成），可右键另存为");
+  await expect(fig).toContainText("静态图（matplotlib）");
+  await expect(fig).not.toContainText("右键另存为");
   await expect(fig.locator("img")).toHaveJSProperty("complete", true);
-  await expect(sv.getByRole("button", { name: "导出 PNG" })).toHaveCount(0);
+  const [dl] = await Promise.all([page.waitForEvent("download"), fig.getByRole("button", { name: "导出 PNG" }).click()]);
+  const png = await read(dl);
+  expect(png.name).toBe("静态图1.png");
+  const natural = await fig.locator("img").evaluate((i: HTMLImageElement) => ({ w: i.naturalWidth, h: i.naturalHeight }));
+  expect({ w: png.width, h: png.height }).toEqual(natural);
   expect(w.bad).toEqual([]);
 });

@@ -196,6 +196,15 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
     setDraft("");
     void ask(q);
   };
+  // U3 结果卡「换个口径」「补一张图」：和手动发送同一条链路、同一套拦截（有轮次在跑不发；没配凭证前端拦下、不发请求）
+  const followUp = (q: string) => {
+    if (running) return;
+    if (!keyConfigured) {
+      setFlash((n) => n + 1);
+      return;
+    }
+    void ask(q);
+  };
   const questionBefore = (i: number) => {
     for (let j = i - 1; j >= 0; j--) if (s.messages[j].role === "user") return s.messages[j].content;
     return "";
@@ -217,6 +226,8 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
         onRephrase={q ? () => rephrase(q) : undefined}
         onGoSettings={onGoSettings}
         foot={m.status === "ok" || m.status === "error" ? <FeedbackBar c={c} messageId={m.id} initial={m.feedback} /> : undefined}
+        onFollowUp={running ? undefined : followUp}
+        onExport={(what) => (what === "code" ? c.exportCode(m.id) : c.exportResult(m.id, what)).then((r) => r.path)}
       />
     );
   };

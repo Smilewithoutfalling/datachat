@@ -89,6 +89,13 @@ export function client(api: Api) {
         jsonBody("PUT", { rating, note }),
       ),
 
+    // #110（阶段 7.5 第 2 步）：导出这一轮的代码（独立 .py）和结果表（CSV / xlsx）。后端写进下载文件夹，返回完整路径（app/server/app.py）。
+    exportCode: (messageId: string) =>
+      api.json<ExportedFile>(`/messages/${encodeURIComponent(messageId)}/export/code`, { method: "POST" }),
+    exportResult: (messageId: string, format: "csv" | "xlsx") =>
+      api.json<ExportedFile & { rows: number; columns: number; matches_original: boolean }>(
+        `/messages/${encodeURIComponent(messageId)}/export/result?format=${format}`, { method: "POST" }),
+
     settings: () => api.json<Settings>("/settings"),
     saveSettings: (s: Partial<Settings>) => api.json<Settings>("/settings", jsonBody("PUT", s)),
     keyStatus: () => api.json<KeyStatus>("/settings/api-key"),
@@ -120,6 +127,7 @@ export function client(api: Api) {
   };
 }
 export type Client = ReturnType<typeof client>;
+export type ExportedFile = { path: string; filename: string };
 
 export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

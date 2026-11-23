@@ -161,15 +161,92 @@ export function steps(t: Turn, agent?: string): Step[] {
   return o.kind !== "ok" ? out : out.filter((s) => s.count > 0 || s.state !== "pending");
 }
 
-/** 部分完成（黄）：ok 且有 warnings 或 unverified_numbers（phase5 V2a §3.2）。返回要显示的提示条目。 */
+/** 黄条（提示条）的条目：ok 时的可恢复字典错误 + warnings（phase5 V2a §3.2）。
+ *  阶段 7.6 U3：unverified_numbers 不再进黄条，改由结果卡的校验徽章单独承载（verifyState），黄条不重复列这些数字。 */
 export function partialSignals(t: Turn): string[] {
   if (t.status !== "ok" || !t.result) return [];
   // 可恢复的 dataset 错误只有"数据字典读取失败，已跳过"（service.py:186），S 10-22 定归黄；ReAct 的"重跑本轮"不算
   const dict = t.events.flatMap((e) => (e.type === "error" && !e.data.fatal && e.data.kind === "dataset" ? [e.data.message] : []));
-  const out = [...dict, ...(t.result.warnings ?? [])];
-  const nums = t.result.unverified_numbers ?? [];
-  if (nums.length) out.push(`结论里这些数字在执行结果中没找到，请核对：${nums.join("、")}`);
-  return out;
+  return [...dict, ...(t.result.warnings ?? [])];
+}
+
+/** 部分完成（卡头黄标签）：黄条有条目，或有未核实数字（V2a §3.2 的口径不变，只是数字挪到了徽章里）。 */
+export function isPartial(t: Turn): boolean {
+  return partialSignals(t).length > 0 || unverifiedOf(t).length > 0;
+}
+
+const unverifiedOf = (t: Turn): string[] =>
+  t.status === "ok" && Array.isArray(t.result?.unverified_numbers)
+    ? t.result.unverified_numbers.filter((x): x is string => typeof x === "string")
+    : [];
+
+// ---------------------------------------------------------------- 阶段 7.6 U3：结果卡（docs/roadmap/phase76-ui.md §2 U3）
+/** 校验徽章：只在真的核过时出（ok、执行成功拿到了结果、不是反问）。
+ *  app/core/grounding.py：证据为空时 unverified_numbers 返回 [] 但什么都没核，所以没执行成功（executed 不为 true）时不出「全部可溯源」。
+ *  numbers 原样取 result.unverified_numbers，徽章里的 N 就是它的条数。 */
+export type Verify = { kind: "ok" } | { kind: "unverified"; numbers: string[] };
+export function verifyState(t: Turn): Verify | null {
+  const r = t.result;
+  if (t.status !== "ok" || !r || r.executed !== true || r.clarify === true) return null;
+  const numbers = unverifiedOf(t);
+  return numbers.length ? { kind: "unverified", numbers } : { kind: "ok" };
+}
+
+/** 一句话结论：结论正文第一段的第一句，逐字摘取，只去掉 Markdown 记号，不改写、不补字。
+ *  取不到（第一块是表格 / 代码 / 分隔线，或第一句超过 LEAD_MAX 字、短于 4 字）时返回 null，卡片就不出这一行。
+ *  后端没有单独的 summary 字段（app/core/result.py AnalysisResult 只有 answer），所以只能从 answer 摘。 */
+export const LEAD_MAX = 120;
+export function conclusionOf(answer: string): string | null {
+  const lines = (answer ?? "").split(/\r?\n/);
+  let first = "";
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^#{1,6}\s/.test(line)) continue; // 小标题（「### 结论」）跳过，看下一行
+    if (/^(```|~~~|\||[-*_]{3,}$|>)/.test(line)) return null; // 代码块、表格、分隔线、引用打头：不是一句话
+    first = line.replace(/^([-*+]|\d+[.)、])\s+/, "");
+    break;
+  }
+  const plain = first
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__|`)/g, "")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1$2")
+    .trim();
+  const m = /^.*?[。！？!?；;]/u.exec(plain);
+  const lead = (m ? m[0] : plain).trim();
+  if (Array.from(lead).length < 4 || Array.from(lead).length > LEAD_MAX) return null;
+  return lead;
+}
+
+/** 关键数字（最多 3 个）：只认结构化字段 result.key_numbers = [{value, label}]。
+ *  后端现在不产出这个字段（app/core 的结果格式里没有），所以今天总是 []，卡片不出数字——不从结论正文里猜数字、猜口径。
+ *  未核实的数字（unverified_numbers 里有的）不放大显示。 */
+export type KeyNumber = { value: string; label: string };
+export const KEY_NUMBERS_MAX = 3;
+export function keyNumbers(t: Turn): KeyNumber[] {
+  const raw = t.status === "ok" ? t.result?.key_numbers : undefined;
+  if (!Array.isArray(raw)) return [];
+  const bad = new Set(unverifiedOf(t));
+  return raw
+    .filter((x): x is KeyNumber => !!x && typeof x === "object"
+      && typeof (x as KeyNumber).value === "string" && (x as KeyNumber).value.trim() !== ""
+      && typeof (x as KeyNumber).label === "string" && (x as KeyNumber).label.trim() !== "")
+    .filter((x) => !bad.has(x.value.trim()))
+    .slice(0, KEY_NUMBERS_MAX)
+    .map((x) => ({ value: x.value.trim(), label: x.label.trim() }));
+}
+
+/** 结果卡底部「换个口径」「补一张图」发出的追问：走现有提问链路（POST /sessions/{id}/messages），会话记忆把上一轮带上。 */
+export const FOLLOW_UPS = {
+  metric: "换个口径再算一次：先说明上一轮结论用的口径（统计范围、指标定义、时间粒度），再换一种合理的口径重新计算，并对比两种口径的结果差异。",
+  chart: "给上一轮的结论补一张图：选最能说明这个结论的图型，用上一轮的结果画出来。",
+} as const;
+
+/** 能不能导出（POST /messages/{id}/export/*）：后端只收执行成功、带代码的助手消息（app.py export_source），前端照同一条件给按钮。 */
+export function canExport(t: Turn): boolean {
+  const r = t.result;
+  return t.status === "ok" && !!r && r.executed === true && typeof r.code === "string" && r.code.trim() !== "";
 }
 
 /** V2d §2e：整轮 token（done 里的 usage）。真数 + 估算；有估算时 estimated=true；一次调用都没有（reported 为 null）或没有 usage 时 null。 */
