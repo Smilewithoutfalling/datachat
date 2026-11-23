@@ -11149,7 +11149,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 本地闸门（rebase 后，串行，日志 `/workspace/work/logs/chain_114_*.log`）：pytest test_u2_asset_card 13、test_schema 21、test_excel_io 36、test_dataset_notes_api 9、test_dataset_notes_lifecycle 8、test_web_f1 10、test_server 14、test_export（非 slow）35、test_sidecar_contract 4，共 150 passed；vitest 全量分三批 29 个文件 914 passed；`tsc --noEmit` 0 错误。e2e 本机缺库，交给 CI；侧栏卡片会改变含侧栏的视觉基线，红了用 CI x64 actual 重取。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #110 新 head（bda232a）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#110 仍 `997e3217d054`，本 PR 仍 `57f5d010ce73`，全量 sha 仍 `ba13c4a3e5cf`。
 
-## [203] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit <待提交>
+## [203] 2026-11-21 · A3：PALETTE 第 4 色红 → 天青（字节契约变更） · commit 4e5bac3（PR #116）
 决定见 `docs/roadmap/decisions-pending-1120.md` A3（S 同意：改成非红色，按字节契约走）。分支 `feat/a3-palette`，**叠在 #114（feat/u2-asset，4b981ad）上**，链 #109→#110→#114→A3 的链尾；S 内网回归对链尾 head 跑一次。11-21 S 同意推送并开 PR（base = feat/u2-asset），U4 接在本条之后成为新链尾。
 
 ### 改了什么
@@ -11185,7 +11185,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #114 新 head（746dc2b）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109/#110/#114 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#114 仍 `57f5d010ce73`，本条仍 `b32b00fd4e5d`，全量 sha 仍 `64707239f1f6`。
 - 11-21 CI（a5ff3cf，tests run 44884658291 的 web job）：`f4-visual` **视觉 11 红**（240 像素，ratio 0.01），1 failed / 45 passed。diff 只落在标记浮层「销量」一行色板的第 4 个色块：`#C0392B` 红 → `#199BC3` 天青，是本条预期的视觉变化；08、24、25 不受影响。从该 run 的 artifact `playwright-results`（id 14700225832）取 CI x64 的 `11-marks-card-actual.png`，覆盖 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`；看过，是正常页面，仅第 4 色块变色。
 
-## [待编号] 2026-11-21 阶段 7.6 U4 空态卡 · commit <待提交>
+## [204] 2026-11-21 阶段 7.6 U4 空态卡 · commit <待提交>
 方案：docs/roadmap/phase76-ui.md §2 U4（第 43 行）、§2.1（第 58 行：问候 → 数据资产 → 三张提问卡）、§3（不加点了没反应的入口；只有 1px 边框）。worktree `feat/u4-empty`，基于 feat/u2-asset be164e0（U2 数据资产卡，PR #114）。以后用 rebase --onto 挪到新的 U2 上，所以改动集中在新文件。
 
 ### 做了什么
