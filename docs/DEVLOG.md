@@ -11021,7 +11021,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 明确不做：opencode 第三家族交叉校验（Key 一次性用完即删，转可选触发项——换 judge / κ 掉到边缘 / 题库大扩容时再跑）；grg Qwen3.5 临时干跑（与被测模型同家族，GLM 已达标无必要）。
 - [198] 回填：a194836（PR #113）。
 
-## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit <待提交>
+## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit 16fc5ed（PR #109）
 
 ### 结论
 - **phase76-ui §5 第 1 条（`_redirect_savefig` 强制 `bbox_inches="tight"`、按字节契约变更）前提不成立，不做。** 不动 worker，PNG 字节不变，chart_fixtures 与视觉基线都不重取。「14」按根因修，并进 CHART_GUIDE。
@@ -11066,3 +11066,45 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - 冲突只有 `docs/DEVLOG.md`（两边都在末尾追加）。解法同上：保留 master 全部内容（含 [198]），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`ui/web/src/views/Shell.tsx` 与 #113 的改动不重叠，自动合并（本 PR 只动上传文案两处和 `checkFiles` 注释）。
   - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：冲突只有 `docs/DEVLOG.md`（两边都在末尾追加），保留 master 全部内容（含 [198] 回填 a194836 与新增 [199]），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍为 `c94c66aaf559`（#115 只动 docs），本 PR 仍为 `ded1326738a8`，全量 sha 仍 `f56543f9b457`。
+
+## [201] 2026-11-20 · 阶段 7.5 第 2 步：结果表与代码导出（phase75-assess §2 第 40 行） · commit <待提交>
+
+### 规则与验收
+- 导出的 .py 在**仓库外、不装 DataChat 的干净 venv**（只装 pandas / numpy / matplotlib / openpyxl）里重跑出与沙箱相同的 result。导出文件自带数据加载、`chart()`、`plt.savefig` 落盘。沙箱（`sandbox_worker.py:205-220`）会注入变量、重定向 savefig，所以在本机直接跑通不算数。
+
+### 改了什么
+- `app/tools/export.py`（新增）：
+  - `build_script` 生成独立 .py。头部写来源会话、问题、数据集文件名和 sha256。数据目录是脚本顶部常量。单表注入 `df`、多表注入 `dfs`，判据与沙箱一致。末尾打印 result。
+  - `unsafe_reasons` 做静态检查：代码含沙箱拦下的操作（文件读写、起进程等）时拒绝导出（422），避免把沙箱拦过的东西拿到沙箱外执行。
+  - `result_table` / `to_csv_bytes`（UTF-8 BOM）/ `to_xlsx_bytes`（文本保持文本，00123 不丢前导零）。
+- `app/tools/export_runtime.py`（新增）：嵌入导出脚本的运行时。读数规则与 `excel_io` / `dataset` 一致（表名 `文件名.sheet名`、隐藏表跳过、`-` 表头、文本保留），提供最小 `chart()`（只依赖 pandas + matplotlib，每张图一个 PNG），以及与 worker 相同的 savefig 重定向和收尾重存（`sandbox_worker.py:236-237`）。不 import app.*。源码原样嵌进导出文件，所以 `packaging/build_sidecar.py` 用 `--add-data` 把它作为数据文件带上（冻结包里只有字节码）。
+- `app/server/app.py`：
+  - `POST /messages/{id}/export/code` 只导出执行成功、带代码的助手消息。代码来源是 result_json 的 `code`，即最后一次成功执行的那段：工作流 `service.py:402`，ReAct `service.py:720`。每次执行都在新进程里从 load_data 重新读数据，所以单独这一段就能重现 result。
+  - `POST /messages/{id}/export/result?format=csv|xlsx`：result 不存库（`result.py:81` 只留 result_text），所以用同一段代码、同一份数据在沙箱里重跑一次（超时 60 s）。重跑的预览和库里 result_text 不一致时（随机数、当天日期等），如实返回 `matches_original=false`。
+  - 鉴权与 `/exports/png` 相同，写到同一个下载文件夹。不传 `--desktop` 时也可用，因为内容由后端生成，不接收前端字节。
+- `app/server/exports.py`：抽出 `save_file(export_dir, filename, data, suffix)`。`save_png` 改走它，文件名清洗、独占创建、重名编号的行为都不变。
+- `docs/sidecar-contract.md`：补充两个接口。`pytest.ini`：登记 `slow` marker。
+- 前端入口**本批不做**，留给 U3 结果卡的「导出」动作（phase76-ui §3 U3），避免与 U3 改结构时冲突。
+
+### 测试（`tests/test_export.py`，41 条，其中 7 条 slow）
+- 读数对照：`test_runtime_reads_perturb_xlsx_and_csv_like_datachat`、`test_runtime_reads_merged_report_like_datachat`、`test_runtime_reads_hidden_empty_multi_sheet_like_datachat`、`test_runtime_reads_directory_mix_like_datachat`、`test_runtime_constants_match_excel_io`。这几条把运行时读出的结果与 DataChat 的 `load_data` 逐值比对，用来防止两份读数逻辑漂移。另有 `test_runtime_source_has_no_app_import`、`test_runtime_shipped_as_data_in_sidecar_build`。
+- 生成与接口：`test_unsafe_code_is_flagged`、`test_build_script_comment_injection_and_no_app_import`、`test_csv_bytes_bom_and_values_verbatim`、`test_xlsx_bytes_text_stays_text`、`test_export_code_endpoint_writes_standalone_script`、`test_export_result_endpoint_csv_and_xlsx`、`test_export_result_reports_mismatch`、`test_export_endpoints_reject`、`test_export_dir_defaults_to_downloads_when_not_desktop` 等。
+- 干净 venv（slow）：`test_clean_venv_has_no_datachat` 先证明 `import app`、`import fastapi` 会失败，再跑 `test_clean_venv_csv_single`、`_multi_table_dfs`、`_xlsx_multi_sheet`、`_chart`、`_plt_savefig`、`_end_to_end_from_endpoint`，在仓库外目录运行，result 与沙箱逐值相同。装包时先 pip，失败则按依赖闭包从当前环境拷贝（离线可跑），可用 `DATACHAT_EXPORT_VENV=pip|copy` 指定。
+
+### 闸门（最后一次代码改动在 00:58 UTC，之后重跑；日志 `/workspace/work/logs/export_gate_*.log`、`export_slow_copy3.log`）
+| 段 | 结果 |
+|---|---|
+| pytest 主段（不含 test_eval_cases，`-k "not oracle"`） | 2011 passed，28 deselected，654 s |
+| test_eval_cases（不含 oracle） | 230 passed |
+| `-k test_oracle_pipeline_all_correct` | 2 passed，395 s |
+| test_export slow（拷贝装包） | 7 passed，118 s |
+| vitest / e2e | 前端没改，未跑 |
+
+### CI 补丁（11-20）
+- tests df49646（run 44658450556）在 Windows 上红了 6 条 `test_clean_venv_*`，报 `UnicodeEncodeError: 'charmap'`。原因：干净 venv 用 `-I` 运行，`-I` 会忽略 PYTHONIOENCODING/PYTHONUTF8，stdout 是管道，于是按 cp1252 写，导出脚本一打印中文就中断。这在英文 Windows 上把输出重定向到文件时也会真实发生。
+- 修法：`export_runtime.py` 把不是控制台的 stdout/stderr 改成 UTF-8；控制台（isatty）不动。
+- 新增 `test_runtime_prints_chinese_on_non_utf8_pipe`，用 PYTHONIOENCODING=cp1252 模拟这种情况。不加修复时这条测试红，加上后绿。`tests/test_export.py` 本地 42 passed（含 slow）。
+- 11-21 rebase：本 PR **叠在 #109（feat/m13-chart，ab3d8f5）上**，链 #109→#110→#114→A3，合并顺序同此；S 同意链尾 head 内网只跑一次回归。
+  - 冲突只有 `docs/DEVLOG.md`（都在末尾追加）。解法：保留 base 的全部内容（master 到 [198]，加 #109 的 `[待编号]` 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`。`packaging/build_sidecar.py` 与 #109 的 `--hidden-import openpyxl` 相邻，自动合并，两项都在。
+  - A 组 `code_sha12`：#109 head ab3d8f5 `ded1326738a8` → 本 PR `997e3217d054`（新增的 `app/tools/export.py`、`app/tools/export_runtime.py` 按 `app/tools/` 前缀归 A 组；`app/server/app.py`、`app/server/exports.py` 是 B 组）。全量 sha `f56543f9b457 → b3b8e89c3759`。
+- 11-21 rebase 到 e8ccfe3（#115 纯文档）：跟随 #109 新 head（691cbd9）重叠，只有 `docs/DEVLOG.md` 冲突，保留 base 全部内容（含 [198] 回填、[199] 与 #109 条目），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`，#109 仍 `ded1326738a8`，本 PR 仍 `997e3217d054`，全量 sha 仍 `b3b8e89c3759`。
