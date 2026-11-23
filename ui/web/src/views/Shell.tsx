@@ -3,14 +3,14 @@ import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell } from "../desktop";
 import { type Client, errText, formatSize } from "../client";
-import type { Agent, Dataset, DatasetDetail, KeyStatus, Session } from "../types";
+import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session } from "../types";
 import { DatasetView } from "./DatasetView";
 import { IconChat, IconGear, IconPlus, IconSidebar, IconSpark, IconTable, IconUpload } from "./icons";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
 import { createdSuffix, Dialog, MoreMenu, relTime, Topbar } from "./ui";
 
-type View = { kind: "home" } | { kind: "dataset"; id: string } | { kind: "session"; id: string } | { kind: "settings" };
+type View = { kind: "home" } | { kind: "dataset"; id: string; focus?: "notes" } | { kind: "session"; id: string } | { kind: "settings" };
 
 const isDict = (f: string) => /\.dict\.csv$/i.test(f);
 const stem = (f: string) => f.replace(/\.(csv|xlsx)$/i, "");
@@ -30,6 +30,10 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   const [uploaded, setUploaded] = useState<DatasetDetail | undefined>(); // 上传响应（带预览）
   // 读取失败的数据集（phase5 V2a §3.1）：列表接口不带 error，只在拿到详情（上传响应、打开详情）后知道
   const [failed, setFailed] = useState<Record<string, string>>({});
+  // 阶段 7.6 U2 数据资产卡：只用已经拿到的详情（上传响应、打开数据集页、点「剖析」）里的 profile。
+  // 列表接口不读文件，这里也不为侧栏逐个去读（F1.1「每个文件只读一遍」）；没拿到之前卡片写明「点剖析读取概要」。
+  const [profiles, setProfiles] = useState<Record<string, DatasetProfile>>({});
+  const [profiling, setProfiling] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false); // 窄屏：图标条点开的浮层侧栏
   const [collapsed, setCollapsed] = useState(false); // 宽屏下手动收起
   const [pending, setPending] = useState<File[]>([]); // 选好、等确认上传的文件（上传对话框）
@@ -73,7 +77,8 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   const go = (v: View) => (view.kind === "home" || view.kind === "session" ? setAnchor(view) : null, setView(v), setRailOpen(false));
   const backTo: View | null = !anchor ? null : anchor.kind === "session" && !sessions.some((s) => s.id === anchor.id) ? { kind: "home" } : anchor;
   const onBack = backTo ? () => go(backTo) : undefined;
-  const noteDetail = (d: DatasetDetail) =>
+  const noteDetail = (d: DatasetDetail) => (
+    d.profile ? setProfiles((p) => ({ ...p, [d.id]: d.profile! })) : undefined,
     setFailed((f) => {
       const has = d.id in f;
       if (d.error && f[d.id] !== d.error) return { ...f, [d.id]: d.error };
@@ -83,7 +88,15 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         return g;
       }
       return f;
-    });
+    })
+  );
+  // 「剖析」：GET /datasets/{id}（不带 rows）真实读一遍文件，拿回概要填进卡片；读坏了照旧进 failed
+  const profileDataset = (id: string) => (
+    setProfiling(id),
+    c.datasetProfile(id)
+      .then(noteDetail, (e) => setError(errText(e)))
+      .finally(() => setProfiling((x) => (x === id ? null : x)))
+  );
 
   const newSession = (datasetId: string, agent: Agent) =>
     c.createSession(datasetId, agent).then(
@@ -126,8 +139,11 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
             const tables = d.files.filter((f) => !isDict(f.filename.toLowerCase()));
             const dicts = d.files.length - tables.length;
             const active = activeDs === d.id;
+            const p = profiles[d.id];
+            const tableCount = p ? p.table_count : tables.length;
+            const fileName = tables.length === 1 ? tables[0].filename : "";
             return (
-              <li key={d.id}>
+              <li key={d.id} className={`ds-card${active ? " active" : ""}${err ? " failed" : ""}`} data-testid="asset-card">
                 <button type="button" className={`ds-row${active ? " active" : ""}${err ? " failed" : ""}`}
                   aria-current={view.kind === "dataset" && view.id === d.id ? "page" : undefined}
                   onClick={() => go({ kind: "dataset", id: d.id })}>
@@ -137,14 +153,45 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
                     {err ? <span className="ds-tag">读取失败</span> : active ? <span className="ds-tag">使用中</span> : null}
                   </span>
                   <span className="ds-meta" style={{ display: "block" }}>
-                    {err ? "打开查看原因" : `${tables.length} 个表${dicts ? " · 带字典" : ""}`}
+                    {err ? "打开查看原因" : `${tableCount} 个表${dicts ? " · 带字典" : ""}`}
                   </span>
                   {!err && tables.length > 1 ? (
                     <span className="ds-chips">
                       {tables.map((f) => <span key={f.filename} className="ds-chip">{stem(f.filename)}</span>)}
                     </span>
                   ) : null}
+                  {!err && fileName && fileName !== label[d.id] ? (
+                    <span className="ds-chips"><span className="ds-chip" title={fileName}>{fileName}</span></span>
+                  ) : null}
                 </button>
+                {err ? null : (
+                  <>
+                    {/* 阶段 7.6 U2：卡片上的每个数字都来自 GET /datasets/{id} 的 profile（u2-asset-card.test.tsx 钉住） */}
+                    <div className="ds-stats ds-meta" data-testid="asset-stats">
+                      {p ? (
+                        <>
+                          <span>{p.rows.toLocaleString()} 行 · {p.columns} 列 · {p.missing_columns ? `${p.missing_columns} 列有缺失` : "无缺失列"}</span>
+                          <span>{p.time_range ? `${p.time_range.min} ~ ${p.time_range.max}` : "没有日期列"}</span>
+                        </>
+                      ) : (
+                        <span>还没读取概要，点「剖析」</span>
+                      )}
+                    </div>
+                    <div className="ds-actions">
+                      <button type="button" className="link" aria-label={`剖析「${label[d.id]}」`} disabled={profiling === d.id}
+                        onClick={() => profileDataset(d.id)}>
+                        {profiling === d.id ? "剖析中…" : "剖析"}
+                      </button>
+                      <button type="button" className="link" aria-label={`就「${label[d.id]}」提问`} onClick={() => newSession(d.id, "workflow")}>
+                        提问
+                      </button>
+                      <button type="button" className="link" aria-label={`「${label[d.id]}」的口径导入导出`} title="口径与规则的导入、导出"
+                        onClick={() => go({ kind: "dataset", id: d.id, focus: "notes" })}>
+                        口径
+                      </button>
+                    </div>
+                  </>
+                )}
               </li>
             );
           })}
@@ -199,6 +246,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         {view.kind === "dataset" && (
           <DatasetView
             key={view.id}
+            focusNotes={view.focus === "notes"}
             c={c}
             id={view.id}
             initial={uploaded}

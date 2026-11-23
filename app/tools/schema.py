@@ -91,6 +91,66 @@ def describe_df(df: pd.DataFrame, n: int = 3) -> str:
     return data_block("\n".join(lines))
 
 
+# ---------------------------------------------------------------- 阶段 7.6 U2 数据资产卡的概要（只给界面，不进 prompt）
+
+# 日期形态：2024-01-05、2010/12/1 8:26、2017-09-19 09:45:35、2024.1.5、2024年1月5日。只认「年在前」，
+# 月日顺序有歧义的 01/05/2024 不认（宁可不给时间范围，也不给错的）。
+_DATE_TEXT = re.compile(r"^\s*(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?\s*$")
+DATE_SHARE = 0.95          # 采样的非空取值里日期形态到这个占比，才认为是日期列
+DATE_SAMPLE = 200          # 判定只看前 200 个非空取值；判定为日期列后，范围按全列算
+
+
+def _date_range(s: pd.Series):
+    """→ (最早, 最晚)，都是 YYYY-MM-DD；不是日期列返回 None。"""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        v = s.dropna()
+        return (v.min().strftime("%Y-%m-%d"), v.max().strftime("%Y-%m-%d")) if len(v) else None
+    if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_bool_dtype(s):
+        return None
+    v = s.dropna()
+    if not len(v):
+        return None
+    head = v.head(DATE_SAMPLE).astype(str)
+    if head.map(lambda x: bool(_DATE_TEXT.match(x))).mean() < DATE_SHARE:
+        return None
+    parts = pd.Series(v.unique()).astype(str).str.extract(_DATE_TEXT).dropna().astype(int)   # 按唯一值算，大表上快一个量级
+    y, m, d = parts[0], parts[1], parts[2]
+    ok = (m >= 1) & (m <= 12) & (d >= 1) & (d <= 31)
+    key = (y * 10000 + m * 100 + d)[ok]
+    if not len(key):
+        return None
+    fmt = lambda k: f"{k // 10000:04d}-{k // 100 % 100:02d}-{k % 100:02d}"   # noqa: E731
+    return fmt(int(key.min())), fmt(int(key.max()))
+
+
+def profile_df(df: pd.DataFrame) -> dict:
+    """数据资产卡用的单表概要：行数、列数与 describe_df 第一行同源（len(df)、len(df.columns)），
+    另加缺失列数（含任一真缺失值 NaN/None 的列；「未登记」这类哨兵词不算，那是 B65 注解的事）
+    和时间范围（第一个日期形态的列，按全列取最早 / 最晚，精确到日）。只给界面，不改 describe_df 的 prompt 文本。"""
+    out = {"rows": int(len(df)), "columns": int(len(df.columns)),
+           "missing_columns": int(df.isna().any().sum()) if len(df.columns) else 0, "time_range": None}
+    for c in df.columns:
+        r = _date_range(df[c])
+        if r:
+            out["time_range"] = {"column": clip(c, MAX_NAME_CHARS), "min": r[0], "max": r[1]}
+            break
+    return out
+
+
+def profile_dataset(tables: list) -> dict:
+    """[(表名, profile_df 的结果)] → 数据集级概要：表数、总行数、列数（各表之和）、缺失列数（各表之和）、
+    时间范围（各表时间范围的并集：最早的 min 到最晚的 max；没有任何日期列时为 None）。"""
+    ranges = [p["time_range"] for _, p in tables if p["time_range"]]
+    return {
+        "table_count": len(tables),
+        "rows": sum(p["rows"] for _, p in tables),
+        "columns": sum(p["columns"] for _, p in tables),
+        "missing_columns": sum(p["missing_columns"] for _, p in tables),
+        "time_range": {"min": min(r["min"] for r in ranges), "max": max(r["max"] for r in ranges)} if ranges else None,
+        "tables": [{"name": n, **p} for n, p in tables],
+    }
+
+
 def describe_csv(path: str, n: int = 3) -> str:
     """读取 CSV 并生成表结构描述（兼容旧调用）。"""
     return describe_df(read_csv(path), n=n)

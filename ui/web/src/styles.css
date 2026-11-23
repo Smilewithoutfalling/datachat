@@ -623,3 +623,14 @@ dialog.dialog::backdrop { background: rgba(0,0,0,.32); }
 .settings .check { display: flex; align-items: center; gap: 6px; font-size: var(--fs-aux); }
 .settings .check input { height: auto; }
 select:disabled option, option:disabled { color: #A0A0A5; }
+
+/* 阶段 7.6 U2 数据资产卡：侧栏数据集条目扩成卡片（1px 边框，无阴影）。字号走 U1 字阶：概要行沿用 .ds-meta（--fs-aux），
+   动作链接显式 --fs-aux（否则继承根字号 14，落在字阶外；--fs-read 只给聊天阅读区） */
+.ds-card { border: 1px solid var(--line-strong); border-radius: 10px; margin-top: 6px; padding-bottom: 8px; }
+.ds-card.active { background: #fff; }
+.ds-card.failed { border-color: transparent; padding-bottom: 0; }
+.ds-card .ds-row { margin-top: 0; border-color: transparent; }
+.ds-card .ds-row.active { background: none; }
+.ds-card.failed .ds-row { border-color: #F6D8D8; }
+.ds-stats { display: flex; flex-direction: column; gap: 2px; padding: 0 10px; margin: 0; }
+.ds-actions { display: flex; gap: 12px; padding: 6px 10px 0; font-size: var(--fs-aux); }

@@ -1,0 +1,28 @@
+{
+  "_doc": "阶段 7.6 U2 数据资产卡的双向契约：tests/test_u2_asset_card.py 用 csv 上传后断言 GET /datasets/{id} 的 profile 与这里逐字相等；ui/web/src/views/u2-asset-card.test.tsx 用这里的 profile 渲染卡片，断言卡片上的每个数字都在 profile 里。改一边必须改另一边。",
+  "filename": "门店销量.csv",
+  "csv": "日期,地区,销量,备注\n2024-01-05,华东,120,\n2024/2/1 08:30,华北,,促销\n2024.03.15,华南,90,\n2023-12-28,华东,75,退货\n2024-03-31,,60,\n",
+  "profile": {
+    "table_count": 1,
+    "rows": 5,
+    "columns": 4,
+    "missing_columns": 3,
+    "time_range": {
+      "min": "2023-12-28",
+      "max": "2024-03-31"
+    },
+    "tables": [
+      {
+        "name": "df",
+        "rows": 5,
+        "columns": 4,
+        "missing_columns": 3,
+        "time_range": {
+          "column": "日期",
+          "min": "2023-12-28",
+          "max": "2024-03-31"
+        }
+      }
+    ]
+  }
+}
