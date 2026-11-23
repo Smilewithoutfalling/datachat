@@ -27,7 +27,8 @@ def _rendered_codegen():
 def test_codegen_prompt_keeps_result_numeric():
     text = _rendered_codegen()
     assert "保持数值类型" in text
-    assert "0–1 的小数或 ×100 后的数值" in text
+    assert '题目说"百分比/百分数"时用 ×100 后的数值' in text   # 11-23 回归：corr_002 问百分比却给了 0.2230
+    assert "0–1 的小数或 ×100 后的数值均可" in text
     assert "f'{x:.2%}'" in text            # format 之后花括号原样出现，没被吞掉
     assert "格式化交给最终结论" in text
 
@@ -36,12 +37,14 @@ def test_reviewer_prompt_keeps_result_numeric():
     # reviewer 重写代码时「规则不变」，同一条约束也要在，否则修一轮就丢了
     assert "保持数值类型" in reviewer._PROMPT
     assert "不要格式化成带 '%' 的字符串" in reviewer._PROMPT
+    assert '题目说"百分比/百分数"时用 ×100 后的数值' in reviewer._PROMPT
 
 
 def test_react_system_keeps_result_numeric():
     system = _react_system()
     assert "result 里的数值答案（含 Series / 表里的数值列）保持数值类型" in system
     assert "f'{x:.2%}'" in system
+    assert "题目说「百分比/百分数」时用 ×100 后的数值" in system
     assert "格式化写进最终中文结论" in system
 
 

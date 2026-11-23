@@ -11254,3 +11254,11 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 | 文件 | 结果 |
 |---|---|
 | test_result_numeric 4、test_memory_p8 23、test_fixbatch1 13、test_fingerprint 32、test_eval_runner 25、test_react_loop 7、test_workflow_mocked 20、test_fake_llm 101、test_core_analyze 22 | 247 passed，0 failed。按约定没跑全量和 oracle |
+
+### 11-23 下午：内网回归（9274793）后补条件句
+- 回归（S 回贴，14:36–14:57）：nightly_gate GREEN，195/202，配对净退步 -1（退步 2，进步 3）；canary CLEAN 10/10。agg_009 通过，match=strict。
+- 退步 corr_002「各地区销售额占总销售额的百分比是多少？」：result 给 0.222997，gold 22.30。该题没开 `percent_equiv`（`app/eval/cases.py:200`），按 comparator 规则 12「题目明确要百分比时按原值比较」只认 ×100 刻度。根因是上一版措辞「0–1 的小数或 ×100 后的数值」任模型挑，问「百分比」时也挑了 0–1。
+- 退步 mul_012：本次 服饰 25.65 / 食品 24.78，gold 食品 25.18 / 服饰 24.45。数值本身就不同、排序也变了，不是刻度或格式问题，和这句约束没有直接关系；要看本次 result 和代码才能定性。条件句里顺带加了「要求保留几位小数时 round」，因为该题有这个要求。
+- 修法：三处约束改成条件句——题目说「百分比/百分数」时用 ×100 后的数值（写 22.30，不写 0.2230）；只说「占比/比例/增长率」时 0–1 或 ×100 均可；要求保留几位小数时 round。仍然禁止拼 `%` 字符串。agg_009 开着 `percent_equiv`，两种刻度都认，不受影响。
+- 哈希再次重立（旧值写在注释里）：off react_single `2ad082e9c02977d5 → d74d988dfa93cd02`、react_history `b4e012557418443b → ddb8615599bcb952`、workflow `e4f9c420904a3582 → 07461170ad5f0832`；state react_history `383f3ecc4a20f1e0 → 9836daaebbd665fc`、workflow_history `8ce5a093ac4584fd → 6cabdb836b86cec6`。
+- A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
