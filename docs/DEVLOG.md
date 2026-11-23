@@ -11228,3 +11228,29 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：master e8ccfe3 仍 `c94c66aaf559`；本条只改前端，与 A3 同为 `b32b00fd4e5d`，全量 sha `64707239f1f6`。
   - 本地闸门（日志 `/workspace/work/logs/chain2_u4_*.log`、`chain2_pytest.log`）：vitest 全量（node24，`--pool=threads --maxWorkers=2`）30 个文件 925 passed（A3 的 914 + 本条 11）；`tsc --noEmit` 0 错误；`npm run build`（tsc + vite build + check-dist）通过；eslint 0 警告；pytest（串行，相关文件）test_judge / test_judge_expand / test_nightly_gate / test_charts / test_chart_fixtures 124 passed。e2e 交给 CI。
 - 11-21 CI（45c9164，tests run 44884664870 的 web job）：vitest 925 passed；e2e `f4-starter.spec.ts` 3 条在 CI 上真的跑了、全过（「看看这份数据有什么」「找出异常值」「两期对比」各 ✓）；49 条里唯一红的是 `f4-visual` 视觉 11（240 像素），与 A3 同源（色板第 4 色），本条没有新的视觉差异。A3 已用 CI x64 actual 重取 11 号基线（1695da1），本条随之 rebase 到 1695da1（DEVLOG 冲突解法同上）。
+
+## [待编号] 2026-11-23 · result 保持数值（issue #118）· commit <待提交>
+worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网回归**（A 组变了，改的是送给模型的提示词）。
+
+### 现象与根因
+- 11-23 内网回归（83705c2）agg_009「各产品的总销量占比分别是多少？」答案 result 是 `"48.93%"` 这类字符串 Series，gold 是 `0.4893…`。`percent_equiv` 的 `_scale`（`app/eval/comparator.py:333`）只缩放数值，字符串返回 None，规则 12 接不住。数值本身是对的。
+- 查了 result 的生成和约束：三处模板只有「问多少给数值」（`app/nodes/codegen.py:24`、`app/nodes/reviewer.py:32`、`app/react_agent.py:251`），**没有任何一句要求数值保持数值类型**，也没提占比的写法；结果提取层 `app/core/result.py` 的 `format_result` 只做 `to_string()`/`str()` 给模型看，不做类型约束。问题里的「占比」把模型往人读格式上引，于是在 result 里直接 `f"{x:.2%}"`——提示词没拦，提取层也不管。
+
+### 修法：只做 a（提示词），不做 b（提取层还原）
+- `app/nodes/codegen.py:27`、`app/nodes/reviewer.py:32`、`app/react_agent.py:257-258` 各加一句：result 里的数值答案（含 Series / 表里的数值列）保持数值类型；占比、比例、增长率用 0–1 的小数或 ×100 后的数值，不要 `f'{x:.2%}'`、拼 `'%'` 把数值变字符串；百分号、千分位等格式化交给最终结论。reviewer 也加，因为它重写代码时「规则不变」，不加的话修一轮就丢约束。
+- 不做 b 的理由：(1) `"48.93%"` 还原成 48.93 还是 0.4893 本身有歧义，选哪个都在替模型补口径；(2) `app/core/` 是 A 组公共路径，所有题的 result 都过它，还原规则哪怕很保守也会改动展示给用户和 summarizer 的内容；(3) 这次的问题是约束缺失，不是提取层错，补约束是最小改动。若内网回归仍有 `%` 字符串，再按 issue 讨论保守的 b。
+- 没有任何题目 id 或具体数值的特判；`app/eval/` 一个文件都没动。
+
+### 哈希重立
+- `tests/test_memory_p8.py` 五个提示词哈希全部重立（旧值写在注释里）：原因只有上面那句提示词。off `react_single d92ac56752d710c0 → 2ad082e9c02977d5`、`react_history 12eb67995866e6fa → b4e012557418443b`、`workflow fd0b47816facfe40 → e4f9c420904a3582`；state `react_history 1c1d8bde2aa6d0c3 → 383f3ecc4a20f1e0`、`workflow_history 23f82db265846844 → 8ce5a093ac4584fd`。「off 与 state 单轮逐字节相同」仍成立（react_single、workflow 两档同值）。
+
+### 指纹
+- A 组 `code_sha12`（`code_fingerprint()["affects_results_sha256"]`）：master 29ad1bb `b32b00fd4e5d` → 本 PR `9a8601f116e2`（A 组变的是 `app/nodes/codegen.py`、`app/nodes/reviewer.py`、`app/react_agent.py`）。全量 sha `64707239f1f6 → 06d78ee88d41`。evalset / judge 指纹不动。
+
+### 新增测试
+- `tests/test_result_numeric.py`（4 条）：codegen 渲染后的模板、reviewer 模板、react system（`build_react_agent(..., out_system=)`）都含这条约束，`f'{x:.2%}'` 的花括号经 `.format` 后原样保留；三处都不含 `agg_009` / `48.93`。
+
+### 闸门（2026-11-23，aarch64 沙箱，串行，只跑相关文件；日志 `/workspace/work/logs/num_*.log`）
+| 文件 | 结果 |
+|---|---|
+| test_result_numeric 4、test_memory_p8 23、test_fixbatch1 13、test_fingerprint 32、test_eval_runner 25、test_react_loop 7、test_workflow_mocked 20、test_fake_llm 101、test_core_analyze 22 | 247 passed，0 failed。按约定没跑全量和 oracle |

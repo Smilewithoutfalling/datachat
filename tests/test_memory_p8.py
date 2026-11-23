@@ -47,12 +47,17 @@ FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
 # CHART_GUIDE，所以五个哈希都变；「off 与 state 单轮逐字节相同」仍然成立（react_single、workflow 两档同值）。
 # 旧值：off react_single b40fb9d3902f7be2 / react_history fc27585c3118b8e5 / workflow c87c495b73b05267；
 #       state react_history 0584ab68bbef4380 / workflow_history b566dc62d6c47413。
-BASELINE = {"react_single": "d92ac56752d710c0", "react_history": "12eb67995866e6fa", "workflow": "fd0b47816facfe40"}
+# 2026-11-23 issue #118 重立全部哈希：codegen / reviewer 模板与 react system 各加一句「result 里的数值答案保持数值类型，
+# 占比用 0–1 小数或 ×100 后的数值，不拼 '%' 字符串，格式化交给结论」（agg_009 把占比写成 "48.93%" 字符串）。只动了这句提示词；
+# 「off 与 state 单轮逐字节相同」仍然成立（react_single、workflow 两档同值）。
+# 旧值：off react_single d92ac56752d710c0 / react_history 12eb67995866e6fa / workflow fd0b47816facfe40；
+#       state react_history 1c1d8bde2aa6d0c3 / workflow_history 23f82db265846844。
+BASELINE = {"react_single": "2ad082e9c02977d5", "react_history": "b4e012557418443b", "workflow": "e4f9c420904a3582"}
 # 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
 # workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
-STATE_BASELINE = {"react_single": "d92ac56752d710c0", "react_history": "1c1d8bde2aa6d0c3",
-                  "workflow": "fd0b47816facfe40", "workflow_history": "23f82db265846844"}
+STATE_BASELINE = {"react_single": "2ad082e9c02977d5", "react_history": "383f3ecc4a20f1e0",
+                  "workflow": "e4f9c420904a3582", "workflow_history": "8ce5a093ac4584fd"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 
