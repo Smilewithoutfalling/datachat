@@ -11021,7 +11021,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
 - 明确不做：opencode 第三家族交叉校验（Key 一次性用完即删，转可选触发项——换 judge / κ 掉到边缘 / 题库大扩容时再跑）；grg Qwen3.5 临时干跑（与被测模型同家族，GLM 已达标无必要）。
 - [198] 回填：a194836（PR #113）。
 
-## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit <待提交>
+## [200] 2026-11-20 · M13 图表规则小批（phase76-ui §1、§5） · commit 16fc5ed（PR #109）
 
 ### 结论
 - **phase76-ui §5 第 1 条（`_redirect_savefig` 强制 `bbox_inches="tight"`、按字节契约变更）前提不成立，不做。** 不动 worker，PNG 字节不变，chart_fixtures 与视觉基线都不重取。「14」按根因修，并进 CHART_GUIDE。
@@ -11067,7 +11067,7 @@ Key 经 `.env` 交接（不进仓库，M03）。GLM-5.2（JD 网关）作 judge 
   - A 组 `code_sha12`：master a194836 `c94c66aaf559` → 本 PR `ded1326738a8`（#113 只改前端，不在 A 组，master 值未变；与 master 比 A 组仍只有 `app/tools/plotting.py` 有差异）。全量 sha `5623e20bcc68 → f56543f9b457`。
 - 11-21 rebase 到 e8ccfe3（#115 纯文档）：冲突只有 `docs/DEVLOG.md`（两边都在末尾追加），保留 master 全部内容（含 [198] 回填 a194836 与新增 [199]），本条目接在末尾，仍 `[待编号]` / `<待提交>`；代码文件无冲突。A 组 `code_sha12`：master e8ccfe3 仍为 `c94c66aaf559`（#115 只动 docs），本 PR 仍为 `ded1326738a8`，全量 sha 仍 `f56543f9b457`。
 
-## [待编号] 2026-11-20 · 阶段 7.5 第 2 步：结果表与代码导出（phase75-assess §2 第 40 行） · commit <待提交>
+## [201] 2026-11-20 · 阶段 7.5 第 2 步：结果表与代码导出（phase75-assess §2 第 40 行） · commit <待提交>
 
 ### 规则与验收
 - 导出的 .py 在**仓库外、不装 DataChat 的干净 venv**（只装 pandas / numpy / matplotlib / openpyxl）里重跑出与沙箱相同的 result。导出文件自带数据加载、`chart()`、`plt.savefig` 落盘。沙箱（`sandbox_worker.py:205-220`）会注入变量、重定向 savefig，所以在本机直接跑通不算数。
