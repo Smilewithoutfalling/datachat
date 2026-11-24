@@ -11319,7 +11319,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 11-23 视觉基线重取：CI（b4bb284，tests run 45121843302，web job 137517158148）49 条 e2e 里只有 f4-visual 视觉 11（230066 像素）和视觉 25（135507 像素）红，vitest 952 全过。逐张看了 artifact `playwright-results` 里的 actual / expected / diff：差异全部来自本条结果卡——卡头多了加粗的一句话结论和「✓ 全部可溯源」徽章，图卡下多了「换个口径 / 补一张图 / 导出」动作行，卡片因此变高约 105 px（11）/ 42 px（25），会话区照原逻辑滚到底，于是整卡上移（11 里用户气泡移出视口、标记浮层完整露出；25 里卡头滚到顶栏下）；柱图、标记浮层、控件行、输入区本身没有重叠、截断或空白，输入区仍不压卡片。25 顶部那块品红是 `.stepbar` 的 mask 按元素框画、不受滚动容器裁剪，盖在顶栏标题上，不是页面重叠。据此用这次 CI 的 x64 actual 重取 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`、`25-narrow-session-fake-linux.png` 两张（08、24 不涉及 ok 轮次，未动）。
 - CI（007a513）：tests 45136433804、sidecar 45136433729、desktop 45136433723 全 success。11-23 S 同意合并。下一批：一句话结论与正文第一句去重；后端 key_numbers（A 组，需回归）。
 
-## [待编号] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：方案 · commit <待提交>
+## [207] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：方案 · commit <合并后回填>（PR #124）
 
 只有文档，不改代码。新增 `docs/roadmap/phase76-u3u5.md`，同时回填 [206] 的 SHA（d84363c）。
 
@@ -11328,4 +11328,4 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - U5 会话标题：新文件 `app/server/titles.py`，规则是 jieba.posseg + `METRIC_MARKERS`（只 import），取不到时第一个分句截 12 字。只在标题为空时生成；清空标题等于还原自动标题，侧栏与会话页统一；同一数据集重名追加序号；前端改读 `X-Session-Title` 响应头；sidecar 自检加 posseg 探测。
 - 三件都不碰 A 组（`app/server/`、`app/sidecar.py` 属 B，见 `fingerprint.py:136,139`），不改提示词，P8 哈希不变，按 `phase75-assess.md:75` 不需要内网回归。
 - 2026-11-24 S 拍板：7 条待定项全部按推荐执行。另有补充：`app.py:976` 后新加的调用行也要在 `test_inject_check.py` 里按字面钉住。
-- 编号：评测侧 PR #123 已占 [207]。本条合并前 fetch，按顺序接号（预计 [208]）。
+- 编号：11-24 合并前 fetch，master 仍是 d84363c，评测侧 #123 尚未合并。本条先合并，取 [207]；按「后合者 rebase 接号」，#123 改为 [208]。
