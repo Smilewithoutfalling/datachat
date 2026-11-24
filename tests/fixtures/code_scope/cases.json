@@ -1,0 +1,30 @@
+{
+  "contexts": {
+    "single": {"columns": {"": ["date", "region", "product", "units", "price", "order_id"]}, "multi": false},
+    "multi": {"columns": {"orders": ["order_id", "user_id", "amount", "status"], "users": ["user_id", "city"]}, "multi": true}
+  },
+  "cases": [
+    {"id": "same_code", "ctx": "single", "before": "result = df[df['region'] == '华东']['units'].sum()", "after": "result = df[df['region'] == '华东']['units'].sum()"},
+    {"id": "alias_refactor", "ctx": "single", "before": "result = df[df['region'] == '华东']['units'].sum()", "after": "x = df[df['region'] == '华东']\nresult = int(x['units'].sum())"},
+    {"id": "typo_fixed", "ctx": "single", "before": "result = df.groupby('regin')['units'].sum()", "after": "result = df.groupby('region')['units'].sum()"},
+    {"id": "column_added", "ctx": "single", "before": "result = df['units'].sum()", "after": "result = (df['units'] * df['price']).sum()"},
+    {"id": "column_removed", "ctx": "single", "before": "result = df.groupby('region')['units'].sum()", "after": "result = df['units'].sum()"},
+    {"id": "filter_value_changed", "ctx": "single", "before": "result = df[df['region'] == '华东']['units'].sum()", "after": "result = df[df['region'] == '华东区']['units'].sum()"},
+    {"id": "filter_removed", "ctx": "single", "before": "result = df[df.units > 0].units.mean()", "after": "result = df.units.mean()"},
+    {"id": "filter_op_changed", "ctx": "single", "before": "result = len(df[df['region'] == '华东'])", "after": "result = len(df[df['region'] != '华东'])"},
+    {"id": "query_value_changed", "ctx": "single", "before": "result = df.query('units >= 100')['price'].mean()", "after": "result = df.query('units >= 50')['price'].mean()"},
+    {"id": "isin_changed", "ctx": "single", "before": "result = df[df['product'].isin(['A', 'B'])]['units'].sum()", "after": "result = df[df['product'].isin(['A'])]['units'].sum()"},
+    {"id": "str_contains_changed", "ctx": "single", "before": "result = df[df['region'].str.contains('华')]['units'].sum()", "after": "result = df[df['region'].str.startswith('华')]['units'].sum()"},
+    {"id": "loc_mask_column", "ctx": "single", "before": "result = df.loc[df['units'] > 10, 'price'].mean()", "after": "result = df.loc[df['units'] > 10, 'price'].median()"},
+    {"id": "named_agg", "ctx": "single", "before": "result = df.groupby('region').agg(total=('units', 'sum'))", "after": "result = df.groupby('region').agg({'units': 'sum', 'price': 'mean'})"},
+    {"id": "two_typos_three_added", "ctx": "single", "before": "result = df.groupby('regin')['unit'].sum()", "after": "result = df.groupby(['region', 'product'])['units'].sum()"},
+    {"id": "multi_merge_add_city", "ctx": "multi", "before": "o = dfs['orders']\nresult = o.groupby('user_id')['amount'].sum()", "after": "m = dfs['orders'].merge(dfs['users'], on='user_id')\nresult = m.groupby('city')['amount'].sum()"},
+    {"id": "multi_bad_table_fixed", "ctx": "multi", "before": "result = dfs['order'][dfs['order']['status'] == 'paid']['amount'].sum()", "after": "result = dfs['orders'][dfs['orders']['status'] == 'paid']['amount'].sum()"},
+    {"id": "multi_filter_value_changed", "ctx": "multi", "before": "o = dfs['orders']\nresult = o[o['status'] == 'Paid']['amount'].sum()", "after": "o = dfs['orders']\nresult = o[o['status'] == 'paid']['amount'].sum()"},
+    {"id": "parse_fail_before", "ctx": "single", "before": "按地区，求和", "after": "result = 1"},
+    {"id": "parse_fail_after", "ctx": "single", "before": "result = 1", "after": "result = ("},
+    {"id": "not_code_state", "ctx": "single", "before": "x", "after": "y", "state": {"not_code": true}},
+    {"id": "truncated_state", "ctx": "single", "before": "x = df[", "after": "result = 1", "state": {"truncated": true}},
+    {"id": "imports_and_names", "ctx": "single", "before": "import math\nresult = math.sqrt(df['units'].sum())", "after": "import json\nresult = eval('1') + df['units'].sum()"}
+  ]
+}

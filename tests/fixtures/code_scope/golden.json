@@ -1,0 +1,1545 @@
+[
+ {
+  "after": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "same_code",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "",
+   "status": "ok",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "region"
+     ],
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df",
+     "int"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "alias_refactor",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "",
+   "status": "ok",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "regin"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": [
+     "regin"
+    ]
+   }
+  },
+  "id": "typo_fixed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [
+     "region"
+    ],
+    "fixed_missing": [
+     "regin"
+    ]
+   },
+   "reason": "把不存在的列改成了：region",
+   "status": "ok",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "price"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "column_added",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [
+     "price"
+    ],
+    "columns_removed": []
+   },
+   "reason": "修复改了口径（本步只检出）：列：+price",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "column_removed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [],
+    "columns_removed": [
+     "region"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：列：-region",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "region == '华东区'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东区'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "filter_value_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "region == '华东区'"
+    ],
+    "filters_removed": [
+     "region == '华东'"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[region == '华东区'] -[region == '华东']",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "units > 0"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [
+     "units > 0"
+    ],
+    "missing": []
+   }
+  },
+  "id": "filter_removed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [],
+    "filters_removed": [
+     "units > 0"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：-[units > 0]",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "region != '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df",
+     "len"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region"
+    ],
+    "filters": [
+     "region != '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "region == '华东'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df",
+     "len"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region"
+    ],
+    "filters": [
+     "region == '华东'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "filter_op_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "region != '华东'"
+    ],
+    "filters_removed": [
+     "region == '华东'"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[region != '华东'] -[region == '华东']",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "units >= 50"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "price"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price"
+    ],
+    "filters": [
+     "units >= 50"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "units >= 100"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "price"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price"
+    ],
+    "filters": [
+     "units >= 100"
+    ],
+    "missing": []
+   }
+  },
+  "id": "query_value_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "units >= 50"
+    ],
+    "filters_removed": [
+     "units >= 100"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[units >= 50] -[units >= 100]",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "product isin ['A']"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "product"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "product",
+     "units"
+    ],
+    "filters": [
+     "product isin ['A']"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "product isin ['A', 'B']"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "product"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "product",
+     "units"
+    ],
+    "filters": [
+     "product isin ['A', 'B']"
+    ],
+    "missing": []
+   }
+  },
+  "id": "isin_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "product isin ['A']"
+    ],
+    "filters_removed": [
+     "product isin ['A', 'B']"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[product isin ['A']] -[product isin ['A', 'B']]",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "region str.startswith '华'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region str.startswith '华'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "region str.contains '华'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [
+     "region str.contains '华'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "str_contains_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "region str.startswith '华'"
+    ],
+    "filters_removed": [
+     "region str.contains '华'"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[region str.startswith '华'] -[region str.contains '华']",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "units > 10"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "price"
+     ],
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price",
+     "units"
+    ],
+    "filters": [
+     "units > 10"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "units > 10"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "price"
+     ],
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price",
+     "units"
+    ],
+    "filters": [
+     "units > 10"
+    ],
+    "missing": []
+   }
+  },
+  "id": "loc_mask_column",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "",
+   "status": "ok",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "price"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "price",
+     "region",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ]
+    ],
+    "created": [
+     "total"
+    ],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "region",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "named_agg",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [
+     "price"
+    ],
+    "columns_removed": []
+   },
+   "reason": "修复改了口径（本步只检出）：列：+price",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ],
+     [
+      "",
+      "region"
+     ],
+     [
+      "",
+      "product"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "product",
+     "region",
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "unit"
+     ],
+     [
+      "",
+      "regin"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": [
+     "regin",
+     "unit"
+    ]
+   }
+  },
+  "id": "two_typos_three_added",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [
+     "product",
+     "region",
+     "units"
+    ],
+    "columns_removed": []
+   },
+   "reason": "修复改了口径（本步只检出）：列：+product +region +units",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "orders",
+      "user_id"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "user_id"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "orders",
+      "amount"
+     ],
+     [
+      "orders",
+      "user_id"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "amount",
+     "user_id"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "multi_merge_add_city",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "columns_added": [],
+    "columns_removed": [
+     "amount"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：列：-amount",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "status == 'paid'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "orders",
+      "amount"
+     ],
+     [
+      "orders",
+      "status"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "amount",
+     "status"
+    ],
+    "filters": [
+     "status == 'paid'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "status == 'paid'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [
+     "order",
+     "order"
+    ],
+    "columns": [
+     [
+      "order",
+      "amount"
+     ],
+     [
+      "order",
+      "status"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "amount",
+     "status"
+    ],
+    "filters": [
+     "status == 'paid'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "multi_bad_table_fixed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "",
+   "status": "ok",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [
+    "status == 'paid'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "orders",
+      "amount"
+     ],
+     [
+      "orders",
+      "status"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "amount",
+     "status"
+    ],
+    "filters": [
+     "status == 'paid'"
+    ],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [
+    "status == 'Paid'"
+   ],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "orders",
+      "amount"
+     ],
+     [
+      "orders",
+      "status"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "dfs"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [
+     "amount",
+     "status"
+    ],
+    "filters": [
+     "status == 'Paid'"
+    ],
+    "missing": []
+   }
+  },
+  "id": "multi_filter_value_changed",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {
+    "filters_added": [
+     "status == 'paid'"
+    ],
+    "filters_removed": [
+     "status == 'Paid'"
+    ]
+   },
+   "reason": "修复改了口径（本步只检出）：过滤条件：+[status == 'paid'] -[status == 'Paid']",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [],
+    "created": [],
+    "free_names": [],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": null,
+   "refs": null,
+   "scope": null
+  },
+  "id": "parse_fail_before",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "修复前的代码无法解析，无从比较",
+   "status": "not_checked",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": null,
+   "refs": null,
+   "scope": null
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [],
+    "created": [],
+    "free_names": [],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "parse_fail_after",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "修复后的代码无法解析",
+   "status": "fail",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": false,
+    "bad_tables": [],
+    "columns": [],
+    "created": [],
+    "free_names": [
+     "y"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": false,
+    "bad_tables": [],
+    "columns": [],
+    "created": [],
+    "free_names": [
+     "x"
+    ],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "not_code_state",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "修复前不是完整代码，无从比较",
+   "status": "not_checked",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [],
+    "created": [],
+    "free_names": [],
+    "imports": []
+   },
+   "scope": {
+    "columns": [],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": null,
+   "refs": null,
+   "scope": null
+  },
+  "id": "truncated_state",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "修复前不是完整代码，无从比较",
+   "status": "not_checked",
+   "step": 1
+  }
+ },
+ {
+  "after": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df",
+     "eval"
+    ],
+    "imports": [
+     [
+      "json",
+      false
+     ]
+    ]
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "before": {
+   "filters": [],
+   "refs": {
+    "assigns_result": true,
+    "bad_tables": [],
+    "columns": [
+     [
+      "",
+      "units"
+     ]
+    ],
+    "created": [],
+    "free_names": [
+     "df"
+    ],
+    "imports": [
+     [
+      "math",
+      false
+     ]
+    ]
+   },
+   "scope": {
+    "columns": [
+     "units"
+    ],
+    "filters": [],
+    "missing": []
+   }
+  },
+  "id": "imports_and_names",
+  "verdict": {
+   "contract": "reviewer.scope",
+   "details": {},
+   "reason": "",
+   "status": "ok",
+   "step": 1
+  }
+ }
+]
