@@ -23,7 +23,13 @@ model 名语法（解析器严格，见 parse_model）：
       fail-echocut-<code> 同上，但只回显问题的前 2/3（≥12 字），模拟网关截断 body 后的半句回显
       slow-<N>s   每一次调用都先睡 N 秒（把事件拉开，测增量渲染）
       tokens-<N>  同 ok，但每一次调用的 usage 报 prompt_tokens=N、completion_tokens=5（V2d 单轮预算 e2e）。不带 @step。
-    step：plan | codegen | fix | answer（工作流）、act | final（ReAct；步数到顶 / 超预算的强制收尾调用也认作 final，
+      replan-<kind> 阶段 7.5 第 3 步修复回路（REPLAN 边与口径闸）。不带 @step。第一版代码一律引用不存在的列（KeyError），
+                  replan 之后的 codegen 认 REPLAN_PLAN（计划原文进了 codegen prompt），无状态：
+        replan-scope   reviewer 的修复加了一个过滤条件（改口径）→ 口径闸拒收 → replan → 换思路的代码成功
+        replan-exhaust reviewer 每次交回同口径、仍然报错的代码 → 次数用尽 → replan → 成功
+        replan-twice   replan 之后的代码和修复也都报错 → 每轮只 replan 一次，最后带「换了一种思路仍然没能算出来」收尾
+        超预算时不 replan：用 replan-scope 配 DATACHAT_TOKEN_BUDGET（每次调用 usage 15，见 tests/test_fake_llm.py）
+    step：plan | codegen | fix | replan | answer（工作流；replan = 第 3 步的重新规划，planner prompt 末尾带「上一次的尝试」）、act | final（ReAct；步数到顶 / 超预算的强制收尾调用也认作 final，
       靠 MARK_FINALIZE）
       不写 @step 时目标调用是"第一次调用"：工作流的 plan、ReAct 的 act（无状态可判定，不需要计数）。
     设置页「测试连接」（阶段 5 收尾 C）：请求只有一条 user 消息、内容正好是 MARK_PING（= app/core/llm.py 的 PING_MESSAGE）
@@ -62,9 +68,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import urlsplit
 
+from app.nodes.planner import REPLAN_MARK
 from app.tools.charts import KINDS
 
-WORKFLOW_STEPS = ("plan", "codegen", "fix", "answer")
+WORKFLOW_STEPS = ("plan", "codegen", "fix", "replan", "answer")
 REACT_STEPS = ("act", "final")
 PING_STEPS = ("ping",)
 PROBE_STEPS = ("probe",)
@@ -97,6 +104,14 @@ def chart_code(kind: str) -> str:
             f"cat = [c for c in df.columns if c not in num]\n"
             f"chart({kind!r}, df, {xy}, title={'fake ' + kind!r})\n" + CODE)
 FAIL_ANSWER = "（fake）没能得出结果。"
+
+# ------------------------------------------------------------ 阶段 7.5 第 3 步：replan-<kind>
+REPLAN_KINDS = ("scope", "exhaust", "twice")
+REPLAN_PLAN = "（fake）换一种思路：直接数行数。"
+# 第一版代码：引用一个任何 CSV 都没有的列 → KeyError（executor 报错，进 reviewer）
+REPLAN_BAD_CODE = "result = int(df['__fake_missing__'].sum())"
+# replan-scope 的修复：多了一个过滤条件（列 __fake_flag__ == 1）→ 口径闸判「改了过滤条件」拒收
+REPLAN_SCOPE_FIX = "result = int(len(df[df['__fake_flag__'] == 1]))"
 
 # ------------------------------------------------------------ F3 第二步：注入载荷（gen_ui_types 导出给前端，前端不另写）
 # 每条都短于 charts.NAME_MAX，不会被截断。P4 / P5 不是代码执行面，测的是 ECharts 会不会把用户字符串当模板 / 富文本解析。
@@ -157,6 +172,7 @@ MARK_REACT = "你是一个数据分析智能体"
 MARK_PLAN = "你是数据分析规划助手"
 MARK_FIX = "之前生成的 pandas 代码执行出错了，请修正它"
 MARK_CODEGEN = "根据分析计划写一段 pandas 代码"
+MARK_REPLAN = REPLAN_MARK   # 第 3 步 replan：planner prompt 末尾追加的段落标题（app/nodes/planner.py）
 MARK_ANSWER_OK = "根据分析结果，用中文简洁、直接地回答用户问题"
 MARK_ANSWER_FAIL = "分析未能成功完成"
 MARK_FINALIZE = "工具调用次数已经用完"   # service.py FINALIZE_PROMPT（强制收尾，V2d 起超预算也走它）
@@ -172,10 +188,10 @@ class FakeError(Exception):
 
 @dataclass(frozen=True)
 class Scenario:
-    kind: str                    # ok | notools | hang | fail | slow | chart | inject | tokens
+    kind: str                    # ok | notools | hang | fail | slow | chart | inject | tokens | replan
     value: int = 0               # 秒数或 HTTP 状态码
     step: Optional[str] = None   # 目标步骤；None = 第一次调用
-    chart: Optional[str] = None  # chart / inject 场景的图型（inject 另有 "error"）
+    chart: Optional[str] = None  # chart / inject 场景的图型（inject 另有 "error"）；replan 场景的 kind
     echo: Optional[str] = None   # fail 场景的回显方式：None | "echo" | "echocut"（T11）
 
     def targets(self, agent: str, step: str) -> bool:
@@ -186,6 +202,7 @@ class Scenario:
 
 _CHART_RE = re.compile(r"^chart-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _INJECT_RE = re.compile(r"^inject-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
+_REPLAN_RE = re.compile(r"^replan-(?P<kind>[a-z]+)(?:@(?P<step>[a-z]*))?$")
 _MODEL_RE = re.compile(r"^(?P<kind>ok|notools|hang|fail|slow|tokens)(?:-(?P<echo>echo|echocut))?"
                        r"(?:-(?P<val>\d+)(?P<unit>s?))?(?:@(?P<step>[a-z]+))?$")
 
@@ -205,6 +222,13 @@ def parse_model(name: str) -> Scenario:
         if j["step"] is not None:
             raise FakeError(f"inject 作用于写代码的那一步，不带 @step：{name!r}")
         return Scenario("inject", chart=j["kind"])
+    r = _REPLAN_RE.match(name or "")
+    if r:
+        if r["kind"] not in REPLAN_KINDS:
+            raise FakeError(f"未知 replan 场景 {r['kind']!r}：可选 {', '.join(REPLAN_KINDS)}")
+        if r["step"] is not None:
+            raise FakeError(f"replan 场景作用于整条链路，不带 @step：{name!r}")
+        return Scenario("replan", chart=r["kind"])
     m = _MODEL_RE.match(name or "")
     if not m:
         raise FakeError(f"无法解析 model 名 {name!r}：语法是 <ok|hang-Ns|fail-CODE|slow-Ns|chart-KIND|inject-KIND>[@step]")
@@ -272,6 +296,8 @@ def recognize(messages: list, tools=None) -> tuple[str, str]:
         if MARK_FINALIZE in whole:
             return "react", "final"
         return "react", ("final" if messages[-1].get("role") == "tool" else "act")
+    if MARK_PLAN in whole and MARK_REPLAN in whole:
+        return "workflow", "replan"
     for mark, step in ((MARK_PLAN, "plan"), (MARK_FIX, "fix"), (MARK_CODEGEN, "codegen"),
                        (MARK_ANSWER_OK, "answer"), (MARK_ANSWER_FAIL, "answer")):
         if mark in whole:
@@ -287,6 +313,22 @@ def question_of(agent: str, messages: list) -> str:
     whole = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
     m = re.search(r"用户问题：(.*)", whole)
     return m.group(1).strip() if m else ""
+
+
+def replan_reply(kind: str, step: str, messages: list) -> dict:
+    """replan-<kind> 的剧本（只走工作流）。靠 prompt 内容区分 replan 前后，不计数。"""
+    whole = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
+    if step == "plan":
+        return {"role": "assistant", "content": PLAN}
+    if step == "replan":
+        return {"role": "assistant", "content": REPLAN_PLAN}
+    if step == "codegen":
+        good = REPLAN_PLAN in whole and kind != "twice"
+        return {"role": "assistant", "content": f"```python\n{CODE if good else REPLAN_BAD_CODE}\n```"}
+    if step == "fix":
+        code = REPLAN_SCOPE_FIX if kind == "scope" else REPLAN_BAD_CODE
+        return {"role": "assistant", "content": f"```python\n{code}\n```"}
+    return {"role": "assistant", "content": FAIL_ANSWER if MARK_ANSWER_FAIL in whole else ANSWER}
 
 
 def reply_for(agent: str, step: str, messages: list, chart: Optional[str] = None, inject: bool = False,
@@ -344,6 +386,11 @@ def core(model: str, messages, tools=None, *, stream=False, sleep=time.sleep):
                         "invalid_request_error", None)
             text += f"：{q}" if sc.echo == "echo" else f'：{{"content":"{q[:len(q) * 2 // 3]}'
         return sc.value, None, text, "fake_failure", None
+    if sc.kind == "replan":
+        if agent != "workflow":
+            code, text, typ = _fake_error(FakeError("replan 场景只属于工作流链路"))
+            return code, None, text, typ, None
+        return 200, replan_reply(sc.chart, step, messages), None, None, (10, 5)
     msg = reply_for(agent, step, messages, sc.chart, sc.kind == "inject", sc.kind == "notools")
     usage = (sc.value, 5) if sc.kind == "tokens" else (10, 5)
     return 200, msg, None, None, usage

@@ -32,11 +32,20 @@ def _is_inf_scalar(v) -> bool:
     return isinstance(v, (float, np.floating)) and math.isinf(v)
 
 
+EMPTY_COLS = "结果是空表（0 列）"
+EMPTY_ROWS = "结果是空的（0 行）"
+
+
+def is_empty_issue(issue: str) -> bool:
+    """sanity_issue 是不是「结果为空」（0 行 / 0 列，含 dict 结果里某一项为空）。第 3 步 S3-2 口径闸的字面量豁免只在这时开。"""
+    return bool(issue) and (EMPTY_ROWS in issue or EMPTY_COLS in issue)
+
+
 def _frame_issue(obj) -> str | None:
     if isinstance(obj, pd.DataFrame) and obj.shape[1] == 0:
-        return "结果是空表（0 列）"
+        return EMPTY_COLS
     if len(obj) == 0:
-        return "结果是空的（0 行）"
+        return EMPTY_ROWS
     try:
         if obj.isna().all() if isinstance(obj, pd.Series) else bool(obj.isna().all().all()):
             return "结果里的值全是空值（NaN）"
@@ -58,7 +67,7 @@ def _one(v) -> str | None:
     if isinstance(v, (pd.DataFrame, pd.Series)):
         return _frame_issue(v)
     if isinstance(v, pd.Index):
-        return "结果是空的（0 行）" if len(v) == 0 else None
+        return EMPTY_ROWS if len(v) == 0 else None
     if _is_nan_scalar(v):
         return "结果是空值（NaN）"
     if _is_inf_scalar(v):

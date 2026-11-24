@@ -23,7 +23,7 @@ export type Result = {
   [k: string]: unknown;
 };
 export type Ev =
-  | { type: "plan"; seq: number; data: { text: string } }
+  | { type: "plan"; seq: number; data: { text: string; source?: string } } // 阶段 7.5 第 3 步：replan 时 source="replan"
   | { type: "code"; seq: number; data: { code: string; source: string; attempt: number; thought?: string } }
   | {
       type: "exec";
@@ -110,6 +110,16 @@ export function outcome(t: Turn): Outcome {
 export function answerText(t: Turn): string {
   if (t.status !== "ok") return "";
   return t.result?.answer || (t.events.find((e) => e.type === "answer") as Extract<Ev, { type: "answer" }> | undefined)?.data.text || "";
+}
+
+// ---------------------------------------------------------------- 阶段 7.5 第 3 步：两版计划（docs/roadmap/phase75-step3.md §4）
+/** 后端 replan（修复回路失败后带着失败原因重新规划）复用 plan 事件，带 source="replan"。 */
+export const isReplan = (ev: Ev): boolean => ev.type === "plan" && ev.data.source === "replan";
+/** 计划块的标题：第一版「分析计划」，重新规划的那版「重新规划」。 */
+export const planLabel = (ev: Ev): string => (isReplan(ev) ? "重新规划" : "分析计划");
+/** 本轮的所有计划，按到达顺序（工作流最多两版：原计划 + 一次 replan）。 */
+export function plans(t: Turn): { text: string; label: string; replan: boolean }[] {
+  return t.events.flatMap((e) => (e.type === "plan" ? [{ text: e.data.text, label: planLabel(e), replan: isReplan(e) }] : []));
 }
 
 // ---------------------------------------------------------------- F4 迭代 V2a：步骤条与完成度（phase5 V2a §2.3、§3.2）

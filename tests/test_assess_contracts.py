@@ -211,7 +211,9 @@ def test_summarizer_grounding_fail():
 
 
 def test_check_dispatch_covers_every_node():
-    assert set(C.CONTRACTS) == {"planner", "codegen", "executor", "reviewer", "summarizer"}
+    # 第 3 步 S3-3：replan 节点按 planner 契约检查（同两条函数）
+    assert set(C.CONTRACTS) == {"planner", "codegen", "executor", "reviewer", "replan", "summarizer"}
+    assert C.CONTRACTS["replan"] == C.CONTRACTS["planner"]
     vs = C.check("codegen", {}, {"code": "result = df['units'].sum()"}, CTX)
     assert [v.contract for v in vs] == ["codegen.parse", "codegen.columns", "codegen.result",
                                          "codegen.imports", "codegen.names"]

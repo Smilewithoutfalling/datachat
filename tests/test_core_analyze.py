@@ -10,6 +10,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.core import AnalysisResult, LLMConfig, analyze
 from app.core.testing import ScriptedChatModel, prompt_text
+from app.nodes.summarizer import REPLAN_FAILED_PREFIX
 
 FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)   # 退避 0 秒，测试不真睡
 
@@ -76,9 +77,12 @@ def test_workflow_reviewer_fix_recorded(sample_path):
 
 def test_workflow_execution_failure(sample_path):
     bad = "result = df['nope']"
-    res = analyze(sample_path, "总销量", chat_model=wf_model([bad], fixes=[bad] * 3), llm_config=FAST)
+    # 阶段 7.5 第 3 步：reviewer 用尽 → replan 一次（再 codegen 一次、reviewer 再给 1 次）→ 仍失败才收尾
+    res = analyze(sample_path, "总销量", chat_model=wf_model([bad, bad], fixes=[bad] * 4), llm_config=FAST)
     assert not res.ok and res.error_kind == "execution" and not res.executed
-    assert res.attempts == 3 and res.result is None and "KeyError" in res.error
+    assert res.attempts == 4 and res.result is None and "KeyError" in res.error
+    assert res.error.startswith(REPLAN_FAILED_PREFIX)
+    assert [s.name for s in res.steps].count("replan") == 1
 
 
 def test_workflow_llm_timeout_is_captured_not_raised(sample_path):
@@ -98,9 +102,9 @@ def test_workflow_chart(sample_path):
 
 def test_max_attempts_beyond_default_recursion_limit(sample_path):
     bad = "result = df['nope']"
-    res = analyze(sample_path, "总销量", chat_model=wf_model([bad], fixes=[bad] * 15),
+    res = analyze(sample_path, "总销量", chat_model=wf_model([bad, bad], fixes=[bad] * 16),
                   llm_config=FAST, max_attempts=15)
-    assert res.error_kind == "execution" and res.attempts == 15
+    assert res.error_kind == "execution" and res.attempts == 16      # 15 次修复 + replan 之后的 1 次
 
 
 # ------------------------------------------------------------------ 失败前置条件

@@ -21,7 +21,10 @@ def _react_system():
 
 
 def _rendered_codegen():
-    return codegen._PROMPT.format(schema="", data_access="", field_notes="", question="", plan="", chart_guide="")
+    # 阶段 7.5 第 3 步 S3-1：模板多了 {sandbox_lines}（能力对象渲染）与 {result_var}，按 generate_code 的取法补上
+    from app.tools.sandbox_caps import CAPS, prompt_lines
+    return codegen._PROMPT.format(schema="", data_access="", field_notes="", question="", plan="", chart_guide="",
+                                  sandbox_lines=prompt_lines(False), result_var=CAPS.result_var)
 
 
 def test_codegen_prompt_keeps_result_numeric():

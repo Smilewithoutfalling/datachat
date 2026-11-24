@@ -1,5 +1,7 @@
 import generated from "./generated/events.json";
-import { answerText, emptyTurn, type Ev, MESSAGE_STATUSES, MESSAGES, outcome, reduce, replay, settle } from "./turn";
+import {
+  answerText, emptyTurn, type Ev, isReplan, MESSAGE_STATUSES, MESSAGES, outcome, planLabel, plans, reduce, replay, settle, steps,
+} from "./turn";
 import type { Message } from "./types";
 
 const plan: Ev = { type: "plan", seq: 0, data: { text: "计划" } };
@@ -70,4 +72,41 @@ test("error 没有 result（流异常 stream_aborted）：只显示 content；�
 test("每个消息状态都有明确的终止原因分支（不落进默认分支）", () => {
   const kinds = MESSAGE_STATUSES.map((s) => outcome(replay(msg({ status: s, result: s === "ok" ? okResult : null }))).kind);
   expect(kinds).toEqual(["running", "ok", "error", "cancelled", "interrupted"]);
+});
+
+// ---------------------------------------------------------------- 阶段 7.5 第 3 步：replan 两版计划
+describe("replan：第二个 plan 事件（source=replan）", () => {
+  const replanEv: Ev = { type: "plan", seq: 5, data: { text: "换一种思路", source: "replan" } };
+  const code = (seq: number, source = "codegen", attempt = 0): Ev => ({ type: "code", seq, data: { code: "x", source, attempt } });
+  const exec = (seq: number, ok: boolean): Ev =>
+    ({ type: "exec", seq, data: { ok, result_text: "", error: ok ? null : "KeyError", duration_s: 0.1 } }) as Ev;
+  const events: Ev[] = [plan, code(1), exec(2, false), code(3, "reviewer", 1), exec(4, false), replanEv, code(6), exec(7, true)];
+
+  test("plans() 按顺序给出两版，第二版标「重新规划」", () => {
+    let t = emptyTurn(true);
+    for (const e of events) t = reduce(t, e);
+    expect(plans(t)).toEqual([
+      { text: "计划", label: "分析计划", replan: false },
+      { text: "换一种思路", label: "重新规划", replan: true },
+    ]);
+    expect(isReplan(replanEv)).toBe(true);
+    expect(isReplan(plan)).toBe(false);
+    expect(planLabel(plan)).toBe("分析计划");
+    expect(planLabel(replanEv)).toBe("重新规划");
+  });
+
+  test("步骤条：「理解问题」计数 2，replan 之后顺延到写代码（不新增段）", () => {
+    let t = emptyTurn(true);
+    for (const e of events.slice(0, 6)) t = reduce(t, e);
+    const s = steps(t, "workflow");
+    expect(s.map((x) => x.key)).toEqual(["plan", "code", "exec", "answer"]);
+    expect(s.find((x) => x.key === "plan")?.count).toBe(2);
+    expect(s.find((x) => x.key === "code")?.state).toBe("running");
+  });
+
+  test("没有 replan 的轮次：一版计划，标题不变", () => {
+    let t = emptyTurn(true);
+    t = reduce(t, plan);
+    expect(plans(t)).toEqual([{ text: "计划", label: "分析计划", replan: false }]);
+  });
 });

@@ -15,7 +15,7 @@ service 里一个 SnapshotRecorder 都不建，所有快照分支都是 `if snap
 - `kind=end`（最后一行）：错误、本轮 usage、各节点耗时。
 
 **today**：`analyze(today=...)` 给了就用它（today_source=param），否则取本地日期（today_source=local_date），
-一律写进快照。回放只用快照里的 today，不读当天日期（`app/assess/replay.py`）。截至本步，图里的五个节点
+一律写进快照。回放只用快照里的 today，不读当天日期（`app/assess/replay.py`）。截至本步，图里的节点（第 3 步起七个）
 都不读 today；读 today 的只有图之前的问题改写（M7，`service._maybe_rewrite`），它的结果
 （改写后的问题）已经在 node 行的 input_state.question 里，改写记录在 run 行的 rewrite。
 其他时间：会话历史里的时间戳在进图之前已经渲染进 memory_state / memory_history 两个字符串，随 state 一起存下；
@@ -37,7 +37,8 @@ logger = logging.getLogger("datachat.assess.snapshot")
 ENV = "DATACHAT_SNAPSHOT_DIR"
 VERSION = 1
 WIRE_KEY = "__wire__"
-LLM_NODES = ("planner", "codegen", "reviewer", "summarizer")
+# 第 3 步 S3-3：replan 调模型（planner 的第二次），回放时按模型节点比 prompt；scope_gate 是确定性节点，按 executor 那样比 updates
+LLM_NODES = ("planner", "codegen", "reviewer", "replan", "summarizer")
 _ALWAYS_WIRE = {"result"}          # 结构化结果一律走 wire（JSON 会把 tuple 变 list、NaN 写成非法 JSON）
 _TOKEN_FIELDS = ("calls", "input_tokens", "output_tokens", "total_tokens", "estimated_tokens")
 

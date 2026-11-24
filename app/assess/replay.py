@@ -2,7 +2,7 @@
 
 给定快照文件和节点名（可指定第几次出现），用快照里该节点的输入 AgentState 重建 state，只跑这一个节点：
 
-- 模型节点（planner / codegen / reviewer / summarizer）：重建出的 prompt 与原运行比 sha256，**逐字节一致**才算过。
+- 模型节点（planner / codegen / reviewer / replan / summarizer）：重建出的 prompt 与原运行比 sha256，**逐字节一致**才算过。
   模型响应两种模式：默认现调模型（LLMConfig.from_env()，需要 Key）；`recorded=True` 用快照里录下的原始响应，
   这时 updates 也必须与原运行一致。网关在 temp 0 下也不确定（BACKLOG N7），所以「输出一致」只对 recorded 模式判。
 - executor：从快照记录的数据集路径重新读表（先核对 sha256 指纹，不一致直接报错，不回放），
@@ -204,13 +204,15 @@ def load_dataset(ctx: ReplayContext, run: dict):
 
 
 def _node_fn(node: str):
+    from app.graph import scope_gate
     from app.nodes.codegen import generate_code
     from app.nodes.executor import execute
-    from app.nodes.planner import plan
+    from app.nodes.planner import plan, replan
     from app.nodes.reviewer import review_and_fix
     from app.nodes.summarizer import summarize
     return {"planner": plan, "codegen": generate_code, "executor": execute,
-            "reviewer": review_and_fix, "summarizer": summarize}[node]
+            "reviewer": review_and_fix, "summarizer": summarize,
+            "replan": replan, "scope_gate": scope_gate}[node]
 
 
 def _updates_equal(got: dict, want: dict) -> tuple[bool, str]:

@@ -19,6 +19,10 @@ _FAIL_PROMPT = """分析未能成功完成。
 请用中文向用户简要说明没能得出结果，并给出可能的原因或下一步建议。"""
 
 
+# 第 3 步 S3-3（phase75-step3.md §4「用尽之后」）：replan 之后仍然失败，error 前加这一句，沿用原失败说明链路，不新增模板
+REPLAN_FAILED_PREFIX = "换了一种思路仍然没能算出来。"
+
+
 def summarize(state, config=None):
     clarify = state.get("clarify")
     if clarify:
@@ -28,8 +32,13 @@ def summarize(state, config=None):
         # 过模型只会变长变糊。
         return {"answer": clarify, "answer_truncated": False}
     llm = node_llm(config)
+    extra = {}
     if state.get("error"):
-        msg = _FAIL_PROMPT.format(question=state["question"], error=state["error"])
+        error = state["error"]
+        if state.get("replanned") and not error.startswith(REPLAN_FAILED_PREFIX):
+            error = REPLAN_FAILED_PREFIX + error
+            extra["error"] = error          # 写回 state：service 取 state["error"] 作为 res.error，用户看到的也带这句
+        msg = _FAIL_PROMPT.format(question=state["question"], error=error)
     else:
         note = chart_note(state.get("chart_path"), state.get("chart_options") or [])
         text = state.get("result_text")
@@ -37,4 +46,4 @@ def summarize(state, config=None):
             text = str(state.get("result"))
         msg = _OK_PROMPT.format(question=state["question"], result=text, chart_note=note)
     text, truncated = llm.invoke_checked(msg)
-    return {"answer": text, "answer_truncated": truncated}
+    return {"answer": text, "answer_truncated": truncated, **extra}

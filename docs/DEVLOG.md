@@ -11458,3 +11458,70 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 **指纹**：本批不动任何指纹。docs/eval/canary/baseline.json 不在 code/entry/judge 任何文件清单（无指纹覆盖）；canary_sha12=592b9f3baa7e、judge_sha12=289474f4d943 不变；基线记录的 code_sha12=8117bbb25d0a 与 master d84363c 现值一致，直接延续。
 
 **明确不做**：不改 llm.py 采集端（网关字段回来即自动恢复记账）；不因此动 nightly 判读（判红只看算错题，2026-11-18 已收窄，usage 只备查）。
+
+## [待编号] 2026-11-24 阶段 7.5 第 3 步修复回路：实现 · commit <待提交>
+
+方案：`docs/roadmap/phase75-step3.md`（[209]，9c40a97），§7 已定五条照做。本 PR 只含 S3-1、S3-2、S3-3（A 组，内网回归一次，按 §4 判据决定 S3-3 去留）；S3-4（grounding 假阳率）不在本 PR。两个本地 commit：`000bf08` 只落搬家前冻结的 golden（旧路径输出），实现在其后一个 commit。
+
+### 改了什么
+- **S3-1 能力注入**（`app/tools/sandbox_caps.py`）：`SandboxCaps` 加字段 `prompt_imports`（有序 tuple：numpy、pandas、matplotlib、math、statistics、datetime、calendar、re、collections、itertools、functools、decimal、json = `allowed_imports` 去掉 `_strptime` 和 time / locale / warnings）。新增纯函数 `prompt_lines(multi)` 渲染三句：已就绪变量（`single_data_vars` 或 `multi_data_vars` + `common_vars`，每个名字后带一句说明）、可以 import 的包（`prompt_imports`，「只能用这些」）、不给的内建（固定示例 `PROMPT_FORBIDDEN_EXAMPLES` = globals / locals / eval / exec / open / getattr / `__import__` + 「等」）。`app/nodes/codegen.py:21`、`app/nodes/reviewer.py:32` 的手写两句（9c40a97 的 codegen.py:23-24、reviewer.py:31-32）换成 `{sandbox_lines}`；结果变量那一句的变量名改为 `{result_var}`（= `CAPS.result_var`），其余措辞不动。单表 / 多表由 `app/tools/dataset.py:175 is_multi_access` 从 state 里的取数约定行反推（多表时渲染 `dfs`，不再写「df 等数据变量」）。
+- **S3-2 口径闸**：`app/assess/code_refs.py` 整体 `git mv` 为 `app/tools/code_scope.py`（A 组），并把 `contracts.scope_of / missing_columns / reviewer_scope` 的判定搬进同一文件：`scope_of(code, columns, multi)`、`missing_columns(refs, columns)`、`compare_scope(...) -> ScopeCheck`。`app/assess/code_refs.py` 只剩 re-export；`app/assess/contracts.py` 改为 `from app.tools import code_scope as code_refs`，`reviewer_scope` 只把 `ScopeCheck` 翻成 Verdict。过滤条件抽取改为先产出 (字符串, 列, 运算符键, 比较值) 四元组（`_condition_items`），字符串与搬家前逐字一致，后三项给字面量豁免用。
+  - 字面量豁免（`app/tools/code_scope.py:436 compare_scope(empty_before=True)` → `:415 _literal_swap`）：增删的过滤条件能一一配成「同列、同运算符（含列在哪一侧）、只换比较值」才放行；多一条 / 少一条 / 换列 / 换运算符 / 无比较值的条件（isna 类、query 解析失败）/ 同列同运算符出现两次（配对有歧义）都不豁免。`empty_before` 由 `app/tools/sanity.py:39 is_empty_issue` 判（0 行 / 0 列，含 dict 结果某一项为空）。
+  - 产品链路（`app/graph.py:58 scope_gate`）：reviewer → `scope_gate`（确定性节点，不调模型）→ 放行去 executor；改了口径则 `code` 回退为修复前、记 `scope_rejected`（「列：+a -b；过滤条件：+[…] -[…]」），路由到 replan。修复前不是完整代码 / 解析不了 → 不查；修复后解析不了或被截断 → 放行交给 executor（边界 2）。
+- **S3-3 REPLAN 边**：
+  - 路由（`app/graph.py`）：`_route_after_exec` 在次数用尽仍报错或仍有 `sanity_issue` 时返回 `replan`；`_route_after_gate` 拒收时返回 `replan`；两处都经 `_can_replan`（本轮没 replan 过、tracker 不超预算；超预算时 `mark_budget_hit`，与 V2d 同一条路）。不能 replan 时去 summarizer。replan → codegen → executor。
+  - 节点（`app/nodes/planner.py:224 replan`）：planner prompt 抽成 `_prompt(state)`（plan / replan 共用，plan 的 prompt 逐字节不变，已对 3 种 state 与 9c40a97 的 `plan()` 对拍），replan 在末尾追加 `REPLAN_TEMPLATE`：「## 上一次的尝试」+ 上一版计划 + 最后一次的代码（截断 1500 字）+ 失败原因（口径闸拒收 > 报错（取末尾 800 字）> 结果可疑）+「换一条思路，问题和口径保持不变……不要输出 CLARIFY」。`_parse(text, allow_clarify=False)`：模型仍输出 CLARIFY 时按原闸门逻辑换成 `VETO_PLAN`。返回 `replanned=True`、`replan_reason`、`max_attempts = attempts + 1`（reviewer 预算 1 次，attempts 不清零）。
+  - 用尽（`app/nodes/summarizer.py:23`）：`replanned` 且有 error 时 error 前加「换了一种思路仍然没能算出来。」，并写回 state（service 取它做 `res.error`）。没有新模板。
+  - state（`app/state.py:44-47`）：`code_before_fix`、`scope_rejected`、`replanned`、`replan_reason`。
+  - 事件 / service：replan 发 `em.plan(text, source="replan")`（第一版 plan 事件形状不变，仍只有 text；`app/core/events.py` `plan(**extra)`）。`service._workflow_step`：replan 记计划；scope_gate 只在拒收时进 `res.steps`（content = 拒收原因，code = 回退后的代码）。`recursion_limit` 2·max+10 → 3·max+20（每轮修复多一个闸节点，再加 replan 那一段）。
+  - 评估层：`contracts.CONTRACTS["replan"]` = planner 两条；`snapshot.LLM_NODES` 加 replan（回放时比 prompt）；`replay._node_fn` 加 replan、scope_gate（scope_gate 按 executor 那样比 updates）。
+  - 前端：`ui/web/src/turn.ts` 新增 `isReplan / planLabel / plans`，`Ev` 的 plan data 加可选 `source`；`TurnView.tsx` 计划块标题按 `planLabel`，第二版「重新规划」并加 `replan` class。步骤条不加段（「理解问题 ×2」，下一段顺延到写代码）。
+  - fake_llm（`tests/fake_llm.py`）：新场景 `replan-scope | replan-exhaust | replan-twice`，步骤词表加 `replan`（planner prompt 含「上一次的尝试」）。无状态：replan 前后靠 codegen prompt 里有没有 `REPLAN_PLAN` 区分。
+
+### 偏离及理由
+1. **state 多了一个字段 `code_before_fix`**（方案 §4 只列 replanned / replan_reason / scope_rejected）。`app/nodes/reviewer.py:65`、`app/state.py:44`。口径闸在 reviewer 之后，此时 state 里的 code 已是修复后的代码，图里没有别处能拿到「修复前」；放进 reviewer 的返回值而不是在 graph 里包一层 reviewer，是为了让快照里 reviewer 节点的 updates 仍是模型的原始修复（评估层 reviewer.scope / after_fix.* 照常看得到被拒的代码，`--recorded` 回放 updates 一致）。修复前不是完整代码（not_code / truncated）时留空，闸不查。
+2. **口径闸是图里的一个节点 `scope_gate`**（方案写「graph 里加一个确定性的判定」）。`app/graph.py:58`。理由同上：路由函数不能改 state，回退 code 必须由节点做。副作用：快照里每次 reviewer 之后多一行 `scope_gate`（评测侧 diff 会多出 `scope_gate#n` 环，它没有契约，不产生 verdict），`res.steps` 只在拒收时记它。
+3. **评估层 reviewer.scope 不开字面量豁免**。`app/assess/contracts.py:280`。golden 要求 verdict 逐字节一致，且评测侧的 B1 / reviewer.scope 读数不该因为产品闸变化而漂；产品闸放行的「空结果下换字面量」在评估层仍记 fail，正好看得出闸放过了什么。同一份 `compare_scope`，只差 `empty_before` 参数。若评测侧希望同口径，改 `reviewer_scope` 传 `empty_before=is_empty_issue(state.get("sanity_issue"))` 一行即可。
+4. **拒收后不能 replan（已 replan 过 / 超预算）时直接去 summarizer**，不回 executor。`app/graph.py:79-84`。回退后的代码就是上一次执行过的那段，再执行只会得到同一个结果；方案「被拒收的修复不执行，result 保留修复前的结果」在这条路上同样成立（`test_rejected_fix_keeps_pre_fix_result_when_cannot_replan`）。
+5. **「executor 第一次报错不触发」加了 `attempts > 0`**。`app/graph.py:53`。`max_attempts=0` 时第一次报错就是「次数用尽」，字面上满足触发 2；按边界 2 不让它直接 replan。
+6. **触发 3（用尽后仍可疑）实际很少命中**：A2 只给一次可疑重试，`executor` 在 `sanity_retried` 之后不再判可疑（`app/nodes/executor.py:86` 未改），所以只有「可疑结果恰好出现在最后一次执行」时才会 replan。没有改 A2 的「只给一次」。另：这条 replan 之后若报错，原来那个可疑但存在的结果不再交给 summarizer。
+7. **replan 的 reviewer 预算用 `max_attempts = attempts + 1` 表达**（`app/nodes/planner.py:237`），没有另加字段。快照 run 行里的 max_attempts 仍是调用参数。
+8. **`prompt_lines` 的变量带说明文字**（`app/tools/sandbox_caps.py:82-90` `_VAR_GLOSS`）：沿用原 codegen 句子里的「pd（pandas）」写法，名字本身从 CAPS 取、说明是注释性文字，测试只反查名字。因此 prompt 里第一次出现 `chart_path`（它一直被注入，旧句子没提）。
+9. **reviewer 的取数行单独成一行**：原来是「- {data_access}pd、np、plt、chart 已就绪…」拼在一行，现在「- 用变量 df，不要重新读文件；」后面换行接渲染的三句。
+
+### 测试
+- 新 `tests/test_code_scope_golden.py`（5 条）：`test_new_path_matches_golden_byte_for_byte`、`test_contracts_wrappers_match_golden`（新路径对 `tests/fixtures/code_scope/cases.json` 22 份代码对重算 refs / filters / scope_of / reviewer_scope verdict，与 `golden.json` 逐字节相同）、`test_assess_code_refs_is_reexport_only`、`test_golden_covers_required_shapes`、`test_tools_code_scope_does_not_import_assess`。golden（sha256 `2670e234d6da…`）在 `000bf08` 用旧路径生成并单独提交，之后未改。
+- 新 `tests/test_step3_repair.py`（32 条）：S3-1 `test_prompt_imports_is_subset_without_private_and_runtime_only`、`test_prompt_lines_names_all_come_from_caps[单/多表]`、`test_prompt_lines_pinned_text`、`test_codegen_and_reviewer_use_rendered_lines_not_handwritten[单/多表]`（旧手写句按字面断言不存在）、`test_rendered_codegen_prompt_is_stable`；S3-2 `test_compare_scope_rejects_column_filter_denominator_changes`、`test_compare_scope_allows_typo_fix_and_literal_swap_on_empty`、`test_literal_exemption_is_narrow`、`test_compare_scope_parse_and_not_code`、`test_assess_reviewer_scope_keeps_step1_semantics_without_literal_exemption`、`test_scope_gate_*`（3 条）、`test_reviewer_records_code_before_fix`；S3-3 `test_route_after_exec_replan`（6 参数：第一次报错 / 用尽报错 / 用尽可疑 / 已 replan / max=0 / 成功）、`test_no_replan_when_over_budget`、`test_route_after_gate`、`test_replan_prompt_appends_last_attempt_and_forbids_clarify`、`test_replan_reason_priority`；图测试 `test_reviewer_scope_change_goes_to_replan_not_executor`、`test_rejected_fix_keeps_pre_fix_result_when_cannot_replan`、`test_literal_swap_on_empty_result_is_executed_not_rejected`、`test_exhausted_then_replan_then_success_and_once_only`（最坏 9 次模型调用）、`test_first_error_with_missing_column_goes_to_reviewer_not_replan`；`test_snapshot_replan_node_checked_by_planner_contracts_and_replayable`（replan 节点按 planner 契约出 2 条 verdict，`--recorded` 回放 prompt / updates 一致，scope_gate 回放一致）。
+- `tests/test_fake_llm.py`（+15）：解析 3 + 拒绝 7；`test_replan_scenario_only_for_workflow_and_recognizes_replan_step`、`test_real_chain_replan_after_scope_rejected`（下一个节点是 replan 而非 executor；两条 plan 事件，第二条 `source="replan"`）、`test_real_chain_replan_after_exhaustion_then_success`、`test_real_chain_replan_only_once_per_turn`（9 次调用、error 带前缀）、`test_real_chain_no_replan_when_over_budget`（`DATACHAT_TOKEN_BUDGET=50`）。`test_step_vocabulary_is_closed` 词表加 replan。
+- **改了期望值**（行为变化所致）：`test_core_analyze.py::test_workflow_execution_failure`、`::test_max_attempts_beyond_default_recursion_limit`、`test_workflow_mocked.py::test_gives_up_after_max_attempts`（用尽后多一次 replan + codegen + 1 次修复，attempts 3→4 / 15→16）；`test_workflow_mocked.py::test_route_after_exec`（用尽 → replan，另加已 replan → done）；`test_assess_snapshot.py::test_snapshot_records_nodes_state_tokens_and_today`（reviewer 后多一行 scope_gate）；`test_assess_contracts.py::test_check_dispatch_covers_every_node`（CONTRACTS 多 replan）；`test_fixbatch1.py::test_prompts_state_sandbox_limits`、`test_result_numeric.py::_rendered_codegen`（模板改为 `{sandbox_lines}` / `{result_var}`）。
+- **P8 哈希重立**（`tests/test_memory_p8.py`）：workflow `07461170ad5f0832 → ad567ed3492f6002`（off / state 同值），workflow_history `6cabdb836b86cec6 → a52a7aa02434e505`。理由：codegen 模板的沙箱句子改由 `prompt_lines` 渲染（§2 验收要求的「期望哈希按新 prompt 重立」）；planner prompt 逐字节未变，react 三个哈希未动，「off 与 state 单轮逐字节相同」仍成立。`test_workflow_memory.py`、`test_metrics.py` 引用同一常量，随之通过。
+- vitest：`turn.test.ts` +3（`plans()` 两版与标题、步骤条计数 2 且顺延到写代码、无 replan 一版）；`v2a.test.tsx` +1（展开过程两块计划，第二块「重新规划」、带 replan class，步骤条 ×2）。
+
+### 闸门（最后一次改动之后全部重跑；aarch64 沙箱 2 核，日志 `/workspace/work/logs/s3fin_*`、`s3web_*`、`s3eval_*`；master 对照 `s3base_*`、`s3web_base_vitest.log`）
+| 闸门 | master 9c40a97 | 本分支 |
+|---|---|---|
+| pytest 分段 1（34 个文件，去掉 oracle 两条） | 913 passed | 913 passed |
+| pytest 分段 2（36 个文件） | 898 passed | 913 passed（+15：test_fake_llm） |
+| pytest 分段 3（35 → 37 个文件） | 553 passed | 591 passed（+38：test_step3_repair 32、test_code_scope_golden 5、test_workflow_mocked 1） |
+| pytest oracle（`test_oracle_pipeline_all_correct[workflow/react]`，单独跑） | 2 passed | 2 passed |
+| pytest 合计 | 2366 passed | **2419 passed，0 failed，0 skipped**（+53）。`test_git_sha_without_git_binary` 在 worktree 里也通过 |
+| 评测侧三件：`test_assess_contracts.py` + `test_b2_batch_pipeline.py` + `test_nightly_gate.py` | 64 passed | 64 passed（`test_check_dispatch_covers_every_node` 期望改了，条数不变） |
+| `scripts/gen_ui_types.py --check` | — | ok |
+| sidecar `python -m app.sidecar --selftest`（源码版） | — | ok，10 项全过 |
+| vitest 全量（`--pool=threads --maxWorkers=2`） | 32 个文件 984 passed | 32 个文件 988 passed（+4：turn.test 3、v2a 1） |
+| eslint `--max-warnings 0` | — | 0 错误 0 警告 |
+| `tsc --noEmit` | — | 0 错误 |
+| web build | — | 通过；CSS 48.90 kB（gzip 9.64）、JS 1,118.38 kB（gzip 365.29） |
+| `playwright test --list` | — | 53 条 / 20 个文件（未变） |
+| e2e / 视觉基线 | — | **没跑**：沙箱缺 libatk，交给 CI。计划块只多了 replan 时的标题与 class，fake 普通场景不出 replan，截图预计不变 |
+
+### A 组指纹
+`app/eval/fingerprint.py` `code_fingerprint()["affects_results_sha256"]`：**base `8117bbb25d0a`（master 9c40a97，A 组 68 个文件，与预期一致）→ 新 `5436c54d3c6c`（A 组 69 个文件：多了 `app/tools/code_scope.py`）**。全量 sha `210844b6b15d → c2c95c9671c1`。A 组变动文件：`app/graph.py`、`app/state.py`、`app/core/{service,events,result}.py`、`app/nodes/{codegen,planner,reviewer,summarizer}.py`、`app/tools/{sandbox_caps,dataset,sanity}.py`、`app/tools/code_scope.py`（新）、`app/assess/snapshot.py`（LLM_NODES）。B 组：`app/assess/{code_refs,contracts,replay}.py`。
+
+### 未做
+- S3-4（grounding 假阳率脚本与标注）不在本 PR。
+- 内网回归（同一 commit 前后两批快照、`assess --diff`、按 §4 归因逐题核对 replan 计数）没跑，需要内网；没救回题就按 §7 第 1 条把 S3-3 摘出去。
+- react 链路不注入能力（§7 第 4 条挂账）。
+- `AnalysisResult` / 报告 JSON 没加 replan 字段：是否 replan、原因只在快照（replan 节点、scope_gate 行）、`res.steps` 和事件里；评测侧若要在报告里统计 replan 率需另加。
+- e2e 本机缺 libatk，只做 `playwright test --list`；计划块「重新规划」没有 e2e 用例，也没有专门的样式（只加了 class）。
+- 没有 push，没有开 PR。

@@ -17,7 +17,7 @@ from app.core.llm import TokenUsage
 @dataclass
 class Step:
     """执行轨迹中的一步。
-    name：工作流版为节点名（planner/codegen/executor/reviewer/summarizer）；
+    name：工作流版为节点名（planner/codegen/executor/reviewer/summarizer；第 3 步起另有 replan，以及口径闸拒收时的 scope_gate）；
           ReAct 版为 tool_call / observation / answer。"""
     name: str
     content: str = ""

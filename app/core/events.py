@@ -4,7 +4,7 @@
 
 | type   | 何时 | data |
 |--------|------|------|
-| plan   | 工作流 planner 产出计划 | text |
+| plan   | 工作流 planner 产出计划；第 3 步起 replan 重新规划也发它 | text；replan 时另有 source="replan"（第一版计划没有 source） |
 | code   | 工作流 codegen / reviewer 写出代码；ReAct 模型发起一次工具调用 | code, source（codegen / reviewer / tool_call）, attempt；ReAct 另有 thought（模型随调用附带的文字，常为空） |
 | exec   | 一次代码执行结束 | ok, result_text（截断 2000 字）, error, duration_s, chart（PNG 路径或 None）, options（chart() 出的 ECharts spec 列表，exec 失败时为空）, chart_errors, charts_discarded（exec 失败丢弃的张数）；ReAct 另有 stdout, attempt |
 | answer | 最终结论（ReAct 在收尾判定后才发，所以每次分析最多一个） | text, forced（ReAct 步数用完后强制收尾得到的结论） |
@@ -69,8 +69,8 @@ class Emitter:
         self._seq += 1
         return ev
 
-    def plan(self, text):
-        return self._make("plan", {"text": text})
+    def plan(self, text, **extra):
+        return self._make("plan", {"text": text, **extra})
 
     def code(self, code, *, source, attempt, **extra):
         return self._make("code", {"code": code, "source": source, "attempt": attempt, **extra})

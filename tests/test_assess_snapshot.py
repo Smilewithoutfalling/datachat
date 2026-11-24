@@ -85,7 +85,8 @@ def test_snapshot_records_nodes_state_tokens_and_today(sample_path, tmp_path):
     assert run["columns"] == {"": ["date", "region", "product", "units", "price"]}
     assert run["dataset_fingerprint"]["files"][0]["bytes"] == os.path.getsize(sample_path)
     assert [(r["node"], r["occurrence"]) for r in s.nodes] == [
-        ("planner", 1), ("codegen", 1), ("executor", 1), ("reviewer", 1), ("executor", 2), ("summarizer", 1)]
+        ("planner", 1), ("codegen", 1), ("executor", 1), ("reviewer", 1), ("scope_gate", 1), ("executor", 2),
+        ("summarizer", 1)]                                   # 第 3 步 S3-2：reviewer 之后多一个确定性的口径闸节点
     for r in s.nodes:
         assert r["today"] == "2024-03-09"
         assert r["dataset"]["fingerprint"] == run["dataset_fingerprint"]["sha256"]

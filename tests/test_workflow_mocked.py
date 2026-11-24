@@ -44,12 +44,14 @@ def test_reviewer_fixes_error(sample_path):
 
 def test_gives_up_after_max_attempts(sample_path):
     bad = "result = df['nope']"
-    out = _run(sample_path, _client("p", [bad], [bad, bad, bad], "失败说明"))
-    assert out["error"] and out["attempts"] == 3 and out["answer"] == "失败说明"
+    # 阶段 7.5 第 3 步：用尽后 replan 一次（再 codegen 一次，reviewer 再给 1 次），仍失败才去 summarizer
+    out = _run(sample_path, _client("p", [bad, bad], [bad, bad, bad, bad], "失败说明"))
+    assert out["error"] and out["attempts"] == 4 and out["answer"] == "失败说明" and out["replanned"]
 
 
 @pytest.mark.parametrize("state,expected", [    ({"error": "x", "attempts": 0, "max_attempts": 3}, "fix"),
-    ({"error": "x", "attempts": 3, "max_attempts": 3}, "done"),
+    ({"error": "x", "attempts": 3, "max_attempts": 3}, "replan"),               # 第 3 步：用尽 → replan
+    ({"error": "x", "attempts": 3, "max_attempts": 3, "replanned": True}, "done"),
     ({"error": "", "attempts": 0, "max_attempts": 3}, "done"),
 ])
 def test_route_after_exec(state, expected):

@@ -172,6 +172,12 @@ def review_access_rule(data) -> str:
     return REVIEW_SINGLE_ACCESS if not is_multi(data) else access_rule(data)
 
 
+def is_multi_access(rule, single_rule: str) -> bool:
+    """从 state 里的取数约定行反推单表 / 多表（第 3 步 S3-1：codegen / reviewer 渲染沙箱句子时要知道注入的是 df 还是 dfs）。
+    没有约定行（老快照、测试里的最小 state）按单表处理，与两处模板的默认值一致。"""
+    return bool(rule) and rule != single_rule
+
+
 def describe_data(data, n: int = 3) -> str:
     """单表 = describe_df；多表 = 每张表一段（各自包进数据分隔块）。"""
     if not is_multi(data):
