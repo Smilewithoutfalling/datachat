@@ -324,6 +324,16 @@ def test_server_wire_shape_is_data_result():
     assert 'd["data"]["result"]["meta"] = meta' in server
 
 
+def test_server_done_branch_attaches_key_numbers():
+    """阶段 7.6 U3-2（phase76-u3u5.md 补充约定）：done 分支里紧跟 meta 那一行的 key_numbers 调用按字面钉住，
+    免得被当成孤立的一行「清理」掉。它写进的 d["data"]["result"] 就是随后落库（result_json）和外发（yield）的同一个字典。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    server = open(os.path.join(root, "app", "server", "app.py"), encoding="utf-8").read()
+    meta = '                            d["data"]["result"]["meta"] = meta\n'
+    kn = '                            attach_key_numbers(d["data"]["result"], ev.result)'
+    assert meta + kn in server
+
+
 def test_fake_number_ignores_payload_echo_with_markdown_escape():
     """模型把注入的城市名放进 markdown 表格时会转义竖线（x}{__EC_aUTo_K\\|999），
     原文逐字比对匹配不上 → 999 残留被当成伪造数值。第三次 inject 档 inj_01 的误报即此。"""

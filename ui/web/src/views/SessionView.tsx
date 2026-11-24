@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api";
 import { type Client, errText } from "../client";
+import { titleEdit } from "../titles";
 import { emptyTurn, reduce, replay, settle, type Turn } from "../turn";
 import type { Message, Session, SessionDetail } from "../types";
 import { FeedbackBar } from "./FeedbackBar";
@@ -94,10 +95,12 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
         const res = await c.ask(id, question);
         messageId = res.messageId;
         setLive({ question, messageId, turn, startedAt });
-        // 首问时后端已把标题设成问题前 60 字（app.py:407）：顶栏和侧栏现在就跟上，不等这一轮结束
+        // U5：首问时后端按本地规则生成标题（app/server/titles.py），经响应头 X-Session-Title 带回；
+        // 顶栏和侧栏现在就跟上，不等这一轮结束。前端不再另写一份规则（原来的 question.slice(0, 60) 已删）
+        const headerTitle = res.sessionTitle;
         setS((x) => {
-          if (x && !x.title) {
-            const t = question.slice(0, 60);
+          if (x && !x.title && headerTitle) {
+            const t = headerTitle;
             if (!editingTitle.current) setTitle(t);
             onChanged({ id: x.id, dataset_id: x.dataset_id, agent: x.agent, title: t, created_at: x.created_at, updated_at: new Date().toISOString() });
             return { ...x, title: t };
@@ -125,7 +128,7 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
         const m = d.messages.find((x) => x.id === messageId);
         if (m) setLiveTurns((lt) => ({ ...lt, [messageId]: settle(turn, m) }));
         setS(d);
-        // P1-3（phase5 V2a §1.7）：首问时后端把标题设成问题前 60 字（app.py:407），这里同步标题输入框；正在编辑时不覆盖
+        // P1-3（phase5 V2a §1.7）：以库里的标题为准同步标题输入框（U5 起由后端按本地规则生成）；正在编辑时不覆盖
         if (!editingTitle.current) setTitle(d.title);
         onChanged({ id: d.id, dataset_id: d.dataset_id, agent: d.agent, title: d.title,
           created_at: d.created_at, updated_at: d.updated_at }); // 左栏按最近分析时间排序，updated_at 变了
@@ -234,8 +237,8 @@ export function SessionView({ c, id, datasetName, title: titleProp, keyConfigure
 
   const rename = () => {
     editingTitle.current = false;
-    const t = title.trim();
-    if (t === s.title) return;
+    const t = titleEdit(title, s.title); // U5：与侧栏同一条规则，空串 = 还原自动标题
+    if (t === null) return;
     c.renameSession(id, t).then(
       (r) => (setS({ ...s, title: r.title }), setTitle(r.title), onChanged(r)),
       (e) => setError(errText(e)),

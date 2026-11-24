@@ -38,7 +38,9 @@ test("没 Key 拦截 → SSE 失败原因 → 👍 → 刷新重放一致", asyn
     data: { content: "哪个城市销量最高？" } });
   expect(await r.text()).toContain("event: done");
   await page.reload();
-  await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /哪个城市/ }).click();
+  // 阶段 7.6 U5：期望变了——会话标题不再是问题原话前 60 字，而是后端本地规则（app/server/titles.py）从
+  // 「哪个城市销量最高？」取出的「城市」+ 指标词「销量」=「城市销量」，所以按「城市销量」找会话
+  await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /城市销量/ }).click();
   const msg = page.getByTestId("session-view").getByTestId("assistant-msg");
   await expect(msg.getByRole("alert").locator(".errcard-title")).toHaveText("还没有配置 API Key"); // 验收 P1-2：按 llm_kind=no_key 给标题
   await expect(msg.getByRole("alert")).toContainText("未配置 API Key");
@@ -47,7 +49,7 @@ test("没 Key 拦截 → SSE 失败原因 → 👍 → 刷新重放一致", asyn
   await expect(msg.getByRole("button", { name: "有用" })).toHaveAttribute("aria-pressed", "true");
 
   await page.reload();
-  await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /哪个城市/ }).click();
+  await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /城市销量/ }).click();
   const again = page.getByTestId("session-view").getByTestId("assistant-msg");
   await expect(again.getByRole("alert")).toContainText("未配置 API Key");
   await expect(again.getByRole("button", { name: "有用" })).toHaveAttribute("aria-pressed", "true");

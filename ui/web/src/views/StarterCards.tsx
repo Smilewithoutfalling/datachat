@@ -9,7 +9,7 @@ import "./starter.css";
 
 export type Starter = { id: "overview" | "outliers" | "compare"; title: string; desc: string; question: string };
 
-/** 三张卡：标题是卡面上的字，question 是点了之后真实发出去的那句话（会话标题也由它来，见 app.py 首问取前 60 字）。 */
+/** 三张卡：标题是卡面上的字，question 是点了之后真实发出去的那句话（会话标题由后端按本地规则从它生成，见 app/server/titles.py：取第一个分句）。 */
 export const STARTERS: readonly Starter[] = [
   {
     id: "overview",

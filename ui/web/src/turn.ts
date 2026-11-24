@@ -193,34 +193,76 @@ export function verifyState(t: Turn): Verify | null {
 }
 
 /** 一句话结论：结论正文第一段的第一句，逐字摘取，只去掉 Markdown 记号，不改写、不补字。
- *  取不到（第一块是表格 / 代码 / 分隔线，或第一句超过 LEAD_MAX 字、短于 4 字）时返回 null，卡片就不出这一行。
- *  后端没有单独的 summary 字段（app/core/result.py AnalysisResult 只有 answer），所以只能从 answer 摘。 */
+ *  取不到（第一块是表格 / 代码 / 分隔线，或第一句超过 LEAD_MAX 字、短于 4 字）时 lead 为 null，卡片就不出这一行。
+ *  后端没有单独的 summary 字段（app/core/result.py AnalysisResult 只有 answer），所以只能从 answer 摘。
+ *
+ *  阶段 7.6 U3-1（docs/roadmap/phase76-u3u5.md §1.1 做法 A）：同时返回 body，即正文里隐去已摘出那一句之后剩下的部分，
+ *  卡头和正文不再重复同一句。规则：
+ *  1. body = 原文去掉 lead 在原始 Markdown 里对应的那段（从第一段内容的起点——列表记号之后——到这一句的句末），其余字符不动；
+ *  2. 被去掉的原文里 `**`、`__`、`` ` `` 必须成对、链接 [..](..) 必须完整，否则视为隐不干净：lead = null，body = 原文（退回 U3 之前）；
+ *     对不上（原文里找不到去掉记号后等于 lead 的前缀）同样退回；
+ *  3. 去掉后这一行只剩空白（或只剩列表记号）时整行删除；它前面的小标题保留；
+ *  4. 只改显示：消息 content、result.answer、导出、会话记忆读到的仍是完整原文。 */
 export const LEAD_MAX = 120;
-export function conclusionOf(answer: string): string | null {
-  const lines = (answer ?? "").split(/\r?\n/);
-  let first = "";
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (/^#{1,6}\s/.test(line)) continue; // 小标题（「### 结论」）跳过，看下一行
-    if (/^(```|~~~|\||[-*_]{3,}$|>)/.test(line)) return null; // 代码块、表格、分隔线、引用打头：不是一句话
-    first = line.replace(/^([-*+]|\d+[.)、])\s+/, "");
-    break;
-  }
-  const plain = first
+export type Conclusion = { lead: string | null; body: string };
+
+const plainOf = (s: string): string =>
+  s
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/(\*\*|__|`)/g, "")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1$2")
     .trim();
+
+/** 被去掉的原文前缀能不能干净地去掉：强调 / 代码记号成对，链接完整。 */
+function cleanCut(raw: string): boolean {
+  const even = (re: RegExp) => (raw.match(re)?.length ?? 0) % 2 === 0;
+  if (!even(/\*\*/g) || !even(/__/g) || !even(/`/g)) return false;
+  const rest = raw.replace(/!?\[[^\]]*\]\([^)]*\)/g, "");
+  return !/\[[^\]]*\]\(/.test(rest) && !/\[[^\]]*$/.test(rest);
+}
+
+function leadOf(first: string): string | null {
+  const plain = plainOf(first);
   const m = /^.*?[。！？!?；;]/u.exec(plain);
   const lead = (m ? m[0] : plain).trim();
   if (Array.from(lead).length < 4 || Array.from(lead).length > LEAD_MAX) return null;
   return lead;
 }
 
+export function conclusionOf(answer: string): Conclusion {
+  const text = answer ?? "";
+  const none: Conclusion = { lead: null, body: text };
+  const lines = text.split(/(?<=\n)/); // 保留换行符，拼回去逐字不变
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+    if (!line) { offset += rawLine.length; continue; }
+    if (/^#{1,6}\s/.test(line)) { offset += rawLine.length; continue; } // 小标题（「### 结论」）跳过，看下一行
+    if (/^(```|~~~|\||[-*_]{3,}$|>)/.test(line)) return none; // 代码块、表格、分隔线、引用打头：不是一句话
+    const lineBody = rawLine.replace(/\r?\n$/, "");
+    const marker = /^\s*(?:(?:[-*+]|\d+[.)、])\s+)?/.exec(lineBody)![0];
+    const content = lineBody.slice(marker.length);
+    const lead = leadOf(content);
+    if (!lead) return none;
+    // 在原始 Markdown 里找这一句的句末：句末标点之后、或行尾，去掉记号后正好等于 lead 的最短前缀
+    const cuts: number[] = [];
+    for (let k = 0; k < content.length; k++) if ("。！？!?；;".includes(content[k])) cuts.push(k + 1);
+    cuts.push(content.length);
+    const k = cuts.find((c) => plainOf(content.slice(0, c)) === lead);
+    if (k === undefined || !cleanCut(content.slice(0, k))) return none;
+    const restOfLine = content.slice(k);
+    const start = offset + (restOfLine.trim() ? marker.length : 0);
+    const end = restOfLine.trim() ? offset + marker.length + k : offset + rawLine.length;
+    return { lead, body: text.slice(0, start) + text.slice(end) };
+  }
+  return none;
+}
+
 /** 关键数字（最多 3 个）：只认结构化字段 result.key_numbers = [{value, label}]。
- *  后端现在不产出这个字段（app/core 的结果格式里没有），所以今天总是 []，卡片不出数字——不从结论正文里猜数字、猜口径。
+ *  后端在 server 层确定性产出（app/server/key_numbers.py，phase76-u3u5.md §1.2）：数取自 result 原对象、并且和结论里的数字对得上，
+ *  value 用结论里的原文写法，label 取自 result 的结构；前端仍不从结论正文里猜数字、猜口径。
  *  未核实的数字（unverified_numbers 里有的）不放大显示。 */
 export type KeyNumber = { value: string; label: string };
 export const KEY_NUMBERS_MAX = 3;

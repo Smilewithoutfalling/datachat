@@ -34,7 +34,9 @@ for (const echo of ["echo", "echocut"]) {
     };
     await check();
     await page.reload();
-    await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /请按城市/ }).first().click();
+    // 阶段 7.6 U5：期望变了——会话标题由后端本地规则生成（app/server/titles.py），Q 的标题是「城市」+「销量」=「城市销量」，
+    // 不再是问题原话；每个用例各自上传一份数据集（重名只在同一数据集内加序号），.first() 取最近更新的那个，和原来一样
+    await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: /城市销量/ }).first().click();
     await check();
     await useScenario(page, "ok");
   });

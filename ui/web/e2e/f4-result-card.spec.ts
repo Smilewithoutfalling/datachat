@@ -15,7 +15,7 @@ const FOLLOW_METRIC = "换个口径再算一次：先说明上一轮结论用的
 const FOLLOW_CHART = "给上一轮的结论补一张图：选最能说明这个结论的图型，用上一轮的结果画出来。";
 
 /** GET /sessions/{id}：第一条 ok 的助手消息换上桩数据（只改 result 的这几个字段，别的照后端原样）。 */
-async function stubFirstResult(page: Page) {
+async function stubFirstResult(page: Page, extra: Record<string, unknown> = {}) {
   await page.route(/\/sessions\/[^/?]+(\?.*)?$/, async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     const res = await route.fetch();
@@ -23,7 +23,7 @@ async function stubFirstResult(page: Page) {
     const m = (body.messages ?? []).find((x: { role: string; status: string }) => x.role === "assistant" && x.status === "ok");
     if (m?.result) {
       m.result = { ...m.result, executed: true, code: m.result.code || "result = df['销量'].sum()",
-        warnings: [WARNING], unverified_numbers: UNVERIFIED };
+        warnings: [WARNING], unverified_numbers: UNVERIFIED, ...extra };
     }
     await route.fulfill({ response: res, json: body });
   });
@@ -129,4 +129,39 @@ test("U3 结果卡：换个口径、补一张图、导出各发出一条请求",
   await expect(actions.getByTestId("export-result")).toHaveText("已保存到 /tmp/e2e/u3.csv");
   expect(exports).toEqual([`/messages/${messageId}/export/code`, `/messages/${messageId}/export/result?format=csv`]);
   expect(posts.slice(2).map((p) => p.path)).toEqual(exports);
+});
+
+// 阶段 7.6 U3 收尾（docs/roadmap/phase76-u3u5.md §1.3 e2e）：桩上 answer、key_numbers（K3 的真实形状，label 带「 · 」）、
+// unverified_numbers：① 关键数字是桩里未核实之外的前 3 个；② 卡头那句结论在正文 .answer .md 里不出现；③ 刷新页面重放后照样成立。
+const KN_ANSWER = "深圳销量最高，共 1,061 单。\n\n上海次之，82.2 万元，占比 37.5%；深圳 1 月 412 单。";
+const KN_LEAD = "深圳销量最高，共 1,061 单。";
+const KN_STUB = {
+  answer: KN_ANSWER,
+  unverified_numbers: ["82.2 万"],
+  key_numbers: [
+    { value: "1,061", label: "深圳 · 销量" }, { value: "82.2 万", label: "上海 · 销量" },
+    { value: "37.5%", label: "上海 · 占比" }, { value: "412", label: "2024-01 · 深圳" }, { value: "290", label: "第五个" },
+  ],
+};
+
+test("U3 收尾：关键数字取未核实之外的前 3 个；卡头结论在正文里不重复；刷新重放后照样成立", async ({ page }) => {
+  test.setTimeout(90_000);
+  await stubFirstResult(page, KN_STUB);
+  const file = `u3-kn-${Date.now()}.csv`;
+  const sv = await firstTurn(page, file);
+  const check = async () => {
+    const card = sv.getByTestId("assistant-msg").first();
+    await expect(card.getByTestId("key-numbers").locator(".kn-value")).toHaveText(["1,061", "37.5%", "412"]);
+    await expect(card.getByTestId("key-numbers").locator(".kn-label")).toHaveText(["深圳 · 销量", "上海 · 占比", "2024-01 · 深圳"]);
+    await expect(card.getByTestId("result-lead")).toHaveText(KN_LEAD);
+    const md = await card.locator(".answer .md").innerText();
+    expect(md.split(KN_LEAD).length - 1).toBe(0);
+    expect(md).toContain("上海次之");
+  };
+  await check();
+  await page.reload();
+  // 刷新落在首页：从侧栏按数据集名（= 文件名，在会话行的副标题里）点回这个会话，走 GET /sessions/{id} 重放
+  await page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: new RegExp(file.replace(/\./g, "\\.")) }).click();
+  await expect(sv.getByTestId("assistant-msg")).toHaveCount(1, { timeout: 30_000 });
+  await check();
 });

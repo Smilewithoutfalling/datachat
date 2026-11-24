@@ -11319,7 +11319,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 11-23 视觉基线重取：CI（b4bb284，tests run 45121843302，web job 137517158148）49 条 e2e 里只有 f4-visual 视觉 11（230066 像素）和视觉 25（135507 像素）红，vitest 952 全过。逐张看了 artifact `playwright-results` 里的 actual / expected / diff：差异全部来自本条结果卡——卡头多了加粗的一句话结论和「✓ 全部可溯源」徽章，图卡下多了「换个口径 / 补一张图 / 导出」动作行，卡片因此变高约 105 px（11）/ 42 px（25），会话区照原逻辑滚到底，于是整卡上移（11 里用户气泡移出视口、标记浮层完整露出；25 里卡头滚到顶栏下）；柱图、标记浮层、控件行、输入区本身没有重叠、截断或空白，输入区仍不压卡片。25 顶部那块品红是 `.stepbar` 的 mask 按元素框画、不受滚动容器裁剪，盖在顶栏标题上，不是页面重叠。据此用这次 CI 的 x64 actual 重取 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`、`25-narrow-session-fake-linux.png` 两张（08、24 不涉及 ok 轮次，未动）。
 - CI（007a513）：tests 45136433804、sidecar 45136433729、desktop 45136433723 全 success。11-23 S 同意合并。下一批：一句话结论与正文第一句去重；后端 key_numbers（A 组，需回归）。
 
-## [207] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：方案 · commit <合并后回填>（PR #124）
+## [207] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：方案 · commit 28726e6（PR #124）
 
 只有文档，不改代码。新增 `docs/roadmap/phase76-u3u5.md`，同时回填 [206] 的 SHA（d84363c）。
 
@@ -11329,3 +11329,65 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 三件都不碰 A 组（`app/server/`、`app/sidecar.py` 属 B，见 `fingerprint.py:136,139`），不改提示词，P8 哈希不变，按 `phase75-assess.md:75` 不需要内网回归。
 - 2026-11-24 S 拍板：7 条待定项全部按推荐执行。另有补充：`app.py:976` 后新加的调用行也要在 `test_inject_check.py` 里按字面钉住。
 - 编号：11-24 合并前 fetch，master 仍是 d84363c，评测侧 #123 尚未合并。本条先合并，取 [207]；按「后合者 rebase 接号」，#123 改为 [208]。
+
+## [待编号] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：实现 · commit <待提交>
+
+方案：`docs/roadmap/phase76-u3u5.md`（[207]，28726e6），§4「已定」7 条和补充约定照做。三件都只落在 `app/server/`、`app/sidecar.py`（B 组）和 `ui/web/`；A 组（app/core、app/tools、app/nodes、app/react_agent.py、app/memory）一个字节没动，不改提示词，按 `phase75-assess.md:75` 不需要内网回归。
+
+### 改了什么
+- **U3-1 结论不重复**（`ui/web/src/turn.ts` `conclusionOf`、`TurnView.tsx`）：`conclusionOf` 改为返回 `{lead, body}`。lead 取法不变；body = 原文去掉 lead 在原始 Markdown 里对应的那段（从第一段内容起点——列表记号之后——到这一句的句末），其余字符不动。被去掉的原文里 `**` / `__` / `` ` `` 不成对、或链接被切断，或原文里找不到去掉记号后等于 lead 的前缀，一律算「隐不干净」：lead = null、body = 原文（退回 U3 之前）。这一行去掉后只剩空白或只剩列表记号时整行删除，小标题保留。body 为空（fake 那种一句话结论）不渲染正文块。只改显示：`content`、`result.answer`、导出、记忆读到的仍是原文。
+- **U3-2 key_numbers**（新文件 `app/server/key_numbers.py`）：`key_numbers_of(r)` 按方案 §1.2 规则 1–5；`attach_key_numbers(record, r)` 不该产出时不写这个键。`app.py` done 分支在 `d["data"]["result"]["meta"] = meta`（原 :976，这一行没动）之后加一行 `attach_key_numbers(d["data"]["result"], ev.result)`，写进的就是随后落库（result_json）和外发（yield）的同一个字典。只 import `grounding._tokens/_significant/_candidates`、`ambiguity.METRIC_MARKERS`、`result.is_refusal`。`turn.ts` keyNumbers 只改注释。
+- **U5 会话标题**（新文件 `app/server/titles.py`）：`session_title(question)` 按 §2.3 算法 1–6（NFKC、去控制字符、合并空白 → 第一个分句 → METRIC_MARKERS 首个命中并合并紧邻命中 → jieba.posseg 在指标词前找第一段连续名词、没有再往后找、跨界截断、泛词不算 → 拼接截 12 字，否则分句截 12 字）；`unique_title` 同一数据集重名追加「（2）」「（3）」。`app.py`：
+  - `post_message`：只在 `s.title` 为空时 `auto_title()`（规则 + 同数据集去重，不跟自己比）；流式响应加 `X-Session-Title`（`urllib.parse.quote(..., safe="")`，与 `X-Message-Id` 并列）。
+  - `PATCH /sessions/{id}`：清洗后为空串 → 用该会话第一条用户消息重新生成（同样去重）；还没有提问时就是空串。非空照原样保存，用户手动起的名字不去重。
+  - 前端：`src/titles.ts` 新增 `titleEdit(draft, current)`（侧栏 `Shell.tsx SessionRow` 和会话页 `SessionView.tsx` 标题框共用；返回 null 不发请求，否则提交 trim 后的值，可能是空串）和 `decodeTitleHeader`；`client.ask` 多返回 `sessionTitle`；`SessionView` 删掉 `question.slice(0, 60)`，首问时读响应头，流结束后的库同步不变。`fakeBackend.sseStream` 可带标题头。
+  - `app/sidecar.py` 自检 imports：静态 `import jieba.posseg`，并真调一次 `jieba.posseg.cut("各地区销量")`，标不出名词就红。
+
+### 测试
+- pytest `tests/test_key_numbers.py`（新，23 条）：`test_key_numbers_table`（14 参数：§1.2 原型表 5 行 + 其余分支 9 行，每行统一断言 value 在结论原文里且 `unverified_numbers(value, [str(r.result)]) == []`）、`test_unverified_numbers_are_skipped`、`test_not_produced`（4 参数：clarify / 未执行 / 出错 / 拒答，且 `attach_key_numbers` 不写键）、`test_multirow_dataframe_and_unsorted_long_series_give_nothing`、`test_grounding_private_api_is_pinned`（三个私有函数的名字、参数名和返回形状）、`test_done_event_and_stored_message_carry_the_same_key_numbers`（2 参数，TestClient：done 事件与 `GET /sessions/{id}` 的 `key_numbers` 相等且等于期望）。
+- pytest `tests/test_titles.py`（新，26 条）：`test_title_table`（15 参数 = §2.3 对照表）、`test_title_is_short_and_clean`（5 参数）、`test_unique_title_suffix`、`test_first_question_sets_title_and_header_matches_db`、`test_same_dataset_duplicates_get_numbered_other_dataset_does_not`、`test_user_title_before_first_question_is_kept`、`test_patch_empty_restores_auto_title_from_first_question`、`test_sidecar_selftest_probes_posseg`。
+- pytest `tests/test_inject_check.py`：新增 `test_server_done_branch_attaches_key_numbers`，按字面钉住 meta 那一行 + 紧跟的 `attach_key_numbers(...)` 一行（补充约定）。
+- `tests/test_server.py:80`（标题 = 「哪个地区卖得最好」）没改，按截断分支照样成立。
+- vitest `u3-result-card.test.tsx`（26 → 41）：原 11 条 `conclusionOf` 的 lead 期望不变（改成取 `.lead`，取不到时断言 `{lead: null, body: 原文}`）；新增 `conclusionOf：body 隐去已摘出的那一句`（7 条对照 + 一句话结论 body 为空 + 4 条隐不干净）；`一句话结论在卡片顶部；正文里隐去这一句（出现 0 次），其余照常显示`（**断言 lead 在 `.answer .md` 里出现 0 次**，已定 1）、`隐不干净：卡头不出结论，正文完整显示`、`一句话结论（body 为空）：不渲染正文块`、`反问（clarify）不摘结论，正文完整显示`；keyNumbers 用例的 label 改成 K3 的真实形状（「深圳 · 销量」）。
+- vitest `u5-session-title.test.tsx`（新，13 条）：`titleEdit` 7 条、`decodeTitleHeader`、`流还没结束，顶栏和侧栏（onChanged）就已经是后端给的标题`（并断言不等于问题前 60 字）、`没有响应头（旧后端）：不自己编标题…`、`正在编辑标题时，响应头不覆盖输入框`、侧栏与会话页清空标题各一条（都发 `PATCH {title: ""}`，显示还原后的自动标题）。
+- vitest `f2.test.tsx`：**期望值改了**。`OK.answer` 从一句「总销量 **1685**」改成「共 15 行。\n\n总销量 **1685**」。原因：U3-1 之后一句话结论整句进卡头（纯文本）、正文块不渲染，原来断言的 `<strong>1685</strong>` 就没了；改成两句后第一句进卡头、带 Markdown 的第二句留在正文，「结论按 markdown 渲染」照旧钉住。
+- e2e `f4-result-card.spec.ts`：新增 `U3 收尾：关键数字取未核实之外的前 3 个；卡头结论在正文里不重复；刷新重放后照样成立`（桩上 answer / key_numbers 5 个 / unverified 1 个，断言 `.kn-value` = 前 3 个未核实之外的、lead 在 `.answer .md` 里 0 次，刷新后从侧栏点回再断言一遍）。
+- e2e `f4-session-title.spec.ts`（新）：`U5：首问后顶栏和侧栏的会话名是「地区销售额」；刷新后照样`。
+- e2e `f2.spec.ts`、`f3-errors.spec.ts`：**期望值改了**。按会话名找会话的正则从 `/哪个城市/`、`/请按城市/` 改成 `/城市销量/`。原因：标题不再是问题原话，「哪个城市销量最高？」和「请按城市统计二零二五年每个季度的销量并画出柱状图」按新规则都是「城市」+「销量」。`f3-charts` 的两处 `startsWith("画 ")` / `"画 5000"` 不用改（截断分支）。
+
+### 闸门（最后一次改动之后全部重跑；aarch64 沙箱 2 核，日志 `/workspace/work/logs/u35_*`）
+| 闸门 | 结果 |
+|---|---|
+| pytest 分段 1（34 个文件，去掉 oracle 两条） | 913 passed |
+| pytest 分段 2（36 个文件） | 898 passed（1 条 DtypeWarning 是 gate 数据原有的） |
+| pytest 分段 3（35 个文件） | 553 passed |
+| pytest oracle（`test_oracle_pipeline_all_correct[workflow/react]`，单独跑） | 2 passed |
+| pytest 合计 | 2366 passed，0 failed，0 skipped；新增 50 条（test_key_numbers 23、test_titles 26、test_inject_check 1）。`test_memory_p8.py` 五个哈希、`test_fingerprint.py` 分区原样通过 |
+| A 组 code_sha12（`app/eval/fingerprint.py` `code_fingerprint()["affects_results_sha256"]`） | 本分支 `8117bbb25d0a` = master 28726e6 `8117bbb25d0a`（A 组 68 个文件）；全量 sha 61ebeedf3eda → 210844b6b15d，只因 B 组变化 |
+| `scripts/gen_ui_types.py --check` | ok |
+| sidecar `python -m app.sidecar --selftest`（源码版） | ok，9 项全过；imports 一项 `posseg=[('各','r'),('地区','n'),('销量','n')]` |
+| vitest 全量（`--pool=threads --maxWorkers=2`） | 32 个文件 980 passed（master d84363c 为 31 个文件 952；+28 = u3 新增 15 + u5 新文件 13） |
+| eslint `--max-warnings 0` | 0 错误 0 警告 |
+| `tsc --noEmit` | 0 错误 |
+| web build | 通过；CSS 48.90 kB（gzip 9.64）、JS 1,117.99 kB（gzip 365.13），dist/index.html 0 个内联 script |
+| `playwright test --list` | 53 条 / 20 个文件（原 51 / 19）；新增 `f4-result-card.spec.ts:147` U3 收尾、`f4-session-title.spec.ts:10` U5，都归 fake project |
+| e2e / 视觉基线 | **没跑**：沙箱缺 libatk，交给 CI |
+
+### 偏离及理由
+- **§2.1 漏列了两处依赖原话标题的 e2e**：方案只列了 `test_server.py:80` 和 `f3-charts`，实际 `f2.spec.ts:41,50`（`/哪个城市/`）和 `f3-errors.spec.ts:37`（`/请按城市/`）也按原话找会话，新规则下都变成「城市销量」，已改，理由见上。
+- **视觉基线 11、25 预计会红**：fake 的一句话结论现在只在卡头、正文块不再渲染，卡片变矮；顶栏标题从「画各城市销量柱状图」变成「城市销量」（标题框不在 mask 里）。按惯例不提交沙箱图，等 CI x64 actual 重取（08 分析中、24 失败页不涉及）。
+- **对照表 15 行实际跑出来与方案一致**，没有出入。
+- **「第一段连续名词」按字面实现**：§2.3 第 4 步写「在指标词之前找第一段连续的名词」，§0 写「指标词前紧邻的名词短语」。实现取前者（从左往右第一段）；对照表 15 行两种读法结果相同，「各城市各品类销售额」这类问题上才有区别（前者取「城市」）。
+- **泛词表**：方案列了「数据、这份、表、图、图表、情况、结果、分析……」，实现另加了「表格、数据集、字段、内容、信息」。指标词表没动（已定 2：补充表先不补）。
+- **隐去的边界**：方案只写「去掉 lead 对应的那段前缀」。实现里列表记号留在原处（「- 深圳最高；上海次之」→「- 上海次之」，列表结构不散），这一行只剩空白或只剩记号时整行连换行删掉；原文里找不到对应前缀时同样按「隐不干净」退回。另：`**深圳销量最高！**其余略` 在 CommonMark 里本来就不是粗体（`！**其` 不构成右侧定界符），退回后正文按原样显示 `**`，这是 Markdown 解析器的既有行为，不是本条引入。
+- **key_numbers 键**：不该产出（clarify / 未执行 / 出错 / 拒答）时不写键；该产出但一个都没对上时写 `[]`。
+- **PATCH 空串的去重**：还原时同样按同一数据集去重（不跟自己比），所以重名会话还原后仍是「…（2）」。
+- **sidecar 自检多一道断言**：posseg 标不出任何 `n*` 词性就判红，防止冻结包里 posseg 表残缺但 import 不报错。
+- **`test_git_sha_without_git_binary` 在 worktree 里没有红**：这条测试已经改成在 tmp_path 里自搭 .git（与运行环境隔离），worktree 下 3 个参数全过。
+
+### 未做
+- e2e 和视觉基线本机没跑（缺 libatk），交给 CI；`playwright test --list` 已确认新用例被列出。视觉 11 / 25 红了按 HANDOVER §6 用 CI x64 actual 重取。
+- Windows 打包：posseg 进包后的体积变化（方案估 3–4 MB）、冻结包 `--selftest` 要看 Windows CI 的 sidecar / desktop job，本机只跑了源码版 selftest。
+- react 链路没有单独的 key_numbers 端到端用例：server 侧同一份代码，差别只在 `r.result` 是最后一次成功执行的结果（方案 §1.2），TestClient 用例走的是 workflow。
+- 旧消息不回填 key_numbers（方案规则 5）。
+- 没有 push、没有开 PR。

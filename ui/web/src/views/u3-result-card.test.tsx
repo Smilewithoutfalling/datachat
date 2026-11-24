@@ -26,7 +26,7 @@ describe("conclusionOf：结论第一句，逐字摘取", () => {
     ["单句没有句号的结论", "单句没有句号的结论"],
     ["均值为 3.14，标准差 0.5。", "均值为 3.14，标准差 0.5。"], // 小数点不断句
   ])("%j → %j", (answer, lead) => {
-    expect(conclusionOf(answer)).toBe(lead);
+    expect(conclusionOf(answer).lead).toBe(lead);
   });
   test.each([
     ["| 城市 | 销量 |\n|---|---|", "表格打头"],
@@ -34,8 +34,34 @@ describe("conclusionOf：结论第一句，逐字摘取", () => {
     ["好。", "太短"],
     ["", "空"],
     ["长".repeat(LEAD_MAX + 1), "超过 LEAD_MAX"],
-  ])("取不到：%j（%s）→ null", (answer) => {
-    expect(conclusionOf(answer)).toBeNull();
+  ])("取不到：%j（%s）→ null，正文原样", (answer) => {
+    expect(conclusionOf(answer)).toEqual({ lead: null, body: answer });
+  });
+});
+
+// U3-1（phase76-u3u5.md §1.1 做法 A）：body = 原文去掉 lead 在原始 Markdown 里对应的那段，其余逐字不变
+describe("conclusionOf：body 隐去已摘出的那一句", () => {
+  test.each([
+    ["深圳销量最高，共 1,061 单。上海次之。", "深圳销量最高，共 1,061 单。", "上海次之。"],
+    ["深圳销量最高，共 1,061 单。\n\n上海次之，82.2 万元。", "深圳销量最高，共 1,061 单。", "\n上海次之，82.2 万元。"], // 这一行只剩空白 → 整行删除（连同换行）
+    ["### 结论\n\n**深圳**销量最高！其余略", "深圳销量最高！", "### 结论\n\n其余略"], // 小标题保留
+    ["- 深圳销量最高；上海次之\n- 广州第三", "深圳销量最高；", "- 上海次之\n- 广州第三"], // 列表记号留在原处
+    ["1. 看 [明细](http://x) 可知深圳最高\n2. 其余略", "看 明细 可知深圳最高", "2. 其余略"], // 这一行只剩记号 → 整行删除
+    ["### 结论\n\n深圳销量最高。\n\n| 城市 | 销量 |\n|---|---|", "深圳销量最高。", "### 结论\n\n\n| 城市 | 销量 |\n|---|---|"],
+    ["均值为 3.14，标准差 `0.5`。样本 7 行。", "均值为 3.14，标准差 0.5。", "样本 7 行。"],
+  ])("%j → lead %j，body %j", (answer, lead, body) => {
+    expect(conclusionOf(answer)).toEqual({ lead, body });
+  });
+  test("一句话结论（fake 模型那种）：整句摘走，body 为空", () => {
+    expect(conclusionOf("（fake）结论：数据共有若干行。")).toEqual({ lead: "（fake）结论：数据共有若干行。", body: "" });
+  });
+  test.each([
+    ["**深圳销量最高！**其余略", "跨句的 ** 不成对"],
+    ["__深圳销量最高。__其余略", "跨句的 __ 不成对"],
+    ["`深圳销量最高。`其余略", "跨句的 ` 不成对"],
+    ["看[深圳销量最高。](http://x)其余略", "链接被切断"],
+  ])("隐不干净：%j（%s）→ lead 为 null，正文完整", (answer) => {
+    expect(conclusionOf(answer)).toEqual({ lead: null, body: answer });
   });
 });
 
@@ -61,24 +87,45 @@ describe("keyNumbers：只认结构化字段，不从正文里猜", () => {
   test("最多 3 个；形状不对的丢掉；未核实的不放大", () => {
     const t = turn({
       ...OK, unverified_numbers: ["999"],
-      key_numbers: [{ value: "1,061", label: "深圳订单数" }, { value: "999", label: "未核实" }, { value: "", label: "空" }, { label: "缺值" },
-        { value: "82.2 万", label: "上海销售额" }, { value: "12%", label: "环比" }, { value: "7", label: "第四个" }],
+      // 形状照 app/server/key_numbers.py（K3）：Series 的口径是「索引 · Series 名」，dict / 单行表是键名
+      key_numbers: [{ value: "1,061", label: "深圳 · 销量" }, { value: "999", label: "未核实" }, { value: "", label: "空" }, { label: "缺值" },
+        { value: "82.2 万", label: "上海 · 销量" }, { value: "22.30%", label: "占比" }, { value: "7", label: "第四个" }],
     });
     expect(keyNumbers(t)).toEqual([
-      { value: "1,061", label: "深圳订单数" }, { value: "82.2 万", label: "上海销售额" }, { value: "12%", label: "环比" },
+      { value: "1,061", label: "深圳 · 销量" }, { value: "82.2 万", label: "上海 · 销量" }, { value: "22.30%", label: "占比" },
     ]);
     render(<TurnView turn={t} />);
     const box = screen.getByTestId("key-numbers");
-    expect([...box.querySelectorAll(".kn-value")].map((x) => x.textContent)).toEqual(["1,061", "82.2 万", "12%"]);
-    expect([...box.querySelectorAll(".kn-label")].map((x) => x.textContent)).toEqual(["深圳订单数", "上海销售额", "环比"]);
+    expect([...box.querySelectorAll(".kn-value")].map((x) => x.textContent)).toEqual(["1,061", "82.2 万", "22.30%"]);
+    expect([...box.querySelectorAll(".kn-label")].map((x) => x.textContent)).toEqual(["深圳 · 销量", "上海 · 销量", "占比"]);
   });
 });
 
 describe("结果卡头：一句话结论与校验徽章", () => {
-  test("一句话结论在卡片顶部，正文照常完整显示", () => {
+  test("一句话结论在卡片顶部；正文里隐去这一句（出现 0 次），其余照常显示", () => {
     render(<TurnView turn={turn(OK)} />);
-    expect(screen.getByTestId("result-lead").textContent).toBe("深圳销量最高，共 1,061 单。");
-    expect(document.querySelector(".answer .md")?.textContent).toContain("上海次之");
+    const lead = screen.getByTestId("result-lead").textContent!;
+    expect(lead).toBe("深圳销量最高，共 1,061 单。");
+    const md = document.querySelector(".answer .md")!.textContent!;
+    expect(md.split(lead).length - 1).toBe(0);
+    expect(md).toContain("上海次之");
+  });
+  test("隐不干净：卡头不出结论，正文完整显示", () => {
+    render(<TurnView turn={turn({ ...OK, answer: "**深圳销量最高！**其余略" })} />);
+    expect(screen.queryByTestId("result-lead")).toBeNull();
+    // CommonMark 里「！**其」的 ** 不算右侧定界符，原样显示；这里只断言内容完整，不断言粗体
+    const md = document.querySelector(".answer .md")!.textContent!;
+    expect(md).toContain("深圳销量最高！");
+    expect(md).toContain("其余略");
+  });
+  test("一句话结论（body 为空）：不渲染正文块", () => {
+    render(<TurnView turn={turn({ ...OK, answer: "（fake）结论：数据共有若干行。" })} />);
+    expect(screen.getByTestId("result-lead").textContent).toBe("（fake）结论：数据共有若干行。");
+    expect(document.querySelector(".answer .md")).toBeNull();
+  });
+  test("反问（clarify）不摘结论，正文完整显示", () => {
+    render(<TurnView turn={turn({ ...OK, clarify: true, executed: false, answer: "你指的是哪个销量？按金额还是按单数。" })} />);
+    expect(document.querySelector(".answer .md")!.textContent).toContain("你指的是哪个销量？");
   });
   test("反问（clarify）不出一句话结论，也不出徽章", () => {
     render(<TurnView turn={turn({ ...OK, clarify: true, executed: false })} />);
