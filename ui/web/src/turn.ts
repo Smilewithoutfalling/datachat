@@ -199,27 +199,38 @@ export function verifyState(t: Turn): Verify | null {
  *  阶段 7.6 U3-1（docs/roadmap/phase76-u3u5.md §1.1 做法 A）：同时返回 body，即正文里隐去已摘出那一句之后剩下的部分，
  *  卡头和正文不再重复同一句。规则：
  *  1. body = 原文去掉 lead 在原始 Markdown 里对应的那段（从第一段内容的起点——列表记号之后——到这一句的句末），其余字符不动；
- *  2. 被去掉的原文里 `**`、`__`、`` ` `` 必须成对、链接 [..](..) 必须完整，否则视为隐不干净：lead = null，body = 原文（退回 U3 之前）；
+ *  2. 不许有强调 / 代码 / 链接跨过切口，切下的前缀里不许剩落单的 `**`、`` ` ``、半截链接，否则视为隐不干净：lead = null，body = 原文（退回 U3 之前）；
+ *     前缀里有链接 [..](..) 也算隐不干净（卡头是纯文字，切走会丢掉链接）；
+ *     `__` 按 CommonMark 只在成对且不贴字母数字时算强调，其余是字面量，卡头原样保留（f3-inject 的 `window.__pwned` 载荷）；
  *     对不上（原文里找不到去掉记号后等于 lead 的前缀）同样退回；
  *  3. 去掉后这一行只剩空白（或只剩列表记号）时整行删除；它前面的小标题保留；
  *  4. 只改显示：消息 content、result.answer、导出、会话记忆读到的仍是完整原文。 */
 export const LEAD_MAX = 120;
 export type Conclusion = { lead: string | null; body: string };
 
+// `__` 只在成对、且两侧不贴着字母数字时才算强调（CommonMark 的下划线规则）；`window.__x` 这类字面量原样保留。
+const UNDER_PAIR = /(^|[^A-Za-z0-9_])__(?=\S)([\s\S]*?\S)__(?![A-Za-z0-9_])/g;
+const MARK_SPANS = [/\*\*(?=\S)[\s\S]*?\S\*\*/g, /(?<![A-Za-z0-9_])__(?=\S)[\s\S]*?\S__(?![A-Za-z0-9_])/g, /`[^`]+`/g, /!?\[[^\]]*\]\([^)]*\)/g];
+
 const plainOf = (s: string): string =>
   s
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/(\*\*|__|`)/g, "")
+    .replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "$1")
+    .replace(UNDER_PAIR, "$1$2")
+    .replace(/`([^`]+)`/g, "$1")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1$2")
     .trim();
 
-/** 被去掉的原文前缀能不能干净地去掉：强调 / 代码记号成对，链接完整。 */
-function cleanCut(raw: string): boolean {
-  const even = (re: RegExp) => (raw.match(re)?.length ?? 0) % 2 === 0;
-  if (!even(/\*\*/g) || !even(/__/g) || !even(/`/g)) return false;
-  const rest = raw.replace(/!?\[[^\]]*\]\([^)]*\)/g, "");
-  return !/\[[^\]]*\]\(/.test(rest) && !/\[[^\]]*$/.test(rest);
+/** 在第 k 个字符处切开这一行能不能切干净：没有任何强调 / 代码 / 链接跨过切口；
+ *  切下来的前缀里去掉成对记号后，不再剩 `**`、反引号、半截链接（剩下的 `__` 是字面量，照原样进卡头）。 */
+function cleanCut(content: string, k: number): boolean {
+  for (const re of MARK_SPANS)
+    for (const m of content.matchAll(re)) if (m.index! < k && m.index! + m[0].length > k) return false;
+  let rest = content.slice(0, k);
+  for (const re of MARK_SPANS) rest = rest.replace(re, "");
+  // 前缀里有链接也不切：卡头是纯文字，切走就丢了可点的链接（或被拦下的危险链接的标记），宁可不出卡头结论
+  return !/\*\*|`/.test(rest) && !/\[[^\]]*\]\(/.test(content.slice(0, k)) && !/\[[^\]]*$/.test(rest);
 }
 
 function leadOf(first: string): string | null {
@@ -251,7 +262,7 @@ export function conclusionOf(answer: string): Conclusion {
     for (let k = 0; k < content.length; k++) if ("。！？!?；;".includes(content[k])) cuts.push(k + 1);
     cuts.push(content.length);
     const k = cuts.find((c) => plainOf(content.slice(0, c)) === lead);
-    if (k === undefined || !cleanCut(content.slice(0, k))) return none;
+    if (k === undefined || !cleanCut(content, k)) return none;
     const restOfLine = content.slice(k);
     const start = offset + (restOfLine.trim() ? marker.length : 0);
     const end = restOfLine.trim() ? offset + marker.length + k : offset + rawLine.length;

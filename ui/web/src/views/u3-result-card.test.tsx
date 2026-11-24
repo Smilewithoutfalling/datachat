@@ -22,7 +22,7 @@ describe("conclusionOf：结论第一句，逐字摘取", () => {
     ["深圳销量最高，共 1,061 单。上海次之。", "深圳销量最高，共 1,061 单。"],
     ["### 结论\n\n**深圳**销量最高！其余略", "深圳销量最高！"],
     ["- 深圳销量最高；上海次之", "深圳销量最高；"],
-    ["1. 看 [明细](http://x) 可知深圳最高", "看 明细 可知深圳最高"],
+    ["1. 看 `明细` 可知深圳最高", "看 明细 可知深圳最高"], // #125 起：原例带链接，链接所在的句子不再摘（切走会丢链接），改用行内代码钉「去记号」
     ["单句没有句号的结论", "单句没有句号的结论"],
     ["均值为 3.14，标准差 0.5。", "均值为 3.14，标准差 0.5。"], // 小数点不断句
   ])("%j → %j", (answer, lead) => {
@@ -34,6 +34,7 @@ describe("conclusionOf：结论第一句，逐字摘取", () => {
     ["好。", "太短"],
     ["", "空"],
     ["长".repeat(LEAD_MAX + 1), "超过 LEAD_MAX"],
+    ["1. 看 [明细](http://x) 可知深圳最高", "第一句带链接（#125 起）"],
   ])("取不到：%j（%s）→ null，正文原样", (answer) => {
     expect(conclusionOf(answer)).toEqual({ lead: null, body: answer });
   });
@@ -46,11 +47,16 @@ describe("conclusionOf：body 隐去已摘出的那一句", () => {
     ["深圳销量最高，共 1,061 单。\n\n上海次之，82.2 万元。", "深圳销量最高，共 1,061 单。", "\n上海次之，82.2 万元。"], // 这一行只剩空白 → 整行删除（连同换行）
     ["### 结论\n\n**深圳**销量最高！其余略", "深圳销量最高！", "### 结论\n\n其余略"], // 小标题保留
     ["- 深圳销量最高；上海次之\n- 广州第三", "深圳销量最高；", "- 上海次之\n- 广州第三"], // 列表记号留在原处
-    ["1. 看 [明细](http://x) 可知深圳最高\n2. 其余略", "看 明细 可知深圳最高", "2. 其余略"], // 这一行只剩记号 → 整行删除
+    ["1. 深圳销量最高\n2. 其余略", "深圳销量最高", "2. 其余略"], // 这一行只剩记号 → 整行删除
     ["### 结论\n\n深圳销量最高。\n\n| 城市 | 销量 |\n|---|---|", "深圳销量最高。", "### 结论\n\n\n| 城市 | 销量 |\n|---|---|"],
     ["均值为 3.14，标准差 `0.5`。样本 7 行。", "均值为 3.14，标准差 0.5。", "样本 7 行。"],
   ])("%j → lead %j，body %j", (answer, lead, body) => {
     expect(conclusionOf(answer)).toEqual({ lead, body });
+  });
+  test("字面量 __ 不当强调剥掉：卡头逐字保留（f3-inject 的 window.__pwned 载荷），正文里也只隐去这一句", () => {
+    const a = '（fake）结论：<img src=x onerror="window.__pwned=1"> javascript:window.__pwned=3 点我。其余略';
+    expect(conclusionOf(a)).toEqual({ lead: '（fake）结论：<img src=x onerror="window.__pwned=1"> javascript:window.__pwned=3 点我。', body: "其余略" });
+    expect(conclusionOf("列 __a__ 与 b__c__d 都在。其余略")).toEqual({ lead: "列 a 与 b__c__d 都在。", body: "其余略" });
   });
   test("一句话结论（fake 模型那种）：整句摘走，body 为空", () => {
     expect(conclusionOf("（fake）结论：数据共有若干行。")).toEqual({ lead: "（fake）结论：数据共有若干行。", body: "" });
@@ -60,6 +66,8 @@ describe("conclusionOf：body 隐去已摘出的那一句", () => {
     ["__深圳销量最高。__其余略", "跨句的 __ 不成对"],
     ["`深圳销量最高。`其余略", "跨句的 ` 不成对"],
     ["看[深圳销量最高。](http://x)其余略", "链接被切断"],
+    ["看 [明细](http://x) 可知深圳最高。其余略", "前缀里有链接，切走会丢掉可点的链接"],
+    ["（fake）结论：x [点我](javascript:alert(1))", "被拦下的危险链接也不切（f3-inject 的 md-link-blocked）"],
   ])("隐不干净：%j（%s）→ lead 为 null，正文完整", (answer) => {
     expect(conclusionOf(answer)).toEqual({ lead: null, body: answer });
   });
