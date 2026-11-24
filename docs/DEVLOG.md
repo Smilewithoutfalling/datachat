@@ -11525,3 +11525,4 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - `AnalysisResult` / 报告 JSON 没加 replan 字段：是否 replan、原因只在快照（replan 节点、scope_gate 行）、`res.steps` 和事件里；评测侧若要在报告里统计 replan 率需另加。
 - e2e 本机缺 libatk，只做 `playwright test --list`；计划块「重新规划」没有 e2e 用例，也没有专门的样式（只加了 class）。
 - 没有 push，没有开 PR。
+- CI 第一轮（b811dfa，tests 45355090886）：windows 两档 pytest 红在 `test_code_scope_golden` 两条——Windows checkout 把 golden.json 转成 CRLF，逐字节比较失败；ubuntu 两档、web、replay-batch、gate-oracle 全绿，sidecar 45355090888、desktop 45355090954 success。修法：`.gitattributes` 加 `tests/fixtures/code_scope/*.json text eol=lf`（与 docs/gate/*.json 同理），golden 内容不动。
