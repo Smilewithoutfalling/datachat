@@ -11330,7 +11330,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 2026-11-24 S 拍板：7 条待定项全部按推荐执行。另有补充：`app.py:976` 后新加的调用行也要在 `test_inject_check.py` 里按字面钉住。
 - 编号：11-24 合并前 fetch，master 仍是 d84363c，评测侧 #123 尚未合并。本条先合并，取 [207]；按「后合者 rebase 接号」，#123 改为 [208]。
 
-## [待编号] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：实现 · commit <待提交>
+## [208] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：实现 · commit <待提交>
 
 方案：`docs/roadmap/phase76-u3u5.md`（[207]，28726e6），§4「已定」7 条和补充约定照做。三件都只落在 `app/server/`、`app/sidecar.py`（B 组）和 `ui/web/`；A 组（app/core、app/tools、app/nodes、app/react_agent.py、app/memory）一个字节没动，不改提示词，按 `phase75-assess.md:75` 不需要内网回归。
 
