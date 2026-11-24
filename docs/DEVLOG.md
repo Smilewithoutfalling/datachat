@@ -11264,7 +11264,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - A 组 `code_sha12`：master `b32b00fd4e5d` → 本 PR `8117bbb25d0a`（上一版是 9a8601f116e2）。全量 sha `61ebeedf3eda`。需要对新 head 再跑一次内网回归。
 - 内网回归（bd56095，S 回贴 11-23 16:07）：nightly_gate GREEN，canary CLEAN；目标题 corr_002、agg_009、mul_012 全部收复。A 组 `code_sha12` 登记为 `b32b00fd4e5d → 8117bbb25d0a`。CI（bd56095）：tests 45130003747、sidecar 45130003579、desktop 45130003757 全部 success。
 
-## [206] 2026-11-23 阶段 7.6 U3 结果卡（issue #120）· commit <合并后回填>（PR #122）
+## [206] 2026-11-23 阶段 7.6 U3 结果卡（issue #120）· commit d84363c（PR #122）
 
 规格：`docs/roadmap/phase76-ui.md` §2 U3（:42），并照 §3「不加点了没反应的入口」（:58）、§6 第 2 条的顺序约定（:81）。**只改前端**，`app/` 一行没动（A 组 app/core、app/tools、app/nodes 不涉及，不需要内网回归）。
 
@@ -11318,3 +11318,14 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 11-23 rebase 到 master 00e24f9（#121）：冲突只有 `docs/DEVLOG.md`，保留 master 的 [204]/[205] 原样，本条目接在末尾，仍 `[待编号]` / `<待提交>`。
 - 11-23 视觉基线重取：CI（b4bb284，tests run 45121843302，web job 137517158148）49 条 e2e 里只有 f4-visual 视觉 11（230066 像素）和视觉 25（135507 像素）红，vitest 952 全过。逐张看了 artifact `playwright-results` 里的 actual / expected / diff：差异全部来自本条结果卡——卡头多了加粗的一句话结论和「✓ 全部可溯源」徽章，图卡下多了「换个口径 / 补一张图 / 导出」动作行，卡片因此变高约 105 px（11）/ 42 px（25），会话区照原逻辑滚到底，于是整卡上移（11 里用户气泡移出视口、标记浮层完整露出；25 里卡头滚到顶栏下）；柱图、标记浮层、控件行、输入区本身没有重叠、截断或空白，输入区仍不压卡片。25 顶部那块品红是 `.stepbar` 的 mask 按元素框画、不受滚动容器裁剪，盖在顶栏标题上，不是页面重叠。据此用这次 CI 的 x64 actual 重取 `ui/web/e2e/f4-visual.spec.ts-snapshots/11-marks-card-fake-linux.png`、`25-narrow-session-fake-linux.png` 两张（08、24 不涉及 ok 轮次，未动）。
 - CI（007a513）：tests 45136433804、sidecar 45136433729、desktop 45136433723 全 success。11-23 S 同意合并。下一批：一句话结论与正文第一句去重；后端 key_numbers（A 组，需回归）。
+
+## [待编号] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：方案 · commit <待提交>
+
+只有文档，不改代码。新增 `docs/roadmap/phase76-u3u5.md`，同时回填 [206] 的 SHA（d84363c）。
+
+- U3-1 结论与正文重复：采用前端隐去（做法 A）。`conclusionOf` 返回 `{lead, body}`；隐不干净时卡头不出结论，正文完整显示。
+- U3-2 `key_numbers`：由 server 层新文件 `app/server/key_numbers.py` 确定性产出。候选数取自 `r.result` 原对象，按 grounding 的容差与结论数字对上才出；value 用结论原文的写法；每个结论数字最多用一次，最多 3 个，unverified 的跳过，小于 100 的整数不出。react 链路只看最后一次成功执行的结果。旧消息不回填。
+- U5 会话标题：新文件 `app/server/titles.py`，规则是 jieba.posseg + `METRIC_MARKERS`（只 import），取不到时第一个分句截 12 字。只在标题为空时生成；清空标题等于还原自动标题，侧栏与会话页统一；同一数据集重名追加序号；前端改读 `X-Session-Title` 响应头；sidecar 自检加 posseg 探测。
+- 三件都不碰 A 组（`app/server/`、`app/sidecar.py` 属 B，见 `fingerprint.py:136,139`），不改提示词，P8 哈希不变，按 `phase75-assess.md:75` 不需要内网回归。
+- 2026-11-24 S 拍板：7 条待定项全部按推荐执行。另有补充：`app.py:976` 后新加的调用行也要在 `test_inject_check.py` 里按字面钉住。
+- 编号：评测侧 PR #123 已占 [207]。本条合并前 fetch，按顺序接号（预计 [208]）。
