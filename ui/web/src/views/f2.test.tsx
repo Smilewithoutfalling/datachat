@@ -10,7 +10,9 @@ import { SessionView } from "./SessionView";
 
 const INJECT = '<img src=x onerror="window.__pwned=1">';
 const SESSION = { id: "s1", dataset_id: "d1", agent: "workflow", title: "t", created_at: "t", updated_at: "t" };
-const OK = { ok: true, answer: "总销量 **1685**", error: null, error_kind: null, warnings: ["步数用完后强制收尾"], charts: [] };
+// 阶段 7.6 U3-1：answer 期望变了——原来是一句话「总销量 **1685**」，现在卡头会把整句摘走、正文里隐去（phase76-u3u5.md §1.1），
+// 正文块不再渲染，也就没有 <strong> 可断言。改成两句：第一句进卡头，带 markdown 的第二句留在正文里，「结论按 markdown 渲染」照旧钉住
+const OK = { ok: true, answer: "共 15 行。\n\n总销量 **1685**", error: null, error_kind: null, warnings: ["步数用完后强制收尾"], charts: [] };
 const user = (id: string, content: string): Message => ({ id, role: "user", content, status: "ok", created_at: "t" });
 
 function mount(routes: Record<string, unknown>) {

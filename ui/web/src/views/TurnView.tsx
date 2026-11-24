@@ -116,7 +116,8 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
   const list = steps(turn, agent);
   const partial = partialSignals(turn);
   const verify = verifyState(turn);
-  const lead = o.kind === "ok" && r?.clarify !== true ? conclusionOf(answer) : null;
+  // U3-1：卡头摘出的那一句在正文里隐去（隐不干净时 lead 为 null、body 为原文）；只改显示，answer 原文不动
+  const { lead, body } = o.kind === "ok" && r?.clarify !== true ? conclusionOf(answer) : { lead: null, body: answer };
   const nums = keyNumbers(turn);
   const [open, setOpen] = useState(false);
   const [moreWarn, setMoreWarn] = useState(false);
@@ -211,7 +212,7 @@ export function TurnView({ turn, chartSrc, messageId, agent, ...act }: {
         </div>
       ) : null}
 
-      {answer ? <div className="answer"><Markdown text={answer} /></div> : null}
+      {body.trim() ? <div className="answer"><Markdown text={body} /></div> : null}
 
       {o.kind === "cancelled" ? (
         o.unsavedAnswer ? (

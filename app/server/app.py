@@ -71,6 +71,7 @@ import sys
 import threading
 import time
 from typing import Literal, Optional
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -83,6 +84,8 @@ from app.core.errors import user_error
 from app.core.text import BIDI_CONTROLS as _BIDI_CONTROLS, CONTROL_CHARS as _CONTROL_CHARS
 from app.core.events import CANCELLED_MESSAGE, DISCONNECTED_MESSAGE, INTERRUPTED_MESSAGE, STREAM_ABORTED_MESSAGE
 from app.server import connections as conns
+from app.server.key_numbers import attach_key_numbers
+from app.server.titles import session_title, unique_title
 from app.server.db import (ChatSession, Dataset, DatasetFile, DatasetNote, EventRow, Feedback, Message, Setting,
                            make_sessionmaker, now)
 
@@ -853,10 +856,20 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         s = get_or_404(db, ChatSession, session_id)
         return {**session_out(s), "messages": [message_out(m) for m in s.messages]}
 
+    def auto_title(db, s: ChatSession, question: str) -> str:
+        """U5 自动标题：本地规则（app/server/titles.py），同一数据集重名追加（2）（3）。用户手动改的名字不走这里。"""
+        taken = db.scalars(select(ChatSession.title).where(ChatSession.dataset_id == s.dataset_id,
+                                                           ChatSession.id != s.id))
+        return unique_title(session_title(question), taken)
+
     @app.patch("/sessions/{session_id}", dependencies=[Depends(auth)])
     def rename_session(session_id: str, body: SessionPatch, db=Depends(db_dep)):
         s = get_or_404(db, ChatSession, session_id)
-        s.title = _CONTROL_CHARS.sub("", body.title).strip()[:120]
+        title = _CONTROL_CHARS.sub("", body.title).strip()[:120]
+        if not title:                                    # U5（§4 已定 3）：清空 = 还原自动标题，用该会话的第一问重新生成
+            first = next((m.content for m in s.messages if m.role == "user"), "")
+            title = auto_title(db, s, first)
+        s.title = title
         db.commit()
         return session_out(s)
 
@@ -930,11 +943,12 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         q = Message(session_id=session_id, role="user", content=body.content, created_at=now())
         a = Message(session_id=session_id, role="assistant", status="running", created_at=now())
         db.add_all([q, a])
-        if not s.title:
-            s.title = body.content[:60]
+        if not s.title:                                  # U5：只在标题为空时生成（用户改过的名字不覆盖）
+            s.title = auto_title(db, s, body.content)
         s.updated_at = now()
         db.commit()
         msg_id = a.id
+        session_title_now = s.title or ""
 
         kwargs = dict(agent=agent, trace_id=msg_id, log=False, memory_mode=mem_setting, rewrite=rw_setting,
                       prev_clarify=prev_clarify,
@@ -974,6 +988,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                         if ev.type == "done":
                             done_seen = True
                             d["data"]["result"]["meta"] = meta
+                            attach_key_numbers(d["data"]["result"], ev.result)   # U3-2：落库（result_json）与外发（yield）同一份
                             r = ev.result
                             if r.error_kind == "cancelled":
                                 status, content = "cancelled", CANCELLED_MESSAGE
@@ -1004,7 +1019,9 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Message-Id": msg_id,
-                                          "X-User-Message-Id": q.id})
+                                          "X-User-Message-Id": q.id,
+                                          # U5：HTTP 头只能是 latin-1，标题百分号编码；前端 decodeURIComponent
+                                          "X-Session-Title": quote(session_title_now, safe="")})
 
     @app.post("/messages/{message_id}/cancel", dependencies=[Depends(auth)])
     def cancel_message(message_id: str, db=Depends(db_dep)):

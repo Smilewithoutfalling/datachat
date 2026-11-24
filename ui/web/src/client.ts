@@ -2,6 +2,7 @@
 import type { Api } from "./api";
 import { dataUrlBytes } from "./charts/pngSaver";
 import { parseSse } from "./sse";
+import { decodeTitleHeader } from "./titles";
 import type { Ev } from "./turn";
 import type {
   Agent, Catalog, Connection, ConnectionIn, Connections, ConnectionTest, ConnKey, Dataset, DatasetDetail, DatasetNote, KeyStatus,
@@ -65,6 +66,8 @@ export function client(api: Api) {
         signal,
       });
       const messageId = res.headers.get("X-Message-Id") ?? "";
+      // U5：首问时后端按本地规则生成的会话标题（app/server/titles.py）；不是首问时就是现有标题
+      const sessionTitle = decodeTitleHeader(res.headers.get("X-Session-Title"));
       const body = res.body;
       async function* events(): AsyncGenerator<Ev> {
         if (!body) return;
@@ -78,7 +81,7 @@ export function client(api: Api) {
           yield ev;
         }
       }
-      return { messageId, events: events() };
+      return { messageId, sessionTitle, events: events() };
     },
     /** 停止：CAS 落库 cancelled。409 = 已经结束。前端必须等它返回再断开流（否则库里会落 interrupted）。 */
     cancel: (messageId: string) =>

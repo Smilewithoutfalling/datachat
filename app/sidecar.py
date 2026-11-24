@@ -102,11 +102,15 @@ def selftest() -> int:
         import langgraph  # noqa: F401
         import uvicorn  # noqa: F401
         import jieba
+        import jieba.posseg  # U5 会话标题用词性标注；静态 import 让 PyInstaller 收进 posseg 的大表（#109 教训）
         from app.react_agent import build_react_agent  # noqa: F401
         from app.server.app import create_app
         create_app(tempfile.mkdtemp(prefix="datachat-selftest-home-"), "x")
         list(jieba.cut("各地区销量"))
-        return True, f"keyring={type(keyring.get_keyring()).__name__}"
+        tags = [(w.word, w.flag) for w in jieba.posseg.cut("各地区销量")]   # 真调一次：冻结包缺 posseg 表时这里红
+        if not any(f.startswith("n") for _, f in tags):
+            return False, f"jieba.posseg 没标出名词：{tags}"
+        return True, f"keyring={type(keyring.get_keyring()).__name__} posseg={tags}"
 
     for name, fn in [("compute", compute), ("plot", plot), ("stdout", stdout), ("blocked_read", blocked_read),
                      ("blocked_import", blocked_import), ("timeout", timeout), ("memory", memory),

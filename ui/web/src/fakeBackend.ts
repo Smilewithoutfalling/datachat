@@ -3,14 +3,21 @@ export type Call = { method: string; path: string; body: unknown };
 type Handler = (body: unknown, path: string) => unknown;
 
 /** 可控的 SSE 响应：push 一个事件、end 结束。 */
-export function sseStream(messageId: string) {
+export function sseStream(messageId: string, sessionTitle?: string) {
   let ctrl!: ReadableStreamDefaultController<Uint8Array>;
   const enc = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
   let seq = 0;
   return {
     response: () =>
-      new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream", "X-Message-Id": messageId } }),
+      new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream", "X-Message-Id": messageId,
+          // U5：和后端一样百分号编码（app.py post_message 的 X-Session-Title）
+          ...(sessionTitle !== undefined ? { "X-Session-Title": encodeURIComponent(sessionTitle) } : {}),
+        },
+      }),
     push: (type: string, data: unknown) => {
       const ev = { type, trace_id: messageId, seq: seq++, ts: 0, data };
       ctrl.enqueue(enc.encode(`id: ${ev.seq}\nevent: ${type}\ndata: ${JSON.stringify(ev)}\n\n`));

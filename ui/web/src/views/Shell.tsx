@@ -3,6 +3,7 @@ import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell } from "../desktop";
 import { type Client, errText, formatSize } from "../client";
+import { titleEdit } from "../titles";
 import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session } from "../types";
 import { DatasetView } from "./DatasetView";
 import { IconChat, IconGear, IconPlus, IconSidebar, IconSpark, IconTable, IconUpload } from "./icons";
@@ -308,8 +309,8 @@ function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
   const title = s.title || "未命名会话";
   const save = () => {
     setEditing(false);
-    const t = draft.trim();
-    if (t && t !== s.title) onRename(t);
+    const t = titleEdit(draft, s.title); // U5：与会话页同一条规则，空串 = 还原自动标题（以前侧栏拦了空串，会话页不拦）
+    if (t !== null) onRename(t);
   };
   return (
     <li className="sess-item">
