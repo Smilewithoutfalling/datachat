@@ -11330,7 +11330,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 2026-11-24 S 拍板：7 条待定项全部按推荐执行。另有补充：`app.py:976` 后新加的调用行也要在 `test_inject_check.py` 里按字面钉住。
 - 编号：11-24 合并前 fetch，master 仍是 d84363c，评测侧 #123 尚未合并。本条先合并，取 [207]；按「后合者 rebase 接号」，#123 改为 [208]。
 
-## [208] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：实现 · commit <待提交>
+## [208] 2026-11-24 阶段 7.6 U3 收尾与 U5 会话标题：实现 · commit a0aaa4c（PR #125）
 
 方案：`docs/roadmap/phase76-u3u5.md`（[207]，28726e6），§4「已定」7 条和补充约定照做。三件都只落在 `app/server/`、`app/sidecar.py`（B 组）和 `ui/web/`；A 组（app/core、app/tools、app/nodes、app/react_agent.py、app/memory）一个字节没动，不改提示词，按 `phase75-assess.md:75` 不需要内网回归。
 
@@ -11397,7 +11397,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
   - **视觉 08、11、25**：逐张看了 artifact `playwright-results`（14884716763）。08 只有顶栏标题从原话变成「城市销量占比」（U5）；11 和 25 是 fake 一句话结论只在卡头出现、正文块不渲染、卡片变矮，顶栏是「城市销量」。没有重叠、截断或空白，所以用这次 CI 的 x64 actual 重取三张。本次修正不改 fake 普通结论（不带链接，也没有 `__`），截图不受影响。
   - 修正后重跑前端闸门：vitest 32 个文件 984 passed；eslint、tsc、build 通过；playwright --list 53 条。后端没改，pytest 不重跑。
 
-## [待编号] 2026-11-24 阶段 7.5 第 3 步修复回路：方案 · commit <待提交>
+## [209] 2026-11-24 阶段 7.5 第 3 步修复回路：方案 · commit <待提交>
 - 新增 `docs/roadmap/phase75-step3.md`。依据 phase75-assess.md 第 3 步，以及评测侧 7.5b §4 的三条验收边界（原文摘进方案 §0；7.5b 文件不在仓库里）。
 - 分四件：S3-1 由 `CAPS` 渲染两处 prompt 的沙箱约定；S3-2 口径闸，`code_refs` 挪到 `app/tools/code_scope.py`，assess 改为 import；S3-3 REPLAN 边，每轮一次，三种触发；S3-4 grounding 假阳率只量不改。前三件属 A 组，放一个实现 PR，内网回归一次。
 - 关键决定：replan 时不允许反问；口径闸拒收后，result 用修复前的结果；空结果下同列同运算符只换字面量，不算换口径（为 N9 准备）。
