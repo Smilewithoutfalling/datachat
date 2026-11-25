@@ -65,25 +65,6 @@ describe("步骤条分段", () => {
   });
 });
 
-describe("阶段 7.5 第 3 步：replan 的两版计划", () => {
-  const evs = [
-    ev("plan", 0, { text: "第一版：按地区求和" }), ev("code", 1, { code: "a", source: "codegen", attempt: 0 }),
-    ev("exec", 2, { ok: false, error: "KeyError", duration_s: 0.1 }), ev("code", 3, { code: "b", source: "reviewer", attempt: 1 }),
-    ev("exec", 4, { ok: false, error: "KeyError", duration_s: 0.1 }),
-    ev("plan", 5, { text: "第二版：换一种思路", source: "replan" }), ev("code", 6, { code: "c", source: "codegen", attempt: 1 }),
-    ev("exec", 7, { ok: true, result_text: "5", duration_s: 0.1 }), ev("answer", 8, { text: "结论" }),
-  ];
-  test("展开过程：两版计划都在，第二版标「重新规划」；步骤条「理解问题 ×2」", () => {
-    render(<TurnView turn={turn("ok", evs, OK)} agent="workflow" />);
-    expect(screen.getByTestId("stepbar").querySelector('[data-step="plan"]')?.textContent).toContain("×2");
-    fireEvent.click(screen.getByRole("button", { name: /查看过程/ }));
-    const blocks = Array.from(document.querySelectorAll("details.ev.plan"));
-    expect(blocks.map((b) => b.querySelector("summary")?.textContent)).toEqual(["分析计划", "重新规划"]);
-    expect(blocks[1].className).toContain("replan");
-    expect(blocks.map((b) => b.querySelector(".text")?.textContent)).toEqual(["第一版：按地区求和", "第二版：换一种思路"]);
-  });
-});
-
 describe("部分完成的信号", () => {
   test("黄条：warnings、字典读取失败各算一条；ReAct 的重跑提示不算；unverified_numbers 不进黄条（U3 挪到校验徽章）", () => {
     const t = turn("ok", [

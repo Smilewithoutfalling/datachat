@@ -10,8 +10,7 @@ import { download } from "../charts/exportPng";
 import { safeFilename } from "../charts/filename";
 import { getPngSaver } from "../charts/pngSaver";
 import {
-  answerText, canExport, conclusionOf, type Ev, FOLLOW_UPS, isPartial, isReplan, keyNumbers, MESSAGES, outcome, partialSignals, planLabel,
-  type Step, steps,
+  answerText, canExport, conclusionOf, type Ev, FOLLOW_UPS, isPartial, keyNumbers, MESSAGES, outcome, partialSignals, type Step, steps,
   totalSeconds, type Turn, turnMeta, turnTokens, verifyState,
 } from "../turn";
 import { IconAlert, IconChevronDown, IconChevronUp, IconDownload, IconPlay, IconRetry, IconSpark, IconWarn, Spinner, StepIcon } from "./icons";
@@ -24,8 +23,8 @@ function EventView({ ev }: { ev: Ev }) {
   switch (ev.type) {
     case "plan":
       return (
-        <details className={`ev plan${isReplan(ev) ? " replan" : ""}`} open>
-          <summary>{planLabel(ev)}</summary>
+        <details className="ev plan" open>
+          <summary>分析计划</summary>
           <div className="text">{ev.data.text}</div>
         </details>
       );
