@@ -11416,7 +11416,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
   - B4 挂账（触发式交叉校验，三个触发条件照录 [199] 原文）写进 #139 正文。
 - 不改代码：A 组、B 组文件都没动，code_sha12 不变，不需要内网回归。
 - [209] 回填：9c40a97（PR #126）。
-## [211] 2026-11-23 · canary usage 覆盖消失归因：网关回包结构变化（issue #119）· commit <待提交>
+## [211] 2026-11-23 · canary usage 覆盖消失归因：网关回包结构变化（issue #119）· commit e75a9db（PR #123）
 
 - 现象：#121 两轮内网回归（9274793 14:36 / bd56095 15:37，现场 _ver\num 与 _ver\num2）canary 均 exit 0 CLEAN、10/10 全对，但逐题 `tokens_cache_read=null`、`tokens_reasoning=null`，`tokens_in` 占比 0.9484 / 0.9504（基线 0.5049，+88%）。
 - 证据一（采集端只转抄）：`app/core/llm.py:186-191` 从 `usage_metadata.input_token_details.cache_read` 与 `output_token_details.reasoning` 读数，字段不回传就落 null（`app/eval/runner.py:29` 原样落报告）。评测侧没有可坏的计算逻辑。
@@ -11435,7 +11435,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 | CI | 全矩阵照跑，结果挂 PR |
 
 
-## [212] 2026-11-24 · #119 实锤与 canary 基线重立 · commit <待提交>
+## [212] 2026-11-24 · #119 实锤与 canary 基线重立 · commit e75a9db（PR #123）
 
 **背景**：[211] 判定 usage 覆盖消失疑似网关回包结构变化。本批实锤并重立基线，#119 闭环。
 
@@ -11473,6 +11473,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - **结果**：`git diff --stat origin/master -- app/` 恰为 7 个文件（`app/tools/{sandbox_caps,code_scope,dataset}.py`、`app/nodes/{codegen,reviewer}.py`、`app/assess/{code_refs,contracts}.py`）；graph / state / planner / summarizer / core 三件 / sanity / snapshot / replay 与 9c40a97 逐字节一致；`git diff origin/master -- ui/web/` 为空。
 - **哨兵**：`tests/test_step3_repair.py::test_step3_strip_no_replan_or_scope_gate` 断言图节点 = master 五节点、reviewer 直连 executor、`AgentState` 没有四个字段、`LLM_NODES` 四项、service 的 `recursion_limit` 为 `2 * max_attempts + 10`。回退红已做：摘除前（#127 rebase 后 6381fe1）红、把 scope_gate 节点临时加回 graph 时红，撤回后绿（日志 `/workspace/work/logs/s3strip_sentinel_*`）。
 - 11-25 rebase 到 master 643adfb（#154）：冲突只有 `docs/DEVLOG.md`（都在末尾追加），保留 master 的 [210] 原样并回填为 643adfb，本条目接在其后；原 [待编号] 条目改写为本条（编号按已定编号链 [213]，[211]/[212] 留给 #123）。
+- 11-25 #134 读数通过后再 rebase 到 master e75a9db（#155 Vite 升级 be0abbe、#123 让号 e75a9db）：冲突仍只有 `docs/DEVLOG.md`，保留 master 的 [210]–[212]，本条接在 [212] 后，[211]/[212] 回填 e75a9db。be0abbe 只改 `ui/web/package.json` 与 lock，e75a9db 只改 docs，A 组无变动；rebase 后本地重算 `affects_results_sha256` 仍为 `e11f8abc8a0a`，内网读数继续有效，不重跑。
 
 ### 偏离及理由
 1. **`_condition_items` 四元组与 `filter_items` 一并删除**（issue #129 只点名 `_literal_swap` 与 `empty_before`）。两者在 #127 里唯一的消费者是 `_literal_swap`（`git grep` 6381fe1：`filter_items` 只在 `code_scope.py:463` 被调用）；删掉后 `code_scope.py` 第 12–325 行与搬家前 `code_refs.py` 逐字相同，搬家变成纯移动。golden 5 条照样逐字节通过。
@@ -11508,10 +11509,26 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 ### CI
 - 第一轮（b811dfa，tests 45355090886）：windows 两档 pytest 红在 `test_code_scope_golden` 两条（Windows checkout 把 golden.json 转成 CRLF）；修法 `.gitattributes` 加 `tests/fixtures/code_scope/*.json text eol=lf`，golden 内容不动。sidecar 45355090888、desktop 45355090954 success。
 - 第二轮（19171d8，按 head_sha 全部工作流）：tests 45358222488 success、sidecar 45358222585 success、desktop 45358222697 success。
-- 摘除后的 head 尚未 push，CI 待 #134。
+- 摘除后（acac4cb，按 head_sha 全部工作流）：tests 45557203875 success、sidecar 45557203890 success、desktop 45557204032 success。
+- rebase 到 e75a9db 后的 head：CI 结果挂 PR #127，下一次提交回填。
+
+### 内网回归（#134 节点 3，评测侧，2026-11-25 15:13–15:50）
+被测 `acac4cb580355cf876ae6993ea1db1ed8f362bc2`（codeload tarball），workflow / state / n=202，基线 v7（[194, 192, 192] 中位 192/202，pass^3 188）。
+
+| 项 | 读数 |
+|---|---|
+| nightly_gate | 退出码 0，🟢 GREEN；通过 195/202；配对净退步 −2（退步 1：mul_012；进步 3：mem_003、ts_007、inv_005），未过阈值 6 |
+| canary | 退出码 0，CLEAN |
+| compare vs base 9c40a97 | 195 → 195，Δ 0.0pp，配对 4 错→对 / 4 对→错，McNemar p=1.0（MDE 6），strict 69.7% → 70.3% |
+| compare vs 摘除前 19171d8 | 196 → 195，Δ −0.5pp，配对 2 / 3，p=1.0，strict 68.4% → 70.3% |
+| replan 探针 | 256 个快照 0 命中（replan_files=NONE），整批无 replan / scope_gate 节点 |
+| code_sha12 | 报告 `fingerprints.code_sha12` = `e11f8abc8a0a`；评测侧在被测树上重算同值；sandbox_caps.py / codegen.py / code_scope.py 与 git 对象哈希一致（5a0b2574bb62 / f10a725b1aac / 447d25d657f1）。报告 `git_sha` 为 unknown：tarball 无 .git，属预期 |
+| 其余指纹 | judge 289474f4d943、entry c44fcc754331、evalset 672b52a3a6b0，均不变 |
+
+- 退步题 mul_012 归因：快照节点链为 planner > codegen > executor > summarizer 直链，摘下的 S3-3 代码不经过；11-25 早批（9274793）同题同形态翻过（会话筛选条件漂移），本轮答案取值又不同，判已知噪声。另 3 道错题 biz_014、ord_028、ord_030 是 v7 里本来就不稳的题。
+- 判读：195/202 在 196 ± 噪声带内（低于 190 才怀疑摘除不干净），对 base、对摘除前都不显著，replan 运行时零残留。摘除对能力无可检出影响。#134 判读评论 issuecomment-7156670101。
 
 ### 未做
-- 内网回归一批 new + nightly_gate 判读 + canary（#134，评测侧）。
 - BACKLOG 追溯条目与 mul_005#2 快照入库（#131）；react 链路不注入能力（§7 第 4 条挂账，随 #131 写进 BACKLOG）。
 - S3-4 假阳率脚本与决策（#132、#135）。
 - e2e 与视觉基线本机缺 libatk，交 CI。
