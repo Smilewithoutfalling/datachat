@@ -40,8 +40,3 @@ class AgentState(TypedDict, total=False):
     sanity_retried: bool # A2：已经因为可疑送过一次 reviewer（只给一次）
     truncated: bool      # V2d §3：本次 codegen / reviewer 输出被长度上限截断（executor 不执行半截代码）
     answer_truncated: bool  # V2d §3：summarizer 的结论被截断（service 加 warning）
-    # 阶段 7.5 第 3 步修复回路（docs/roadmap/phase75-step3.md §3 §4）
-    code_before_fix: str    # S3-2：reviewer 修复前的代码（口径闸比较 / 拒收时回退用；修复前不是完整代码时为空）
-    scope_rejected: str     # S3-2：最近一次口径闸拒收的原因（改了哪些列和过滤条件）；空 = 放行或没查
-    replanned: bool         # S3-3：本轮已经 replan 过（每轮最多一次）
-    replan_reason: str      # S3-3：触发 replan 的失败原因（口径闸拒收 / 报错 / 结果可疑），也写进 replan 的 prompt

@@ -59,7 +59,7 @@ FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
 # 2026-11-24 阶段 7.5 第 3 步 S3-1 重立 workflow 两个哈希（docs/roadmap/phase75-step3.md §2）：codegen / reviewer 模板里关于沙箱的
 # 手写句子（「pd、np、plt、chart 已就绪…不要导入其他库」「没有 globals / locals / eval / exec / open 等内置函数」）改由
 # app/tools/sandbox_caps.prompt_lines 从能力对象渲染：已就绪变量、可 import 的包（prompt_imports，只能用这些）、不给的内建（固定示例子集）。
-# 结果变量名改从 CAPS.result_var 取（值仍是 result）。planner 的 prompt 逐字节未变（plan / replan 共用的 _prompt 只是搬出函数），
+# 结果变量名改从 CAPS.result_var 取（值仍是 result）。planner 的 prompt 逐字节未变（#129 摘除 S3-3 后 planner.py 与 9c40a97 逐字节相同），
 # react 三个哈希一个都没动（§7 第 4 条：react 本步不注入）。「off 与 state 单轮逐字节相同」仍然成立（workflow 两档同值）。
 # 旧值：off / state workflow 07461170ad5f0832；state workflow_history 6cabdb836b86cec6。
 BASELINE = {"react_single": "d74d988dfa93cd02", "react_history": "ddb8615599bcb952", "workflow": "ad567ed3492f6002"}

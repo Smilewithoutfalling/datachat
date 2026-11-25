@@ -60,7 +60,4 @@ def review_and_fix(state, config=None):
         "code": strip_code(text),
         "truncated": truncated,
         "attempts": state.get("attempts", 0) + 1,
-        # 第 3 步 S3-2：修复前的代码，给图里的口径闸比较、拒收时回退用。修复前不是完整代码
-        # （F3 文字说明 / V2d 截断）时留空：没有可比的口径，闸不查
-        "code_before_fix": "" if (state.get("not_code") or state.get("truncated")) else (state.get("code") or ""),
     }

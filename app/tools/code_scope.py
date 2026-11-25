@@ -2,9 +2,10 @@
 （纯 AST，确定性，不调模型）。
 
 阶段 7.5 第 3 步 S3-2（docs/roadmap/phase75-step3.md §3）从 `app/assess/code_refs.py` + `contracts.scope_of /
-reviewer_scope` 搬来：产品链路（`app/graph.py` 的口径闸）和评估层（`app/assess/contracts.py` 的 reviewer.scope）
-共用这一份判定。`app/assess/code_refs.py` 只剩 re-export。搬家前后对同一批输入的输出逐字节一致，由
-`tests/test_code_scope_golden.py` 对照 `tests/fixtures/code_scope/golden.json`（搬家前用旧路径冻结）钉住。
+reviewer_scope` 搬来，评估层（`app/assess/contracts.py` 的 reviewer.scope）调用这一份判定；产品链路的口径闸节点
+随 S3-3 一起在 #127 摘除（issue #129），目前没有产品侧调用方。`app/assess/code_refs.py` 只剩
+re-export。搬家前后对同一批输入的输出逐字节一致，由 `tests/test_code_scope_golden.py` 对照
+`tests/fixtures/code_scope/golden.json`（搬家前用旧路径冻结）钉住。
 
 抽取不追求完美，只求：认出来的一定是列引用（宁可漏，不误报）。规则：
 
@@ -291,10 +292,7 @@ def _col_of(e):
             return None
 
 
-def _condition_items(tree, name_is_col: bool = False) -> set:
-    """过滤条件，每条一个 (规范化字符串, 列, 运算符键, 比较值)。字符串与搬家前 `_conditions` 逐字一致；
-    后三项给字面量豁免用（同列、同运算符、只换比较值）。没有比较值的条件（isna 这类、query 解析失败）列为 None，
-    不参与豁免。运算符键带上列在哪一侧（`r:` 前缀 = 列在右侧），两侧不同不算「同运算符」。"""
+def _conditions(tree, name_is_col: bool = False) -> set:
     out = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Compare) and len(n.ops) == 1:
@@ -302,52 +300,38 @@ def _condition_items(tree, name_is_col: bool = False) -> set:
             lc = (left.id if name_is_col and isinstance(left, ast.Name) else _col_of(left))
             rc = (right.id if name_is_col and isinstance(right, ast.Name) else _col_of(right))
             if lc is not None:
-                v = ast.unparse(right)
-                out.add((f"{lc} {op} {v}", lc, op, v))
+                out.add(f"{lc} {op} {ast.unparse(right)}")
             elif rc is not None:
-                v = ast.unparse(left)
-                out.add((f"{v} {op} {rc}", rc, "r:" + op, v))
+                out.add(f"{ast.unparse(left)} {op} {rc}")
         elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
             m = n.func.attr
             recv = n.func.value
             if m in ("isin", "between"):
                 c = recv.id if name_is_col and isinstance(recv, ast.Name) else _col_of(recv)
                 if c is not None:
-                    v = ', '.join(ast.unparse(a) for a in n.args)
-                    out.add((f"{c} {m} {v}", c, m, v))
+                    out.add(f"{c} {m} {', '.join(ast.unparse(a) for a in n.args)}")
             elif m in _STR_FILTERS and isinstance(recv, ast.Attribute) and recv.attr == "str":
                 c = _col_of(recv.value)
                 if c is not None:
-                    v = ', '.join(ast.unparse(a) for a in n.args)
-                    out.add((f"{c} str.{m} {v}", c, f"str.{m}", v))
+                    out.add(f"{c} str.{m} {', '.join(ast.unparse(a) for a in n.args)}")
             elif m in _NULL_FILTERS and not n.args:
                 c = _col_of(recv)
                 if c is not None:
-                    out.add((f"{c} {m}", c, m, None))
+                    out.add(f"{c} {m}")
             elif m == "query" and n.args and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str):
                 try:
                     sub = ast.parse(n.args[0].value.replace("`", ""), mode="eval")
                 except SyntaxError:
-                    out.add((f"query {n.args[0].value!r}", None, "query", None))
+                    out.add(f"query {n.args[0].value!r}")
                 else:
-                    out |= _condition_items(sub, name_is_col=True)
+                    out |= _conditions(sub, name_is_col=True)
     return out
-
-
-def _conditions(tree, name_is_col: bool = False) -> set:
-    return {t[0] for t in _condition_items(tree, name_is_col)}
 
 
 def filter_conditions(code: str) -> set | None:
     """代码里的过滤 / 比较条件集合（「列 运算 值」的规范化字符串）；代码解析不了返回 None。"""
     tree = parse(code)
     return None if tree is None else _conditions(tree)
-
-
-def filter_items(code: str) -> set | None:
-    """同 filter_conditions，但每条带 (字符串, 列, 运算符键, 比较值)；解析不了返回 None。"""
-    tree = parse(code)
-    return None if tree is None else _condition_items(tree)
 
 
 # ------------------------------------------------------------------ 口径（第 3 步 S3-2）
@@ -392,8 +376,7 @@ def scope_of(code: str, columns: dict, multi: bool, result_var: str = "result"):
     return cols, set(missing_columns(refs, columns)), conds
 
 
-# 判定结果的四种状态。CHANGED = 改了口径；UNPARSED_AFTER = 修复后的代码解析不了
-# （评估层记 fail；产品口径闸不拦，交给 executor，见 app/graph.py）。
+# 判定结果的四种状态。CHANGED = 改了口径；UNPARSED_AFTER = 修复后的代码解析不了（评估层记 fail）。
 SCOPE_OK, SCOPE_CHANGED, SCOPE_NOT_CHECKED, SCOPE_UNPARSED_AFTER = "ok", "changed", "not_checked", "unparsed_after"
 
 
@@ -412,35 +395,12 @@ class ScopeCheck:
         return "；".join(self.parts)
 
 
-def _literal_swap(f0: set, f1: set, items0: set, items1: set) -> list | None:
-    """字面量豁免（phase75-step3.md §3 / §7 第 2 条）：增删的过滤条件能一一配成「同列、同运算符、只换比较值」时，
-    返回 [(旧, 新)]；有任何一条配不上（新增 / 删掉一条条件、换了列、换了运算符、条件没有比较值）返回 None。"""
-    removed, added = f0 - f1, f1 - f0
-    if not removed or len(removed) != len(added):
-        return None
-    key0 = {t[0]: (t[1], t[2]) for t in items0 if t[0] in removed and t[1] is not None and t[3] is not None}
-    key1 = {t[0]: (t[1], t[2]) for t in items1 if t[0] in added and t[1] is not None and t[3] is not None}
-    if len(key0) != len(removed) or len(key1) != len(added):
-        return None
-    if len(set(key0.values())) != len(key0) or len(set(key1.values())) != len(key1):
-        return None                                  # 同一列同一运算符出现两次：配对有歧义，不豁免
-    by_key = {k: s for s, k in key1.items()}
-    pairs = []
-    for s0, k in sorted(key0.items()):
-        if k not in by_key:
-            return None
-        pairs.append((s0, by_key[k]))
-    return pairs
-
-
 def compare_scope(before_code: str, after_code: str, columns: dict, multi: bool, *, result_var: str = "result",
-                  not_code: bool = False, truncated: bool = False, empty_before: bool = False) -> ScopeCheck:
+                  not_code: bool = False, truncated: bool = False) -> ScopeCheck:
     """修复前后比口径。列集合只算 schema 里真有的列。规定：
 
     - 修复前引用了 k 个不存在的列（KeyError 那类），修复后最多可以新增 k 个 schema 里的列 —— 把拼错的列名改对
       （'regin' → 'region'）不是换口径；
-    - **字面量豁免**（empty_before=True，即修复前结果为空）：同一列、同一运算符的过滤条件只换了比较值，不算换口径
-      （'华东' → '华东区'：把写错的取值改对，不是换问题）；
     - 除此之外，增删任何一个真实列、增删改任何一个过滤条件都是 CHANGED。
 
     修复前不是完整代码（not_code / truncated）或解析不了 → NOT_CHECKED；修复后解析不了 → UNPARSED_AFTER。"""
@@ -458,19 +418,12 @@ def compare_scope(before_code: str, after_code: str, columns: dict, multi: bool,
     if removed or len(added) > len(miss0):
         details["columns_added"], details["columns_removed"] = sorted(added), sorted(removed)
         parts.append("列：" + " ".join([f"+{c}" for c in sorted(added)] + [f"-{c}" for c in sorted(removed)]))
-    swapped = None
-    if f0 != f1 and empty_before:
-        swapped = _literal_swap(f0, f1, filter_items(before_code or ""), filter_items(after_code or ""))
-    if f0 != f1 and swapped is None:
+    if f0 != f1:
         details["filters_added"], details["filters_removed"] = sorted(f1 - f0), sorted(f0 - f1)
         parts.append("过滤条件：" + " ".join([f"+[{c}]" for c in sorted(f1 - f0)] + [f"-[{c}]" for c in sorted(f0 - f1)]))
     if parts:
         return ScopeCheck(SCOPE_CHANGED, parts=parts, details=details)
-    notes, ok_details = [], {}
     if added:
-        notes.append("把不存在的列改成了：" + "、".join(sorted(added)))
-        ok_details.update({"fixed_missing": sorted(miss0), "columns_added": sorted(added)})
-    if swapped:
-        notes.append("空结果下替换了过滤条件的取值：" + "、".join(f"[{a}] → [{b}]" for a, b in swapped))
-        ok_details["literal_swaps"] = [list(p) for p in swapped]
-    return ScopeCheck(SCOPE_OK, details=ok_details, note="；".join(notes))
+        return ScopeCheck(SCOPE_OK, details={"fixed_missing": sorted(miss0), "columns_added": sorted(added)},
+                          note="把不存在的列改成了：" + "、".join(sorted(added)))
+    return ScopeCheck(SCOPE_OK)

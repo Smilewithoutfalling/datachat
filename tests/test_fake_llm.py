@@ -14,8 +14,7 @@ from app.tools.charts import KINDS, MAX_POINTS, validate_spec
 from tests.fake_llm import (ANSWER, CODE, FAIL_CODES, INJECT_ANSWER, INJECT_COLUMNS, INJECT_ORDER, INJECT_PAYLOADS,
                             INJECT_ROWS,
                             inject_csv, MARK_ANSWER_FAIL, MARK_CODEGEN, MARK_PING, MARK_PLAN, MARK_REACT, PING_REPLY, PLAN,
-                            REACT_STEPS, REPLAN_BAD_CODE, REPLAN_PLAN, WORKFLOW_STEPS, FakeError, FAIL_ANSWER, Scenario,
-                            handle, make_server, parse_model)
+                            REACT_STEPS, WORKFLOW_STEPS, FakeError, Scenario, handle, make_server, parse_model)
 
 WF_PLAN = [{"role": "user", "content": MARK_PLAN + "……"}]
 WF_CODEGEN = [{"role": "user", "content": MARK_CODEGEN + "……"}]
@@ -35,9 +34,6 @@ RE_FINAL = RE_ACT + [{"role": "assistant", "content": "", "tool_calls": []}, {"r
     ("inject-bar", Scenario("inject", chart="bar")),
     ("inject-pie", Scenario("inject", chart="pie")),
     ("inject-error", Scenario("inject", chart="error")),
-    ("replan-scope", Scenario("replan", chart="scope")),
-    ("replan-exhaust", Scenario("replan", chart="exhaust")),
-    ("replan-twice", Scenario("replan", chart="twice")),
 ])
 def test_parse_valid(name, sc):
     assert parse_model(name) == sc
@@ -50,7 +46,6 @@ def test_parse_valid(name, sc):
     "chart-bar ",
     "inject", "inject-", "inject-heatmap", "inject-Bar", "inject-bar@codegen", "inject-bar@act", "inject-bar@",
     "inject-error@final", "inject-bar-1s", "chart-error",
-    "replan", "replan-", "replan-foo", "replan-Scope", "replan-scope@plan", "replan-scope@", "replan-scope-1s",
 ])
 def test_parse_rejects_everything_else(name):
     code, body = handle({"model": name, "messages": WF_PLAN}, sleep=lambda s: pytest.fail("不该睡"))
@@ -119,7 +114,7 @@ def test_chart_scenario_only_changes_the_code_steps():
 
 
 def test_step_vocabulary_is_closed():
-    assert set(WORKFLOW_STEPS) == {"plan", "codegen", "fix", "replan", "answer"} and set(REACT_STEPS) == {"act", "final"}
+    assert set(WORKFLOW_STEPS) == {"plan", "codegen", "fix", "answer"} and set(REACT_STEPS) == {"act", "final"}
     assert 500 in FAIL_CODES and 401 in FAIL_CODES
 
 
@@ -345,75 +340,3 @@ def test_ping_is_exact_message_only():
                  [{"role": "system", "content": MARK_PING}]):
         code, body = handle({"model": "ok", "messages": msgs})
         assert code == 400 and "无法识别当前步骤" in body["error"]["message"]
-
-
-# ---------------------------------------------------------------- 阶段 7.5 第 3 步：replan-<kind>（REPLAN 边与口径闸）
-def _nodes(r):
-    return [s.name for s in r.steps if s.name != "load"]       # 第一步 load 是读数据，不是图节点
-
-
-def _df_rows(path):
-    import pandas as pd
-    return len(pd.read_csv(path))
-
-
-def test_replan_scenario_only_for_workflow_and_recognizes_replan_step():
-    from app.nodes.planner import REPLAN_MARK
-    code, body = handle({"model": "replan-scope", "messages": RE_ACT})
-    assert code == 400 and "只属于工作流" in body["error"]["message"]
-    msgs = [{"role": "user", "content": MARK_PLAN + "……\n## " + REPLAN_MARK + "……"}]
-    assert handle({"model": "replan-scope", "messages": msgs})[1]["choices"][0]["message"]["content"] == REPLAN_PLAN
-    # fail-<code>@replan 能命中 replan 这一步（步骤词表里有它）
-    assert handle({"model": "fail-500@replan", "messages": msgs})[0] == 500
-    assert handle({"model": "fail-500@replan", "messages": WF_PLAN})[0] == 200
-
-
-def test_real_chain_replan_after_scope_rejected(fake_url, sample_path):
-    """reviewer 改口径 → 口径闸拒收（不执行）→ 下一个节点是 replan，不是 executor → 换思路成功。"""
-    from app.core import analyze_stream
-    evs = list(analyze_stream(sample_path, "有多少行", agent="workflow", llm_config=cfg(fake_url, "replan-scope")))
-    r = evs[-1].result
-    assert _nodes(r) == ["planner", "codegen", "executor", "reviewer", "scope_gate", "replan", "codegen", "executor",
-                         "summarizer"]
-    gate = next(x for x in r.steps if x.name == "scope_gate")
-    assert "过滤条件" in gate.content and "__fake_flag__ == 1" in gate.content
-    assert gate.code == REPLAN_BAD_CODE                       # 回退成修复前的代码，被拒的修复没执行
-    assert r.ok and r.executed and r.result == _df_rows(sample_path) and r.answer == ANSWER
-    plans = [e.data for e in evs if e.type == "plan"]
-    assert plans == [{"text": PLAN}, {"text": REPLAN_PLAN, "source": "replan"}]
-    assert r.plan == REPLAN_PLAN
-
-
-def test_real_chain_replan_after_exhaustion_then_success(fake_url, sample_path):
-    r = analyze(sample_path, "有多少行", agent="workflow", llm_config=cfg(fake_url, "replan-exhaust"))
-    # 口径闸放行时不进报告步骤（只有拒收才留一步），所以这里看不到 scope_gate
-    assert _nodes(r) == (["planner", "codegen", "executor"] + ["reviewer", "executor"] * 3
-                         + ["replan", "codegen", "executor", "summarizer"])
-    assert r.ok and r.executed and r.result == _df_rows(sample_path)
-    assert r.attempts == 3                                   # attempts 不清零；replan 后一次就成功，没再进 reviewer
-    assert r.usage.calls == 1 + 1 + 3 + 1 + 1 + 1
-
-
-def test_real_chain_replan_only_once_per_turn(fake_url, sample_path):
-    """replan 之后仍失败：reviewer 只再给 1 次，不会第二次 replan；error 前加「换了一种思路仍然没能算出来」。"""
-    from app.nodes.summarizer import REPLAN_FAILED_PREFIX
-    r = analyze(sample_path, "有多少行", agent="workflow", llm_config=cfg(fake_url, "replan-twice"))
-    nodes = _nodes(r)
-    assert nodes.count("replan") == 1 and nodes.count("planner") == 1
-    assert nodes == (["planner", "codegen", "executor"] + ["reviewer", "executor"] * 3
-                     + ["replan", "codegen", "executor", "reviewer", "executor", "summarizer"])
-    assert not r.ok and r.error_kind == "execution" and r.error.startswith(REPLAN_FAILED_PREFIX)
-    assert "__fake_missing__" in r.error and r.answer == FAIL_ANSWER
-    assert r.attempts == 4 and r.usage.calls == 9                # 方案 §4：最坏 6+1+1+1 = 9 次模型调用
-
-
-def test_real_chain_no_replan_when_over_budget(fake_url, sample_path, monkeypatch):
-    """超预算时不 replan：每次调用 usage 15（10+5）。plan+codegen 后已用 30、预留 10 → 40 < 50 进 reviewer；
-    reviewer 之后 45+10 ≥ 50 → 口径闸拒收但不 replan，带着修复前的报错去总结，并记 budget_hit。"""
-    monkeypatch.setenv("DATACHAT_TOKEN_BUDGET", "50")
-    r = analyze(sample_path, "有多少行", agent="workflow", llm_config=cfg(fake_url, "replan-scope"))
-    assert _nodes(r) == ["planner", "codegen", "executor", "reviewer", "scope_gate", "summarizer"]
-    assert "replan" not in _nodes(r) and r.usage.budget_hit
-    assert not r.ok and r.code == REPLAN_BAD_CODE and "__fake_missing__" in r.error
-    from app.nodes.summarizer import REPLAN_FAILED_PREFIX
-    assert not r.error.startswith(REPLAN_FAILED_PREFIX)        # 没 replan 过，不加那句

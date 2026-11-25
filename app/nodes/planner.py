@@ -124,8 +124,8 @@ def split_clarify(text: str) -> tuple[str, str]:
     return body, text[:m.start()].strip()
 
 
-def _prompt(state) -> str:
-    """planner 的 prompt（plan 与 replan 共用：replan 在它末尾再追加「上一次的尝试」）。"""
+def plan(state, config=None):
+    llm = node_llm(config)
     msg = _PROMPT.format(
         schema=state["schema"],
         field_notes=state.get("field_notes") or "（无）",
@@ -151,87 +151,17 @@ def _prompt(state) -> str:
     # 有原文也算有上文：P0 之后 planner 能看到最近几轮的对话，判「这是追问」不再依赖折叠状态。
     elif state.get("memory_state") or state.get("memory_history"):
         msg += FOLLOWUP_HINT
-    return msg
-
-
-def _parse(text: str, allow_clarify: bool) -> tuple[str, str]:
+    text = llm.invoke(msg)
     clarify, plan_text = split_clarify(text)
     # 第二道闸门（2026-11-13 晚）：模型判「该问」不等于真该问。两类场景它看不出来 ——
     # 追问（前半句被上一轮省掉了）和设前提的祈使句 —— 由代码拦在路由之前。
     # 拦下时换成 VETO_PLAN 而不是把标记前的解释塞回去：反问是给图的协议，
     # 那段解释是在讲「为什么问不出口径」，两者都不能当分析步骤。
-    if clarify and not allow_clarify:
+    if clarify and not may_clarify(state["question"], bool(state.get("followup")),
+                                   bool(state.get("prev_clarify"))):
         clarify = ""
         # 丢掉反问之后必须给 codegen 一条能执行的计划。用 VETO_PLAN 而不是把标记前的
         # 解释塞回去：那段话在讲「为什么问不出口径」，拿它当计划等于让 codegen 重走一遍
         # 「口径未定 → 拒答」的老路。
         plan_text = VETO_PLAN
-    return clarify, plan_text
-
-
-def plan(state, config=None):
-    llm = node_llm(config)
-    text = llm.invoke(_prompt(state))
-    clarify, plan_text = _parse(text, may_clarify(state["question"], bool(state.get("followup")),
-                                                 bool(state.get("prev_clarify"))))
     return {"plan": plan_text, "clarify": clarify}
-
-
-# ------------------------------------------------------------------ 第 3 步 S3-3：replan
-# docs/roadmap/phase75-step3.md §4。每轮最多一次（由 app/graph.py 的路由保证），带着失败原因回到 planner：
-# 同一份 planner prompt，末尾追加「上一次的尝试」。拒答规则（A 类）照常生效，所以 replan 也可以得出「数据不足以回答」；
-# **不允许反问**（may_clarify 强制为 False）：第一轮已经决定不问了，失败之后再问只会让用户觉得是在推卸。
-REPLAN_MARK = "上一次的尝试"
-REPLAN_CODE_CHARS = 1500       # 「最后一次的代码」截断上限（字符）
-REPLAN_REASON_CHARS = 800      # 失败原因（报错取末尾）截断上限
-REPLAN_TEMPLATE = """
-
-## """ + REPLAN_MARK + """（没有算出来，仅供参考）
-上一版计划：
-{plan}
-
-最后一次的代码：
-{code}
-
-失败原因：{reason}
-
-请换一条思路重新写分析步骤：问题本身和口径保持不变（指标、筛选条件、分母都不能换），只换算法或实现的路子；
-不要照抄上一版计划。数据确实回答不了时，按上面 A 类规则写「数据不足以回答：缺少什么」。不要输出 CLARIFY。"""
-
-
-def _clip_head(text: str, n: int) -> str:
-    text = text or ""
-    return text if len(text) <= n else text[:n] + f"\n…（已截断，共 {len(text)} 字）"
-
-
-def _clip_tail(text: str, n: int) -> str:
-    text = (text or "").strip()
-    return text if len(text) <= n else "…" + text[-n:]
-
-
-def replan_reason(state) -> str:
-    """失败原因，按优先级：口径闸拒收（改了哪些列和过滤条件）> 执行报错 > 结果可疑。"""
-    from app.tools.sanity import sanity_message
-    if state.get("scope_rejected"):
-        return "修复改了口径，已拒收（" + state["scope_rejected"] + "）"
-    if state.get("error"):
-        return "执行报错：" + _clip_tail(state["error"], REPLAN_REASON_CHARS)
-    if state.get("sanity_issue"):
-        return sanity_message(state["sanity_issue"])
-    return "（未知）"
-
-
-def replan(state, config=None):
-    """S3-3 的 REPLAN 节点：再调一次 planner，然后由图走 codegen → executor，reviewer 预算重置为 1 次
-    （max_attempts = 当前 attempts + 1；attempts 不清零，修复率统计还用它）。"""
-    llm = node_llm(config)
-    reason = replan_reason(state)
-    msg = _prompt(state) + REPLAN_TEMPLATE.format(
-        plan=state.get("plan") or "（无）",
-        code=_clip_head(state.get("code") or "（无）", REPLAN_CODE_CHARS),
-        reason=reason,
-    )
-    text = llm.invoke(msg)
-    clarify, plan_text = _parse(text, allow_clarify=False)
-    return {"plan": plan_text, "clarify": clarify, "replanned": True, "replan_reason": reason,
-            "max_attempts": state.get("attempts", 0) + 1}

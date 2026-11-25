@@ -10,8 +10,8 @@
 
 | 契约 id | 节点 | 判什么 |
 |---|---|---|
-| planner.length | planner / replan | 计划 > 3000 字 → warn |
-| planner.columns | planner / replan | 计划里反引号 / 引号中的「列名形状」词都在 schema 里 |
+| planner.length | planner | 计划 > 3000 字 → warn |
+| planner.columns | planner | 计划里反引号 / 引号中的「列名形状」词都在 schema 里 |
 | codegen.parse | codegen | 输出能被 ast 解析 |
 | codegen.columns | codegen | 只引用存在的列（AST，见 app/tools/code_scope.py）；多表时 dfs['表'] 的表存在 |
 | codegen.result | codegen | 给 result 赋过值 |
@@ -267,7 +267,7 @@ def executor_sanity(state: dict, upd: dict, ctx: Context) -> Verdict:
 # ------------------------------------------------------------------ reviewer
 def scope_of(code: str, ctx: Context):
     """(schema 内被引用的列集合, 引用了但 schema 里没有的列集合, 过滤条件集合)；解析不了返回 None。
-    判定在 app/tools/code_scope.py（第 3 步 S3-2 搬家，产品口径闸共用）。"""
+    判定在 app/tools/code_scope.py（第 3 步 S3-2 搬家）。"""
     return code_refs.scope_of(code, ctx.columns, ctx.multi, ctx.caps.result_var)
 
 
@@ -276,10 +276,8 @@ def reviewer_scope(state: dict, upd: dict, ctx: Context) -> Verdict:
     修复后最多可以新增 k 个 schema 里的列 —— 把拼错的列名改对（'regin' → 'region'）不是换口径；
     除此之外，增删任何一个真实列、增删改任何一个过滤条件都是 fail。
 
-    判定本身在 app/tools/code_scope.compare_scope（与 app/graph.py 的口径闸同一份）；这里只把结果翻成 Verdict，
-    形状与搬家前逐字节一致（tests/test_code_scope_golden.py）。**不开字面量豁免**（empty_before=False）：
-    评估层的 reviewer.scope 保持第 1 步的口径，产品闸放行的「空结果下换字面量」在这里仍记 fail，
-    看得出闸放过了什么。"""
+    判定本身在 app/tools/code_scope.compare_scope；这里只把结果翻成 Verdict，
+    形状与搬家前逐字节一致（tests/test_code_scope_golden.py）。"""
     chk = code_refs.compare_scope(state.get("code") or "", upd.get("code") or "", ctx.columns, ctx.multi,
                                   result_var=ctx.caps.result_var, not_code=bool(state.get("not_code")),
                                   truncated=bool(state.get("truncated")))
@@ -329,9 +327,6 @@ def summarizer_grounding(state: dict, upd: dict, ctx: Context) -> Verdict:
 
 CONTRACTS = {
     "planner": [planner_length, planner_columns],
-    # 第 3 步 S3-3：replan 是第二次调 planner（prompt 末尾多一段「上一次的尝试」），按 planner 契约检查；
-    # 它之后的 codegen 输出天然被 codegen 五条覆盖。口径闸（scope_gate）是确定性节点，不设契约
-    "replan": [planner_length, planner_columns],
     "codegen": [codegen_parse, codegen_columns, codegen_result, codegen_imports, codegen_names],
     "executor": [executor_shape, executor_sanity],
     "reviewer": [reviewer_scope],

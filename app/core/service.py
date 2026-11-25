@@ -368,9 +368,8 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
         state["metrics_block"] = metrics_block
     config = {
         "configurable": {"llm": client, "df": df},
-        # 每轮 reviewer→口径闸→executor 占 3 步；第 3 步的 replan 再加 replan→codegen→executor 与它之后的一次修复（共 6 步）。
-        # 留足余量，避免 max_attempts 调大后撞上上限
-        "recursion_limit": 3 * max_attempts + 20,
+        # 每轮 reviewer→executor 占 2 步，留足余量，避免 max_attempts 调大后撞上默认上限 25
+        "recursion_limit": 2 * max_attempts + 10,
     }
     node_time = defaultdict(float)
     last = time.perf_counter()
@@ -383,9 +382,7 @@ def _run_workflow(em, res, tracker, cfg, chat_model, df, schema, notes_text, que
                 node_input = dict(state) if snapshot is not None else None   # 该节点的输入 = 合并本次 updates 之前的 state
                 state.update(upd)
                 node_time[node] += dt
-                step = _workflow_step(node, upd, dt)
-                if step is not None:
-                    res.steps.append(step)
+                res.steps.append(_workflow_step(node, upd, dt))
                 if node == "executor":
                     res.executed = not upd.get("error")
                     if upd.get("sanity_issue") and not res.sanity_issue:
@@ -449,17 +446,9 @@ def _chart_event_fields(e: dict) -> dict:
             "charts_discarded": e.get("charts_discarded") or 0}
 
 
-def _workflow_step(node, upd, dt) -> Step | None:
-    if node == "scope_gate" and not upd.get("scope_rejected"):
-        # 第 3 步 S3-2：口径闸放行时不进报告（它不调模型、没有产出，留一个空步骤只会让人以为多跑了一步）
-        return None
+def _workflow_step(node, upd, dt) -> Step:
     s = Step(node, duration_s=round(dt, 4))
-    if node == "scope_gate":
-        s.content = "口径闸拒收这次修复：" + upd["scope_rejected"]
-        s.code = upd.get("code", "")      # 回退后的代码（= 修复前）
-    elif node == "replan":
-        s.content = upd.get("plan", "")   # 第 3 步 S3-3：重新规划的计划（replan 不反问，clarify 恒为空）
-    elif node == "planner":
+    if node == "planner":
         # 口径不明时 planner 产出的是反问，plan 为空（CLARIFY: 是给图的协议，不该出现在计划里）。
         # 这一步在报告里就展示反问本身 —— 否则会留一个空白的 planner 步骤，
         # 看报告的人会以为模型什么都没想。
@@ -481,9 +470,6 @@ def _workflow_event(em, node, upd, dt, state) -> Event | None:
         if upd.get("clarify"):
             return None
         return em.plan(upd.get("plan", ""))
-    if node == "replan":
-        # 第 3 步 S3-3：复用 plan 事件，source="replan" 区分。前端「理解问题」段计数变 2，计划段显示两版
-        return em.plan(upd.get("plan", ""), source="replan")
     if node in ("codegen", "reviewer"):
         return em.code(upd.get("code", ""), source=node, attempt=state.get("attempts", 0))
     if node == "executor":
