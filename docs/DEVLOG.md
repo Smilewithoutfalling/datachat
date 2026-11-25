@@ -11397,9 +11397,22 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
   - **视觉 08、11、25**：逐张看了 artifact `playwright-results`（14884716763）。08 只有顶栏标题从原话变成「城市销量占比」（U5）；11 和 25 是 fake 一句话结论只在卡头出现、正文块不渲染、卡片变矮，顶栏是「城市销量」。没有重叠、截断或空白，所以用这次 CI 的 x64 actual 重取三张。本次修正不改 fake 普通结论（不带链接，也没有 `__`），截图不受影响。
   - 修正后重跑前端闸门：vitest 32 个文件 984 passed；eslint、tsc、build 通过；playwright --list 53 条。后端没改，pytest 不重跑。
 
-## [209] 2026-11-24 阶段 7.5 第 3 步修复回路：方案 · commit <待提交>
+## [209] 2026-11-24 阶段 7.5 第 3 步修复回路：方案 · commit 9c40a97（PR #126）
 - 新增 `docs/roadmap/phase75-step3.md`。依据 phase75-assess.md 第 3 步，以及评测侧 7.5b §4 的三条验收边界（原文摘进方案 §0；7.5b 文件不在仓库里）。
 - 分四件：S3-1 由 `CAPS` 渲染两处 prompt 的沙箱约定；S3-2 口径闸，`code_refs` 挪到 `app/tools/code_scope.py`，assess 改为 import；S3-3 REPLAN 边，每轮一次，三种触发；S3-4 grounding 假阳率只量不改。前三件属 A 组，放一个实现 PR，内网回归一次。
 - 关键决定：replan 时不允许反问；口径闸拒收后，result 用修复前的结果；空结果下同列同运算符只换字面量，不算换口径（为 N9 准备）。
 - react 链路、reviewer 查 unique（出境合同）、拦截方式，不在本步。
 - S 于 11-24 13:46 裁定 §7 五条：前三条按推荐执行。另补两条：一是判据加归因，救回的题必须在快照里有 replan 节点；二是 S3-4 的拦截门槛为假阳率 <5%，拦截方式优先改用降级话术。评测侧要求 S3-2 搬家时加 golden 对比测试，并列出了他们那侧必跑的三个测试文件。react 的能力注入挂账，等 react 下一次改 prompt 时一并做。
+
+## [210] 2026-11-25 总体计划书与 issue 驱动流程（master-plan，issue #128） · commit <待提交>
+- 新增 `docs/roadmap/master-plan.md`（计划书 v2，含 11-25 第二轮修订）、`docs/roadmap/issues/`（25 份 issue 全文 + INDEX，文件名保留草稿编号 I-xx，INDEX 的「GitHub #」列对应 #129–#153）、`.github/ISSUE_TEMPLATE/task.md`（11 字段 + 「依赖与并行编排」块）。GitHub 上的追踪 issue 为 #128，25 个子 issue 已由评测侧挂为它的 sub-issue。
+- 为什么用 issue 驱动：把第 3、4 步、v8、待定决策和对外分发前置项拆成可独立交付、可自动验收的单元；依赖图管顺序，内网串行链（#129 → #134 → #136 → #137 → #141）管 A 组回归，只读审查的语义一致性对比表管「做的就是计划的」。默认不叠链，每份 A 组变更单独回归，归因干净。
+- S 11-25 裁定（第二轮）：
+  - #134 执行分工：节点 1/2（本地闸门、push、CI）我方在 worktree 做；节点 3（一批 new → nightly_gate 判读 → canary）由评测侧在内网执行，取 head 用完整 40 位 SHA 的 codeload tarball，解压到 `D:\Coding\claude\_ver`，从原仓库拷 `.env`，`set PYTHONUTF8=1`，conda 环境 `dc` 里用 python 跑；S 只批准 push 与合并。
+  - DEVLOG 编号链：本条 [210]（同时回填 [209]=9c40a97）→ #123（#133）[211]/[212]，要等本 PR 合并后才执行 → #127（#134）squash [213]；#134 的守卫是「末条不是 [212] 就停下报告」。
+  - D 号去歧义：decisions-pending 与 phase6-desktop 的 D3/D4/D5 一律改用 #编号指代，相关 issue 标题去掉 D 号前缀。
+  - 安装目录写法：由 #147 以实际安装包核实，#148 实施时顺手统一 phase6-desktop.md 两处写法。
+  - HANDOVER 不另开 issue：本 PR 只在 `docs/HANDOVER.md` §7 末尾插入 §7.1「issue 驱动流程」，其余内容不动。
+  - B4 挂账（触发式交叉校验，三个触发条件照录 [199] 原文）写进 #139 正文。
+- 不改代码：A 组、B 组文件都没动，code_sha12 不变，不需要内网回归。
+- [209] 回填：9c40a97（PR #126）。
