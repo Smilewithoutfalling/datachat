@@ -2,6 +2,7 @@
 
 第二版，写于 2026-10-23，接 master `39c4741`（PR #70，F4 迭代 V2a 实现）之后，和「四屏视觉回归」（DEVLOG [59]）同一个 PR 合并。
 第一版写于 2026-10-16（PR #37，`7ece7a2`），那一版里的进度已经过时，这一版整份替换它。
+2026-11-25 修订：只在 §7 末尾插入 §7.1「issue 驱动流程」（随 master-plan 文档 PR，DEVLOG [210]），其余内容未改，仍是 10-23 的版本。
 读完这一份，再按 §2 的顺序读文档，就能接着干。本文只写"不读代码、不翻历史就不知道"的东西；细节以仓库里的文档和代码为准，冲突时以代码为准，并顺手修正本文。
 
 ---
@@ -131,6 +132,23 @@ Playwright 结构（`playwright.config.ts`）：
   - `sidecar`：Windows 打包冒烟，有 paths 过滤，只改前端或文档的 PR 不触发，这是正常的。
 - 查 CI：`GET /repos/Smilewithoutfalling/datachat/actions/runs?branch=<br>`；job 日志可以匿名 `curl https://api.github.com/repos/Smilewithoutfalling/datachat/actions/jobs/<id>/logs`。
 - PR 描述里有破坏性改动要单列一节（例：#70 写了 `Emitter.error(kind="llm")` 必须传 `llm_kind`）。
+
+### 7.1 issue 驱动流程（2026-11-25 起）
+
+- **总纲**：`docs/roadmap/master-plan.md`（计划书）+ 追踪 issue #128（依赖总图与总表，各任务挂为它的 sub-issue）。开工前先读这两处，再以对应 issue 的正文为任务书；计划书与 issue 冲突时停下问 S。
+- **issue 模板**（`.github/ISSUE_TEMPLATE/task.md`）：正文开头是「依赖与并行编排」块——前置依赖、可并行兄弟 Issue、后续解锁（必须与对方的「前置依赖」互相对应）、独占修改边界（兄弟之间不得重叠；`docs/DEVLOG.md` 是追加型共享台账，不计入）、内网串行链（只有触 A 组的填第几环）。之后是 11 个字段：1 标题、2 背景（带出处）、3 范围（本次只解决 / 明确不做）、4 输入、5 输出、6 环境 / 前置条件、7 依赖、8 实施步骤（每个节点写做什么、怎么验证、通过标准）、9 测试用例、10 验收标准、11 交付物。
+- **标题与标签**：标题 `[Wave-N][类型] 模块：一句话`，类型为 `Serial-Gate` / `Parallel-A/B/C…` / `Independent` / `External` / `Decision`。标签必选四个：`wave:N-xxx`、`exec:serial|parallel|independent|external|decision`、`layer:*`、`priority:P0|P1|P2`；改动命中 A 组（`app/eval/fingerprint.py` `_AFFECTS_RESULTS`）再加 `regress:intranet`。
+- **执行类型**：
+  - Serial-Gate（串行闸）：后续节点要等它**合入**才能开工，或它占内网 / 链上独占文件。
+  - Parallel（并行）：与兄弟 issue 同时开工，兄弟之间独占修改边界两两不相交。
+  - Independent（独立）：没有兄弟、没有前置、不占内网，随时可开工。
+  - External（外部）：评测侧或外部主体执行，我方只提需求和验收口径；触 A 组或占内网的同样按链序排队。
+  - 决策型（Decision）：只由 S 拍板，不改代码，决定以 issue 评论为准；会引出实现的另开 issue。
+- **内网只能串行**：触 A 组或占内网的 issue 排成一条链，当前为 #129 → #134 → #136 → #137 → #141；新的 A 组实施 issue 一律接到链尾。内网回归由评测侧在内网机上执行。
+- **默认不叠链**：每个 A 组改动合入后单独回归一次，不把相邻两环叠在一起只跑链尾，保证每次读数只对应一份 A 组变更。
+- **节点审查**：每个实施节点完成后，另起只读审查（不改任何文件，只跑 git diff/show/grep 和测试），做语义一致性对比表（计划项 / 实际 / 是否偏离 / 证据），贴到该 issue 的评论里；有未说明的偏离就退回修改，最多两轮，仍不一致交 S 裁定。
+- **合并**：须 S 明确同意；一律 squash 合并，PR 描述全文作为 squash 的 commit message。
+- **DEVLOG**：编号与核对一律以 `git show origin/master:docs/DEVLOG.md` 为准（不看任何本地工作树），合并前 fetch 后取末条号 +1；本条 commit 写 `<待提交>`，下一次提交回填上一条的 SHA（§4 末条）。
 
 ## 8. 踩过的坑
 
