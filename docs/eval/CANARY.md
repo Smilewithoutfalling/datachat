@@ -122,6 +122,8 @@ python run_eval.py --canary --oracle
 而同时十条探针 **10/10 全对**、`canary_sha12` 与 `judge_sha12` 都与基线一致。
 那不是模型或 judge 在漂，是缓存在冷热之间跳。**基线不动**（不因为降级而重立）。
 
+**11-23 升级：覆盖消失，不只是比例移动。** #121 两轮内网回归（9274793 / bd56095）的 canary 均 10/10 CLEAN，但逐题 `tokens_cache_read` 与 `tokens_reasoning` 全部 `null`（11-16 及以前是比例在动、字段还在）。`tokens_in` 占比 0.948–0.950 ≈ 旧 `in + cache_read`（0.5049 + 0.427 = 0.932）：网关回包不再单独记 cache 明细，整笔并入 input。采集端只转抄（`app/core/llm.py` 读 `input_token_details.cache_read` / `output_token_details.reasoning`），两个代码版本同症状，判定为**网关回包结构变化**，不是评测代码回归。按上表属 clean + 提示，canary 行为符合规格。待办：①内网恢复后直打网关抓原始 usage 实锤；②网关行为稳定后重立基线 usage 段。**若网关真把 prompt cache 关了（不只是改记账），每轮评测实付输入 token 近乎翻倍，值得向网关方确认。** 归因全文见 DEVLOG [211]。
+
 **为什么不是「掉 1 题就报漂移」。** 规格原文写的是「accuracy 掉 ≥1 题即 drift」。11-04 实测
 60 个题次掉 2 次（3.3%），**两次都是答对没赋值**，而且换着题出（不是某一道题的问题）。
 按条数判，这 6 跑里有 2 跑会响（1/3），而它们都不是权重问题 —— 一周一次的哨兵照这个频率
@@ -209,3 +211,4 @@ python run_eval.py --canary --oracle
    temperature 0 也照出。它不影响 `clean` / `contract` 的判定（已经分开），但会让
    `flips` 长期不是 0 —— 看到 `flips = 2` 先看形态，再谈结论。
 
+11-24 已实锚：网关已换 OpenAI 标准回包 schema（探针证据见 DEVLOG [212]），基线已重立：usage_components=[tokens_in,tokens_out]，tokens_in 0.9503。

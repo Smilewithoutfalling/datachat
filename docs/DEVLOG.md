@@ -11404,7 +11404,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - react 链路、reviewer 查 unique（出境合同）、拦截方式，不在本步。
 - S 于 11-24 13:46 裁定 §7 五条：前三条按推荐执行。另补两条：一是判据加归因，救回的题必须在快照里有 replan 节点；二是 S3-4 的拦截门槛为假阳率 <5%，拦截方式优先改用降级话术。评测侧要求 S3-2 搬家时加 golden 对比测试，并列出了他们那侧必跑的三个测试文件。react 的能力注入挂账，等 react 下一次改 prompt 时一并做。
 
-## [210] 2026-11-25 总体计划书与 issue 驱动流程（master-plan，issue #128） · commit <待提交>
+## [210] 2026-11-25 总体计划书与 issue 驱动流程（master-plan，issue #128） · commit 643adfb（#154）
 - 新增 `docs/roadmap/master-plan.md`（计划书 v2，含 11-25 第二轮修订）、`docs/roadmap/issues/`（25 份 issue 全文 + INDEX，文件名保留草稿编号 I-xx，INDEX 的「GitHub #」列对应 #129–#153）、`.github/ISSUE_TEMPLATE/task.md`（11 字段 + 「依赖与并行编排」块）。GitHub 上的追踪 issue 为 #128，25 个子 issue 已由评测侧挂为它的 sub-issue。
 - 为什么用 issue 驱动：把第 3、4 步、v8、待定决策和对外分发前置项拆成可独立交付、可自动验收的单元；依赖图管顺序，内网串行链（#129 → #134 → #136 → #137 → #141）管 A 组回归，只读审查的语义一致性对比表管「做的就是计划的」。默认不叠链，每份 A 组变更单独回归，归因干净。
 - S 11-25 裁定（第二轮）：
@@ -11416,3 +11416,45 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
   - B4 挂账（触发式交叉校验，三个触发条件照录 [199] 原文）写进 #139 正文。
 - 不改代码：A 组、B 组文件都没动，code_sha12 不变，不需要内网回归。
 - [209] 回填：9c40a97（PR #126）。
+## [211] 2026-11-23 · canary usage 覆盖消失归因：网关回包结构变化（issue #119）· commit <待提交>
+
+- 现象：#121 两轮内网回归（9274793 14:36 / bd56095 15:37，现场 _ver\num 与 _ver\num2）canary 均 exit 0 CLEAN、10/10 全对，但逐题 `tokens_cache_read=null`、`tokens_reasoning=null`，`tokens_in` 占比 0.9484 / 0.9504（基线 0.5049，+88%）。
+- 证据一（采集端只转抄）：`app/core/llm.py:186-191` 从 `usage_metadata.input_token_details.cache_read` 与 `output_token_details.reasoning` 读数，字段不回传就落 null（`app/eval/runner.py:29` 原样落报告）。评测侧没有可坏的计算逻辑。
+- 证据二（两版同症状）：9274793 与 bd56095 之间隔了三处 prompt 修复（codegen/reviewer/react_agent），usage 采集路径一字未动，症状一致 → 不是代码回归。
+- 证据三（数字对账）：基线（11-18，6 跑）`tokens_in 0.5049 + cache_read 0.427 = 0.932` ≈ 今日 0.948–0.950——原来走 prompt cache 的约 43% 输入不再单独记账，整笔并入 input。
+- 与 11-16 的区别：那次是比例移动（缓存冷热之间跳，字段还在回传）；这次是覆盖消失（字段整体不回传）。两者按 CANARY.md 判读表都归 clean + 提示（不拦），canary 行为符合规格，判对数不受影响。
+- 待办一：内网恢复后 curl 直打网关实锤回包 usage 形状（看 `prompt_tokens_details.cached_tokens` 在不在）：`curl -s https://grg-aikits-test.grgbanking.com/v1/chat/completions -H "Authorization: Bearer <KEY>" -d '{"model": "Qwen3.5-397B-A17B", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 50}'`
+- 待办二：网关行为稳定后重立 canary 基线 usage 段（优先 drift.yml workflow_dispatch init=true repeat=6，工作树干净）。
+- 成本警讯：若网关是把 prompt cache 真关了（不只是改记账），每轮评测实付输入 token 近乎翻倍（phase7 预算每轮约 230 万 token 的盘算要重算）——须向网关方确认 11-18→11-23 之间 serving 配置/版本变化。
+- 本批 docs-only：不动任何指纹，code/entry/judge/canary 四层全不变，基线直接延续。
+
+### 验证
+| 项 | 结果 |
+|---|---|
+| pytest | docs-only，不跑 |
+| CI | 全矩阵照跑，结果挂 PR |
+
+
+## [212] 2026-11-24 · #119 实锤与 canary 基线重立 · commit <待提交>
+
+**背景**：[211] 判定 usage 覆盖消失疑似网关回包结构变化。本批实锤并重立基线，#119 闭环。
+
+**实锤（内网探针两发，2026-11-24）**：
+
+1. 短请求原始回包：usage 只有 prompt_tokens / prompt_tokens_details（空对象）/ completion_tokens / total_tokens；顶层新增 system_fingerprint；reasoning 明细整字段消失 —— 网关 serving 已换 OpenAI 标准 schema，11-18→11-23 之间换栈坐实。采集端 app/core/llm.py:186-191 只转抄明细字段，零嫌疑。
+2. 同一 2007-token 提示连打两次：两次均全价 prompt_tokens=2007、details 空 —— 外部已完全不可见缓存记账。真关缓存 vs 只去记账，外部不可分辨，待网关方回答三问：
+   - serving 换栈/升级确认（system_fingerprint 新出现为证）；
+   - prefix caching 是关闭还是仅去除记账字段；
+   - 计费口径（若按回包 usage 计费，phase7 评测预算每轮约 230 万 token 的盘算按全价 input 近乎翻倍；若缓存仍生效按内部口径计，则只是报表变化）。
+
+**基线重立**：drift.yml 公网 runner 够不着内网网关（其头注释 11-18 已写明），按 docs/eval/README.md 手工口径在内网机跑：
+
+    python run_eval.py --canary --agent react --repeat 6
+    python scripts/eval/canary.py "outputs/eval_react_canary_*.json" --init --force
+
+- 读数：判对 [8,10,10,10,10,10]、min_correct 8、accuracy 96.7%、翻转 2（ts_010、ord_013，老噪声题）、pass^6 8/10；run1 的 ord_013 为 no_assign 没交卷。
+- **usage_components 收敛为 [tokens_in, tokens_out] 两项，tokens_in 占比 0.9503** —— 新记账口径固化进基线，与 [211] 的数字对账（旧 0.5049+0.427≈0.932）吻合。
+
+**指纹**：本批不动任何指纹。docs/eval/canary/baseline.json 不在 code/entry/judge 任何文件清单（无指纹覆盖）；canary_sha12=592b9f3baa7e、judge_sha12=289474f4d943 不变；基线记录的 code_sha12=8117bbb25d0a 与 master d84363c 现值一致，直接延续。
+
+**明确不做**：不改 llm.py 采集端（网关字段回来即自动恢复记账）；不因此动 nightly 判读（判红只看算错题，2026-11-18 已收窄，usage 只备查）。
