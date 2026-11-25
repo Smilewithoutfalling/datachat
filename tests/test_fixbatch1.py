@@ -53,8 +53,12 @@ def test_globals_error_carries_hint_end_to_end(tmp_path):
 
 
 def test_prompts_state_sandbox_limits():
+    # 阶段 7.5 第 3 步 S3-1：沙箱那几句改由 sandbox_caps.prompt_lines 渲染进两处模板（{sandbox_lines}），不再手写
+    from app.tools.sandbox_caps import prompt_lines
     for text in (codegen._PROMPT, reviewer._PROMPT):
-        assert "不要判断变量是否存在" in text and "globals" in text
+        assert "{sandbox_lines}" in text
+    for multi in (False, True):
+        assert "不要判断变量是否存在" in prompt_lines(multi) and "globals" in prompt_lines(multi)
 
 
 # ---- F2b：没赋 result ----

@@ -13,7 +13,7 @@
 | planner.length | planner | 计划 > 3000 字 → warn |
 | planner.columns | planner | 计划里反引号 / 引号中的「列名形状」词都在 schema 里 |
 | codegen.parse | codegen | 输出能被 ast 解析 |
-| codegen.columns | codegen | 只引用存在的列（AST，见 code_refs.py）；多表时 dfs['表'] 的表存在 |
+| codegen.columns | codegen | 只引用存在的列（AST，见 app/tools/code_scope.py）；多表时 dfs['表'] 的表存在 |
 | codegen.result | codegen | 给 result 赋过值 |
 | codegen.imports | codegen | import 都在能力对象的 allowed_imports 里，没有相对导入 |
 | codegen.names | codegen | 没用沙箱不给的内建（能力对象的 forbidden_builtins）、没用另一种数据变量（多表用 df / 单表用 dfs）；其他未定义名字 → warn |
@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
-from app.assess import code_refs
+from app.tools import code_scope as code_refs   # 第 3 步 S3-2：判定逻辑在 app/tools/code_scope.py，只有一份
 from app.tools.sandbox_caps import CAPS, SandboxCaps
 
 OK, WARN, FAIL, NOT_CHECKED = "ok", "warn", "fail", "not_checked"
@@ -152,14 +152,7 @@ def codegen_parse(state: dict, upd: dict, ctx: Context) -> Verdict:
 
 
 def missing_columns(refs, ctx: Context) -> list:
-    out = []
-    for table, col in refs.columns:
-        if col in refs.created or col in ctx.table_columns(table):
-            continue
-        label = f"{table}.{col}" if table else col
-        if label not in out:
-            out.append(label)
-    return out
+    return code_refs.missing_columns(refs, ctx.columns)
 
 
 def codegen_columns(state: dict, upd: dict, ctx: Context) -> Verdict:
@@ -273,41 +266,29 @@ def executor_sanity(state: dict, upd: dict, ctx: Context) -> Verdict:
 
 # ------------------------------------------------------------------ reviewer
 def scope_of(code: str, ctx: Context):
-    """(schema 内被引用的列集合, 引用了但 schema 里没有的列集合, 过滤条件集合)；解析不了返回 None。"""
-    refs = _code_refs(code, ctx)
-    conds = code_refs.filter_conditions(code)
-    if refs is None or conds is None:
-        return None
-    cols = {c for t, c in refs.columns if c in ctx.table_columns(t)}
-    return cols, set(missing_columns(refs, ctx)), conds
+    """(schema 内被引用的列集合, 引用了但 schema 里没有的列集合, 过滤条件集合)；解析不了返回 None。
+    判定在 app/tools/code_scope.py（第 3 步 S3-2 搬家）。"""
+    return code_refs.scope_of(code, ctx.columns, ctx.multi, ctx.caps.result_var)
 
 
 def reviewer_scope(state: dict, upd: dict, ctx: Context) -> Verdict:
     """列集合只算 schema 里真有的列。唯一的口径规定：修复前引用了 k 个不存在的列（KeyError 那类），
     修复后最多可以新增 k 个 schema 里的列 —— 把拼错的列名改对（'regin' → 'region'）不是换口径；
-    除此之外，增删任何一个真实列、增删改任何一个过滤条件都是 fail。"""
-    if state.get("not_code") or state.get("truncated"):
-        return Verdict("reviewer.scope", NOT_CHECKED, "修复前不是完整代码，无从比较")
-    before = scope_of(state.get("code") or "", ctx)
-    if before is None:
-        return Verdict("reviewer.scope", NOT_CHECKED, "修复前的代码无法解析，无从比较")
-    after = scope_of(upd.get("code") or "", ctx)
-    if after is None:
-        return Verdict("reviewer.scope", FAIL, "修复后的代码无法解析")
-    (c0, miss0, f0), (c1, _miss1, f1) = before, after
-    added, removed = c1 - c0, c0 - c1
-    parts, details = [], {}
-    if removed or len(added) > len(miss0):
-        details["columns_added"], details["columns_removed"] = sorted(added), sorted(removed)
-        parts.append("列：" + " ".join([f"+{c}" for c in sorted(added)] + [f"-{c}" for c in sorted(removed)]))
-    if f0 != f1:
-        details["filters_added"], details["filters_removed"] = sorted(f1 - f0), sorted(f0 - f1)
-        parts.append("过滤条件：" + " ".join([f"+[{c}]" for c in sorted(f1 - f0)] + [f"-[{c}]" for c in sorted(f0 - f1)]))
-    if parts:
-        return Verdict("reviewer.scope", FAIL, "修复改了口径（本步只检出）：" + "；".join(parts), details=details)
-    if added:
-        return Verdict("reviewer.scope", OK, "把不存在的列改成了：" + "、".join(sorted(added)),
-                       details={"fixed_missing": sorted(miss0), "columns_added": sorted(added)})
+    除此之外，增删任何一个真实列、增删改任何一个过滤条件都是 fail。
+
+    判定本身在 app/tools/code_scope.compare_scope；这里只把结果翻成 Verdict，
+    形状与搬家前逐字节一致（tests/test_code_scope_golden.py）。"""
+    chk = code_refs.compare_scope(state.get("code") or "", upd.get("code") or "", ctx.columns, ctx.multi,
+                                  result_var=ctx.caps.result_var, not_code=bool(state.get("not_code")),
+                                  truncated=bool(state.get("truncated")))
+    if chk.status == code_refs.SCOPE_NOT_CHECKED:
+        return Verdict("reviewer.scope", NOT_CHECKED, chk.note)
+    if chk.status == code_refs.SCOPE_UNPARSED_AFTER:
+        return Verdict("reviewer.scope", FAIL, chk.note)
+    if chk.changed:
+        return Verdict("reviewer.scope", FAIL, "修复改了口径（本步只检出）：" + chk.summary(), details=chk.details)
+    if chk.note:
+        return Verdict("reviewer.scope", OK, chk.note, details=chk.details)
     return Verdict("reviewer.scope", OK)
 
 

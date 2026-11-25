@@ -11416,7 +11416,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
   - B4 挂账（触发式交叉校验，三个触发条件照录 [199] 原文）写进 #139 正文。
 - 不改代码：A 组、B 组文件都没动，code_sha12 不变，不需要内网回归。
 - [209] 回填：9c40a97（PR #126）。
-## [211] 2026-11-23 · canary usage 覆盖消失归因：网关回包结构变化（issue #119）· commit <待提交>
+## [211] 2026-11-23 · canary usage 覆盖消失归因：网关回包结构变化（issue #119）· commit e75a9db（PR #123）
 
 - 现象：#121 两轮内网回归（9274793 14:36 / bd56095 15:37，现场 _ver\num 与 _ver\num2）canary 均 exit 0 CLEAN、10/10 全对，但逐题 `tokens_cache_read=null`、`tokens_reasoning=null`，`tokens_in` 占比 0.9484 / 0.9504（基线 0.5049，+88%）。
 - 证据一（采集端只转抄）：`app/core/llm.py:186-191` 从 `usage_metadata.input_token_details.cache_read` 与 `output_token_details.reasoning` 读数，字段不回传就落 null（`app/eval/runner.py:29` 原样落报告）。评测侧没有可坏的计算逻辑。
@@ -11435,7 +11435,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 | CI | 全矩阵照跑，结果挂 PR |
 
 
-## [212] 2026-11-24 · #119 实锤与 canary 基线重立 · commit <待提交>
+## [212] 2026-11-24 · #119 实锤与 canary 基线重立 · commit e75a9db（PR #123）
 
 **背景**：[211] 判定 usage 覆盖消失疑似网关回包结构变化。本批实锤并重立基线，#119 闭环。
 
@@ -11458,3 +11458,77 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 **指纹**：本批不动任何指纹。docs/eval/canary/baseline.json 不在 code/entry/judge 任何文件清单（无指纹覆盖）；canary_sha12=592b9f3baa7e、judge_sha12=289474f4d943 不变；基线记录的 code_sha12=8117bbb25d0a 与 master d84363c 现值一致，直接延续。
 
 **明确不做**：不改 llm.py 采集端（网关字段回来即自动恢复记账）；不因此动 nightly 判读（判红只看算错题，2026-11-18 已收窄，usage 只备查）。
+
+## [213] 2026-11-25 阶段 7.5 第 3 步修复回路：实现与摘除（issue #129、#130，PR #127） · commit <待提交>
+
+方案：`docs/roadmap/phase75-step3.md`（[209]，9c40a97）。PR #127 先实现了 S3-1、S3-2、S3-3（内网回归 GREEN 196/202）；S 11-24 决定无条件摘除 S3-3 REPLAN，并连同 S3-2 的产品闸一起摘（phase75-step3 §7 第 1 条原本是「一题都没救回才摘 S3-3」）。合入 master 的只剩 **S3-1 能力注入 + code_scope 搬家**。摘下的部分在 BACKLOG 的追溯由 #131 写，本条不重复。S3-4（grounding 假阳率）不在本 PR。
+
+### 第 3 步实现（留在 master 的部分）
+- **S3-1 能力注入**（`app/tools/sandbox_caps.py`）：`SandboxCaps.prompt_imports`（`allowed_imports` 去掉 `_strptime` 和 time / locale / warnings）；纯函数 `prompt_lines(multi)` 渲染三句：已就绪变量（带说明）、可 import 的包（「只能用这些」）、不给的内建（固定示例 `PROMPT_FORBIDDEN_EXAMPLES`）。`app/nodes/codegen.py`、`app/nodes/reviewer.py` 的手写沙箱句子换成 `{sandbox_lines}`，结果变量名改为 `{result_var}`（= `CAPS.result_var`）；单表 / 多表由 `app/tools/dataset.py is_multi_access` 从取数约定行反推。理由：两处 prompt 与沙箱能力只有一份来源，改 CAPS 不会再漏改 prompt。
+- **code_scope 搬家**（S3-2 的非产品部分）：`app/assess/code_refs.py` `git mv` 为 `app/tools/code_scope.py`（A 组），`contracts.scope_of / missing_columns / reviewer_scope` 的判定一并搬入（`scope_of`、`missing_columns`、`compare_scope -> ScopeCheck`）；`app/assess/code_refs.py` 只剩 re-export，`contracts` 改为调用。抽取部分与搬家前 `code_refs.py` 逐字相同。评测侧要求的 golden 对比：`000bf08`（rebase 后 `cb51cfd`）先用旧路径冻结 `tests/fixtures/code_scope/golden.json`（sha256 `2670e234d6da…`），之后未改；`.gitattributes` 固定 LF（Windows CI 逐字节比较）。
+- 实现期的偏离仍然有效的两条：`prompt_lines` 的变量带说明文字（`_VAR_GLOSS`，沿用原句「pd（pandas）」写法，因此 prompt 里第一次出现 `chart_path`）；reviewer 的取数行单独成一行。
+
+### 摘除（S 11-24）
+- **摘了什么**：S3-3 全部（`graph` 的 replan 节点与 `_route_after_exec/_can_replan`、`planner.replan` 与 `_prompt` 抽取、summarizer 的 `REPLAN_FAILED_PREFIX`、state 的 replanned / replan_reason、service 的 replan 事件与步骤、`events.plan(**extra)`、`snapshot.LLM_NODES`、`replay._node_fn`、`CONTRACTS["replan"]`、fake_llm 的三个 replan 场景）；S3-2 产品闸（`scope_gate` 节点与 `_route_after_gate`、reviewer 的 `code_before_fix`、state 的 code_before_fix / scope_rejected、`recursion_limit` 回到 `2 * max_attempts + 10`、`code_scope._literal_swap` 与 `compare_scope(empty_before)`、`sanity.is_empty_issue` 与 EMPTY_* 常量）；前端「重新规划」两版计划（`turn.ts` 的 isReplan / planLabel / plans、`TurnView.tsx` 的标题与 replan class）。
+- **结果**：`git diff --stat origin/master -- app/` 恰为 7 个文件（`app/tools/{sandbox_caps,code_scope,dataset}.py`、`app/nodes/{codegen,reviewer}.py`、`app/assess/{code_refs,contracts}.py`）；graph / state / planner / summarizer / core 三件 / sanity / snapshot / replay 与 9c40a97 逐字节一致；`git diff origin/master -- ui/web/` 为空。
+- **哨兵**：`tests/test_step3_repair.py::test_step3_strip_no_replan_or_scope_gate` 断言图节点 = master 五节点、reviewer 直连 executor、`AgentState` 没有四个字段、`LLM_NODES` 四项、service 的 `recursion_limit` 为 `2 * max_attempts + 10`。回退红已做：摘除前（#127 rebase 后 6381fe1）红、把 scope_gate 节点临时加回 graph 时红，撤回后绿（日志 `/workspace/work/logs/s3strip_sentinel_*`）。
+- 11-25 rebase 到 master 643adfb（#154）：冲突只有 `docs/DEVLOG.md`（都在末尾追加），保留 master 的 [210] 原样并回填为 643adfb，本条目接在其后；原 [待编号] 条目改写为本条（编号按已定编号链 [213]，[211]/[212] 留给 #123）。
+- 11-25 #134 读数通过后再 rebase 到 master e75a9db（#155 Vite 升级 be0abbe、#123 让号 e75a9db）：冲突仍只有 `docs/DEVLOG.md`，保留 master 的 [210]–[212]，本条接在 [212] 后，[211]/[212] 回填 e75a9db。be0abbe 只改 `ui/web/package.json` 与 lock，e75a9db 只改 docs，A 组无变动；rebase 后本地重算 `affects_results_sha256` 仍为 `e11f8abc8a0a`，内网读数继续有效，不重跑。
+
+### 偏离及理由
+1. **`_condition_items` 四元组与 `filter_items` 一并删除**（issue #129 只点名 `_literal_swap` 与 `empty_before`）。两者在 #127 里唯一的消费者是 `_literal_swap`（`git grep` 6381fe1：`filter_items` 只在 `code_scope.py:463` 被调用）；删掉后 `code_scope.py` 第 12–325 行与搬家前 `code_refs.py` 逐字相同，搬家变成纯移动。golden 5 条照样逐字节通过。
+2. **`app/assess/code_refs.py` 改了一行 docstring**（不在 #129 独占边界清单里，但在节点 2 的 7 文件清单里）：原文写「产品链路的口径闸和评估层共用一份」，摘除后不成立，改为「判定只有一份」；re-export 不变。
+3. **`test_compare_scope_allows_typo_fix_and_literal_swap_on_empty` 改名为 `test_compare_scope_allows_typo_fix`**：按 issue 拆掉字面量那半后，旧名字描述的行为已不存在。
+4. **issue #129 / #130 写「不写 DEVLOG」**：本条由同一轮任务按 S 的指示写成独立 commit，不混进两个摘除 commit，两个 issue 的独占边界照样能单独核对。
+
+### 测试
+- 保留：`tests/test_code_scope_golden.py` 5 条；`tests/test_step3_repair.py` 的 S3-1 7 条（含参数）、compare_scope 4 条（含 reviewer.scope 不豁免），加哨兵 1 条，共 12 条。
+- 删除：`test_literal_exemption_is_narrow`、`test_scope_gate_*` 3 条、`test_reviewer_records_code_before_fix`、`test_route_after_exec_replan`、`test_no_replan_when_over_budget`、`test_route_after_gate`、`test_replan_prompt_appends_last_attempt_and_forbids_clarify`、`test_replan_reason_priority`、图测试 5 条、`test_snapshot_replan_node_checked_by_planner_contracts_and_replayable`；`test_fake_llm.py` 的 replan 15 条。
+- 还原为 master 期望：`test_core_analyze.py::test_workflow_execution_failure`、`::test_max_attempts_beyond_default_recursion_limit`、`test_workflow_mocked.py::test_gives_up_after_max_attempts`、`::test_route_after_exec`、`test_assess_snapshot.py::test_snapshot_records_nodes_state_tokens_and_today`、`test_assess_contracts.py::test_check_dispatch_covers_every_node`。
+- S3-1 改的期望保留：`test_fixbatch1.py::test_prompts_state_sandbox_limits`、`test_result_numeric.py::_rendered_codegen`。
+- **P8 哈希**（`tests/test_memory_p8.py`）：摘除后实测 workflow 仍为 `ad567ed3492f6002`（off / state 同值），workflow_history `a52a7aa02434e505`，react 三个不变。理由：S3-1 改的是 codegen / reviewer 模板，摘除只动 planner 之外的编排，planner 与 9c40a97 逐字节相同；期望值没改，只改了注释。
+- vitest：`turn.test.ts` 删 3 条、`v2a.test.tsx` 删 1 条，回到 984。
+
+### 闸门（最后一次改动之后全部重跑；aarch64 沙箱 2 核，日志 `/workspace/work/logs/s3strip_*`）
+| 闸门 | master 9c40a97 | #127（19171d8） | 摘除后 |
+|---|---|---|---|
+| pytest 分段 1（34 个文件，去掉 oracle 两条） | 913 passed | 913 passed | 913 passed |
+| pytest 分段 2（36 个文件） | 898 passed | 913 passed | 898 passed |
+| pytest 分段 3（37 个文件） | 553 passed（35 个文件） | 591 passed | 570 passed（+17：test_step3_repair 12、test_code_scope_golden 5） |
+| pytest oracle（单独跑） | 2 passed | 2 passed | 2 passed |
+| pytest 合计 | 2366 passed | 2419 passed | **2383 passed** |
+| 评测侧三件 | 64 passed | 64 passed | 64 passed（`test_check_dispatch_covers_every_node` 回到 master 期望） |
+| vitest（`--pool=threads --maxWorkers=2`） | 32 个文件 984 passed | 988 passed | 32 个文件 984 passed |
+| eslint / tsc / build | — | 通过 | 通过（0/0、0） |
+| `playwright test --list` | — | 53 条 / 20 个文件 | 53 条 / 20 个文件 |
+| e2e / 视觉基线 | — | 交 CI | **没跑**：沙箱缺 libatk，交给 CI |
+
+### A 组指纹
+`code_fingerprint()["affects_results_sha256"]`：**base `8117bbb25d0a`（9c40a97 / 643adfb，A 组 68 个文件）→ #127 `5436c54d3c6c`（69 个）→ 摘除后 `e11f8abc8a0a`（69 个：多出的仍是 `app/tools/code_scope.py`）**。全量 sha `210844b6b15d → c2c95c9671c1 → 7602fcd64a1f`。相对 master 的 A 组变动文件：`app/nodes/{codegen,reviewer}.py`、`app/tools/{sandbox_caps,dataset}.py`、`app/tools/code_scope.py`（新）；B 组：`app/assess/{code_refs,contracts}.py`。S3-1 改了全局 prompt，按 phase75-step3 §3 须内网全量 202 题回归（#134）。
+
+### CI
+- 第一轮（b811dfa，tests 45355090886）：windows 两档 pytest 红在 `test_code_scope_golden` 两条（Windows checkout 把 golden.json 转成 CRLF）；修法 `.gitattributes` 加 `tests/fixtures/code_scope/*.json text eol=lf`，golden 内容不动。sidecar 45355090888、desktop 45355090954 success。
+- 第二轮（19171d8，按 head_sha 全部工作流）：tests 45358222488 success、sidecar 45358222585 success、desktop 45358222697 success。
+- 摘除后（acac4cb，按 head_sha 全部工作流）：tests 45557203875 success、sidecar 45557203890 success、desktop 45557204032 success。
+- rebase 到 e75a9db 后的 head：CI 结果挂 PR #127，下一次提交回填。
+
+### 内网回归（#134 节点 3，评测侧，2026-11-25 15:13–15:50）
+被测 `acac4cb580355cf876ae6993ea1db1ed8f362bc2`（codeload tarball），workflow / state / n=202，基线 v7（[194, 192, 192] 中位 192/202，pass^3 188）。
+
+| 项 | 读数 |
+|---|---|
+| nightly_gate | 退出码 0，🟢 GREEN；通过 195/202；配对净退步 −2（退步 1：mul_012；进步 3：mem_003、ts_007、inv_005），未过阈值 6 |
+| canary | 退出码 0，CLEAN |
+| compare vs base 9c40a97 | 195 → 195，Δ 0.0pp，配对 4 错→对 / 4 对→错，McNemar p=1.0（MDE 6），strict 69.7% → 70.3% |
+| compare vs 摘除前 19171d8 | 196 → 195，Δ −0.5pp，配对 2 / 3，p=1.0，strict 68.4% → 70.3% |
+| replan 探针 | 256 个快照 0 命中（replan_files=NONE），整批无 replan / scope_gate 节点 |
+| code_sha12 | 报告 `fingerprints.code_sha12` = `e11f8abc8a0a`；评测侧在被测树上重算同值；sandbox_caps.py / codegen.py / code_scope.py 与 git 对象哈希一致（5a0b2574bb62 / f10a725b1aac / 447d25d657f1）。报告 `git_sha` 为 unknown：tarball 无 .git，属预期 |
+| 其余指纹 | judge 289474f4d943、entry c44fcc754331、evalset 672b52a3a6b0，均不变 |
+
+- 退步题 mul_012 归因：快照节点链为 planner > codegen > executor > summarizer 直链，摘下的 S3-3 代码不经过；11-25 早批（9274793）同题同形态翻过（会话筛选条件漂移），本轮答案取值又不同，判已知噪声。另 3 道错题 biz_014、ord_028、ord_030 是 v7 里本来就不稳的题。
+- 判读：195/202 在 196 ± 噪声带内（低于 190 才怀疑摘除不干净），对 base、对摘除前都不显著，replan 运行时零残留。摘除对能力无可检出影响。#134 判读评论 issuecomment-7156670101。
+
+### 未做
+- BACKLOG 追溯条目与 mul_005#2 快照入库（#131）；react 链路不注入能力（§7 第 4 条挂账，随 #131 写进 BACKLOG）。
+- S3-4 假阳率脚本与决策（#132、#135）。
+- e2e 与视觉基线本机缺 libatk，交 CI。

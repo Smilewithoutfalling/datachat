@@ -56,12 +56,18 @@ FAST = LLMConfig(api_key="test", backoff_base=0.0, max_retries=2)
 # 那句约束改成条件句——说「百分比/百分数」用 ×100 的数值，只说「占比/比例/增长率」时 0–1 或 ×100 均可，要求保留几位小数时 round。
 # 旧值（上一条重立的结果）：off react_single 2ad082e9c02977d5 / react_history b4e012557418443b / workflow e4f9c420904a3582；
 #       state react_history 383f3ecc4a20f1e0 / workflow_history 8ce5a093ac4584fd。
-BASELINE = {"react_single": "d74d988dfa93cd02", "react_history": "ddb8615599bcb952", "workflow": "07461170ad5f0832"}
+# 2026-11-24 阶段 7.5 第 3 步 S3-1 重立 workflow 两个哈希（docs/roadmap/phase75-step3.md §2）：codegen / reviewer 模板里关于沙箱的
+# 手写句子（「pd、np、plt、chart 已就绪…不要导入其他库」「没有 globals / locals / eval / exec / open 等内置函数」）改由
+# app/tools/sandbox_caps.prompt_lines 从能力对象渲染：已就绪变量、可 import 的包（prompt_imports，只能用这些）、不给的内建（固定示例子集）。
+# 结果变量名改从 CAPS.result_var 取（值仍是 result）。planner 的 prompt 逐字节未变（#129 摘除 S3-3 后 planner.py 与 9c40a97 逐字节相同），
+# react 三个哈希一个都没动（§7 第 4 条：react 本步不注入）。「off 与 state 单轮逐字节相同」仍然成立（workflow 两档同值）。
+# 旧值：off / state workflow 07461170ad5f0832；state workflow_history 6cabdb836b86cec6。
+BASELINE = {"react_single": "d74d988dfa93cd02", "react_history": "ddb8615599bcb952", "workflow": "ad567ed3492f6002"}
 # 批 4a 硬规则 3（docs/roadmap/memory-batch4.md §1）：state 档、没有口径、没开改写时，送进模型的消息与 f39753c
 # 逐字节一致。下面四个哈希是在 f39753c 上用同一段脚本（run_all + workflow 带 HISTORY）在 DATACHAT_MEMORY=state 下算的。
 # workflow 两个随 2026-11-13 的澄清分支一起重立（见模块 docstring），react 两个未动。
 STATE_BASELINE = {"react_single": "d74d988dfa93cd02", "react_history": "9836daaebbd665fc",
-                  "workflow": "07461170ad5f0832", "workflow_history": "6cabdb836b86cec6"}
+                  "workflow": "ad567ed3492f6002", "workflow_history": "a52a7aa02434e505"}
 HISTORY = [("哪个地区卖得最好", "华北，540。"), ("再画个图", "已画柱状图")]
 
 

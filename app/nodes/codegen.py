@@ -1,6 +1,7 @@
 from app.core.llm import node_llm, strip_code
-from app.tools.dataset import SINGLE_ACCESS
+from app.tools.dataset import SINGLE_ACCESS, is_multi_access
 from app.tools.plotting import CHART_GUIDE
+from app.tools.sandbox_caps import CAPS, prompt_lines
 
 _PROMPT = """根据分析计划写一段 pandas 代码。
 
@@ -17,9 +18,8 @@ _PROMPT = """根据分析计划写一段 pandas 代码。
 
 严格遵守以下约定：
 - {data_access}
-- pd（pandas）、np（numpy）、plt（matplotlib.pyplot）、chart（出图函数，见绘图要求）已就绪，无需 import；不要导入其他库。
-- 代码在受限沙箱里执行：df 等数据变量一定已就绪，直接使用，不要判断变量是否存在；没有 globals / locals / eval / exec / open 等内置函数。
-- 把最终答案赋值给变量 result（可以是 DataFrame / Series / 数值 / 字符串 / dict），result 必须直接回答问题：
+{sandbox_lines}
+- 把最终答案赋值给变量 {result_var}（可以是 DataFrame / Series / 数值 / 字符串 / dict），{result_var} 必须直接回答问题：
   问"哪个/哪一个"：result 只放标签本身（如 '华南'、'A'、'2024-06'），不要拼接说明文字或数值；
   问"多少/是多少"：给数值；问"各…/每…"：给以分组键为索引的 Series 或表；问"哪些/哪条记录"：给筛选出的行（DataFrame）；
   问题含多个小问（如"分别是多少？哪个更高？"）：result 用 dict 把每个小问都答上，键用简短中文。
@@ -40,6 +40,9 @@ def generate_code(state, config=None):
         question=state["question"],
         plan=state.get("plan", ""),
         chart_guide=CHART_GUIDE,
+        # 第 3 步 S3-1：沙箱那几句从能力对象渲染（app/tools/sandbox_caps.py），不再手写
+        sandbox_lines=prompt_lines(is_multi_access(state.get("data_access"), SINGLE_ACCESS)),
+        result_var=CAPS.result_var,
     )
     text, truncated = llm.invoke_checked(msg)
     return {"code": strip_code(text), "truncated": truncated}

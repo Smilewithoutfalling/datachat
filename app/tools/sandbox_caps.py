@@ -7,7 +7,9 @@
   `tests/test_assess_caps.py::test_worker_namespace_matches_caps` 钉住）；
 - 评估契约（`app/assess/contracts.py` 的 codegen 契约）读它判 import / 内建 / 注入变量。
 
-本步**不**把它注入 codegen / reviewer 的 prompt（那是第 3 步）。
+第 3 步 S3-1（docs/roadmap/phase75-step3.md §2）起，codegen / reviewer 两处 prompt 里关于沙箱的句子
+由 `prompt_lines()` 从这里渲染，不再手写；对 prompt 可见的包是 `prompt_imports`（`allowed_imports` 的子集，
+`tests/test_assess_caps.py` 钉住）。react 的 system prompt 本步不注入（phase75-step3.md §7 第 4 条）。
 
 本模块不 import 任何第三方包：worker 子进程在装审计钩子之前会经 sandbox_policy 导入它。
 """
@@ -30,6 +32,9 @@ class SandboxCaps:
     common_vars: tuple
     # 模型必须赋值的结果变量
     result_var: str
+    # 第 3 步 S3-1：写进 prompt 的「可以 import 的包」，有序（prompt 逐字节稳定）。是 allowed_imports 的子集：
+    # 去掉 `_` 开头的私有名（_strptime）和只给运行时用的 time / locale / warnings。
+    prompt_imports: tuple = ()
 
     @property
     def forbidden_builtins(self) -> frozenset:
@@ -62,4 +67,43 @@ CAPS = SandboxCaps(
     multi_data_vars=("dfs",),
     common_vars=("pd", "np", "plt", "chart", "chart_path"),
     result_var="result",
+    prompt_imports=(
+        "numpy", "pandas", "matplotlib", "math", "statistics", "datetime", "calendar",
+        "re", "collections", "itertools", "functools", "decimal", "json",
+    ),
 )
+
+# 不给的内建：只举一份**固定的示例子集**，后面加「等」。不全量列出：forbidden_builtins 有 100 多个名字，
+# 而且按解释器现算，全量列会让 prompt 跟着 Python 版本变（phase75-step3.md §2）。
+# 每个名字都必须在 CAPS.forbidden_builtins 里或是 `__import__`（沙箱换成了受限版本，模型代码不该直接调），测试钉住。
+PROMPT_FORBIDDEN_EXAMPLES = ("globals", "locals", "eval", "exec", "open", "getattr", "__import__")
+
+# 已就绪变量在 prompt 里的简短说明（只是注释性文字，名字本身从 CAPS 取；键必须是注入的名字，测试钉住）
+_VAR_GLOSS = {
+    "df": "数据表",
+    "dfs": "表名 → 数据表的 dict",
+    "pd": "pandas",
+    "np": "numpy",
+    "plt": "matplotlib.pyplot",
+    "chart": "出图函数，见绘图要求",
+    "chart_path": "图表文件路径",
+}
+
+
+def prompt_vars(multi: bool, caps: SandboxCaps = CAPS) -> tuple:
+    """prompt 里列出的已就绪变量（有序）：数据变量在前，再是公共变量。result 不在这里（它有自己那一句）。"""
+    return (caps.multi_data_vars if multi else caps.single_data_vars) + caps.common_vars
+
+
+def prompt_lines(multi: bool, caps: SandboxCaps = CAPS) -> str:
+    """codegen / reviewer prompt 里关于沙箱的三句话（纯函数，全部从 caps 取）：
+
+    1. 已就绪的变量；2. 可以 import 的包（只能用这些）；3. 不给的内建（固定示例子集 + 「等」）。
+    每句以「- 」开头，句间换行，直接嵌进两处模板的约定列表。"""
+    names = "、".join(f"{v}（{_VAR_GLOSS[v]}）" if v in _VAR_GLOSS else v for v in prompt_vars(multi, caps))
+    data = "、".join(caps.multi_data_vars if multi else caps.single_data_vars)
+    return "\n".join((
+        f"- 已就绪的变量：{names}。直接使用，无需 import；{data} 等数据变量一定已就绪，不要判断变量是否存在。",
+        f"- 可以 import 的包：{'、'.join(caps.prompt_imports)}；只能用这些，导入其他库会被沙箱拒绝。",
+        f"- 代码在受限沙箱里执行：没有 {' / '.join(PROMPT_FORBIDDEN_EXAMPLES)} 等内置函数。",
+    ))
