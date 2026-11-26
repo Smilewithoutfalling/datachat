@@ -36,6 +36,7 @@ def test_run_eval_repeat_and_rescore_cli(tmp_path):
     """阶段 1.5：--repeat 输出每次报告和汇总；--rescore 用存下的结构化结果离线重新打分。"""
     out = tmp_path / "r.json"
     p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--dataset", "sales", "--category", "ts", "--repeat", "2",
+                        "--scope", "category",
                         "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     runs = sorted(tmp_path.glob("r_run*.json"))
@@ -44,12 +45,41 @@ def test_run_eval_repeat_and_rescore_cli(tmp_path):
                        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     assert "13/13 = 100.0%" in p.stdout
+    # #136：--scope 声明落报告顶层 filter（summary() 摊平 meta），台账与闸门据此追溯跑批口径。
+    first = json.loads(runs[0].read_text(encoding="utf-8"))
+    assert first["filter"]["scope"] == "category"
+
+
+def test_run_eval_subset_scope_hard_rule(tmp_path):
+    """#136 硬规则：子集跑批不声明作用域、或声明全局作用域，都在开跑前拒绝（退出 1，不写报告）。"""
+    out = tmp_path / "r.json"
+    for extra, needle in [
+        ([], "需要显式声明"),
+        (["--scope", "global"], "误导性结论"),
+        (["--scope", "debug"], "--case"),
+    ]:
+        cmd = [sys.executable, "run_eval.py", "--oracle", "--category", "agg", *extra, "--out", str(out)]
+        p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        assert p.returncode == 1, (extra, p.stdout + p.stderr)
+        assert needle in p.stdout, (extra, p.stdout)
+        assert not out.exists()   # 拒绝发生在写报告之前
+
+
+def test_run_eval_case_debug_scope_exemption_and_recording(tmp_path):
+    """#136：--case 单题调试豁免硬规则，声明的 --scope 照样进报告 meta.filter。"""
+    out = tmp_path / "r.json"
+    p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--case", "agg_001", "--scope", "debug",
+                        "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["filter"]["scope"] == "debug"
 
 
 def test_run_eval_both_agents_and_rescore_new_tables(tmp_path):
     """阶段 3：--agent both 两个 Agent 各出一份报告；新表、拒答题的报告也能 --rescore。"""
     out = tmp_path / "r.json"
     p = subprocess.run([sys.executable, "run_eval.py", "--oracle", "--agent", "both", "--category", "refusal",
+                        "--scope", "category",
                         "--out", str(out)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert p.returncode == 0, p.stdout + p.stderr
     assert "应拒答" in p.stdout and "workflow" in p.stdout and "react" in p.stdout
