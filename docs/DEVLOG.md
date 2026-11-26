@@ -11710,4 +11710,5 @@ S 11-25 授权小问题自定，按此口径执行。
 - #131：BACKLOG T3-2、T3-4、T3-5 补「验收材料」位置（#131 节点 1 原本要求每条都写）。本 PR `Closes #131`。
 - `decisions-pending-1120` #147 行补实际安装包核实依据：CI desktop run 45580031624，评论 7194159498。
 - 分发方式（S 22:27）：先给几个朋友用，不签名。落在 decisions-pending「11-26 决定」表和 phase6-desktop 范围节。公开发布仍须签名。
+- 更正 #147 落档理由：「改安装目录会断已装用户的 NSIS 升级匹配」不对。模板的 `RestorePreviousInstallLocation` 会让升级沿用旧目录，因此已装用户既不会断，也不会自动分离。见 #147 更正评论。
 - 偏离：无。docs-only，本机未跑 pytest，CI 覆盖。
