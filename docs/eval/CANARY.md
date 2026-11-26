@@ -124,6 +124,10 @@ python run_eval.py --canary --oracle
 
 **11-23 升级：覆盖消失，不只是比例移动。** #121 两轮内网回归（9274793 / bd56095）的 canary 均 10/10 CLEAN，但逐题 `tokens_cache_read` 与 `tokens_reasoning` 全部 `null`（11-16 及以前是比例在动、字段还在）。`tokens_in` 占比 0.948–0.950 ≈ 旧 `in + cache_read`（0.5049 + 0.427 = 0.932）：网关回包不再单独记 cache 明细，整笔并入 input。采集端只转抄（`app/core/llm.py` 读 `input_token_details.cache_read` / `output_token_details.reasoning`），两个代码版本同症状，判定为**网关回包结构变化**，不是评测代码回归。按上表属 clean + 提示，canary 行为符合规格。待办：①内网恢复后直打网关抓原始 usage 实锤；②网关行为稳定后重立基线 usage 段。**若网关真把 prompt cache 关了（不只是改记账），每轮评测实付输入 token 近乎翻倍，值得向网关方确认。** 归因全文见 DEVLOG [211]。
 
+**`--dump-usage`：覆盖变化一眼可判（2026-11-26，#119 收尾 / issue #138）。** 判「字段是没了还是在动」不再手工翻报告里的 null：
+`python scripts/eval/canary.py outputs/eval_react_canary_*.json --dump-usage`
+导出每题每轮的 usage 四元组与**覆盖统计**（每个组件在多少题次上有数）到 `outputs/canary_usage.json`（路径可用 `--dump-out` 指定），控制台同步打印；某组件「有数 0/N」就是 11-23 那次的签名。可与正常判定同跑，也可在没立过基线的环境单跑（此时退出 0，导出即全部诉求）。边界说清楚：报告里存的是采集端转抄后的四个字段，这一层导出**就是报告层能看到的全部**；要看 `prompt_tokens_details` 等原始回包键，仍走 DEVLOG [211] 的 live 探针。
+
 **为什么不是「掉 1 题就报漂移」。** 规格原文写的是「accuracy 掉 ≥1 题即 drift」。11-04 实测
 60 个题次掉 2 次（3.3%），**两次都是答对没赋值**，而且换着题出（不是某一道题的问题）。
 按条数判，这 6 跑里有 2 跑会响（1/3），而它们都不是权重问题 —— 一周一次的哨兵照这个频率
