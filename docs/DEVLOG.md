@@ -11692,7 +11692,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - `docs/roadmap/decisions-pending-1120.md` B3「决定」列：#141 probe 结果与 #142 决定（不加 scipy.stats、不加能力说明）。按 master-plan §7「决定落档」，没有后续实施的决定攒到 docs PR。
 - 不触 app/，不进内网链。
 
-## [220] 2026-11-26 加 Apache-2.0 LICENSE + 决策 issue 落档（issue #146、#139、#140、#143–#145、#147、#152、#153） · commit <待提交>
+## [220] 2026-11-26 加 Apache-2.0 LICENSE + 决策 issue 落档（issue #146、#139、#140、#143–#145、#147、#152、#153） · commit 859115d（PR #162）
 
 纯文档。
 - [219] 回填 d77eb89（PR #161；PR head 6f18d47 的 CI tests `45825949947` success）。
@@ -11702,3 +11702,12 @@ S 11-25 授权小问题自定，按此口径执行。
 - #147 核实：Tauri NSIS 模板 currentUser 默认 `$LOCALAPPDATA\${PRODUCTNAME}`，安装目录与数据目录重叠属实；phase6 :27 的写法留给 #148 改。
 - 不触 app/，不进内网链。
 
+## [221] 2026-11-26 #131/#132 节点 2 审查补交 + 分发方式落档（issue #131、#132、#147） · commit <待提交>
+
+- 回填：[220] = 859115d（PR #162），push CI tests 45834151200 success（已用 `/actions/runs` 核对 head_sha、event、conclusion）。
+- 起因：只读审查 PR #160（4bffa4c）发现 #131、#132 随 `Closes` 自动关闭时，§11 要求的审查对比表没有贴。S 11-26 22:27 同意补做并重开（重开 22:28 CST / 14:28 UTC）。
+- #132：重跑 `grounding_fp.py`（master 859115d，脚本与 4bffa4c 逐字节相同），EXIT=0，读数与评论 7184415590 一致。审查表、原句手工编辑的更正、列名更正、inv_005 归类观察，见评论 7194909541。已重新关闭（22:30 CST / 14:30 UTC）。读数文件和 bundle 只记 sha256，不入库（S 定）。
+- #131：BACKLOG T3-2、T3-4、T3-5 补「验收材料」位置（#131 节点 1 原本要求每条都写）。本 PR `Closes #131`。
+- `decisions-pending-1120` #147 行补实际安装包核实依据：CI desktop run 45580031624，评论 7194159498。
+- 分发方式（S 22:27）：先给几个朋友用，不签名。落在 decisions-pending「11-26 决定」表和 phase6-desktop 范围节。公开发布仍须签名。
+- 偏离：无。docs-only，本机未跑 pytest，CI 覆盖。
