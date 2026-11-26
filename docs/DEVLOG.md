@@ -11684,11 +11684,21 @@ S 11-25 授权小问题自定，按此口径执行。
 - 评测侧三件 `test_assess_contracts`、`test_b2_batch_pipeline`、`test_nightly_gate` 随同重跑（rebase 到 b886a3e 之后）：与 test_grounding_fp 合计 87 passed。
 - 全量 pytest / web 闸门交 CI（S 11-26：小改动不必本机重跑全量）。app/ 对 origin/master 零 diff，A 组指纹 e11f8abc8a0a 不变，不进内网链。
 
-## [219] 2026-11-26 S3-4 决定落档 + B3 scipy 决定落档（issue #135、#142） · commit <待提交>
+## [219] 2026-11-26 S3-4 决定落档 + B3 scipy 决定落档（issue #135、#142） · commit d77eb89（PR #161）
 
 纯文档。
 - [218] 回填 4bffa4c（PR #160；PR head 5038ae1 的 CI tests `45768063885` success）。
 - `docs/roadmap/phase75-step3.md` 新增附录 A：5 条未核实数字的评测侧标注、S 抽查、假阳率（带单位类真编造 0/140）与 S 的决定（暂不拦，证据口径以产品口径为准）。#135 的交付物。
 - `docs/roadmap/decisions-pending-1120.md` B3「决定」列：#141 probe 结果与 #142 决定（不加 scipy.stats、不加能力说明）。按 master-plan §7「决定落档」，没有后续实施的决定攒到 docs PR。
+- 不触 app/，不进内网链。
+
+## [220] 2026-11-26 加 Apache-2.0 LICENSE + 决策 issue 落档（issue #146、#139、#140、#143–#145、#147、#152、#153） · commit <待提交>
+
+纯文档。
+- [219] 回填 d77eb89（PR #161；PR head 6f18d47 的 CI tests `45825949947` success）。
+- 新增 `LICENSE`：Apache License 2.0 原文（apache.org/licenses/LICENSE-2.0.txt，sha256 `cfc7749b…3d30`）。#146 S 定「现在就加」。
+- `docs/roadmap/decisions-pending-1120.md`：D1/D3/D4/D5 决定列，文末新增「11-26 决定」表（九个决策 issue）。
+- `phase6-desktop.md` §1 第 6 条、`phase7-accuracy.md` §1、`BACKLOG.md` N9 各补一行决定。
+- #147 核实：Tauri NSIS 模板 currentUser 默认 `$LOCALAPPDATA\${PRODUCTNAME}`，安装目录与数据目录重叠属实；phase6 :27 的写法留给 #148 改。
 - 不触 app/，不进内网链。
 

@@ -28,7 +28,7 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 | 3 | WebView2 怎么装 | **downloadBootstrapper**（Tauri 默认）：缺 WebView2 时联网装 | Win11 自带 WebView2，Win10 一般也已经通过系统更新装上了，离线安装包要多出约 127 MB。离线场景另出一个包，放到以后再做 |
 | 4 | 卸载时删不删数据 | **默认不删**。数据目录 `%LOCALAPPDATA%\datachat`（会话、数据集、server.log）和钥匙串里的 Key 都保留；卸载页给一个「同时删除我的数据」的勾选框 | 重装或升级后历史都还在；想彻底删的用户也有出口 |
 | 5 | 发布渠道 | **GitHub Releases**（仓库是公开的），自动更新读 Release 里的 `latest.json` | 不用另找服务器 |
-| 6 | 仓库许可证 | 要 S 定（MIT / Apache-2.0 / 不开源） | 仓库现在**没有 LICENSE**（GitHub API 返回 license=null），默认就是保留所有权利。这一项影响 §6 免费签名能不能申请、第三方声明怎么写，也影响别人能不能合法使用 |
+| 6 | 仓库许可证 | **Apache-2.0**（S 11-26 定，#146；LICENSE 已入库） | 仓库现在**没有 LICENSE**（GitHub API 返回 license=null），默认就是保留所有权利。这一项影响 §6 免费签名能不能申请、第三方声明怎么写，也影响别人能不能合法使用 |
 
 ## 2. D1 壳：进程管理与窗口（spike + 实现）
 
