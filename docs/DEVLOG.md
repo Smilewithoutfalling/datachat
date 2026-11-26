@@ -11567,7 +11567,7 @@ S 11-25 授权小问题自定，按此口径执行。
 ### 未做（节点 2）
 真数据读数：需要 #134 那批的 `s3_strip.json` 与 `snap_strip\`（256 个文件），由评测侧带出（英文文件名 zip）。拿到后出四类读数表，贴 #132。
 
-## [215] 2026-11-26 阶段 7.5b 第 4 步评测降级：子集入口硬规则 + 回归范围表 + 指纹元数据盘点 + 台账重建（issue #136） · commit <待提交>
+## [215] 2026-11-26 阶段 7.5b 第 4 步评测降级：子集入口硬规则 + 回归范围表 + 指纹元数据盘点 + 台账重建（issue #136） · commit f77ad68（PR #157）
 
 改动（A 组零触碰，code_sha256 全程 e11f8abc8a0a）：
 
@@ -11595,3 +11595,15 @@ S 11-25 授权小问题自定，按此口径执行。
 
 明确不做：app/eval/runner.py 不搬（子集筛选 _select_cases 本就在 run_eval.py 层，搬家只会白触 A 组、多占一次内网回归）；judge / registry 防盗门不拆；canary --dump-usage 属 #138；题库 / judge / gold 一律不动（v7 冻结）。
 
+## [216] 2026-11-26 canary --dump-usage：usage 覆盖变化一眼可判（issue #138，#119 收尾） · commit <待提交>
+
+#119 判「网关回包字段是没了还是在动」当时要手工 curl + 手翻报告里的 null。本批把这一步机械化。
+
+改动（零 A 组触碰，scripts/ 不进指纹）：
+- `scripts/eval/canary.py`：新增 `dump_usage(runs, out_path)`——导出本批每题每轮的 usage 四元组与**每组件覆盖统计**（`seen`/`null`/`slots`，题次 = 跑数×10）；CLI 加 `--dump-usage [--dump-out PATH]`（默认 `outputs/canary_usage.json`），控制台同步打印覆盖概览，「有数 0/N」即 11-23 那次的签名（cache_read/reasoning 整批消失）。可与正常判定同跑；没立过基线时导出后退出 0——导出即全部诉求，不因基线缺席判失败。
+- `docs/eval/CANARY.md`：11-23 升级段后补 `--dump-usage` 用法段，并写清边界：报告层存的是采集端转抄后的四个字段，导出**就是报告层能看到的全部**；要看 `prompt_tokens_details` 等原始回包键仍走 DEVLOG [211] 的 live 探针。
+- `tests/test_canary_drift.py`：+3（覆盖统计口径、无基线导出 exit 0、与正常判定并行互不干扰）。首版 slots 断言算术错（3 跑×10 探针写成 60 题次），复跑抓出后修正为 30。
+
+验证：`tests/test_canary_drift.py` **27 passed**。
+
+明确不做：采集端（`app/core/llm.py`）加原始回包留存——属 A 组、越 #138 独占边界（canary.py + CANARY.md），且 #119 归因已有 live 探针实锚（网关换 OpenAI 标准 schema），无需重复建设。

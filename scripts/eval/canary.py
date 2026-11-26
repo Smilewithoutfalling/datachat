@@ -248,6 +248,37 @@ def _drop_kind(cur: dict, cid: str) -> str:
     return "contract"
 
 
+def dump_usage(runs: list[dict], out_path: str) -> dict:
+    """#119 收尾（issue #138）：导出本批每题每轮的 usage 四元组与覆盖统计。
+
+    判「网关回包字段变了」不再靠手工去报告里翻 null：覆盖统计直接给出每个组件
+    在多少题次上有数；某组件本批全 null 就是 #119 那次的签名（tokens_cache_read /
+    tokens_reasoning 整批消失 → 网关换栈，实锚见 DEVLOG [209]）。回包级原始键
+    （prompt_tokens_details 等）不进报告 —— 报告里存的是采集端转抄后的四个字段，
+    这一层导出的就是报告层能看到的全部；真要原始回包仍走 live 探针。
+    """
+    per_case = []
+    seen = {k: 0 for k in COMPONENTS}
+    slots = len(runs) * len(CANARY_IDS)
+    for r in runs:
+        for i in CANARY_IDS:
+            u = r["cases"][i]["usage"]
+            per_case.append({"file": r["file"], "run": r["run"], "id": i, **u})
+            for k in COMPONENTS:
+                if _num(u.get(k)):
+                    seen[k] += 1
+    coverage = {k: {"seen": seen[k], "null": slots - seen[k], "slots": slots} for k in COMPONENTS}
+    payload = {"created": datetime.now().isoformat(timespec="seconds"),
+               "files": [r["file"] for r in runs],
+               "components": list(COMPONENTS),
+               "coverage": coverage,
+               "per_case": per_case}
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1)
+    return payload
+
+
 def compare(base: dict, cur: dict) -> dict:
     """基线 vs 本次。返回 `verdict` + `reasons`；不抛异常，让调用方决定退几。
 
@@ -356,6 +387,11 @@ def main(argv=None) -> int:
     ap.add_argument("--init", action="store_true", help="用本次读数立基线（写入 --baseline）")
     ap.add_argument("--force", action="store_true", help="允许覆盖已存在的基线")
     ap.add_argument("--out", default=None, help="另存本次汇总 JSON")
+    ap.add_argument("--dump-usage", action="store_true",
+                    help="导出本批每题每轮 usage 四元组与覆盖统计（#119 收尾：字段覆盖变化一眼可判，"
+                         "不再手工翻 null；可与正常判定同跑）。默认写 outputs/canary_usage.json")
+    ap.add_argument("--dump-out", default=None, metavar="PATH",
+                    help="--dump-usage 的导出路径（默认 outputs/canary_usage.json）")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
 
@@ -367,6 +403,17 @@ def main(argv=None) -> int:
         return 2
     runs = [load_run(p) for p in paths]
     cur = summarize(runs)
+
+    if args.dump_usage:
+        dump_path = (args.dump_out if (args.dump_out and os.path.isabs(args.dump_out))
+                     else os.path.join(ROOT, args.dump_out or os.path.join("outputs", "canary_usage.json")))
+        payload = dump_usage(runs, dump_path)
+        if not args.quiet:
+            print(f"usage 导出：{dump_path}")
+            for k in COMPONENTS:
+                cov = payload["coverage"][k]
+                note = "  ← 本批全 null（网关未回该字段）" if cov["seen"] == 0 else ""
+                print(f"  {k:<18} 有数 {cov['seen']}/{cov['slots']}{note}")
 
     base_path = args.baseline if os.path.isabs(args.baseline) else os.path.join(ROOT, args.baseline)
     out_path = args.out if (args.out and os.path.isabs(args.out)) else (
@@ -390,6 +437,9 @@ def main(argv=None) -> int:
         return 0
 
     if not os.path.exists(base_path):
+        if args.dump_usage:
+            # 导出就是本次的全部诉求；没有基线不算失败（哨兵没立过是另一件事）。
+            return 0
         print(f"没有基线：{base_path}\n先跑一次 `--init` 立基线", file=sys.stderr)
         return 2
     base = json.load(open(base_path, encoding="utf-8"))

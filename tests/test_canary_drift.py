@@ -301,3 +301,46 @@ def test_init_then_compare_roundtrip(tmp_path, capsys):
     assert saved["min_correct"] == 10 and saved["runs"] == 2
     assert drift.main(paths + ["--baseline", str(base)]) == 0
     assert "CLEAN" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- usage 导出（#119 收尾 / #138）
+
+
+def test_dump_usage_counts_coverage_per_component(tmp_path):
+    """#119 那次的签名（cache_read/reasoning 整批 null）必须能从导出里直接读出来。"""
+    usage = {i: {"tokens_in": 100, "tokens_out": 10, "tokens_cache_read": None} for i in CANARY_IDS}
+    runs = [drift.load_run(_report(tmp_path, name=f"r{k}.json", run=k, usage=usage)) for k in (1, 2, 3)]
+    out = tmp_path / "u.json"
+    payload = drift.dump_usage(runs, str(out))
+    # fixture 只给了 in/out 两个组件 → 30 个题次（3 跑 × 10 探针）里 cache_read 有数 0
+    assert payload["coverage"]["tokens_in"] == {"seen": 30, "null": 0, "slots": 30}
+    assert payload["coverage"]["tokens_cache_read"]["seen"] == 0
+    assert payload["coverage"]["tokens_reasoning"]["seen"] == 0
+    assert len(payload["per_case"]) == 30
+    assert payload["per_case"][0]["id"] in CANARY_IDS
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["coverage"] == payload["coverage"]
+
+
+def test_dump_usage_cli_without_baseline_still_exits_zero(tmp_path, capsys):
+    """导出是独立诉求：没立过基线不该把导出也判成失败（退出 2）。"""
+    paths = [_report(tmp_path, name=f"r{k}.json", run=k) for k in (1, 2)]
+    out = tmp_path / "u.json"
+    missing_base = tmp_path / "nope.json"
+    rc = drift.main(paths + ["--dump-usage", "--dump-out", str(out), "--baseline", str(missing_base)])
+    assert rc == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["coverage"]["tokens_out"]["slots"] == 20
+    assert "usage 导出" in capsys.readouterr().out
+
+
+def test_dump_usage_does_not_break_normal_verdict(tmp_path, capsys):
+    """带基线同跑：导出照写，判定照常（两个动作互不干扰）。"""
+    paths = [_report(tmp_path, name=f"r{k}.json", run=k) for k in (1, 2)]
+    base = tmp_path / "baseline.json"
+    assert drift.main(paths + ["--init", "--baseline", str(base)]) == 0
+    out = tmp_path / "u.json"
+    rc = drift.main(paths + ["--dump-usage", "--dump-out", str(out), "--baseline", str(base)])
+    assert rc == 0
+    assert out.exists()
+    assert "CLEAN" in capsys.readouterr().out
