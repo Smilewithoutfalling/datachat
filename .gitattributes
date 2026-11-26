@@ -4,3 +4,5 @@ data/eval/*.csv text eol=lf
 docs/gate/*.json text eol=lf
 # S3-2 口径 golden 按 LF 存储：tests/test_code_scope_golden.py 逐字节对比（Windows checkout 会转 CRLF）
 tests/fixtures/code_scope/*.json text eol=lf
+# 存档快照按原字节存储：BACKLOG 记了 sha256（Windows checkout 不许转 CRLF）
+docs/eval/archives/**/*.jsonl -text

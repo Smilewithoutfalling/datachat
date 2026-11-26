@@ -182,3 +182,22 @@ def test_react_and_missing_snapshot_listed_separately(tmp_path):
     m2 = gfp.measure({"agent": "react", "cases": [w1]}, {})
     assert m2["react"] == ["w1"] and m2["missing_snapshot"] == []
 
+
+
+def test_markdown_bold_does_not_hide_unit():
+    # 结论常把数字加粗：「**2100-2350** 件」里的 2350 后面隔着 **，仍应判为带单位的计数
+    assert gfp.classify("2350", "大多在 **2100-2350** 件之间波动。") == gfp.K_COUNT
+    assert gfp.classify("2,350", "共 `2,350` 单。") == gfp.K_COUNT
+
+
+def test_denominator_counts_checked_numbers_per_kind():
+    # 分母只算产品口径适用的题（已执行、非拒答），每题按 grounding 的「有效数字」去重计数
+    report = {"cases": [
+        _case("a", "共 1,061 单，占比 12%，共 1,061 单。", missing=None),   # 1,061 去重 → 计数 1、百分比 1
+        _case("b", "2024 年增长 300 件。", missing=None),                  # 2024 是年份不检查；300 → 派生数 1
+        _case("c", "无法回答：缺列。", applicable=False, executed=True),    # 拒答：不进分母
+    ]}
+    m = gfp.measure(report, {})
+    assert m["applicable"] == 2
+    assert [m["by_kind"][k]["结论数字"] for k in gfp.KINDS] == [1, 1, 1, 0]
+    assert "产品口径适用的 2 题" in gfp.render_md(m, "r.json")

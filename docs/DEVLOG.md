@@ -11608,7 +11608,7 @@ S 11-25 授权小问题自定，按此口径执行。
 
 明确不做：采集端（`app/core/llm.py`）加原始回包留存——属 A 组、越 #138 独占边界（canary.py + CANARY.md），且 #119 归因已有 live 探针实锚（网关换 OpenAI 标准 schema），无需重复建设。
 
-## [217] 2026-11-26 v8 基线三跑重立 + nightly 基线标签参数化（issue #137） · commit <待提交>
+## [217] 2026-11-26 v8 基线三跑重立 + nightly 基线标签参数化（issue #137） · commit b886a3e（PR #159）
 
 第 3 步 S3-1 能力注入（PR #127）与多批产品改动进 A 组后，v7 的 code_sha12（996020ad8a04）已不匹配
 现 master；题库（672b52a3a6b0）与 judge（289474f4d943）与 v7 相同——尺子没换，锚点随代码重钉。
@@ -11646,3 +11646,40 @@ S 11-25 授权小问题自定，按此口径执行。
 - `baseline_v7.json` 不动（冻结尺子，历史锚点仍可比时显式传参可用）；
 - v8 与 v7 差值不写结论（A 组代码多批变更，相减无意义）；
 - 三份报告不入库（outputs/ 被 .gitignore 覆盖，LEDGER 机读层已存路径与读数）。
+
+## [218] 2026-11-26 S3-4 grounding 假阳率·节点 2 读数 + 摘下的挂 BACKLOG、mul_005#2 存档（issue #132、#131） · commit <待提交>
+
+### 回填与更正
+- [217] 回填 b886a3e（PR #159）。
+- [214] 的 CI：squash 6f87750 在 master 上的 push run 是 tests `45738280840`（success；sidecar / desktop 被路径过滤，未触发）。11-26 09:49 对 S 说的「[214] 的 CI run id 45735997571」写错了，那是 PR head dc985cc 的 pull_request run（同样 success），不是 6f87750 的。
+
+### #132 节点 2：真数据读数（只量不改）
+数据：评测侧带出的 #134 那批，`s3_strip.json`（sha256 d1038223…0260，202 题，workflow）+ `snap_strip\`（256 个快照，多轮题取最后一份）。脚本跑前补两处：
+- 分类前去掉 markdown 的 `*` 与 `` ` ``：inv_016 的「**2100-2350** 件」修前因 `**` 隔开量词被判成「其他」，修后为计数/金额。
+- 读数表加分母列「结论数字」= 产品口径适用题（已执行、非拒答）里 grounding 会检查的数字，每题去重后按类计数；`measure` 返回 `applicable`。
+
+四类表（产品口径适用 186 题）：
+
+| 类别 | 结论数字 | 条目 | 产品口径未核实 | 评测口径未核实 | 仅评测口径 | 仅产品口径 |
+|---|---|---|---|---|---|---|
+| 带单位的计数/金额 | 140 | 2 | 1 | 2 | 1 | 0 |
+| 百分比 | 61 | 0 | 0 | 0 | 0 | 0 |
+| 派生数 | 37 | 3 | 3 | 3 | 0 | 0 |
+| 其他 | 267 | 0 | 0 | 0 | 0 | 0 |
+
+守恒：并集 5 = 评测 5（= 报告 answer_nums_missing 之和）；产品 4。ReAct 0；工作流缺快照 0。条目：filt_001 100（仅评测口径，数字出自问题原文「大于100件」）、corr_008 4.5、inv_005 2333、inv_016 2350、mul_009 4.5。真假由 #135 人工标注，脚本不判。
+
+适用题数差 6（评测 `evidence.applicable` 180，产品 186）已查清：emp_023、inv_022、mul_029、neg_008、neg_009、neg_010 都是拒答类题（`app/eval/consistency.py:64–66` 按题的 expect_refusal / expect_kind 判不适用），答案是「数据中没有…字段，无法回答」，但 `app/core/result.py` 的 `refusal_from_answer` 认不出这几种句式，产品口径按答案文本把它们算作适用。6 题答案里都没有数字，对条目和「结论数字」分母都是 0 贡献。
+
+### #131：摘下的挂 BACKLOG，mul_005#2 存档
+- `docs/eval/BACKLOG.md` 阶段 7.5 分区新增 T3-1..T3-5：S3-3 REPLAN 边（重启用前提：202 批中至少一道原失败题被救回、快照有 replan 节点为证、配对净退步 <6）；S3-2 口径闸（判定逻辑留在 `app/tools/code_scope.py`，与 T3-1 一起重启用、重算 recursion_limit）；字面量豁免（重新实现必须同时覆盖同列 `==` ↔ `isin`，作 #140 的材料）；前端两版计划（前提 T3-1 且后端重发 `source="replan"` 的 plan 事件）；react 同步注入 S3-1（挂账，S 11-24：不同步，react 下次改 system prompt 时一并做）。
+- `docs/roadmap/phase75-step3.md`：状态行补「实施结果（2026-11-25）」、§7 补「摘除」记录、§8 写明合并的是摘除后的版本，S3-4 量测由 #132 单独交付。
+- 快照入库 `docs/eval/archives/step3-mul_005-replan/`（原字节，sha256 4dcd35e02429e542b29a80d0aa528d3e8723012890653d1dd43c6f3fa9d6f711，9 个节点含 replan，未进 tests/fixtures）。
+- 偏离 #131 原稿：
+  - `.gitattributes` 加 `docs/eval/archives/**/*.jsonl -text`。快照含 11 行 CRLF，不加的话 Windows checkout 可能改字节、sha256 对不上。
+  - 原稿写「commit 落在 feat/step3，随 #127 合入」「不写 DEVLOG」：#127 已合（8493709），feat/step3 已删，改在新分支、并入本条。
+
+### 验证
+- `tests/test_grounding_fp.py` 23 passed（新增 `test_markdown_bold_does_not_hide_unit`、`test_denominator_counts_checked_numbers_per_kind`；脚本换回 HEAD 版本时这 2 条红、其余 21 条绿）。
+- 评测侧三件 `test_assess_contracts`、`test_b2_batch_pipeline`、`test_nightly_gate` 随同重跑（rebase 到 b886a3e 之后）：与 test_grounding_fp 合计 87 passed。
+- 全量 pytest / web 闸门交 CI（S 11-26：小改动不必本机重跑全量）。app/ 对 origin/master 零 diff，A 组指纹 e11f8abc8a0a 不变，不进内网链。
