@@ -11459,7 +11459,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 
 **明确不做**：不改 llm.py 采集端（网关字段回来即自动恢复记账）；不因此动 nightly 判读（判红只看算错题，2026-11-18 已收窄，usage 只备查）。
 
-## [213] 2026-11-25 阶段 7.5 第 3 步修复回路：实现与摘除（issue #129、#130，PR #127） · commit <待提交>
+## [213] 2026-11-25 阶段 7.5 第 3 步修复回路：实现与摘除（issue #129、#130，PR #127） · commit 8493709（PR #127）
 
 方案：`docs/roadmap/phase75-step3.md`（[209]，9c40a97）。PR #127 先实现了 S3-1、S3-2、S3-3（内网回归 GREEN 196/202）；S 11-24 决定无条件摘除 S3-3 REPLAN，并连同 S3-2 的产品闸一起摘（phase75-step3 §7 第 1 条原本是「一题都没救回才摘 S3-3」）。合入 master 的只剩 **S3-1 能力注入 + code_scope 搬家**。摘下的部分在 BACKLOG 的追溯由 #131 写，本条不重复。S3-4（grounding 假阳率）不在本 PR。
 
@@ -11510,7 +11510,8 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - 第一轮（b811dfa，tests 45355090886）：windows 两档 pytest 红在 `test_code_scope_golden` 两条（Windows checkout 把 golden.json 转成 CRLF）；修法 `.gitattributes` 加 `tests/fixtures/code_scope/*.json text eol=lf`，golden 内容不动。sidecar 45355090888、desktop 45355090954 success。
 - 第二轮（19171d8，按 head_sha 全部工作流）：tests 45358222488 success、sidecar 45358222585 success、desktop 45358222697 success。
 - 摘除后（acac4cb，按 head_sha 全部工作流）：tests 45557203875 success、sidecar 45557203890 success、desktop 45557204032 success。
-- rebase 到 e75a9db 后的 head：CI 结果挂 PR #127，下一次提交回填。
+- rebase 到 e75a9db 后（6a8d9ea，按 head_sha 全部工作流）：tests 45580031793 success、sidecar 45580031538 success、desktop 45580031624 success。
+- squash 合并为 8493709。偏差：squash commit message 只有标题，正文（本条全文）漏传；全文以本条和 PR #127 描述为准，S 同意不改写 master 历史。
 
 ### 内网回归（#134 节点 3，评测侧，2026-11-25 15:13–15:50）
 被测 `acac4cb580355cf876ae6993ea1db1ed8f362bc2`（codeload tarball），workflow / state / n=202，基线 v7（[194, 192, 192] 中位 192/202，pass^3 188）。
@@ -11532,3 +11533,37 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - BACKLOG 追溯条目与 mul_005#2 快照入库（#131）；react 链路不注入能力（§7 第 4 条挂账，随 #131 写进 BACKLOG）。
 - S3-4 假阳率脚本与决策（#132、#135）。
 - e2e 与视觉基线本机缺 libatk，交 CI。
+
+## [214] 2026-11-25 S3-4 grounding 假阳率量测脚本·节点 1（issue #132） · commit <待提交>
+
+只量不改：新增 `scripts/eval/grounding_fp.py` 与 `tests/test_grounding_fp.py`，app/ 零 diff，A 组指纹不变（e11f8abc8a0a）。
+
+### 和 issue 原稿的偏离：输入改为「202 题报告 + 同批快照目录」
+原稿写「用 report_adapter 的 unverified 条目」。202 题报告由 `app/eval/runner.py` 写，逐题字典没有 `unverified_numbers`（只有 `scripts/gate/run_gate.py:142` 写），`app/eval/report_adapter.py:200` 对它恒为 0，照原稿做「条目数守恒」是 0 = 0 的假绿。改为：
+- 评测口径：报告逐题 `evidence.detail.answer_nums_missing`（`app/eval/consistency.py:72–77`，证据 = result_text + str(result)，不含问题原文）。
+- 产品口径：按 `app/core/service.py:427–430` 从同批快照重算（证据 = 问题 + result_text + metrics_block，只算已执行且非拒答），调同一个 `app.core.grounding.unverified_numbers`。
+- 守恒：两口径并集逐条列出，读数表写出并集 / 评测 / 产品三个总数。产品口径算不出的题分两列：ReAct（没有节点行，不适用）和工作流缺快照（数据缺失，正常应为 0）。
+- 不选「请评测侧在报告里加字段」：runner.py 属 A 组，会另占一次内网回归。
+S 11-25 授权小问题自定，按此口径执行。
+
+### 四类（判定顺序即优先级）
+百分比 → 派生数（前 8 字内、不跨逗号句号分号，有派生词；或后接「倍」）→ 带单位计数/金额（货币符号、万/亿、或去空白后紧跟量词）→ 其他。`after` 窗口最初 4 字，「个百分点」类用例不过，改为 8 字。数字定位用 grounding 同一个 `_NUM_RE` 整段比对，不会命中更长数字的一部分。
+
+### 本地实测
+- `tests/test_grounding_fp.py` 21 passed：`test_classifies_four_kinds`（11 个参数化）、`test_classify_counter_examples`、`test_classify_locates_whole_number_not_substring`、`test_derived_word_does_not_cross_clause`、`test_two_evidence_scopes_differ_when_question_contains_number`、`test_product_scope_uses_metrics_block_and_original_question`、`test_every_unverified_entry_is_listed`、`test_product_only_entry_counted_in_union`、`test_react_and_missing_snapshot_listed_separately`、`test_multi_turn_takes_latest_snapshot`、`test_cli_exit_codes`。
+- 回退验证：脚本换回 4e3ee13 版本，新增和改过的 5 条测试全红，其余 16 条绿。
+- 全量闸门（8493709 之上，审查修正后重跑）：pytest 拆两半跑 1448 + 956 = 2404 passed、0 failed（= 合并前 2383 + 新增 21）；评测侧三件 64 passed；lint 0 警告、tsc ok、vitest 32 文件 984、build ok。A 组指纹重算 e11f8abc8a0a，app/ 对 origin/master 零 diff。e2e 本机缺 libatk，交 CI。
+
+### 只读审查（2026-11-26）后的修正
+独立只读审查对 4e3ee13 出了对比表：产品口径与 `service.py:427–430` 逐项一致，评测口径只读 `answer_nums_missing` 且尊重 applicable，app/ 零 diff。指出 7 处偏差，全部在脚本和测试里修掉：
+- a 已执行但拒答、又无快照的题被记成「无快照」：改为先判适用再判快照。
+- b 文字写「后 3 字内接量词」与代码「紧跟」不符：文字改为「去空白后紧跟」。
+- c `str.find` 会命中更长数字的一部分（「增长 1,500 单；评分 500 分」的 500 判成派生数）：改用 `_NUM_RE` 整段定位。
+- d 派生词窗口跨子句（「增长 5%，共 300 单」的 300 判成派生数，会缩小计数/金额类分母）：窗口截到最近的子句分隔符之后。
+- e 守恒只核了评测侧：加 `product_total`、`union_total`，测试断言并集条数，补「仅产品口径」用例；读数表「仅评测口径」的说明改为「产品证据里有、评测证据里没有」。
+- f ReAct 没单列：按逐题 `agent`（缺省读报告顶层 `agent`）拆成 ReAct / 工作流缺快照两列。
+- g 补百分比、其他两类的显式反例；测试里的 `started_at_utc` 改为与 `snapshot.py:140` 一致的 ISO 格式。
+
+### 未做（节点 2）
+真数据读数：需要 #134 那批的 `s3_strip.json` 与 `snap_strip\`（256 个文件），由评测侧带出（英文文件名 zip）。拿到后出四类读数表，贴 #132。
+
