@@ -66,6 +66,19 @@ def test_classify_counter_examples():
     assert gfp.classify("15%", "同比增长 15%。") == gfp.K_PCT
     # 反例：没有单位、没有派生词 → 其他，不算计数/金额
     assert gfp.classify("1234", "结果是 1234。") == gfp.K_OTHER
+    # 反例：「倍」不是百分比；带「元」不是其他
+    assert gfp.classify("3.5", "是去年的 3.5 倍。") == gfp.K_DERIVED
+    assert gfp.classify("1234", "结果是 1234 元。") == gfp.K_COUNT
+
+
+def test_classify_locates_whole_number_not_substring():
+    # 500 不能落到「1,500」里面（那样前面有「增长」会被误判为派生数）
+    assert gfp.classify("500", "比上月增长 1,500 单；评分 500 分") == gfp.K_OTHER
+
+
+def test_derived_word_does_not_cross_clause():
+    # 「增长」在上一个子句，300 单是本子句的计数，不是派生数（S 的门槛只看计数/金额，误判会缩小分母）
+    assert gfp.classify("300", "增长 5%，共 300 单") == gfp.K_COUNT
 
 
 def test_two_evidence_scopes_differ_when_question_contains_number(tmp_path):
@@ -108,9 +121,10 @@ def test_every_unverified_entry_is_listed(tmp_path):
     # 评测口径的每一条都在表里（逐条不丢）
     listed = [(e["id"], e["number"]) for e in m["entries"] if e["eval_unverified"]]
     assert len(listed) == m["eval_total"] == 4
-    # 表的条目数 = 每题两种口径并集之和
-    assert len(m["entries"]) == 4 + 0
-    assert m["no_snapshot"] == ["b", "d"]
+    # 表的条目数 = 每题两种口径并集之和（a 产品 3 条 ⊂ 评测 3 条；b、d 产品算不出）
+    assert m["product_total"] == 3
+    assert len(m["entries"]) == m["union_total"] == 4
+    assert m["missing_snapshot"] == ["b", "d"] and m["react"] == []
     b = [e for e in m["entries"] if e["id"] == "b"][0]
     assert b["product_unverified"] is None
     md = gfp.render_md(m, "r.json")
@@ -140,3 +154,31 @@ def test_cli_exit_codes(tmp_path, capsys):
     g = tmp_path / "g.json"
     g.write_text(json.dumps({"cases": [], "auto_correct": 1}), encoding="utf-8")
     assert gfp.main([str(g), "--snapshots", str(d)]) == 2
+
+
+def test_product_only_entry_counted_in_union(tmp_path):
+    # 评测证据含 str(result)，里面有 88.8；产品证据（result_text 被截断）没有 → 只有产品口径未核实
+    d = tmp_path / "snap"
+    d.mkdir()
+    _snap(d, "p", "问题 p", "count 37")
+    report = {"cases": [_case("p", "共 37 单，均值 88.8。", missing=None)]}
+    m = gfp.measure(report, gfp.index_snapshots(str(d)))
+    assert [(e["number"], e["product_unverified"], e["eval_unverified"]) for e in m["entries"]] == [("88.8", True, False)]
+    assert m["product_total"] == m["union_total"] == 1 and m["eval_total"] == 0
+    assert m["by_kind"][gfp.K_DERIVED]["仅产品口径"] == 1
+
+
+def test_react_and_missing_snapshot_listed_separately(tmp_path):
+    d = tmp_path / "snap"
+    d.mkdir()
+    r1 = dict(_case("r1", "共 300 件。", missing=["300"]), agent="react")
+    w1 = _case("w1", "共 777 单。", missing=["777"])
+    refused = _case("x", "无法回答：缺列。", missing=None)          # 拒答：不适用，不算缺快照
+    m = gfp.measure({"cases": [r1, w1, refused]}, gfp.index_snapshots(str(d)))
+    assert m["react"] == ["r1"] and m["missing_snapshot"] == ["w1"]
+    md = gfp.render_md(m, "r.json")
+    assert "ReAct（不适用）1（r1）" in md and "工作流缺快照（数据缺失）1（w1）" in md
+    # 报告顶层 agent=react 时整批都算 ReAct
+    m2 = gfp.measure({"agent": "react", "cases": [w1]}, {})
+    assert m2["react"] == ["w1"] and m2["missing_snapshot"] == []
+

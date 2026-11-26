@@ -20,15 +20,16 @@ issue #132 原稿写的是「用 report_adapter 的 unverified 条目」。代�
   （即总结时看到的最终状态），调用同一个 `app.core.grounding.unverified_numbers`。
   结论文本两种口径都用报告里的 `answer`（同一个 res.answer）。
 
-ReAct 没有节点行，这类题的产品口径记为「无快照」，单独计数，不静默丢掉。
+产品口径算不出的题分两列，不静默丢掉：ReAct（没有节点行，本来就不适用）和
+工作流缺快照（数据缺失，正常应为 0，可当作快照带出是否完整的检查）。
 
 ## 四类（判定顺序即优先级）
 
 1. 百分比：数字带 % / ％，或后面紧跟「个百分点 / 百分点」。
-2. 派生数：数字前 8 个字内出现差、和、比、均值一类的词（增长、下降、相差、合计、平均、占比、
+2. 派生数：数字前 8 个字内（截到最近的逗号/句号/分号之后，不跨子句）出现差、和、比、均值一类的词（增长、下降、相差、合计、平均、占比、
    环比、同比……），或后面紧跟「倍」。这类数本来就不在证据里，是假阳的主要来源。
 3. 带单位的计数/金额：数字前有货币符号（¥ ￥ $），或带 万/亿，或后面 3 个字内紧跟量词/货币单位
-   （元、单、件、个、人、次、笔……）。S 的门槛（假阳率 <5% 才考虑拦）只看这一类。
+   （元、单、件、个、人、次、笔……；去掉空白后紧跟）。S 的门槛（假阳率 <5% 才考虑拦）只看这一类。
 4. 其他：以上都不是。
 
 本脚本只分类、只列条目，不判「是不是真编造」——那是 #135 的人工标注。
@@ -47,7 +48,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from app.assess import snapshot as snap  # noqa: E402
-from app.core.grounding import unverified_numbers  # noqa: E402
+from app.core.grounding import _NUM_RE, unverified_numbers  # noqa: E402
 from app.core.result import refusal_from_answer  # noqa: E402
 from app.eval.report_adapter import KIND_EVAL, ReportError, kind_of, load as load_json  # noqa: E402
 
@@ -63,12 +64,19 @@ _COUNT_UNITS = ("万元", "亿元", "元", "块", "美元", "单", "件", "个",
                 "千克", "公斤", "吨", "克", "kg", "天", "小时", "分钟", "单位")
 _CURRENCY = ("¥", "￥", "$")
 _SENT_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
+_CLAUSE_BREAK = "，,。；;：:！!？?\n"
 
 
 # ------------------------------------------------------------------ 分类
 def _find(raw: str, answer: str) -> int:
-    """raw 在结论里第一次出现的位置（与 grounding 的去重保序一致：只看首次）。"""
-    i = answer.find(raw)
+    """raw 在结论里第一次出现的位置（与 grounding 的去重保序一致：只看首次）。
+
+    用 grounding 同一个 _NUM_RE 切数字，按整段数字比对，不会命中更长数字的一部分
+    （「1,500 单；评分 500 分」里的 500 落在后一处）。"""
+    for m in _NUM_RE.finditer(answer or ""):
+        if m.group(0).strip() == raw:
+            return m.start()
+    i = (answer or "").find(raw)
     return i if i >= 0 else 0
 
 
@@ -76,6 +84,9 @@ def classify(raw: str, answer: str) -> str:
     """一个未核实数字（grounding 给的原文写法）属于四类中的哪一类。"""
     i = _find(raw, answer)
     before = answer[max(0, i - 8):i]
+    cut = max(before.rfind(c) for c in _CLAUSE_BREAK)
+    if cut >= 0:
+        before = before[cut + 1:]                # 派生词只在本子句里找
     after = answer[i + len(raw):i + len(raw) + 8].lstrip()
     if raw.endswith(("%", "％")) or after.startswith(("个百分点", "百分点")):
         return K_PCT
@@ -120,12 +131,12 @@ def product_evidence(s: snap.Snapshot):
 
 
 def product_scope(case: dict, s):
-    """产品口径的未核实列表；无快照返回 None，不适用（未执行、拒答）返回 []。"""
-    if s is None:
-        return None
+    """产品口径的未核实列表；不适用（未执行、拒答）返回 []，无快照返回 None。先判适用再判快照。"""
     answer = case.get("answer") or ""
     if not (answer and case.get("executed")) or refusal_from_answer(answer) is not None:
         return []
+    if s is None:
+        return None
     ev = product_evidence(s)
     if ev is None:
         return None
@@ -150,16 +161,23 @@ def index_snapshots(directory: str) -> dict:
 
 
 # ------------------------------------------------------------------ 汇总
+def _agent_of(case: dict, report: dict) -> str:
+    a = case.get("agent") or report.get("agent") or "workflow"
+    return a if isinstance(a, str) else "mixed"
+
+
 def measure(report: dict, snapshots: dict) -> dict:
-    entries, no_snapshot, eval_total = [], [], 0
+    entries, react, missing = [], [], []
+    eval_total = product_total = 0
     for case in report.get("cases") or []:
         cid = str(case.get("id") or "")
         answer = case.get("answer") or ""
         ev_list = eval_scope(case)
         pr_list = product_scope(case, snapshots.get(cid))
-        if pr_list is None and case.get("executed") and answer:
-            no_snapshot.append(cid)
+        if pr_list is None:
+            (react if _agent_of(case, report) == "react" else missing).append(cid)
         eval_total += len(ev_list or [])
+        product_total += len(pr_list or [])
         union = list(dict.fromkeys((pr_list or []) + (ev_list or [])))
         for raw in union:
             entries.append({
@@ -177,7 +195,8 @@ def measure(report: dict, snapshots: dict) -> dict:
         c["仅评测口径"] += e["eval_unverified"] is True and e["product_unverified"] is False
         c["仅产品口径"] += e["product_unverified"] is True and e["eval_unverified"] is False
     return {"entries": entries, "by_kind": {k: dict(v) for k, v in by_kind.items()},
-            "eval_total": eval_total, "no_snapshot": no_snapshot,
+            "eval_total": eval_total, "product_total": product_total, "union_total": len(entries),
+            "react": react, "missing_snapshot": missing,
             "cases": len(report.get("cases") or [])}
 
 
@@ -191,10 +210,13 @@ def render_md(m: dict, report_name: str) -> str:
            "| 类别 | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
     for k in KINDS:
         out.append(f"| {k} | " + " | ".join(str(m["by_kind"][k].get(c, 0)) for c in cols) + " |")
-    out += ["", f"- 评测口径条目总数（报告 answer_nums_missing 之和）：{m['eval_total']}",
-            f"- 有结论但无快照、产品口径算不出的题：{len(m['no_snapshot'])}"
-            + (f"（{', '.join(m['no_snapshot'])}）" if m["no_snapshot"] else ""),
-            "- 「仅评测口径」= 问题原文里有这个数、产品口径因此放行的条目。", "",
+    def _ids(xs):
+        return f"{len(xs)}" + (f"（{', '.join(xs)}）" if xs else "")
+    out += ["", f"- 条目守恒：并集 {m['union_total']} 条（逐条列在下表）；"
+            f"评测口径 {m['eval_total']} 条（报告 answer_nums_missing 之和）；产品口径 {m['product_total']} 条。",
+            f"- 产品口径算不出的题：ReAct（不适用）{_ids(m['react'])}；工作流缺快照（数据缺失）{_ids(m['missing_snapshot'])}。",
+            "- 「仅评测口径」= 产品证据里有（问题、原问题或 metrics_block）、评测证据里没有的条目；"
+            "「仅产品口径」= 评测证据（含 str(result)）里有、产品证据里没有的条目。", "",
             "## 待标注清单（逐条）", "",
             "| 题号 | 数字 | 类别 | 产品口径未核实 | 评测口径未核实 | 结论原句 |", "|---|---|---|---|---|---|"]
     for e in m["entries"]:

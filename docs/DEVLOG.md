@@ -11542,16 +11542,27 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 原稿写「用 report_adapter 的 unverified 条目」。202 题报告由 `app/eval/runner.py` 写，逐题字典没有 `unverified_numbers`（只有 `scripts/gate/run_gate.py:142` 写），`app/eval/report_adapter.py:200` 对它恒为 0，照原稿做「条目数守恒」是 0 = 0 的假绿。改为：
 - 评测口径：报告逐题 `evidence.detail.answer_nums_missing`（`app/eval/consistency.py:72–77`，证据 = result_text + str(result)，不含问题原文）。
 - 产品口径：按 `app/core/service.py:427–430` 从同批快照重算（证据 = 问题 + result_text + metrics_block，只算已执行且非拒答），调同一个 `app.core.grounding.unverified_numbers`。
-- 守恒：两口径并集逐条列出；ReAct 没有节点行，单列「无快照」，不静默丢掉。
+- 守恒：两口径并集逐条列出，读数表写出并集 / 评测 / 产品三个总数。产品口径算不出的题分两列：ReAct（没有节点行，不适用）和工作流缺快照（数据缺失，正常应为 0）。
 - 不选「请评测侧在报告里加字段」：runner.py 属 A 组，会另占一次内网回归。
 S 11-25 授权小问题自定，按此口径执行。
 
 ### 四类（判定顺序即优先级）
-百分比 → 派生数（前 8 字内有派生词，或后接「倍」）→ 带单位计数/金额（货币符号、万/亿、或后 3 字内接量词）→ 其他。`after` 窗口最初 4 字，「百分个点」类用例不过，改为 8 字。
+百分比 → 派生数（前 8 字内、不跨逗号句号分号，有派生词；或后接「倍」）→ 带单位计数/金额（货币符号、万/亿、或去空白后紧跟量词）→ 其他。`after` 窗口最初 4 字，「个百分点」类用例不过，改为 8 字。数字定位用 grounding 同一个 `_NUM_RE` 整段比对，不会命中更长数字的一部分。
 
 ### 本地实测
-- `tests/test_grounding_fp.py` 17 passed：`test_classifies_four_kinds`（11 个参数化）、`test_classify_counter_examples`、`test_two_evidence_scopes_differ_when_question_contains_number`、`test_product_scope_uses_metrics_block_and_original_question`、`test_every_unverified_entry_is_listed`、`test_multi_turn_takes_latest_snapshot`、`test_cli_exit_codes`。
-- 全量闸门（8493709 之上）：pytest 拆两半跑 1444 + 956 = 2400 passed、0 failed（= 合并前 2383 + 新增 17）；评测侧三件 64 passed；lint 0 警告、tsc ok、vitest 32 文件 984、build ok。A 组指纹重算 e11f8abc8a0a，app/ 对 origin/master 零 diff。e2e 本机缺 libatk，交 CI。
+- `tests/test_grounding_fp.py` 21 passed：`test_classifies_four_kinds`（11 个参数化）、`test_classify_counter_examples`、`test_classify_locates_whole_number_not_substring`、`test_derived_word_does_not_cross_clause`、`test_two_evidence_scopes_differ_when_question_contains_number`、`test_product_scope_uses_metrics_block_and_original_question`、`test_every_unverified_entry_is_listed`、`test_product_only_entry_counted_in_union`、`test_react_and_missing_snapshot_listed_separately`、`test_multi_turn_takes_latest_snapshot`、`test_cli_exit_codes`。
+- 回退验证：脚本换回 4e3ee13 版本，新增和改过的 5 条测试全红，其余 16 条绿。
+- 全量闸门（8493709 之上，审查修正后重跑）：pytest 拆两半跑 1448 + 956 = 2404 passed、0 failed（= 合并前 2383 + 新增 21）；评测侧三件 64 passed；lint 0 警告、tsc ok、vitest 32 文件 984、build ok。A 组指纹重算 e11f8abc8a0a，app/ 对 origin/master 零 diff。e2e 本机缺 libatk，交 CI。
+
+### 只读审查（2026-11-26）后的修正
+独立只读审查对 4e3ee13 出了对比表：产品口径与 `service.py:427–430` 逐项一致，评测口径只读 `answer_nums_missing` 且尊重 applicable，app/ 零 diff。指出 7 处偏差，全部在脚本和测试里修掉：
+- a 已执行但拒答、又无快照的题被记成「无快照」：改为先判适用再判快照。
+- b 文字写「后 3 字内接量词」与代码「紧跟」不符：文字改为「去空白后紧跟」。
+- c `str.find` 会命中更长数字的一部分（「增长 1,500 单；评分 500 分」的 500 判成派生数）：改用 `_NUM_RE` 整段定位。
+- d 派生词窗口跨子句（「增长 5%，共 300 单」的 300 判成派生数，会缩小计数/金额类分母）：窗口截到最近的子句分隔符之后。
+- e 守恒只核了评测侧：加 `product_total`、`union_total`，测试断言并集条数，补「仅产品口径」用例；读数表「仅评测口径」的说明改为「产品证据里有、评测证据里没有」。
+- f ReAct 没单列：按逐题 `agent`（缺省读报告顶层 `agent`）拆成 ReAct / 工作流缺快照两列。
+- g 补百分比、其他两类的显式反例；测试里的 `started_at_utc` 改为与 `snapshot.py:140` 一致的 ISO 格式。
 
 ### 未做（节点 2）
 真数据读数：需要 #134 那批的 `s3_strip.json` 与 `snap_strip\`（256 个文件），由评测侧带出（英文文件名 zip）。拿到后出四类读数表，贴 #132。
