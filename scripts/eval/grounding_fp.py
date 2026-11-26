@@ -48,7 +48,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from app.assess import snapshot as snap  # noqa: E402
-from app.core.grounding import _NUM_RE, unverified_numbers  # noqa: E402
+from app.core.grounding import _NUM_RE, _significant, _tokens, unverified_numbers  # noqa: E402
 from app.core.result import refusal_from_answer  # noqa: E402
 from app.eval.report_adapter import KIND_EVAL, ReportError, kind_of, load as load_json  # noqa: E402
 
@@ -81,7 +81,10 @@ def _find(raw: str, answer: str) -> int:
 
 
 def classify(raw: str, answer: str) -> str:
-    """一个未核实数字（grounding 给的原文写法）属于四类中的哪一类。"""
+    """一个未核实数字（grounding 给的原文写法）属于四类中的哪一类。
+
+    先去掉 markdown 的 * 和 `：结论常写成「**2,350** 件」，不去掉的话量词前隔着 **，判不成计数。"""
+    answer = re.sub(r"[*`]", "", answer or "")
     i = _find(raw, answer)
     before = answer[max(0, i - 8):i]
     cut = max(before.rfind(c) for c in _CLAUSE_BREAK)
@@ -169,6 +172,8 @@ def _agent_of(case: dict, report: dict) -> str:
 def measure(report: dict, snapshots: dict) -> dict:
     entries, react, missing = [], [], []
     eval_total = product_total = 0
+    base = Counter()          # 分母：产品口径适用题的结论里，grounding 会检查的数字（去重）按类计数
+    applicable = 0
     for case in report.get("cases") or []:
         cid = str(case.get("id") or "")
         answer = case.get("answer") or ""
@@ -176,6 +181,14 @@ def measure(report: dict, snapshots: dict) -> dict:
         pr_list = product_scope(case, snapshots.get(cid))
         if pr_list is None:
             (react if _agent_of(case, report) == "react" else missing).append(cid)
+        a = case.get("answer") or ""
+        if a and case.get("executed") and refusal_from_answer(a) is None:
+            applicable += 1
+            seen = set()
+            for raw, v, dec, unit, after in _tokens(a):
+                if _significant(v, dec, unit, after) and raw not in seen:
+                    seen.add(raw)
+                    base[classify(raw, a)] += 1
         eval_total += len(ev_list or [])
         product_total += len(pr_list or [])
         union = list(dict.fromkeys((pr_list or []) + (ev_list or [])))
@@ -186,7 +199,7 @@ def measure(report: dict, snapshots: dict) -> dict:
                 "product_unverified": None if pr_list is None else raw in pr_list,
                 "eval_unverified": None if ev_list is None else raw in ev_list,
             })
-    by_kind = {k: Counter() for k in KINDS}
+    by_kind = {k: Counter({"结论数字": base[k]}) for k in KINDS}
     for e in entries:
         c = by_kind[e["kind"]]
         c["条目"] += 1
@@ -196,7 +209,7 @@ def measure(report: dict, snapshots: dict) -> dict:
         c["仅产品口径"] += e["product_unverified"] is True and e["eval_unverified"] is False
     return {"entries": entries, "by_kind": {k: dict(v) for k, v in by_kind.items()},
             "eval_total": eval_total, "product_total": product_total, "union_total": len(entries),
-            "react": react, "missing_snapshot": missing,
+            "react": react, "missing_snapshot": missing, "applicable": applicable,
             "cases": len(report.get("cases") or [])}
 
 
@@ -205,7 +218,7 @@ def _cell(v) -> str:
 
 
 def render_md(m: dict, report_name: str) -> str:
-    cols = ("条目", "产品口径未核实", "评测口径未核实", "仅评测口径", "仅产品口径")
+    cols = ("结论数字", "条目", "产品口径未核实", "评测口径未核实", "仅评测口径", "仅产品口径")
     out = [f"# grounding 假阳率量测读数（{report_name}，{m['cases']} 题）", "",
            "| 类别 | " + " | ".join(cols) + " |", "|---" * (len(cols) + 1) + "|"]
     for k in KINDS:
@@ -214,6 +227,8 @@ def render_md(m: dict, report_name: str) -> str:
         return f"{len(xs)}" + (f"（{', '.join(xs)}）" if xs else "")
     out += ["", f"- 条目守恒：并集 {m['union_total']} 条（逐条列在下表）；"
             f"评测口径 {m['eval_total']} 条（报告 answer_nums_missing 之和）；产品口径 {m['product_total']} 条。",
+            f"- 「结论数字」= 产品口径适用的 {m['applicable']} 题（已执行、非拒答）里，grounding 会检查的数字（每题去重）按类计数，"
+            "是「未核实条目 / 结论数字」的分母；未核实不等于假阳，真假由人工标注。",
             f"- 产品口径算不出的题：ReAct（不适用）{_ids(m['react'])}；工作流缺快照（数据缺失）{_ids(m['missing_snapshot'])}。",
             "- 「仅评测口径」= 产品证据里有（问题、原问题或 metrics_block）、评测证据里没有的条目；"
             "「仅产品口径」= 评测证据（含 str(result)）里有、产品证据里没有的条目。", "",
