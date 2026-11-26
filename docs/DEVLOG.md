@@ -11647,7 +11647,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - v8 与 v7 差值不写结论（A 组代码多批变更，相减无意义）；
 - 三份报告不入库（outputs/ 被 .gitignore 覆盖，LEDGER 机读层已存路径与读数）。
 
-## [218] 2026-11-26 S3-4 grounding 假阳率·节点 2 读数 + 摘下的挂 BACKLOG、mul_005#2 存档（issue #132、#131） · commit <待提交>
+## [218] 2026-11-26 S3-4 grounding 假阳率·节点 2 读数 + 摘下的挂 BACKLOG、mul_005#2 存档（issue #132、#131） · commit 4bffa4c（PR #160）
 
 ### 回填与更正
 - [217] 回填 b886a3e（PR #159）。
@@ -11683,3 +11683,12 @@ S 11-25 授权小问题自定，按此口径执行。
 - `tests/test_grounding_fp.py` 23 passed（新增 `test_markdown_bold_does_not_hide_unit`、`test_denominator_counts_checked_numbers_per_kind`；脚本换回 HEAD 版本时这 2 条红、其余 21 条绿）。
 - 评测侧三件 `test_assess_contracts`、`test_b2_batch_pipeline`、`test_nightly_gate` 随同重跑（rebase 到 b886a3e 之后）：与 test_grounding_fp 合计 87 passed。
 - 全量 pytest / web 闸门交 CI（S 11-26：小改动不必本机重跑全量）。app/ 对 origin/master 零 diff，A 组指纹 e11f8abc8a0a 不变，不进内网链。
+
+## [219] 2026-11-26 S3-4 决定落档 + B3 scipy 决定落档（issue #135、#142） · commit <待提交>
+
+纯文档。
+- [218] 回填 4bffa4c（PR #160；PR head 5038ae1 的 CI tests `45768063885` success）。
+- `docs/roadmap/phase75-step3.md` 新增附录 A：5 条未核实数字的评测侧标注、S 抽查、假阳率（带单位类真编造 0/140）与 S 的决定（暂不拦，证据口径以产品口径为准）。#135 的交付物。
+- `docs/roadmap/decisions-pending-1120.md` B3「决定」列：#141 probe 结果与 #142 决定（不加 scipy.stats、不加能力说明）。按 master-plan §7「决定落档」，没有后续实施的决定攒到 docs PR。
+- 不触 app/，不进内网链。
+
