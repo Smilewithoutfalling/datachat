@@ -42,6 +42,31 @@
 - **拿不准就跑。** 22 分钟换掉一次「我不知道它退没退」，不亏；漏跑一次退步的代价是
   它悄悄留在 master 上，等下一次有人想起才被发现。
 
+## 回归范围表（按改动作用域，2026-11-26 起）
+
+上面那张表按**目录**判「跑不跑」；这张按**改动作用域**判「跑多全」。两表互补：先用目录表
+确认要跑，再用这张定范围。硬规则在 `run_eval.py` 里强制：**子集跑批必须显式
+`--scope category`，声明 `--scope global` 或不声明都会被拒绝退出**（#136，phase75-assess §3）。
+`--case` 单题调试与 `--canary` 探针豁免，无需声明。
+
+| 改动作用域 | 跑什么 | 为什么 |
+|---|---|---|
+| **全局**（prompt / 节点 / 沙箱 / 记忆 / 执行器 / 模型配置） | 全量 202 题，**禁止子集** | 影响所有类别，子集没翻 ≠ 全集没翻 |
+| **一类题**（只动某类题的规则 / 提示） | 该类子集快速迭代；**合并前仍要补一次全量** | 子集管快，全量防外溢 |
+| **换模型** | 全量三跑取中位 | 单跑在噪声带（±6 题）里没有判别力 |
+| **尺子**（comparator / judge / gold / 题库） | 不跑模型；`--rescore` 重打历史报告 + 断代 | 判分口径变了，新旧读数要重新对账 |
+| **UI / 前端** | 不跑评测；CI 的 web job 兜 | 不进评测路径 |
+
+子集跑批的样子（改动只影响 agg 类题时）：
+
+```bash
+python run_eval.py --agent workflow --memory state --category agg \
+    --scope category --no-fail --out outputs/agg_check.json
+```
+
+声明落进报告顶层 `filter.scope`，台账与闸门据此追溯这次跑批的口径；闸门对子集报告天然免疫
+（题数 ≠ 202 直接判不可比，退出 2）。
+
 ## S 的两条命令
 
 前置：内网的 Ubuntu；仓库根目录；能 `curl` 到 `https://grg-aikits-test.grgbanking.com/v1/models`
@@ -67,8 +92,8 @@ echo "退出码=$?"
 
 | 退出码 | 意思 | 你做什么 |
 |---|---|---|
-| **0** | 绿：通过数没比基线低 6 题 | 不用管。翻了几道题照样在简报里，看都不用看 |
-| **1** | 红：通过数掉了 6 题及以上 | 打开 `outputs/nightly_brief.md`，按「翻了的题」回去找改动 |
+| **0** | 绿：配对净退步 < 6（翻转为错 − 翻转为对） | 不用管。纯通过数下降只列不拦；翻转题名单照样在简报里 |
+| **1** | 红：配对净退步 ≥ 6 | 打开 `outputs/nightly_brief.md`，按「退步的题」回去找改动 |
 | **2** | 不可比：模型/题数/指纹不对，或有 `infra_error` | 先修环境（多半是没在内网或 `n` 不是 202），不是查回归 |
 
 简报固定给三样：触发了什么、**翻了的题**（id / 分类 / 题面 / gold / 本次答案）、提交区间。
@@ -95,10 +120,10 @@ echo "退出码=$?"
 锚点是 `docs/eval/baseline_v7.json`：v7 的 workflow+state 三跑（194 / 192 / 192，取中位 **192**），
 `pass^3` 名单 **188** 道，**模型 `Qwen3.5-397B-A17B` / temp 0**。
 
-`scripts/eval/nightly_gate.py` **判红只看一条**：本次通过数 **≤ 186**（192 − 6）。
-
-翻转题（v7 三跑全对、本次变错）**只列不拦**，2026-11-18 降级。证据：同一个 master、同一基线，
-连续两跑给出相反结论（193 翻 2 → 红、195 翻 0 → 绿），而判红那跑的通过数还**高于**基线。
+`scripts/eval/nightly_gate.py` **判红只看一条**：配对净退步 ≥ 6 —— 与基线同题配对，
+翻转为错的题数减去翻转为对的。**纯通过数下降（哪怕 6 题）只列不拦**（2026-11-21 起，
+PR #111 / B5）。理由：门禁分辨率就是噪声宽度 —— 同一个 master、同一基线，连续两跑给出
+相反结论（193 翻 2 / 195 翻 0），纯计数在噪声带里没有判别力；配对口径下这两跑同判绿。
 根因是网关 temp 0 并不确定（canary 基线 `answer_varied=10`，十题六跑答案文本全不同），
 `pass^3` 只是三次抽样，证不了「这题永远对」。详见 `BACKLOG.md` N7。
 
@@ -204,6 +229,7 @@ CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 2000+ 项 / 约
 |---|---|---|
 | `baselines.json` / `eval_ledger.py` | `test_ledger.py test_fingerprint.py test_replay.py test_report_adapter.py test_rescore_ledger.py test_tier_check.py` | 115 项 / 14s |
 | `baseline_v7.json` / `nightly_gate.py` | `test_nightly_gate.py test_tier_check.py` | 28 项 / 6s |
+| `run_eval.py`（入口 / `--scope` 子集规则） | `test_entrypoints.py` | 约 2 分钟 |
 | `app/eval/comparator.py` | `test_comparator.py` | — |
 | 题集 `app/eval/cases*.py` | `test_eval_cases.py` + `test_multi_cases.py test_memory_cases.py` | 12 分钟起 |
 | `app/eval/runner.py` | `test_eval_runner.py test_multi_cases.py test_memory_cases.py test_v2d.py` | 约 1 分钟 |

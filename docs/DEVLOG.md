@@ -11534,7 +11534,7 @@ worktree `feat/result-numeric`，基于 origin/master 29ad1bb。**需要内网�
 - S3-4 假阳率脚本与决策（#132、#135）。
 - e2e 与视觉基线本机缺 libatk，交 CI。
 
-## [214] 2026-11-25 S3-4 grounding 假阳率量测脚本·节点 1（issue #132） · commit <待提交>
+## [214] 2026-11-25 S3-4 grounding 假阳率量测脚本·节点 1（issue #132） · commit 6f87750（PR #156）
 
 只量不改：新增 `scripts/eval/grounding_fp.py` 与 `tests/test_grounding_fp.py`，app/ 零 diff，A 组指纹不变（e11f8abc8a0a）。
 
@@ -11566,4 +11566,32 @@ S 11-25 授权小问题自定，按此口径执行。
 
 ### 未做（节点 2）
 真数据读数：需要 #134 那批的 `s3_strip.json` 与 `snap_strip\`（256 个文件），由评测侧带出（英文文件名 zip）。拿到后出四类读数表，贴 #132。
+
+## [215] 2026-11-26 阶段 7.5b 第 4 步评测降级：子集入口硬规则 + 回归范围表 + 指纹元数据盘点 + 台账重建（issue #136） · commit <待提交>
+
+改动（A 组零触碰，code_sha256 全程 e11f8abc8a0a）：
+
+- run_eval.py：新增 `--scope {category,global,debug}`。硬规则：`--category` 或 `--dataset≠all` 的子集跑批必须显式 `--scope category`；不声明、声明 `global`、声明 `debug` 都在开跑前拒绝退出（不写报告）。`--case` 单题调试与 `--canary` 探针豁免。声明落报告顶层 `filter.scope`（summary 摊平 meta），台账与闸门可追溯；nightly_gate 对子集报告天然免疫（题数 ≠ 202 判不可比）。
+- docs/eval/README.md：新增「回归范围表（按改动作用域）」五档表（全局禁子集 / 类别子集+合并前补全量 / 换模型三跑 / 尺子走 --rescore / UI 不跑）与子集命令示例；顺带更正三处 B5 后过期的判据文字（退出码表两行、「判红只看一条」段——旧文还写「通过数 ≤ 186 判红」）；测试挂点表补 run_eval.py 行。
+- docs/eval/BACKLOG.md：N7 行补 2026-11-21 追记（旧文「判红只看规则 1」已过期，B5 起判红 = 配对净退步 ≥ 6，193 翻 2 / 195 翻 0 两跑配对口径同判绿）。
+- docs/eval/LEDGER.md：台账重建（数据区原停在 11-17）。批次表里 10-30 至 11-13 的旧 canary 单跑行移出（现行生成器规则：oracle 与 canary 不进趋势批次）；11-24 canary 六跑组进 canary 专表（97%，翻转 ord_013、ts_010，与基线重立读数一致）。NOTES 区原样保留。
+- 指纹降级（第三件）盘点结论：零代码改动。全仓无任何 pytest 把指纹钉成真实树的常量（出现的固定值均为合成 fixture）；两条「防盗门」测试方向正确保留（entry_sha12 不在 GATE_KEYS：test_fingerprint.py:377；registry_sha12 不在 GATE_KEYS：test_registry.py:250）；「报告元数据含指纹」正验在场（test_fingerprint.py:273 报告必带 fingerprints 块；:380-394 报告暴露 entry_sha12 与 code_sha12）。即降级态在 #136 之前已事实上达成，本批把它写成明文结论。
+
+验证：
+
+| 项 | 读数 |
+|---|---|
+| run_eval 入口 | tests/test_entrypoints.py 7 passed（新增：硬规则三拒、退出 1 且不落报告；--case 豁免；scope 落报告断言；两个既有子集测试补 --scope category） |
+| 评测面回归簇 | test_ledger + test_fingerprint + test_nightly_gate + test_rescore_ledger + test_tier_check = 97 passed |
+| 台账复算 | eval_ledger.py 重建后 --check 退出码 0（报告 169 份、进表批次 52、runs 113 份） |
+| 指纹 | A 组 affects_results_sha256 = e11f8abc8a0a 与合并前一致（零触碰）；entry_sha12 → 57a6706a2dbc（run_eval.py 在入口指纹覆盖内，换新值属元数据更替，不在 GATE_KEYS、不触发断代） |
+
+验收对应（issue #136 §10）：
+
+- 子集入口存在且拒绝对全局改动只跑子集：run_eval.py --scope 硬规则 + test_run_eval_subset_scope_hard_rule；
+- 报告元数据含指纹：test_fingerprint.py:273 与 :380-394 正验在场；
+- LEDGER 机读可重建：eval_ledger.py 重建 + --check 退出码 0；
+- 我方验收口径（--rescore 与子集入口在同一 code_sha12 上可复算）：A 组未动，code_sha12 仍为 e11f8abc8a0a，--rescore 复打不受影响；子集报告 --rescore 链路已由 test_run_eval_repeat_and_rescore_cli 覆盖（该测试正是子集跑批 + 离线复打）。
+
+明确不做：app/eval/runner.py 不搬（子集筛选 _select_cases 本就在 run_eval.py 层，搬家只会白触 A 组、多占一次内网回归）；judge / registry 防盗门不拆；canary --dump-usage 属 #138；题库 / judge / gold 一律不动（v7 冻结）。
 

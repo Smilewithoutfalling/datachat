@@ -97,6 +97,11 @@ def main():
     parser.add_argument("--category", "-c", default=None, help="分类: agg/filt/corr/ts/refusal/ambiguity")
     parser.add_argument("--dataset", "-d", default="all", help="数据表: sales/orders/employees/inventory/all（默认 all）")
     parser.add_argument("--case", default=None, help="用例ID，可逗号分隔，如 agg_001 或 ord_004,ord_013")
+    parser.add_argument("--scope", default=None, choices=["category", "global", "debug"],
+                        help="本次改动的作用域声明（phase75-assess §3 回归范围表的硬规则）。"
+                             "--category/--dataset 子集跑批必须显式给 --scope category；"
+                             "全局改动只跑子集会得出误导性结论（子集没翻≠全集没翻），声明 --scope global 会被拒绝并要求跑全量。"
+                             "--case 单题调试与 --canary 探针豁免，无需声明")
     parser.add_argument("--canary", action="store_true",
                         help="跑 canary 十条（app/eval/canary.py 的固定清单），用来探模型权重漂移")
     parser.add_argument("--data", default=None, help="替换 sales 表的数据文件（默认 data/sample_eval.csv）")
@@ -155,6 +160,26 @@ def main():
         # 两个都给的话，谁也说不清这次跑的到底是哪批题。直接拒，不猜。
         print("--canary 与 --case 只能给一个")
         sys.exit(1)
+
+    # 第 4 步硬规则（#136，phase75-assess §3）：子集跑批必须显式声明改动作用域。
+    # 全局改动只跑子集会得出误导性结论（子集没翻≠全集没翻），所以这里是拒绝退出
+    # 而不是打印提醒。--case 单题调试与 --canary 探针豁免：它们本来就不进趋势台账、
+    # 也不作为回归判据。声明本身进报告 meta.filter.scope，台账与闸门都能追溯。
+    subset = (bool(args.category) or args.dataset != "all") and not args.case
+    if subset and not args.canary:
+        if args.scope is None:
+            print("子集跑批需要显式声明改动作用域：改动只影响某一类题就加 --scope category；"
+                  "没有把握请跑全量（去掉 --category/--dataset）。")
+            sys.exit(1)
+        if args.scope != "category":
+            # scope=global：全局改动必须跑全量；scope=debug：多题子集不是调试，调试用 --case。
+            reason = ("全局改动会影响所有类别的题，只跑子集会得出误导性结论，请跑全量 202 题"
+                      if args.scope == "global" else
+                      "debug 作用域只适用于 --case 单题调试，多题子集请用 --scope category")
+            print(f"--scope {args.scope} 与子集跑批矛盾：{reason}")
+            sys.exit(1)
+    if not subset and not args.case and args.scope == "category":
+        print("ℹ️ 全量跑批无需 --scope category，声明只随子集跑批记录")
 
     ensure_dirs()
     cases = _select_cases(args.category, args.case, args.dataset, args.canary)
@@ -233,7 +258,8 @@ def _run_agent(agent, cases, args, llm_config, stamp):
                  # None 会让同一份报告说不清是 off 还是 state（默认值改过，null 的含义会漂）。
                  "memory_mode": args.memory,
                  "datasets": datasets_metadata({k: v for k, v in runner.datasets.items() if k in used}),
-                 "filter": {"dataset": args.dataset, "category": args.category, "case": args.case}})
+                 "filter": {"dataset": args.dataset, "category": args.category, "case": args.case,
+                            "scope": args.scope}})
     if args.canary:
         # 台账靠这个字段把探针读数从全量趋势里摘出去（n=10 恰好不被 DEBUG_N 的
         # `n < 10` 判成 debug，不显式标就会混进批次表）。
