@@ -1,4 +1,4 @@
-"""nightly 回归门禁：把一次 workflow+state 全量跑批与 v7 基线比。
+"""nightly 回归门禁：把一次 workflow+state 全量跑批与基线（v8 起，DEFAULT_BASELINE 指向 baseline_v8.json；旧基线文件仍可直接 --baseline 传入）比。
 
 ## 它回答什么
 
@@ -58,7 +58,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-DEFAULT_BASELINE = os.path.join("docs", "eval", "baseline_v7.json")
+DEFAULT_BASELINE = os.path.join("docs", "eval", "baseline_v8.json")
 DEFAULT_REPORT = os.path.join("outputs", "nightly_v7.json")
 
 # 判红阈值。**写死在代码里，不从环境变量读** —— 能随手改的门槛等于没有门槛。
@@ -103,7 +103,7 @@ def evaluate(report: dict, baseline: dict) -> dict:
     if report.get("memory_mode") != baseline.get("memory_mode"):
         reasons.append(f"memory_mode 不同：基线 `{baseline.get('memory_mode')}`，"
                        f"本次 `{report.get('memory_mode')}`")
-    # 模型也是"被测对象"的一部分：v7 的三跑是在 Qwen3.5-397B-A17B 上量的，
+    # 模型也是"被测对象"的一部分：基线的三跑是在其记录的模型上量的，
     # 换模型（哪怕名字只差一个快照）读出来的差不能算到代码头上。
     if report.get("model") != baseline.get("model"):
         reasons.append(f"模型不同：基线 `{baseline.get('model')}`，本次 `{report.get('model')}`"
@@ -163,17 +163,18 @@ def evaluate(report: dict, baseline: dict) -> dict:
                      "同题配对抵得掉单跑抖动，净退步过阈才判红")
 
     # 提示不拦：列出来备查，不进退出码、也不进 `fired`。B5：规则 1 也降级到这里。
+    label = str(baseline.get("version") or "v7")  # 基线版本从基线文件读，v8 起必填
     notes: list[str] = []
     if drop >= max_drop:
         notes.append(f"规则 1（已降级为只列不拦，B5）：通过数 {correct}/{n}，比基线 "
                      f"{base_correct} 低 {drop} 题（原阈值 {max_drop}）—— 总数差分辨不出"
                      "噪声带（±6 题），判红改看上面的配对翻转")
     if flips:
-        notes.append(f"退步（不拦）：v7 三跑全对的题里有 {len(flips)} 题变错 —— "
+        notes.append(f"退步（不拦）：{label} 三跑全对的题里有 {len(flips)} 题变错 —— "
                      + "、".join(flips[:8]) + ("…" if len(flips) > 8 else ""))
 
     if gains:
-        notes.append(f"进步（不拦）：v7 三跑全错的题里有 {len(gains)} 题本次答对 —— "
+        notes.append(f"进步（不拦）：{label} 三跑全错的题里有 {len(gains)} 题本次答对 —— "
                       + "、".join(gains))
 
     metrics = {
@@ -202,12 +203,13 @@ def evaluate(report: dict, baseline: dict) -> dict:
 def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
                  commits: list[str], commits_note: str = "") -> str:
     m = result.get("metrics") or {}
+    label = str(baseline.get("version") or "v7")
     head = {"green": "🟢 GREEN", "red": "🔴 RED", "config": "⚪ 不可比"}[result["verdict"]]
     lines = [f"# nightly 回归简报 —— {head}", ""]
     lines.append(f"- 跑批：`agent={report.get('agent')}` `memory_mode={report.get('memory_mode')}` "
                  f"`n={m.get('n', len(report.get('cases') or []))}`")
     lines.append(f"- 报告：`{report_path}`")
-    lines.append(f"- 基线：v7（{baseline.get('runs')} 三跑，取中位 {baseline.get('correct')}/"
+    lines.append(f"- 基线：{label}（{baseline.get('runs')} 三跑，取中位 {baseline.get('correct')}/"
                  f"{baseline.get('n')}；pass^3 {baseline.get('pass3')}）")
     lines.append("")
     lines.append("## 判定")
@@ -221,7 +223,7 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
 
     if m:
         lines += ["", "## 读数", "",
-                  "| 项 | 本次 | 基线 v7 | 差 |", "|---|---|---|---|",
+                  f"| 项 | 本次 | 基线 {label} | 差 |", "|---|---|---|---|",
                   f"| 通过数 | {m['correct']}/{m['n']} | {m['baseline_correct']}/{m['n']} | "
                   f"{_delta(m['drop'])}（只列，不拦） |",
                   f"| 三跑全对的题变错（退步） | {m['pass3_flips']} | 0 | +{m['pass3_flips']}"
@@ -233,13 +235,13 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
 
     gains = result.get("gains") or []
     if gains:
-        lines += ["", f"## 进步的题（{len(gains)} 道，v7 三跑全错 → 本次对；"
+        lines += ["", f"## 进步的题（{len(gains)} 道，{label} 三跑全错 → 本次对；"
                   "**只列不拦**）", "",
                   "、".join(f"`{i}`" for i in gains)]
 
     cases = _case_map(report)
     if result["flips"]:
-        lines += ["", f"## 翻了的题（{len(result['flips'])} 道，v7 三跑全对 → 本次错；"
+        lines += ["", f"## 翻了的题（{len(result['flips'])} 道，{label} 三跑全对 → 本次错；"
                   "**只列不拦**）", "",
                   "| id | 分类 | 题面 | gold | 本次答案 |", "|---|---|---|---|---|"]
         for cid in result["flips"]:
@@ -251,7 +253,7 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
 
     old = [i for i, c in cases.items() if not c.get("correct") and i in set(baseline.get("unstable_ids") or [])]
     if old:
-        lines += ["", f"另有 {len(old)} 道错题是 v7 里本来就晃的（1/3~2/3），不影响判定："
+        lines += ["", f"另有 {len(old)} 道错题是 {label} 里本来就晃的（1/3~2/3），不影响判定："
                   + "、".join(f"`{i}`" for i in sorted(old))]
 
     lines += ["", "## 提交区间（上次绿 → 本次；是嫌疑范围，不是归因）", ""]
@@ -272,7 +274,7 @@ def render_brief(result: dict, baseline: dict, report: dict, report_path: str,
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="nightly 回归门禁（对 v7 基线）")
+    ap = argparse.ArgumentParser(description="nightly 回归门禁（对基线比，默认 v8）")
     ap.add_argument("--report", default=DEFAULT_REPORT)
     ap.add_argument("--baseline", default=DEFAULT_BASELINE)
     ap.add_argument("--commits-file", default=None,

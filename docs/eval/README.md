@@ -1,6 +1,6 @@
-# 评测系统入口（v7 稳态，2026-11-18 起）
+# 评测系统入口（v8 稳态，2026-11-26 起）
 
-> **v7 是冻结的尺子。** 题库、gold、判分口径的改动一律先进 `BACKLOG.md` 的「下一轮」，
+> **基线是冻结的尺子。** 题库、gold、判分口径的改动一律先进 `BACKLOG.md` 的「下一轮」，
 > 攒够了一次性断代（新基线 + 说明）。不按单题断代，也不在日常跑批里改判据。
 >
 > **任何读数表必须同时标出 `agent=` 与 `memory_mode=`**（2026-11-17，P1）。缺一个就不许贴：
@@ -73,7 +73,7 @@ python run_eval.py --agent workflow --memory state --category agg \
 （不通就是不在内网，别往下走）。模型配置走 `.env`（`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` /
 `DEEPSEEK_MODEL`，取值见 `.env.example`），`run_eval.py` 启动时自己加载。
 
-### 一条：全量 202 题对比 v7（约 22 分钟）
+### 一条：全量 202 题对比基线（约 22 分钟）
 
 ```bash
 cd <仓库根目录>
@@ -81,14 +81,15 @@ git pull
 python -m pip install -r requirements.txt
 
 python run_eval.py --agent workflow --memory state --no-fail \
-    --out outputs/nightly_v7.json
+    --out outputs/nightly_v8.json
 
 python scripts/eval/nightly_gate.py \
-    --report outputs/nightly_v7.json \
-    --baseline docs/eval/baseline_v7.json \
+    --report outputs/nightly_v8.json \
     --out outputs/nightly_brief.md
 echo "退出码=$?"
 ```
+
+（`--baseline` 不传默认就是 `docs/eval/baseline_v8.json`；要跟旧锚点比才需要显式传 `--baseline docs/eval/baseline_v7.json`。）
 
 | 退出码 | 意思 | 你做什么 |
 |---|---|---|
@@ -117,8 +118,11 @@ echo "退出码=$?"
 
 ## 判据是写死的
 
-锚点是 `docs/eval/baseline_v7.json`：v7 的 workflow+state 三跑（194 / 192 / 192，取中位 **192**），
-`pass^3` 名单 **188** 道，**模型 `Qwen3.5-397B-A17B` / temp 0**。
+锚点是 `docs/eval/baseline_v8.json`：v8 的 workflow+state 三跑（**194 / 196 / 194，取中位 194**，
+2026-11-26 内网三跑），`pass^3` 名单 **191** 道，**模型 `Qwen3.5-397B-A17B` / temp 0**；
+`code_sha12=e11f8abc8a0a`（第 3 步 S3-1 能力注入后的树），题库 `672b52a3a6b0` 与 judge
+`289474f4d943` 与 v7 相同——尺子没换，锚点随代码重钉。与 v7 读数不可相减（A 组代码变了），
+纵向对比从 v8 条目起算，历史读数见 `baselines.json`。
 
 `scripts/eval/nightly_gate.py` **判红只看一条**：配对净退步 ≥ 6 —— 与基线同题配对，
 翻转为错的题数减去翻转为对的。**纯通过数下降（哪怕 6 题）只列不拦**（2026-11-21 起，
@@ -142,7 +146,7 @@ PR #111 / B5）。理由：门禁分辨率就是噪声宽度 —— 同一个 ma
 
 1. 触发了哪条规则、差多少；
 2. **翻了的题**：id、分类、题面、gold、本次答案；
-3. **提交区间**：简报能查到的最近一次通过记录（有成功的 nightly 就用它，没有就退回 v7
+3. **提交区间**：简报能查到的最近一次通过记录（有成功的 nightly 就用它，没有就退回
    基线的 `run_commit`）到本次的所有提交（最多 20 条）。手动模式下这一段往往很长 ——
    你自己知道刚改了什么，它只是兜底。
 
@@ -161,10 +165,18 @@ PR #111 / B5）。理由：门禁分辨率就是噪声宽度 —— 同一个 ma
 - **只有断代才写 `CHANGES.md` 与 `LEDGER.md`。** 日常不进台账。
 - 尺子一动，旧基线立刻不可比：门禁会以退出码 2 明确报「先断代」，不会把差异算成回归。
 
-## 当前读数（v7，2026-11-17，各 3 跑）
+## 当前读数（v8，2026-11-26，内网三跑）
+
+`code e11f8abc8a0a` / `evalset 672b52a3a6b0` / 模型 `Qwen3.5-397B-A17B`（temp 0）。
+门禁对象 = workflow + state 三跑 **194 / 196 / 194（中位 194 = 96.0%）**，`pass^3` **191/202**；
+不稳 7 题（biz_014、ts_007、corr_001、inv_005、filt_003、inv_002、ord_027），三跑全错 4 题
+（mul_005、mem_006、mul_026、ord_030）。报告在 `outputs/eval_v8_wf_state_run{1,2,3}.json`。
+
+## 历史读数（v7，2026-11-17，各 3 跑）
 
 `code 996020ad8a04` / `evalset 672b52a3a6b0` / 模型 `Qwen3.5-397B-A17B`（temp 0）。
-详细分解见 `v7.md` 与 `v7-report-20261117.md`。
+详细分解见 `v7.md` 与 `v7-report-20261117.md`。与 v8 之间 A 组代码多批变更（#109 五环链、
+#127 S3-1 能力注入、#157 入口硬规则），**两段读数不可相减**。
 
 | agent | memory_mode | n | 3 跑均值 | pass^3 | 备注 |
 |---|---|---|---|---|---|
@@ -228,7 +240,7 @@ CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 pytest tests/ -q   # 2000+ 项 / 约
 | 改了什么 | 跑什么 | 规模 |
 |---|---|---|
 | `baselines.json` / `eval_ledger.py` | `test_ledger.py test_fingerprint.py test_replay.py test_report_adapter.py test_rescore_ledger.py test_tier_check.py` | 115 项 / 14s |
-| `baseline_v7.json` / `nightly_gate.py` | `test_nightly_gate.py test_tier_check.py` | 28 项 / 6s |
+| `baseline_v8.json` / `nightly_gate.py` | `test_nightly_gate.py test_tier_check.py` | 28 项 / 6s |
 | `run_eval.py`（入口 / `--scope` 子集规则） | `test_entrypoints.py` | 约 2 分钟 |
 | `app/eval/comparator.py` | `test_comparator.py` | — |
 | 题集 `app/eval/cases*.py` | `test_eval_cases.py` + `test_multi_cases.py test_memory_cases.py` | 12 分钟起 |

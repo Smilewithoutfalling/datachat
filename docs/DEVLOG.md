@@ -11595,7 +11595,7 @@ S 11-25 授权小问题自定，按此口径执行。
 
 明确不做：app/eval/runner.py 不搬（子集筛选 _select_cases 本就在 run_eval.py 层，搬家只会白触 A 组、多占一次内网回归）；judge / registry 防盗门不拆；canary --dump-usage 属 #138；题库 / judge / gold 一律不动（v7 冻结）。
 
-## [216] 2026-11-26 canary --dump-usage：usage 覆盖变化一眼可判（issue #138，#119 收尾） · commit <待提交>
+## [216] 2026-11-26 canary --dump-usage：usage 覆盖变化一眼可判（issue #138，#119 收尾） · commit 27042ab（PR #158）
 
 #119 判「网关回包字段是没了还是在动」当时要手工 curl + 手翻报告里的 null。本批把这一步机械化。
 
@@ -11607,3 +11607,42 @@ S 11-25 授权小问题自定，按此口径执行。
 验证：`tests/test_canary_drift.py` **27 passed**。
 
 明确不做：采集端（`app/core/llm.py`）加原始回包留存——属 A 组、越 #138 独占边界（canary.py + CANARY.md），且 #119 归因已有 live 探针实锚（网关换 OpenAI 标准 schema），无需重复建设。
+
+## [217] 2026-11-26 v8 基线三跑重立 + nightly 基线标签参数化（issue #137） · commit <待提交>
+
+第 3 步 S3-1 能力注入（PR #127）与多批产品改动进 A 组后，v7 的 code_sha12（996020ad8a04）已不匹配
+现 master；题库（672b52a3a6b0）与 judge（289474f4d943）与 v7 相同——尺子没换，锚点随代码重钉。
+
+### 三跑读数（内网，workflow + state，202 题 × 3，E3 独立化）
+- 通过数 **194 / 196 / 194，取中位 194（96.0%）**；pass^3 **191/202**；
+- 不稳 7 题（biz_014、ts_007、corr_001、inv_005、filt_003、inv_002、ord_027）；
+- 三跑全错 4 题（mul_005、mem_006、mul_026、ord_030）——与 v7 名单基本同源，非新退化。
+- 报告：`outputs/eval_v8_wf_state_run{1,2,3}.json`（gitignored，本地留存；LEDGER 由 runs 目录机读复算）。
+
+### 指纹
+`code e11f8abc8a0a`（= master #156→#157→#158 链，跑批树 69dcd02 与 squash 后 master 同树已核验 git diff 为空）
+/ `evalset 672b52a3a6b0` / `judge 289474f4d943` / `entry 57a6706a2dbc`（#136 入口硬规则后新值）。
+三跑执行期间工作树 HEAD 因并行 #138 批从 69dcd02 移到 53ecc7e（只动 scripts/canary.py、CANARY.md、
+测试与 DEVLOG，评测路径 app/ 零触碰，三份报告同 code_sha12 与 master 相同）——baselines.json v8
+条目的 commit_note 已如实记录。
+
+### 改动（5 文件）
+- `docs/eval/baseline_v8.json`（新）：v8 锚点，含 `version: "v8"`（v8 起必填字段）；rules 用 B5
+  配对口径 `{max_paired_net_drop: 6}`。
+- `docs/eval/baselines.json`：追加 v8 条目（含 code_all/rendered_set/registry 全指纹，
+  与 v7 读数不可相减的说明写在 note）。
+- `scripts/eval/nightly_gate.py`：DEFAULT_BASELINE → `baseline_v8.json`；简报与 notes 里硬编码的
+  「v7」改为从基线 `version` 字段读（v7 文件无该字段，回退显示 v7，旧基线仍可 --baseline 显式传）。
+- `docs/eval/README.md`：标题/命令示例/判据段/测试挂点表换 v8 锚点；「当前读数」段换 v8 三跑，
+  v7 段降为历史并注明两段之间 A 组多批变更、不可相减。
+- `docs/DEVLOG.md`：本条。
+
+### 验收
+- `nightly_gate --report outputs/eval_v8_wf_state_run1.json --baseline docs/eval/baseline_v8.json`
+  自比 **GREEN，exit 0**（配对净退步 0，阈值 6 未过）——issue #137 §9 通过标准。
+- `test_nightly_gate.py` 20 passed；`test_tier_check.py` + `test_ledger.py` 36 passed。
+
+### 明确不做
+- `baseline_v7.json` 不动（冻结尺子，历史锚点仍可比时显式传参可用）；
+- v8 与 v7 差值不写结论（A 组代码多批变更，相减无意义）；
+- 三份报告不入库（outputs/ 被 .gitignore 覆盖，LEDGER 机读层已存路径与读数）。
