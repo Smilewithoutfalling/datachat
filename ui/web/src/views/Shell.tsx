@@ -4,10 +4,10 @@ import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell, UPDATE_POLL_MS, UPDATE_URL } from "../desktop";
 import { type Client, errText, formatSize } from "../client";
 import { titleEdit } from "../titles";
-import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session } from "../types";
+import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session, SessionDetail } from "../types";
 import { DatasetView } from "./DatasetView";
 import { GenieHome } from "./GenieHome";
-import { IconChat, IconGear, IconHome, IconPlus, IconSidebar, IconSpark, IconTable, IconUpload } from "./icons";
+import { IconChat, IconDownload, IconGear, IconHome, IconPencil, IconPlus, IconSidebar, IconSpark, IconTable, IconTrash, IconUpload } from "./icons";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
 import { createdSuffix, Dialog, MoreMenu, relTime, Topbar } from "./ui";
@@ -247,12 +247,18 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       <nav aria-label="会话" className="g-chats">
         <div className="side-head"><span>对话</span><span className="count">{sessions.length}</span></div>
         {sessions.length === 0 ? <p className="side-empty">还没有对话</p> : null}
-        <ul className="side-list">
-          {sessions.map((s) => (
-            <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
-              onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)} />
-          ))}
-        </ul>
+        {groupSessions(sessions).map(([g, xs]) => (
+          <div key={g} className="sess-group">
+            <div className="sess-group-head">{g}</div>
+            <ul className="side-list">
+              {xs.map((s) => (
+                <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
+                  onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)}
+                  onExport={() => void exportSession(c, s.id, label[s.dataset_id] ?? "")} />
+              ))}
+            </ul>
+          </div>
+        ))}
       </nav>
 
       <div className="side-foot">
@@ -353,9 +359,54 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   );
 }
 
-function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
-  s: Session; active: boolean; dsName: string; onOpen: () => void; onRename: (t: string) => void; onDelete: () => void;
+/** 侧栏分组：今天 / 昨天 / 近 7 天 / 更早，按 updated_at 的本地日期；组内保持后端给的顺序。 */
+function groupSessions(xs: Session[], now = Date.now()): [string, Session[]][] {
+  const day0 = new Date(now); day0.setHours(0, 0, 0, 0);
+  const t0 = day0.getTime();
+  const order = ["今天", "昨天", "近 7 天", "更早"];
+  const m = new Map<string, Session[]>();
+  for (const s of xs) {
+    const t = parseIso(s.updated_at);
+    const g = t >= t0 ? "今天" : t >= t0 - 86400000 ? "昨天" : t >= t0 - 6 * 86400000 ? "近 7 天" : "更早";
+    m.set(g, [...(m.get(g) ?? []), s]);
+  }
+  return order.filter((g) => m.has(g)).map((g) => [g, m.get(g)!]);
+}
+
+const parseIso = (iso: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+const fullTime = (iso: string) => {
+  const t = parseIso(iso);
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t), z = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+};
+
+/** 导出：前端拼 Markdown 下载（后端暂无会话导出接口）。助手消息只取正文，图表和表格不带。 */
+async function exportSession(c: Client, id: string, dsName: string) {
+  const d: SessionDetail = await c.session(id);
+  const lines = [`# ${d.title || "未命名会话"}`, "", `数据集：${dsName || "（已删除）"} · 导出时间：${fullTime(new Date().toISOString())}`, ""];
+  for (const m of d.messages) lines.push(m.role === "user" ? `## 问：${m.content}` : m.content || "（无文字回答）", "");
+  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `${(d.title || "会话").replace(/[\\/:*?"<>|]/g, "_")}.md` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function SessionRow({ s, active, dsName, onOpen, onRename, onDelete, onExport }: {
+  s: Session; active: boolean; dsName: string; onOpen: () => void; onRename: (t: string) => void; onDelete: () => void; onExport: () => void;
 }) {
+  const [tip, setTip] = useState<{ top: number; left: number } | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const showTip = (el: HTMLElement) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      if (window.innerWidth < 720) return; // 窄屏侧栏是抽屉，卡片没地方放
+      const r = el.getBoundingClientRect();
+      setTip({ top: r.top, left: r.right + 12 });
+    }, 450);
+  };
+  const hideTip = () => (window.clearTimeout(timer.current), setTip(null));
+  useEffect(() => () => window.clearTimeout(timer.current), []);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(s.title);
   const [confirm, setConfirm] = useState(false);
@@ -383,14 +434,25 @@ function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
       ) : (
         <>
           <button type="button" className={`sess-row${active ? " active" : ""}`} aria-current={active ? "page" : undefined}
-            onClick={onOpen} onDoubleClick={() => (setDraft(s.title), setEditing(true))}>
+            onClick={() => (hideTip(), onOpen())} onDoubleClick={() => (setDraft(s.title), setEditing(true))}
+            onMouseEnter={(e) => showTip(e.currentTarget)} onMouseLeave={hideTip} onFocus={hideTip}>
             <span className="sess-title">{title}</span>
             <span className="sess-meta">{dsName}{dsName ? " · " : ""}{relTime(s.updated_at)}</span>
           </button>
           <MoreMenu label="更多操作" className="sess-more" align="left" items={[
-            { label: "重命名", onClick: () => (setDraft(s.title), setEditing(true)) },
-            { label: "删除", onClick: () => setConfirm(true), danger: true },
+            { label: "重命名", icon: <IconPencil size={14} />, onClick: () => (setDraft(s.title), setEditing(true)) },
+            { label: "导出", icon: <IconDownload size={14} />, onClick: onExport },
+            { label: "删除会话", icon: <IconTrash size={14} />, onClick: () => setConfirm(true), danger: true },
           ]} />
+          {tip ? (
+            <div className="sess-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>
+              <strong>{title}</strong>
+              <span>{dsName || "数据集已删除"}</span>
+              {active ? <span className="sess-tip-now">当前会话</span> : null}
+              <span>创建 {fullTime(s.created_at)}</span>
+              <span>更新 {relTime(s.updated_at)}</span>
+            </div>
+          ) : null}
         </>
       )}
       {confirm ? (

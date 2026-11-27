@@ -124,3 +124,4 @@ export const IconHome = (p: P) => (
 export const IconSend = (p: P) => (
   <Svg {...p}><path d="M8 13V3.2M4.2 7 8 3.2 11.8 7" /></Svg>
 );
+export const IconPencil = (p: P) => <Svg {...p}><path d="M10.6 3.2 12.8 5.4 6 12.2l-2.8.6.6-2.8 6.8-6.8Z" /></Svg>;
