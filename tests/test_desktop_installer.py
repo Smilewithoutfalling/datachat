@@ -198,3 +198,14 @@ def test_updater_config_matches_phase6_section4():
     rel = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert '"createUpdaterArtifacts":true' in rel and "TAURI_SIGNING_PRIVATE_KEY" in rel
     assert "workflow_dispatch" in rel and "\n  push:" not in rel
+
+
+def test_updater_pubkey_is_the_one_s_generated():
+    """#149：公钥由 S 本机 gen_update_key.py 生成（11-27 14:00 发来），key id FAAA8FE893455A0D。
+    换公钥 = 已装用户再也收不到更新（HANDOVER §8），所以钉死。"""
+    import base64
+    pk = _conf()["plugins"]["updater"]["pubkey"]
+    text = base64.b64decode(pk).decode()
+    assert text.splitlines()[0] == "untrusted comment: minisign public key: FAAA8FE893455A0D"
+    raw = base64.b64decode(text.splitlines()[1])
+    assert len(raw) == 42 and raw[:2] == b"Ed" and raw[2:10][::-1].hex().upper() == "FAAA8FE893455A0D"

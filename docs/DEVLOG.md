@@ -11771,7 +11771,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - 越界说明（问题 7）：#148 独占边界以外还改了 desktop.yml、tests/、Cargo.toml/lock、main.rs、README、HANDOVER、DEVLOG。这些都是 §9、§10 和 §3b 验收要求的配套改动，没有改动其他功能。
 - 测试：`test_desktop_installer.py` 12 条，本机全部通过。
 
-## [226] 2026-11-27 自动更新 + release 工作流（issue #149） · commit <待提交>
+## [226] 2026-11-27 自动更新 + release 工作流（issue #149） · commit 1da0c58（PR #169）
 
 - 回填：[225] = 7730064（PR #168）。PR 的 CI desktop 45929338375、tests 45929338402 均 success；#148 已关闭（评论 7208519165）。
 - 方案：phase6 §4（S 已定）；S 11-27 确认「提示后点一下」+ passive。实现细化与偏离写在 phase6 §4「实现细化与偏离（#149）」。
@@ -11797,3 +11797,10 @@ S 11-25 授权小问题自定，按此口径执行。
   - 沙箱端到端核对：本脚本生成的私钥交给 `tauri signer sign`（2.12.6）签名后，能用本脚本生成的公钥（Python cryptography）验过。
 - 本机没能做 Rust 的 Windows 交叉 `cargo check`：ring 需要 MSVC 工具链。Rust 部分交给 Windows CI（desktop job）编译。
 - 待 S：用脚本生成密钥，把私钥和口令粘贴进 Secrets，把公钥发给我。之后的步骤：填公钥 → 发 v0.1.0 测试版 → 改版本号为 0.1.1 → 发测试版 → 运行 update-e2e → S 本机验证一次（#149 节点 2）。
+
+## [227] 2026-11-27 #149 填入更新公钥 · commit <待提交>
+
+- 回填：[226] = 1da0c58（PR #169）。CI：sidecar 45932538827、desktop 45932538896、tests 45932538828，均 success。
+- S 于 11-27 14:00 发来公钥（本机用 gen_update_key.py 生成，key id FAAA8FE893455A0D），已写进 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥和口令由 S 粘贴进 Secrets，我看不到，也核对不了；以 release 工作流能否签名为准。
+- 新增测试 `test_updater_pubkey_is_the_one_s_generated`：钉死 key id。换公钥会让已装用户再也收不到更新。
+- 公钥填好后，desktop 冒烟的 `--smoke-update` 会真的去查 latest。现在还没有 Release，预期 exit=1（出错）。
