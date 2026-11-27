@@ -33,9 +33,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           $rep = "update-e2e.txt"
           # 直接起安装目录里的 sidecar（和壳同样的参数），走产品 HTTP 接口建 / 读会话（#149 节点 1「旧会话在」）
-          function Invoke-Sidecar([string]$instDir, [string]$home, [scriptblock]$body) {
+          function Invoke-Sidecar([string]$instDir, [string]$dataHome, [scriptblock]$body) {
             $sc = Get-ChildItem $instDir -Recurse -Filter datachat-sidecar.exe | Select-Object -First 1
-            $psi = [System.Diagnostics.ProcessStartInfo]::new($sc.FullName, "--port 0 --home `"$home`" --desktop")
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($sc.FullName, "--port 0 --home `"$dataHome`" --desktop")
             $psi.RedirectStandardOutput = $true
             $psi.UseShellExecute = $false
             $proc = [System.Diagnostics.Process]::Start($psi)
