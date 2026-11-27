@@ -247,18 +247,13 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       <nav aria-label="会话" className="g-chats">
         <div className="side-head"><span>对话</span><span className="count">{sessions.length}</span></div>
         {sessions.length === 0 ? <p className="side-empty">还没有对话</p> : null}
-        {groupSessions(sessions).map(([g, xs]) => (
-          <div key={g} className="sess-group">
-            <div className="sess-group-head">{g}</div>
-            <ul className="side-list">
-              {xs.map((s) => (
-                <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
-                  onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)}
-                  onExport={() => void exportSession(c, s.id, label[s.dataset_id] ?? "")} />
-              ))}
-            </ul>
-          </div>
-        ))}
+        <ul className="side-list">
+          {sessions.map((s) => (
+            <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
+              onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)}
+              onExport={() => void exportSession(c, s.id, label[s.dataset_id] ?? "")} />
+          ))}
+        </ul>
       </nav>
 
       <div className="side-foot">
@@ -357,20 +352,6 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       <UploadDialog key={pending.map((f) => f.name).join("|")} c={c} files={pending} onClose={() => setPending([])} onDone={onUploaded} />
     </div>
   );
-}
-
-/** 侧栏分组：今天 / 昨天 / 近 7 天 / 更早，按 updated_at 的本地日期；组内保持后端给的顺序。 */
-function groupSessions(xs: Session[], now = Date.now()): [string, Session[]][] {
-  const day0 = new Date(now); day0.setHours(0, 0, 0, 0);
-  const t0 = day0.getTime();
-  const order = ["今天", "昨天", "近 7 天", "更早"];
-  const m = new Map<string, Session[]>();
-  for (const s of xs) {
-    const t = parseIso(s.updated_at);
-    const g = t >= t0 ? "今天" : t >= t0 - 86400000 ? "昨天" : t >= t0 - 6 * 86400000 ? "近 7 天" : "更早";
-    m.set(g, [...(m.get(g) ?? []), s]);
-  }
-  return order.filter((g) => m.has(g)).map((g) => [g, m.get(g)!]);
 }
 
 const parseIso = (iso: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
