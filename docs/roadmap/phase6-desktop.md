@@ -25,7 +25,7 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 | # | 问题 | 我的建议 | 理由 |
 |---|---|---|---|
 | 1 | 外壳：Tauri 2 还是 Electron | **Tauri 2** | M22 担心的几处成本，在这里都已经卸掉了：前端不碰 IPC；sidecar 自己管进程；Rust 只写大约 200 行的进程管理；构建全在 CI 里，S 不用装 Rust。Electron 会多带一个 Chromium（约 100 MB），而且 Node 和 Python 两套运行时并存 |
-| 2 | 安装包格式 | **NSIS，按当前用户安装**（`installMode: currentUser`，不要管理员权限，装到 `%LOCALAPPDATA%\Programs\DataChat`） | 不弹 UAC；S 的本机就是普通用户场景。MSI 适合企业批量部署，现在用不上 |
+| 2 | 安装包格式 | **NSIS，按当前用户安装**（`installMode: currentUser`，不要管理员权限，装到 `%LOCALAPPDATA%\Programs\DataChat`；**#148 起才是这样**，此前 Tauri 默认模板实际装在 `%LOCALAPPDATA%\DataChat`，#147 用 CI 安装包核实） | 不弹 UAC；S 的本机就是普通用户场景。MSI 适合企业批量部署，现在用不上 |
 | 3 | WebView2 怎么装 | **downloadBootstrapper**（Tauri 默认）：缺 WebView2 时联网装 | Win11 自带 WebView2，Win10 一般也已经通过系统更新装上了，离线安装包要多出约 127 MB。离线场景另出一个包，放到以后再做 |
 | 4 | 卸载时删不删数据 | **默认不删**。数据目录 `%LOCALAPPDATA%\datachat`（会话、数据集、server.log）和钥匙串里的 Key 都保留；卸载页给一个「同时删除我的数据」的勾选框 | 重装或升级后历史都还在；想彻底删的用户也有出口 |
 | 5 | 发布渠道 | **GitHub Releases**（仓库是公开的），自动更新读 Release 里的 `latest.json` | 不用另找服务器 |
@@ -73,7 +73,7 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 - S 10-27 本机试装后的修改（DEVLOG [70]）：
   - 导出 PNG 在桌面模式下改由后端写进「下载」文件夹：`POST /exports/png`，只在 `--desktop` 时开放。这样 §2 第 6 条放行 `blob:` / `data:` 的规则就不再承担下载。
   - `GET /settings` 新增 `sources`，设置页显示每一项值的来源，并注明桌面版不读取 `.env`。
-- **遗留（D3 之前处理）**：安装目录 `%LOCALAPPDATA%\DataChat` 和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上其实是同一个目录。目前不会出错，因为卸载时只删自己装的文件，删目录用的是不递归的 RMDir。但做自动更新之前必须把两者分开，有两种办法：一是改安装目录（NSIS 模板或 productName），二是改数据目录（要迁移数据，还会影响浏览器模式共用同一份数据）。
+- **遗留（D3 之前处理；#148 已按 §3b 处理：改安装目录，新装分开，已装的升级沿用原目录）**：安装目录 `%LOCALAPPDATA%\DataChat` 和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上其实是同一个目录。目前不会出错，因为卸载时只删自己装的文件，删目录用的是不递归的 RMDir。但做自动更新之前必须把两者分开，有两种办法：一是改安装目录（NSIS 模板或 productName），二是改数据目录（要迁移数据，还会影响浏览器模式共用同一份数据）。
 
 ## 3b. 安装目录与数据文件夹（#148，S 11-27 定，代码待 S 审本节后再写）
 

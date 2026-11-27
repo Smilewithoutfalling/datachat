@@ -17,6 +17,7 @@ serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
+winreg = "0.56"
 
 [profile.release]
 codegen-units = 1

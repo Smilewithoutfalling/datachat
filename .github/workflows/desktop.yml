@@ -58,20 +58,26 @@ jobs:
         shell: pwsh
         run: |
           $t = Get-Date
-          npx --yes @tauri-apps/cli@2 build
+          npx --yes @tauri-apps/cli@2.12.6 build  # 固定版本：installer.nsi 是这一版官方模板的副本（phase6 §3b）
           "build_seconds=$([int]((Get-Date) - $t).TotalSeconds)" | Tee-Object -FilePath ../desktop-report.txt
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
           "installer=$($setup.Name)" | Tee-Object -FilePath ../desktop-report.txt -Append
           "installer_mb=$([math]::Round($setup.Length / 1MB, 1))" | Tee-Object -FilePath ../desktop-report.txt -Append
-      - name: 安装冒烟（静默安装 → --smoke → 强杀壳 → 静默卸载）
+      - name: 安装冒烟（自选数据文件夹静默安装 → --smoke → --smoke-home → 强杀壳 → 升级 → 卸载两种）
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $rep = "desktop-report.txt"
           $setup = (Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1).FullName
-          Start-Process $setup -ArgumentList "/S" -Wait
-          $dir = Join-Path $env:LOCALAPPDATA "DataChat"
+          # phase6 §3b：默认装到 %LOCALAPPDATA%\Programs\DataChat；数据文件夹用 /DATADIR= 指定到一个自选位置
+          $userData = Join-Path $env:RUNNER_TEMP "我的数据dc"
+          Start-Process $setup -ArgumentList "/S", "/DATADIR=$userData" -Wait
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\DataChat"
           if (-not (Test-Path $dir)) { throw "安装目录不存在：$dir" }
+          $regKey = "HKCU:\Software\smilewithoutfalling\DataChat"
+          $regData = (Get-ItemProperty -Path $regKey -Name DataDir -ErrorAction SilentlyContinue).DataDir
+          "install_dir=$dir reg_datadir=$regData" | Tee-Object -FilePath $rep -Append
+          if ($regData -ne $userData) { throw "注册表 DataDir 不对：$regData" }
           $exe = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch "uninstall" } | Select-Object -First 1
           "installed_exe=$($exe.Name)" | Tee-Object -FilePath $rep -Append
           if (-not (Test-Path (Join-Path $dir "sidecar/datachat-sidecar.exe"))) { throw "sidecar 没装上" }
@@ -88,6 +94,14 @@ jobs:
           "selftest_in_job_ok=$($st.ok) memory_ok=$($mem.ok) memory_seconds=$($mem.seconds)" | Tee-Object -FilePath $rep -Append
           if ($p.ExitCode -ne 0 -or -not $st.ok) { throw "嵌套 Job 下 selftest 失败：$(($st.checks | Where-Object { -not $_.ok } | ForEach-Object { $_.name + ': ' + $_.detail }) -join '; ')" }
 
+          # ①c 正式数据目录：壳按 DATACHAT_HOME → 注册表 DataDir → 默认 解析，数据库必须落在自选的数据文件夹
+          $p = Start-Process $exe.FullName -ArgumentList "--smoke-home", "$PWD\smoke-home.json" -Wait -PassThru
+          $sh = Get-Content smoke-home.json -Raw -Encoding utf8 | ConvertFrom-Json
+          "smoke_home=$($sh.home) db_exists=$($sh.db_exists)" | Tee-Object -FilePath $rep -Append
+          if ($p.ExitCode -ne 0) { throw "--smoke-home 失败，退出码 $($p.ExitCode)" }
+          if ($sh.home -ne $userData) { throw "壳没用安装时选的数据文件夹：$($sh.home)" }
+          if (Test-Path (Join-Path $dir "datachat.db")) { throw "安装目录里出现了 datachat.db" }
+
           # ② 强杀壳，sidecar 必须被 Job Object 一起带走
           $hold = Start-Process $exe.FullName -ArgumentList "--smoke-hold", "$PWD\sidecar.pid" -PassThru
           for ($i = 0; $i -lt 60 -and -not (Test-Path sidecar.pid); $i++) { Start-Sleep -Milliseconds 500 }
@@ -100,17 +114,42 @@ jobs:
           "orphan_after_kill=$([bool]$left)" | Tee-Object -FilePath $rep -Append
           if ($left) { throw "壳被强杀后 sidecar（pid $sp）还活着" }
 
-          # ③ 静默卸载：安装目录删掉，数据目录保留（卸载页勾选框默认不勾）
-          $data = Join-Path $env:LOCALAPPDATA "datachat"
-          New-Item -ItemType Directory -Force $data | Out-Null
-          Set-Content (Join-Path $data "keep.txt") "x"
+          # ③ 升级：再装一次（带另一个 /DATADIR=，必须被忽略）。安装目录、注册表 DataDir 都不变，数据库还在
+          $other = Join-Path $env:RUNNER_TEMP "other-data"
+          Start-Process $setup -ArgumentList "/S", "/DATADIR=$other" -Wait
+          $regData2 = (Get-ItemProperty -Path $regKey -Name DataDir -ErrorAction SilentlyContinue).DataDir
+          $sameDir = Test-Path (Join-Path $dir $exe.Name)
+          $dbKept = Test-Path (Join-Path $userData "datachat.db")
+          "upgrade_same_dir=$sameDir upgrade_reg_datadir=$regData2 upgrade_db_kept=$dbKept other_created=$(Test-Path $other)" | Tee-Object -FilePath $rep -Append
+          if (-not $sameDir) { throw "升级后安装目录变了" }
+          if ($regData2 -ne $userData) { throw "升级改了注册表 DataDir：$regData2" }
+          if (-not $dbKept) { throw "升级后数据库不见了" }
+          if (Test-Path $other) { throw "升级时 /DATADIR= 没被忽略" }
+
+          # ④ 静默卸载（不勾删除）：程序删掉，数据文件夹原样保留
           Start-Process (Join-Path $dir "uninstall.exe") -ArgumentList "/S" -Wait
           for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $dir $exe.Name)); $i++) { Start-Sleep -Milliseconds 500 }
           $gone = -not (Test-Path (Join-Path $dir $exe.Name))
-          $kept = Test-Path (Join-Path $data "keep.txt")
+          $kept = Test-Path (Join-Path $userData "datachat.db")
           "uninstalled=$gone data_kept=$kept" | Tee-Object -FilePath $rep -Append
           if (-not $gone) { throw "卸载后程序还在" }
-          if (-not $kept) { throw "卸载把数据目录删了" }
+          if (-not $kept) { throw "卸载把数据删了" }
+
+          # ⑤ 重装后勾选删除卸载（/DELETEDATA）：只删 DataChat 自己的文件，无关文件和数据文件夹本身都在
+          Start-Process $setup -ArgumentList "/S" -Wait
+          if (-not (Test-Path (Join-Path $dir $exe.Name))) { throw "重装失败" }
+          Set-Content (Join-Path $userData "keep.txt") "x"
+          New-Item -ItemType Directory -Force (Join-Path $userData "datasets\ds1") | Out-Null
+          Set-Content (Join-Path $userData "server.log") "x"
+          Start-Process (Join-Path $dir "uninstall.exe") -ArgumentList "/S", "/DELETEDATA" -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $userData "datachat.db")); $i++) { Start-Sleep -Milliseconds 500 }
+          $dbGone = -not (Test-Path (Join-Path $userData "datachat.db"))
+          $dsGone = -not (Test-Path (Join-Path $userData "datasets"))
+          $logGone = -not (Test-Path (Join-Path $userData "server.log"))
+          $keepKept = Test-Path (Join-Path $userData "keep.txt")
+          "deletedata_db_gone=$dbGone datasets_gone=$dsGone log_gone=$logGone unrelated_kept=$keepKept" | Tee-Object -FilePath $rep -Append
+          if (-not ($dbGone -and $dsGone -and $logGone)) { throw "勾选删除没删干净 DataChat 的文件" }
+          if (-not $keepKept) { throw "勾选删除误删了数据文件夹里的无关文件" }
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -119,6 +158,7 @@ jobs:
             desktop-report.txt
             smoke-shell.json
             selftest-in-job.json
+            smoke-home.json
           retention-days: 30
       - uses: actions/upload-artifact@v7
         with:
