@@ -32,6 +32,7 @@
                                          URL fragment 交给前端；index.html 带 CSP（阶段 5 F0）
     GET    /settings  PUT /settings      非机密设置：model、base_url、timeout（单次请求超时，秒）；
                                          sources 给出每项当前生效值的来源 settings | env | default（阶段 6 收尾）
+    PUT    /desktop/update  GET /desktop/update  桌面壳查到的新版本 {"version","notes"}；GET 返回 {"available": … | null}（#149）
     POST   /exports/png?filename=        桌面模式（--desktop）：请求体是 PNG 字节，写进「下载」文件夹，返回 {"path"}；
                                          浏览器模式 404（前端走 <a download>）。见 app/server/exports.py
     POST   /messages/{id}/export/code    把这一轮最终执行的代码导出成独立 .py（自带数据加载、chart()、savefig 落盘），
@@ -142,6 +143,11 @@ def default_home() -> str:
         return reg
     base = os.getenv("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(base, "datachat")
+
+
+class DesktopUpdateIn(BaseModel):
+    version: str = Field(min_length=1, max_length=64, pattern=r"^[0-9A-Za-z.+-]+$")
+    notes: str = Field("", max_length=4000)
 
 
 class SessionIn(BaseModel):
@@ -479,6 +485,19 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             raise HTTPException(500, "写入下载文件夹失败") from None
         logger.info("导出 PNG：%s（%d 字节）", os.path.basename(path), len(data))
         return {"path": path}
+
+    # 阶段 6 D3（phase6-desktop.md §4，#149）：桌面壳启动 10 秒后查更新，查到就 PUT 过来；前端每分钟 GET 一次，
+    # 有新版本就在顶部提示「更新并重启」。只存在内存里（重启即清），后端自己不联网。浏览器模式没人 PUT，永远是 null。
+    app.state.desktop_update = None
+
+    @app.put("/desktop/update", dependencies=[Depends(auth)])
+    def put_desktop_update(body: DesktopUpdateIn):
+        app.state.desktop_update = {"version": body.version, "notes": body.notes}
+        return app.state.desktop_update
+
+    @app.get("/desktop/update", dependencies=[Depends(auth)])
+    def get_desktop_update():
+        return {"available": app.state.desktop_update}
 
     # 阶段 7.5 第 2 步：代码导出（独立 .py）与结果表导出（CSV / xlsx），见 app/tools/export.py。
     # 鉴权与 /exports/png 相同（请求头 token）；写进 app.state.export_dir（桌面模式），没挂时写 default_export_dir()

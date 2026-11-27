@@ -163,6 +163,7 @@ Playwright 结构（`playwright.config.ts`）：
 - 上传对话框的名称输入框只有 placeholder，用 `getByPlaceholder("数据集名称（可选）")`。
 - Windows CI：测试夹具写 CSV 要 `newline=""`，否则单元格里的 `\n` 被写成 `\r\n`（#46 红过一次）。
 - `ui/web/tsconfig.tsbuildinfo` 是 tsc 的副产物，不要提交。
+- **自动更新的私钥只在 S 手里**（#149）：存放在 Secrets `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` 中，公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥丢了，已装用户就再也收不到更新，只能手动重装；所以**不要换公钥**。发版：先改 `tauri.conf.json` 的 version，再手动运行 Actions → release。
 - **NSIS 模板是官方的副本**（#148）：`desktop/src-tauri/installer.nsi` 抄自 tauri-cli 2.12.6，CI 把 `@tauri-apps/cli` 固定在同一版本（`tests/test_desktop_installer.py` 核对）。升级 CLI 时先拿新版官方模板逐段对比，把以 `; DATACHAT:` 开头的改动搬过去，再改版本号。注册表键 `Software\smilewithoutfalling\DataChat` 由 identifier 推出，**不要设 `bundle.publisher`、不要改 identifier**，否则已装用户读不到上次的安装目录和数据文件夹。
 
 ## 9. 关于"记忆"

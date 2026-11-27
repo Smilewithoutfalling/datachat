@@ -175,6 +175,23 @@ pub fn request(port: u16, method: &str, path: &str, token: Option<&str>) -> Opti
     std::str::from_utf8(&head[9..12]).ok()?.parse().ok()
 }
 
+/// 带 JSON 请求体的请求（壳 → 后端 PUT /desktop/update，#149），返回状态码。
+pub fn request_json(port: u16, method: &str, path: &str, token: Option<&str>, body: &serde_json::Value) -> Option<u16> {
+    let data = serde_json::to_vec(body).ok()?;
+    let mut s = TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(2)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+    let head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        data.len()
+    );
+    s.write_all(head.as_bytes()).ok()?;
+    s.write_all(&data).ok()?;
+    let mut st = [0u8; 12];
+    s.read_exact(&mut st).ok()?;
+    std::str::from_utf8(&st[9..12]).ok()?.parse().ok()
+}
+
 pub fn wait_health(port: u16, within: Duration) -> bool {
     let t0 = Instant::now();
     while t0.elapsed() < within {

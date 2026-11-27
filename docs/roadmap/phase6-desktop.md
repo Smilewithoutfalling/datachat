@@ -135,6 +135,23 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 3. 版本号：`tauri.conf.json` 的 version 是唯一来源，打 tag `v0.x.y` 时触发 release 工作流，构建、签名、发 Release，并生成 latest.json。
 4. 数据兼容：升级不碰数据目录。SQLite 迁移沿用现有做法（启动时补表，参见 v1 → feedback 表的 `test_v1_database_gains_feedback_table_without_touching_old_tables`）。之后每次改表都要带一条「旧库启动」的测试。
 
+**实现细化与偏离（#149，11-27，DEVLOG [226]）**
+
+- **前端怎么知道有新版本（不用 IPC）**：
+  1. 壳在 sidecar 起来 10 秒后查一次更新，查到就 `PUT /desktop/update` 告诉后端。后端只把结果存在内存里，自己不联网。
+  2. 前端在桌面模式下每分钟 `GET /desktop/update` 一次。有新版本时，工作区顶部显示「有新版本 x.y.z … 更新并重启」。
+  3. 用户点按钮后，前端跳到 `http://update.datachat.invalid/`，壳的 `on_navigation` 拦下这个地址（和「重新启动」同一个模式）。窗口换成 `updating.html`，然后下载、用公钥校验。
+  4. 校验通过后，先正常停掉 sidecar（`on_before_exit`），再以 passive 模式运行新安装包。安装包带 `/UPDATE`，所以沿用原来的安装目录和数据文件夹（#148），装完自动重启。
+  5. 失败时跳到错误页，页上有「重新启动」。
+- **第 2 条偏离：密钥对改由 S 本机生成**。S 本机运行 `python scripts\desktop\gen_update_key.py`（只用 Python 标准库，格式与 `tauri signer generate` 相同，有测试对照）。这样私钥从生成起就不离开 S 的机器，不经过沙箱。S 把私钥和口令粘贴进 Secrets，只把公钥发给我写进 `tauri.conf.json`。公钥为空时整个更新流程跳过。
+- **第 3 条偏离：发布改为手动运行 `release.yml`**，不再是推 tag 触发。tag 由工作流按 `tauri.conf.json` 的 version 生成为 `v<version>`；同名 Release 已存在时失败，不会覆盖已发的版本。勾选 prerelease 就是测试发布。PR 构建不生成更新签名，`createUpdaterArtifacts` 只在 release 里开。
+- **验收**：
+  - `update-e2e.yml`（手动运行，输入旧 tag 和新 tag）：装旧版，运行 `--smoke-update` 检查并安装新版，然后确认四点：版本号变了、安装目录不变、注册表 `DataDir` 不变、新版能用原数据文件夹启动。
+  - pre-release 不算 GitHub 的「latest」，所以测试时用 `DATACHAT_UPDATE_ENDPOINT` 指向新版的 latest.json。这个变量只能换地址，换不了包：签名仍由内置公钥校验。
+  - desktop.yml 的 PR 冒烟加一段 `--smoke-update`。
+- **#148 留下的 B5（旧版默认安装的用户）**：自动更新会装回原来的 `%LOCALAPPDATA%\DataChat`，两个目录继续重叠。不影响数据：安装器只覆盖程序文件，从不删除数据。只有勾选删除后卸载、再重装，才会真正分开。
+- **暂不做**：`requireSignedVersion`（防降级）。它要求签名里带版本号，还需要核实 tauri-cli 2.12.6 的签名里有没有这一项，留作后续。
+
 **验收**：CI 发两个版本（v0.1.0 → v0.1.1 的测试 Release，标为 pre-release），在 runner 上装旧版 → 让它检查更新 → 装上新版 → 版本号变了、旧会话还在。S 本机手动验证一次。
 
 ## 5. D4 依赖许可证审计

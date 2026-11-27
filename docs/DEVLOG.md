@@ -11759,7 +11759,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - CI 新增 ⓪ 段，验证四种不安全的数据文件夹会被拒绝：非空且没有 db、相对路径、`C:\`、带 `..` 段。被拒时不安装、不写注册表。⑤ 段增加对 `charts` 的检查。
 - 测试：`tests/test_desktop_installer.py` 现为 11 条。其中 `test_uninstall_reads_data_dir_before_official_key_cleanup` 的断言改为「env 先读进 $0 并去空格」，原因是读取写法随 B9 一起变了，env → 注册表 → 默认的顺序没变。
 
-## [225] 2026-11-27 #148 收尾：第二轮审查剩余问题 · commit <待提交>
+## [225] 2026-11-27 #148 收尾：第二轮审查剩余问题 · commit 7730064（PR #168）
 
 - 回填：[224] = ea12c5d（PR #167）。PR CI：desktop 45924149056、tests 45924149031，均 success；master push tests 45925410869 success。第二轮审查表已贴 #148 评论 7208241871。
 - S 11-27 10:35：本机已验过两种卸载（勾选删除、不勾选），都没问题；第二轮审查剩下的问题「顺手修掉」。
@@ -11770,3 +11770,30 @@ S 11-25 授权小问题自定，按此口径执行。
 - 未处理：问题 6（B5，留到 #149 立项时定）；问题 8（节点 2 用例用的是当前 schema，旧 schema 兼容已有 `test_v1_database_gains_feedback_table_without_touching_old_tables` 覆盖）；B10–B12 低风险，已写进 phase6 §3b。
 - 越界说明（问题 7）：#148 独占边界以外还改了 desktop.yml、tests/、Cargo.toml/lock、main.rs、README、HANDOVER、DEVLOG。这些都是 §9、§10 和 §3b 验收要求的配套改动，没有改动其他功能。
 - 测试：`test_desktop_installer.py` 12 条，本机全部通过。
+
+## [226] 2026-11-27 自动更新 + release 工作流（issue #149） · commit <待提交>
+
+- 回填：[225] = 7730064（PR #168）。PR 的 CI desktop 45929338375、tests 45929338402 均 success；#148 已关闭（评论 7208519165）。
+- 方案：phase6 §4（S 已定）；S 11-27 确认「提示后点一下」+ passive。实现细化与偏离写在 phase6 §4「实现细化与偏离（#149）」。
+- 改了什么：
+  - 壳：
+    - 新增 `src/update.rs`：检查、通知后端、安装、`--smoke-update`；
+    - `main.rs`：注册 `tauri-plugin-updater` 2.14.1，sidecar 首次起来后安排检查，`on_navigation` 拦截 `update.datachat.invalid`；
+    - `sidecar.rs`：新增 `request_json`；
+    - `static/updating.html`；
+    - `tauri.conf.json`：新增 `plugins.updater`，pubkey 暂为空；
+    - Cargo.lock：在沙箱里用 `cargo metadata` 补出新依赖，已有依赖的版本不变。
+  - 后端：`PUT/GET /desktop/update`，只存内存（B 组，code_sha12 不变）。
+  - 前端：`desktop.ts` 新增 `UPDATE_URL`；`client.desktopUpdate`；Shell 在桌面模式下轮询，有新版本时显示提示条（`.update-bar`）。
+  - 发布：
+    - `release.yml`：手动运行，版本号取自 conf，带更新签名，产出 latest.json，发 Release；
+    - `update-e2e.yml`：旧版 → 新版的升级验收；
+    - `scripts/desktop/gen_update_key.py`（S 本机生成密钥）；
+    - `scripts/desktop/make_latest_json.py`。
+  - CI：desktop.yml 冒烟新增 `--smoke-update` 一段。
+- 测试：
+  - 新增 `test_desktop_update.py`（3 条）、`test_gen_update_key.py`（4 条，包括 RFC 8032 向量和 tauri 生成密钥的对照）、`test_make_latest_json.py`（2 条）；`test_desktop_installer.py` 新增 updater 配置一条，CLI 版本钉住的检查扩到 release.yml。
+  - vitest `views.test.tsx` 新增 2 条（共 23 条）。
+  - 沙箱端到端核对：本脚本生成的私钥交给 `tauri signer sign`（2.12.6）签名后，能用本脚本生成的公钥（Python cryptography）验过。
+- 本机没能做 Rust 的 Windows 交叉 `cargo check`：ring 需要 MSVC 工具链。Rust 部分交给 Windows CI（desktop job）编译。
+- 待 S：用脚本生成密钥，把私钥和口令粘贴进 Secrets，把公钥发给我。之后的步骤：填公钥 → 发 v0.1.0 测试版 → 改版本号为 0.1.1 → 发测试版 → 运行 update-e2e → S 本机验证一次（#149 节点 2）。

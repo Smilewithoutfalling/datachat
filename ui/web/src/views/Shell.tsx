@@ -1,7 +1,7 @@
 import { type DragEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
-import { inDesktopShell } from "../desktop";
+import { inDesktopShell, UPDATE_POLL_MS, UPDATE_URL } from "../desktop";
 import { type Client, errText, formatSize } from "../client";
 import { titleEdit } from "../titles";
 import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session } from "../types";
@@ -24,6 +24,21 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
     setPngSaver(c.savePng);
     return () => setPngSaver(null);
   }, [c, desktop]);
+  // 阶段 6 D3（#149）：壳启动 10 秒后查更新，查到就告诉后端；这里每分钟问一次后端，有了就在顶部提示，点了才更新。
+  // 不静默更新（phase6 §4 第 1 条，S 11-27 确认「提示后点一下」）。请求失败（旧后端 404 等）不打扰用户。
+  const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
+  useEffect(() => {
+    if (!desktop) return;
+    let alive = true;
+    const poll = () =>
+      c.desktopUpdate()
+        .then((r) => alive && r.available && setUpdate(r.available))
+        .catch(() => undefined);
+    poll();
+    const t = window.setInterval(poll, UPDATE_POLL_MS);
+    return () => ((alive = false), window.clearInterval(t));
+  }, [c, desktop]);
+  const [updating, setUpdating] = useState(false);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [view, setView] = useState<View>(initialKey.configured ? { kind: "home" } : { kind: "settings" });
@@ -250,6 +265,15 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       {railOpen ? <div className="rail-scrim" onClick={() => setRailOpen(false)} /> : null}
 
       <section className="workspace">
+        {update && (
+          <p className="update-bar" role="status" data-testid="update-bar">
+            有新版本 {update.version}，更新后会自动重启，数据和会话都会保留。{" "}
+            <button type="button" className="primary" disabled={updating}
+              onClick={() => (setUpdating(true), window.location.assign(UPDATE_URL))}>
+              {updating ? "正在准备更新…" : "更新并重启"}
+            </button>
+          </p>
+        )}
         {error && (
           <p className="toast" role="alert">
             {error}{" "}

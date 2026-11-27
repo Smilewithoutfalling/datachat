@@ -6,6 +6,12 @@ export const SHELL_KEY = "datachat.shell";
 /** 壳拦截这个地址（on_navigation 返回 false）并重启 sidecar；浏览器里永远不会用到它。.invalid 保证不会解析到真实主机。 */
 export const RESTART_URL = "http://restart.datachat.invalid/";
 
+/** 「更新并重启」跳到这里，壳拦下后下载、校验并安装新版本（phase6-desktop.md §4，issue #149）。不用 Tauri IPC，和 RESTART_URL 同一个模式。 */
+export const UPDATE_URL = "http://update.datachat.invalid/";
+
+/** 桌面壳查到新版本后告诉后端，前端每分钟问一次（后端只存在内存里；浏览器模式里永远是 null）。 */
+export const UPDATE_POLL_MS = 60_000;
+
 export function inDesktopShell(
   loc: Pick<Location, "hash"> = window.location,
   store: Pick<Storage, "getItem" | "setItem"> = window.sessionStorage,

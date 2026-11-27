@@ -1,0 +1,111 @@
+# 阶段 6 D3：发布 Release（phase6-desktop.md §4 第 2–3 条，issue #149）。
+# 只能手动触发（Actions → release → Run workflow）：版本号以 tauri.conf.json 的 version 为唯一来源，
+# Release 的 tag 是 v<version>，tag 已存在就失败（不覆盖已发的版本）。
+# 产物：安装包、它的 .sig（Tauri 更新签名，minisign，和 Authenticode 代码签名无关）、latest.json。
+# 需要两个 Secret（S 用 scripts/desktop/gen_update_key.py 本机生成后亲手粘贴）：
+#   TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# 测试发布（升级验收用）勾 prerelease：pre-release 不是 GitHub 的「latest」，已装用户查不到它。
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "标为 pre-release（测试发布，已装用户查不到）"
+        type: boolean
+        default: true
+      notes:
+        description: "更新说明（显示在 Release 页和 latest.json 里）"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: 版本号与前置条件
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $conf = Get-Content desktop/src-tauri/tauri.conf.json -Raw -Encoding utf8 | ConvertFrom-Json
+          $v = $conf.version
+          $tag = "v$v"
+          if (-not $conf.plugins.updater.pubkey) { throw "tauri.conf.json 的 plugins.updater.pubkey 还是空的" }
+          if ($env:HAS_KEY -ne "true") { throw "缺少 Secret TAURI_SIGNING_PRIVATE_KEY" }
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag 已存在，先在 tauri.conf.json 里改版本号" }
+          $global:LASTEXITCODE = 0
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$v tag=$tag sha=$env:GITHUB_SHA prerelease=${{ inputs.prerelease }}"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/requirements-build.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: 安装 Python 依赖
+        run: python -m pip install -r requirements.txt -r packaging/requirements-build.txt
+      - name: 构建前端
+        working-directory: ui/web
+        run: |
+          npm ci
+          npm run build
+      - name: 打包 sidecar 并放进壳的 resources
+        shell: pwsh
+        run: |
+          python packaging/build_sidecar.py
+          Copy-Item -Recurse -Force dist/datachat-sidecar/* desktop/src-tauri/sidecar/
+      - name: 打包壳（NSIS + 更新签名）
+        working-directory: desktop
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          '{"bundle":{"createUpdaterArtifacts":true}}' | Set-Content -Encoding utf8NoBOM updater-build.json
+          npx --yes @tauri-apps/cli@2.12.6 build --config updater-build.json  # 与 desktop.yml 同一版本（installer.nsi 是这一版官方模板的副本）
+          if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
+      - name: 生成 latest.json 并发布
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not (Test-Path "$($setup.FullName).sig")) { throw "没有生成 .sig：更新签名没生效" }
+          python scripts/desktop/make_latest_json.py --version "${{ steps.ver.outputs.version }}" --setup "$($setup.FullName)" `
+            --repo "$env:GITHUB_REPOSITORY" --tag "${{ steps.ver.outputs.tag }}" --notes "$env:NOTES" --out latest.json
+          $pre = @()
+          if ("${{ inputs.prerelease }}" -eq "true") { $pre = @("--prerelease") }
+          $body = if ($env:NOTES) { $env:NOTES } else { "DataChat ${{ steps.ver.outputs.version }}" }
+          gh release create "${{ steps.ver.outputs.tag }}" $setup.FullName "$($setup.FullName).sig" latest.json `
+            --target "$env:GITHUB_SHA" --title "DataChat ${{ steps.ver.outputs.version }}" --notes "$body" @pre
+          if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }

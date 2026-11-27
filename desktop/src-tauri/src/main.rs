@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod sidecar;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
@@ -19,6 +20,8 @@ const RESTART_HOST: &str = "restart.datachat.invalid";
 
 #[derive(Default)]
 struct Sc {
+    /// 本次运行是否已经安排过检查更新（只在第一次成功启动 sidecar 后查一次，重启 sidecar 不再查）。
+    update_checked: std::sync::atomic::AtomicBool,
     running: Mutex<Option<sidecar::Running>>,
     port: AtomicU16,
     /// 代际：每次启动 +1。监视线程只在代际没变时才把 sidecar 退出当成崩溃，主动停止和重启不算。
@@ -66,6 +69,17 @@ fn launch(app: &AppHandle) {
         Ok(r) => {
             let url = format!("http://127.0.0.1:{}/#token={}&shell=desktop", r.port, r.token);
             st.port.store(r.port, Ordering::SeqCst);
+            if !st.update_checked.swap(true, Ordering::SeqCst) {
+                // #149：10 秒后查更新；安装器接管前先正常停掉 sidecar（SQLite 落盘），见 update.rs
+                let st_stop = st.clone();
+                update::spawn_check(app, r.port, r.token.clone(), move || {
+                    st_stop.gen.fetch_add(1, Ordering::SeqCst);
+                    let taken = st_stop.running.lock().unwrap().take();
+                    if let Some(r) = taken {
+                        sidecar::stop(&r);
+                    }
+                });
+            }
             let child = r.child.clone();
             *st.running.lock().unwrap() = Some(r);
             let _ = win.navigate(Url::parse(&url).unwrap());
@@ -104,6 +118,21 @@ fn launch(app: &AppHandle) {
     }
 }
 
+/// 「更新并重启」（#149）：窗口换成 updating.html，下载、校验、安装；失败时导到错误页（页上有「重新启动」）。
+fn start_update(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.navigate(app_page("updating.html", ""));
+        }
+        if let Err(e) = update::install(&app).await {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.navigate(app_page("error.html", &format!("msg={}", enc(&e))));
+            }
+        }
+    });
+}
+
 fn relaunch(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || launch(&app));
@@ -123,6 +152,10 @@ fn main() {
         let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("selftest-in-job.json"));
         std::process::exit(sidecar::smoke_selftest(&out));
     }
+    if let Some(i) = args.iter().position(|a| a == "--smoke-update") {
+        let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("smoke-update.json"));
+        update::smoke(&out, tauri::generate_context!());
+    }
     if let Some(i) = args.iter().position(|a| a == "--smoke-hold") {
         let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("sidecar.pid"));
         sidecar::smoke_hold(&out);
@@ -140,7 +173,9 @@ fn main() {
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(st.clone())
+        .manage(update::Pending::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             let st_nav = st.clone();
@@ -159,6 +194,10 @@ fn main() {
                     }
                     if u.host_str() == Some(RESTART_HOST) {
                         relaunch(&h_nav);
+                        return false;
+                    }
+                    if u.host_str() == Some(update::UPDATE_HOST) {
+                        start_update(&h_nav);
                         return false;
                     }
                     open_outside(u);
