@@ -352,3 +352,48 @@ test("设置：DATACHAT_MEMORY 覆盖时，记忆一节写明这里的选择暂�
   expect((within(view).getByLabelText("会话记忆") as HTMLSelectElement).value).toBe("state");
   expect(within(view).getByTestId("memory-hint").textContent).toContain("DATACHAT_MEMORY=off 覆盖");
 });
+
+// 阶段 6 D3（#149）：壳查到新版本后，桌面模式顶部提示，点了才跳到 UPDATE_URL；浏览器模式不问后端
+test("Shell：桌面模式轮询到新版本时提示，点「更新并重启」跳到壳拦截的地址；浏览器模式不请求", async () => {
+  const { UPDATE_URL } = await import("../desktop");
+  const key: KeyStatus = { configured: true, source: "keyring" };
+  const web = fakeBackend({ "GET /datasets": [], "GET /sessions": [] });
+  const a = render(<Shell c={client(new Api("t", web.fetchImpl))} initialKey={key} desktop={false} />);
+  await screen.findByTestId("ready");
+  expect(web.calls.some((x) => x.path === "/desktop/update")).toBe(false);
+  a.unmount();
+
+  const be = fakeBackend({
+    "GET /datasets": [], "GET /sessions": [],
+    "GET /desktop/update": { available: { version: "0.1.1", notes: "" } },
+  });
+  const assign = vi.fn();
+  const orig = window.location;
+  Object.defineProperty(window, "location", { configurable: true, value: { ...orig, assign } });
+  try {
+    render(<Shell c={client(new Api("t", be.fetchImpl))} initialKey={key} desktop />);
+    const bar = await screen.findByTestId("update-bar");
+    expect(bar.textContent).toContain("有新版本 0.1.1");
+    fireEvent.click(within(bar).getByRole("button", { name: "更新并重启" }));
+    expect(assign).toHaveBeenCalledWith(UPDATE_URL);
+    expect((within(bar).getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+  } finally {
+    Object.defineProperty(window, "location", { configurable: true, value: orig });
+  }
+});
+
+test("Shell：桌面模式后端没有新版本或不支持（404）时不提示", async () => {
+  const key: KeyStatus = { configured: true, source: "keyring" };
+  const none = fakeBackend({ "GET /datasets": [], "GET /sessions": [], "GET /desktop/update": { available: null } });
+  const a = render(<Shell c={client(new Api("t", none.fetchImpl))} initialKey={key} desktop />);
+  await screen.findByTestId("ready");
+  await act(async () => {});
+  expect(none.calls.some((x) => x.path === "/desktop/update")).toBe(true);
+  expect(screen.queryByTestId("update-bar")).toBeNull();
+  a.unmount();
+  const old = fakeBackend({ "GET /datasets": [], "GET /sessions": [] });
+  render(<Shell c={client(new Api("t", old.fetchImpl))} initialKey={key} desktop />);
+  await screen.findByTestId("ready");
+  await act(async () => {});
+  expect(screen.queryByTestId("update-bar")).toBeNull();
+});

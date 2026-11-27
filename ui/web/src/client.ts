@@ -120,6 +120,8 @@ export function client(api: Api) {
     /** 两步测试（连接 + 工具调用），测的是已保存的配置；和 testSettings 共用一把锁，第二个 409。 */
     testConnection: (id: string) => api.json<ConnectionTest>(`/connections/${encodeURIComponent(id)}/test`, { method: "POST" }),
     connectionModels: (id: string) => api.json<ModelList>(`/connections/${encodeURIComponent(id)}/models`),
+    /** 桌面壳查到的新版本（#149）；没有时 available 为 null。浏览器模式不调用。 */
+    desktopUpdate: () => api.json<{ available: { version: string; notes: string } | null }>("/desktop/update"),
     /** 桌面模式导出 PNG（阶段 6 收尾）：后端写进「下载」文件夹，返回完整路径。浏览器模式后端 404，前端也不会调用。 */
     savePng: async (dataUrl: string, filename: string) =>
       (await api.json<{ path: string }>(`/exports/png?filename=${encodeURIComponent(filename)}`, {

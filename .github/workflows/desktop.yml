@@ -116,6 +116,13 @@ jobs:
           if ($sh.home -ne $userData) { throw "壳没用安装时选的数据文件夹：$($sh.home)" }
           if (Test-Path (Join-Path $dir "datachat.db")) { throw "安装目录里出现了 datachat.db" }
 
+          # ①d 自动更新（#149）：PR 构建不带更新签名；--smoke-update 必须能跑完并写出 JSON。
+          #    公钥未填时退出码 1（configured=false）；填了公钥之后，查 latest 得到 1（出错/没有 Release）或 2（没有更新）都算通过
+          $p = Start-Process $exe.FullName -ArgumentList "--smoke-update", "$PWD\smoke-update.json" -Wait -PassThru
+          $su = Get-Content smoke-update.json -Raw -Encoding utf8 | ConvertFrom-Json
+          "smoke_update_exit=$($p.ExitCode) configured=$($su.configured) current=$($su.current_version) error=$($su.error)" | Tee-Object -FilePath $rep -Append
+          if ($p.ExitCode -notin 1, 2) { throw "--smoke-update 退出码异常：$($p.ExitCode)" }
+
           # ② 强杀壳，sidecar 必须被 Job Object 一起带走
           $hold = Start-Process $exe.FullName -ArgumentList "--smoke-hold", "$PWD\sidecar.pid" -PassThru
           for ($i = 0; $i -lt 60 -and -not (Test-Path sidecar.pid); $i++) { Start-Sleep -Milliseconds 500 }
@@ -176,6 +183,7 @@ jobs:
             smoke-shell.json
             selftest-in-job.json
             smoke-home.json
+            smoke-update.json
           retention-days: 30
       - uses: actions/upload-artifact@v7
         with:

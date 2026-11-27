@@ -1,0 +1,86 @@
+# 阶段 6 D3 升级验收（phase6-desktop.md §4 验收，issue #149）：在干净的 runner 上装旧版 → 让它检查更新 →
+# 装上新版 → 版本号变了、安装目录和数据文件夹不变、旧会话还在。
+# 先用 release.yml 发两个 pre-release（例如 v0.1.0、v0.1.1），再手动运行本工作流。
+# pre-release 不是 GitHub 的「latest」，所以用 DATACHAT_UPDATE_ENDPOINT 指向新版那个 Release 的 latest.json；
+# 安装包签名仍由旧版内置的公钥校验（update.rs）。
+name: update-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      old_tag:
+        description: "旧版 Release tag（例如 v0.1.0）"
+        required: true
+      new_tag:
+        description: "新版 Release tag（例如 v0.1.1）"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 装旧版 → 检查更新 → 装新版
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD: ${{ inputs.old_tag }}
+          NEW: ${{ inputs.new_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rep = "update-e2e.txt"
+          New-Item -ItemType Directory -Force old | Out-Null
+          gh release download $env:OLD --repo $env:GITHUB_REPOSITORY --pattern "*-setup.exe" --dir old
+          $setup = (Get-ChildItem old/*-setup.exe | Select-Object -First 1).FullName
+          $data = Join-Path $env:RUNNER_TEMP "升级数据"
+          Start-Process $setup -ArgumentList "/S", "/DATADIR=$data" -Wait
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\DataChat"
+          $exe = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch "uninstall" } | Select-Object -First 1
+          $uk = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DataChat"
+          $v0 = (Get-ItemProperty $uk).DisplayVersion
+          "old_version=$v0 dir=$dir" | Tee-Object -FilePath $rep -Append
+
+          # 旧版先跑一次，建出数据库（代表「旧会话」所在的库）
+          $p = Start-Process $exe.FullName -ArgumentList "--smoke-home", "$PWD\home1.json" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "旧版 --smoke-home 失败" }
+          $db = Join-Path $data "datachat.db"
+          $dbHash0 = (Get-FileHash $db).Hash
+          "db_before=$dbHash0" | Tee-Object -FilePath $rep -Append
+
+          # 检查更新并安装（passive，带 /UPDATE；本进程交给安装器后退出，不自动重启）
+          $env:DATACHAT_UPDATE_ENDPOINT = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:NEW/latest.json"
+          $p = Start-Process $exe.FullName -ArgumentList "--smoke-update", "$PWD\update.json" -Wait -PassThru
+          Get-Content update.json | Tee-Object -FilePath $rep -Append
+          if ($p.ExitCode -ne 0) { throw "--smoke-update 退出码 $($p.ExitCode)（2 = 没查到更新，1 = 出错）" }
+          $want = (Get-Content update.json -Raw | ConvertFrom-Json).version
+          for ($i = 0; $i -lt 120; $i++) {
+            $v1 = (Get-ItemProperty $uk -ErrorAction SilentlyContinue).DisplayVersion
+            if ($v1 -eq $want -and -not (Get-Process -Name "*setup*" -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Seconds 1
+          }
+          Start-Sleep -Seconds 3
+          $exe1 = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch "uninstall" } | Select-Object -First 1
+          $reg = (Get-ItemProperty "HKCU:\Software\smilewithoutfalling\DataChat" -Name DataDir -ErrorAction SilentlyContinue).DataDir
+          "new_version=$v1 same_dir=$([bool]$exe1) reg_datadir=$reg" | Tee-Object -FilePath $rep -Append
+          if ($v1 -ne $want) { throw "版本号没变成 $want（现在是 $v1）" }
+          if (-not $exe1) { throw "升级后安装目录里没有程序" }
+          if ($reg -ne $data) { throw "升级改了数据文件夹：$reg" }
+
+          # 新版能打开旧库（启动时补表，旧数据不动）
+          $p = Start-Process $exe1.FullName -ArgumentList "--smoke-home", "$PWD\home2.json" -Wait -PassThru
+          $h2 = Get-Content home2.json -Raw | ConvertFrom-Json
+          "new_smoke_home=$($h2.home) db_exists=$($h2.db_exists) exit=$($p.ExitCode)" | Tee-Object -FilePath $rep -Append
+          if ($p.ExitCode -ne 0 -or $h2.home -ne $data) { throw "新版没用原来的数据文件夹" }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: update-e2e-report
+          path: |
+            update-e2e.txt
+            update.json
+            home1.json
+            home2.json
+          retention-days: 30

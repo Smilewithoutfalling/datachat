@@ -50,7 +50,7 @@ def test_template_is_wired_and_pinned_to_ci_cli_version():
     nsi = (TAURI / "installer.nsi").read_text(encoding="utf-8")
     m = re.search(r"tag tauri-cli-v(\d+\.\d+\.\d+)", nsi)
     assert m, "模板文件头要写来源 tag"
-    wf = (ROOT / ".github" / "workflows" / "desktop.yml").read_text(encoding="utf-8")
+    wf = "".join((ROOT / ".github" / "workflows" / f).read_text(encoding="utf-8") for f in ("desktop.yml", "release.yml"))
     pins = set(re.findall(r"@tauri-apps/cli@(\S+)", wf))
     assert pins == {m.group(1)}, f"CI 的 CLI 版本 {pins} 与模板来源 {m.group(1)} 不一致"
 
@@ -185,3 +185,16 @@ def test_tail_fixes_b4_env_and_normalization_bypass():
     un_init = nsi[nsi.index("Function un.onInit"):nsi.index("Section Uninstall")]
     assert "StrCpy $UnFromEnv 1" in un_init
     assert "${AndIf} $UnFromEnv <> 1" in _hook_body()
+
+
+def test_updater_config_matches_phase6_section4():
+    """#149：endpoint 指向 GitHub Releases 的 latest.json；Windows 用 passive；PR 构建不生成更新签名。"""
+    conf = _conf()
+    up = conf["plugins"]["updater"]
+    assert up["endpoints"] == ["https://github.com/Smilewithoutfalling/datachat/releases/latest/download/latest.json"]
+    assert up["windows"]["installMode"] == "passive"
+    assert "pubkey" in up
+    assert "createUpdaterArtifacts" not in conf["bundle"], "签名只在 release.yml 里开（PR 构建没有私钥）"
+    rel = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert '"createUpdaterArtifacts":true' in rel and "TAURI_SIGNING_PRIVATE_KEY" in rel
+    assert "workflow_dispatch" in rel and "\n  push:" not in rel
