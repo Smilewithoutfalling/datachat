@@ -166,3 +166,22 @@ def test_installer_rejects_unsafe_data_dirs_by_rule():
         assert needle in body, needle
     hook = _hook_body()
     assert '${AndIf} ${FileExists} "$UnDataDir\\datachat.db"' in hook
+
+
+def test_tail_fixes_b4_env_and_normalization_bypass():
+    """#148 第二轮审查问题 1/2/4：没选过数据文件夹的新装也查重叠；DATACHAT_HOME 的文件夹卸载不删；
+    拒绝 ? ~ $ 和以点 / 空格结尾的段。运行时行为由 desktop CI ⓪ / ⓪b 段在 Windows 上验。"""
+    nsi = (TAURI / "installer.nsi").read_text(encoding="utf-8")
+    sec = nsi[nsi.index("Section Install"):]
+    sec = sec[:sec.index("SetOutPath $INSTDIR")]
+    assert "${ElseIf} $IsUpgrade = 0" in sec and "StrCpy $R3 0" in sec
+    body = nsi[nsi.index("Function ValidateDataDir"):]
+    body = body[:body.index("FunctionEnd")]
+    for needle in ('StrCpy $1 "?"', 'StrCpy $1 "~"', 'StrCpy $1 "$$"', 'StrCpy $1 ".\\"', 'StrCpy $1 " \\"',
+                   "Goto overlap", "  overlap:"):
+        assert needle in body, needle
+    # mode 0 只跳过字符规则和「非空」规则，不跳过重叠检查
+    assert body.index("  overlap:") < body.index("数据文件夹不能与安装目录相同")
+    un_init = nsi[nsi.index("Function un.onInit"):nsi.index("Section Uninstall")]
+    assert "StrCpy $UnFromEnv 1" in un_init
+    assert "${AndIf} $UnFromEnv <> 1" in _hook_body()

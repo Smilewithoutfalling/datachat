@@ -97,6 +97,7 @@ Var DataDirChosen    ; 1 = 由数据文件夹页或 /DATADIR= 选定，需要写
 Var IsUpgrade        ; 1 = 以前装过（注册表里有上次的安装目录），升级不碰数据文件夹
 Var DataDirText      ; 数据文件夹页的输入框
 Var UnDataDir        ; 卸载时要清理的数据文件夹
+Var UnFromEnv        ; 1 = 数据文件夹来自 DATACHAT_HOME：安装器从没校验过它，卸载一律不删
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -469,6 +470,7 @@ FunctionEnd
 
 Function DataDirPageLeave
   ${NSD_GetText} $DataDirText $DataDir
+  StrCpy $R3 1
   Call ValidateDataDir
   ${If} $R0 != ""
     MessageBox MB_ICONEXCLAMATION|MB_OK "$R0"
@@ -551,6 +553,10 @@ Function ValidateDataDir
     StrCpy $R0 "请选择数据文件夹。"
     Return
   ${EndIf}
+  ; $R3 = 0：只查与安装目录相同 / 嵌套（没选过数据文件夹的新装，例如 /S /D=… 不带 /DATADIR=，审查 B4）
+  ${If} $R3 = 0
+    Goto overlap
+  ${EndIf}
   StrCpy $0 $DataDir
   StrCpy $1 "/"
   Call HasChar
@@ -562,6 +568,20 @@ Function ValidateDataDir
   Call HasChar
   ${If} $2 = 1
     StrCpy $R0 "不支持 %变量% 写法，请选择实际的文件夹：$DataDir"
+    Return
+  ${EndIf}
+  ; ? （\\?\ 设备路径）、~（8.3 短名）、$$（C$$ 这类管理共享）：Windows 会把它们规范化成别的路径，绕过下面的字符串比较（审查第二轮问题 4）
+  StrCpy $1 "?"
+  Call HasChar
+  StrCpy $R2 $2
+  StrCpy $1 "~"
+  Call HasChar
+  IntOp $R2 $R2 | $2
+  StrCpy $1 "$$"
+  Call HasChar
+  IntOp $R2 $R2 | $2
+  ${If} $R2 = 1
+    StrCpy $R0 "路径里不能有 ? 、~ 或 $$，请直接选择实际的文件夹：$DataDir"
     Return
   ${EndIf}
   ; 绝对路径：第 2、3 个字符是 :\，或者以 \\ 开头
@@ -581,12 +601,19 @@ Function ValidateDataDir
   StrCpy $1 "\.\"
   Call HasSubstr
   IntOp $R2 $R2 | $2
+  ; 以 . 或空格结尾的段（Windows 会去掉，DataChat.\data 实际就在 DataChat\data）
+  StrCpy $1 ".\"
+  Call HasSubstr
+  IntOp $R2 $R2 | $2
+  StrCpy $1 " \"
+  Call HasSubstr
+  IntOp $R2 $R2 | $2
   StrCpy $0 $DataDir "" 2 ; 去掉开头两个字符（UNC 的 \\ 合法）再找连续反斜杠
   StrCpy $1 "\\"
   Call HasSubstr
   IntOp $R2 $R2 | $2
   ${If} $R2 = 1
-    StrCpy $R0 "路径里不能有 . 、.. 或连续的反斜杠，请直接选择实际的文件夹：$DataDir"
+    StrCpy $R0 "路径里不能有 . 、.. 、以点或空格结尾的文件夹名，或连续的反斜杠，请直接选择实际的文件夹：$DataDir"
     Return
   ${EndIf}
   StrLen $1 $DataDir
@@ -594,6 +621,7 @@ Function ValidateDataDir
     StrCpy $R0 "不能直接用磁盘根目录，请在里面新建或选择一个文件夹：$DataDir"
     Return
   ${EndIf}
+  overlap:
   ; 规范化后的安装目录放在 $R1
   StrCpy $0 $INSTDIR
   Call TrimPath
@@ -617,6 +645,9 @@ Function ValidateDataDir
   StrCpy $3 "$R1\" $2
   ${If} $3 == $1
     StrCpy $R0 "安装目录不能放在数据文件夹里面：$DataDir"
+    Return
+  ${EndIf}
+  ${If} $R3 = 0
     Return
   ${EndIf}
   ; 已存在的文件夹：必须是空的，或者已有 datachat.db
@@ -939,8 +970,15 @@ Section WebView2
 SectionEnd
 
 Section Install
-  ; DATACHAT: 4. 复核数据文件夹（/DATADIR= 没经过页面校验；或者用户从数据文件夹页退回去改过安装目录）
+  ; DATACHAT: 4. 复核数据文件夹（/DATADIR= 没经过页面校验；或者用户从数据文件夹页退回去改过安装目录；没选过的新装只查重叠）
+  ; 没选过数据文件夹的新装（升级除外）也要查与安装目录相同 / 嵌套（审查 B4）
+  StrCpy $R3 2
   ${If} $DataDirChosen = 1
+    StrCpy $R3 1
+  ${ElseIf} $IsUpgrade = 0
+    StrCpy $R3 0
+  ${EndIf}
+  ${If} $R3 <> 2
     Call ValidateDataDir
     ${If} $R0 != ""
       ${IfNot} ${Silent}
@@ -1120,6 +1158,10 @@ Function un.onInit
   ReadEnvStr $0 "DATACHAT_HOME"
   Call un.TrimSpaces
   StrCpy $UnDataDir $0
+  StrCpy $UnFromEnv 0
+  ${If} $UnDataDir != ""
+    StrCpy $UnFromEnv 1
+  ${EndIf}
   ${If} $UnDataDir == ""
     ReadRegStr $UnDataDir SHCTX "${MANUPRODUCTKEY}" "DataDir"
   ${EndIf}
