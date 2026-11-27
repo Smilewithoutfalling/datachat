@@ -156,6 +156,10 @@ class SessionIn(BaseModel):
     title: str = ""
 
 
+class SessionExportBody(BaseModel):
+    charts: dict[str, dict[str, str]] = Field(default_factory=dict)   # 原型：前端离屏渲染的 ECharts 图 {message_id: {序号: PNG data URL}}
+
+
 class SessionPatch(BaseModel):
     title: str = Field(max_length=200)
 
@@ -591,6 +595,53 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         return {"path": path, "filename": os.path.basename(path), "rows": int(frame.shape[0]),
                 "columns": int(frame.shape[1]),
                 "matches_original": format_result(result) == (rec.get("result_text") or "")}
+
+    @app.post("/sessions/{session_id}/export", dependencies=[Depends(auth)])
+    def export_session(session_id: str, body: SessionExportBody | None = None,
+                       download: bool = Query(False), db=Depends(db_dep)):
+        """整段会话导出为自包含 HTML（提问、回答、图表、结果数据）。download=1 直接回文件（浏览器模式），
+        否则与代码 / 结果表导出一样写进「下载」文件夹，回 {path, filename}。"""
+        from app.server.session_export import SessionExportError, build_html, decode_client_pngs, read_png
+        s = get_or_404(db, ChatSession, session_id)
+        ds = db.get(Dataset, s.dataset_id)
+        try:
+            client_pngs = decode_client_pngs(body.charts if body else None)
+        except SessionExportError as e:
+            raise HTTPException(400, str(e)) from None
+        turns, q = [], None
+        for m in s.messages:
+            if m.role == "user":
+                if q is not None:
+                    turns.append({"question": q.content, "answer": "", "status": "none", "charts": [], "result_text": ""})
+                q = m
+                continue
+            try:
+                rec = json.loads(m.result_json) if m.result_json else {}
+            except ValueError:
+                rec = {}
+            pngs = []
+            for k, c in enumerate(rec.get("charts") or []):
+                if isinstance(c, str):
+                    c = {"png": c, "option": None}
+                pngs.append(read_png(c.get("png"), chart_dir) if c.get("png") else client_pngs.get(m.id, {}).get(k))
+            if not rec.get("charts") and rec.get("chart_path"):
+                pngs.append(read_png(rec.get("chart_path"), chart_dir))
+            turns.append({"question": q.content if q else "", "answer": m.content, "status": m.status,
+                          "charts": pngs, "result_text": rec.get("result_text") or ""})
+            q = None
+        if q is not None:
+            turns.append({"question": q.content, "answer": "", "status": "none", "charts": [], "result_text": ""})
+        title = s.title or "DataChat 分析"
+        page = build_html(title=title, dataset=ds.name if ds else "（已删除）", exported_at=now(), turns=turns)
+        data = page.encode("utf-8")
+        if download:
+            from app.server.exports import clean_filename
+            fn = clean_filename(title) + ".html"
+            return Response(data, media_type="text/html; charset=utf-8",
+                            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"})
+        path = write_export(title, data, ".html")
+        logger.info("导出会话：%s（%d 轮）", os.path.basename(path), len(turns))
+        return {"path": path, "filename": os.path.basename(path)}
 
     def check_xlsx(path, fn):
         """xlsx 上传后按解压后体积判（zip 头里各成员 file_size 之和）；坏文件 400，超限 413。"""

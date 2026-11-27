@@ -2,6 +2,9 @@ import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell, UPDATE_POLL_MS, UPDATE_URL } from "../desktop";
+import { exportPng } from "../charts/exportPng";
+import { type ChartInput, DEFAULT_UI } from "../charts/prepare";
+import { getChartTheme } from "../charts/themes";
 import { type Client, errText, formatSize } from "../client";
 import { titleEdit } from "../titles";
 import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session, SessionDetail } from "../types";
@@ -43,6 +46,12 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   const [sessions, setSessions] = useState<Session[]>([]);
   const [view, setView] = useState<View>(initialKey.configured ? { kind: "home" } : { kind: "settings" });
   const [key, setKey] = useState(initialKey);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
   const [error, setError] = useState("");
   const [uploaded, setUploaded] = useState<DatasetDetail | undefined>(); // 上传响应（带预览）
   // 读取失败的数据集（phase5 V2a §3.1）：列表接口不带 error，只在拿到详情（上传响应、打开详情）后知道
@@ -251,7 +260,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
           {sessions.map((s) => (
             <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
               onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)}
-              onExport={() => void exportSession(c, s.id, label[s.dataset_id] ?? "")} />
+              onExport={() => exportSession(c, s.id).then(setNotice, (e) => setNotice(`导出失败：${errText(e)}`))} />
           ))}
         </ul>
       </nav>
@@ -349,6 +358,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         )}
         {view.kind === "settings" && <SettingsView c={c} onKeyChange={setKey} onBack={onBack} />}
       </section>
+      {notice ? <div className="g-toast" role="status">{notice}</div> : null}
       <UploadDialog key={pending.map((f) => f.name).join("|")} c={c} files={pending} onClose={() => setPending([])} onDone={onUploaded} />
     </div>
   );
@@ -362,15 +372,31 @@ const fullTime = (iso: string) => {
   return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
 };
 
-/** 导出：前端拼 Markdown 下载（后端暂无会话导出接口）。助手消息只取正文，图表和表格不带。 */
-async function exportSession(c: Client, id: string, dsName: string) {
+/** 导出整段会话：ECharts 图用与屏幕同一条 prepare 离屏渲染成 PNG，连同会话交给后端拼成自包含 HTML。
+ *  桌面壳里后端直接写进「下载」文件夹（WebView2 里 <a download> 不生效），浏览器里拿文件触发下载。返回给用户看的一句话。 */
+async function exportSession(c: Client, id: string): Promise<string> {
   const d: SessionDetail = await c.session(id);
-  const lines = [`# ${d.title || "未命名会话"}`, "", `数据集：${dsName || "（已删除）"} · 导出时间：${fullTime(new Date().toISOString())}`, ""];
-  for (const m of d.messages) lines.push(m.role === "user" ? `## 问：${m.content}` : m.content || "（无文字回答）", "");
-  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: `${(d.title || "会话").replace(/[\\/:*?"<>|]/g, "_")}.md` });
+  const charts: Record<string, Record<string, string>> = {};
+  const theme = getChartTheme();
+  for (const m of d.messages) {
+    const list = (m.result as { charts?: { png: string | null; option: unknown }[] } | null)?.charts ?? [];
+    list.forEach((ch, i) => {
+      if (ch.png || !ch.option) return;
+      try {
+        (charts[m.id] ??= {})[String(i)] = exportPng(ch.option as ChartInput, DEFAULT_UI, theme, { width: 960, height: 540 });
+      } catch { /* 这一张交给后端标成「未能导出」 */ }
+    });
+  }
+  if (inDesktopShell()) {
+    const r = await c.exportSessionToDisk(id, charts);
+    return `已导出到 ${r.path}`;
+  }
+  const blob = await c.exportSessionFile(id, charts);
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: `${(d.title || "会话").replace(/[\\/:*?"<>|]/g, "_")}.html` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return "已导出为 HTML";
 }
 
 function SessionRow({ s, active, dsName, onOpen, onRename, onDelete, onExport }: {

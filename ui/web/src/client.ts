@@ -99,6 +99,13 @@ export function client(api: Api) {
       api.json<ExportedFile & { rows: number; columns: number; matches_original: boolean }>(
         `/messages/${encodeURIComponent(messageId)}/export/result?format=${format}`, { method: "POST" }),
 
+    // 原型：整段会话导出为 HTML。charts 是前端离屏渲染的 ECharts 图 {message_id: {序号: PNG data URL}}。
+    // download=true 直接拿文件（浏览器模式）；否则后端写进下载文件夹，返回路径（桌面模式）。
+    exportSessionFile: async (id: string, charts: Record<string, Record<string, string>>) =>
+      (await api.request(`/sessions/${encodeURIComponent(id)}/export?download=1`, jsonBody("POST", { charts }))).blob(),
+    exportSessionToDisk: (id: string, charts: Record<string, Record<string, string>>) =>
+      api.json<ExportedFile>(`/sessions/${encodeURIComponent(id)}/export`, jsonBody("POST", { charts })),
+
     settings: () => api.json<Settings>("/settings"),
     saveSettings: (s: Partial<Settings>) => api.json<Settings>("/settings", jsonBody("PUT", s)),
     keyStatus: () => api.json<KeyStatus>("/settings/api-key"),
