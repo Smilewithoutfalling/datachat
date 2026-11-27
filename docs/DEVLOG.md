@@ -11713,7 +11713,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - 更正 #147 落档理由：「改安装目录会断已装用户的 NSIS 升级匹配」不对。模板的 `RestorePreviousInstallLocation` 会让升级沿用旧目录，因此已装用户既不会断，也不会自动分离。见 #147 更正评论。
 - 偏离：无。docs-only，本机未跑 pytest，CI 覆盖。
 
-## [222] 2026-11-27 phase6 §3b 安装目录与数据文件夹方案（issue #148） · commit <待提交>
+## [222] 2026-11-27 phase6 §3b 安装目录与数据文件夹方案（issue #148） · commit 6e59282（PR #164）
 
 - 回填：[221] = e3fc970（PR #163），push CI tests 45843234622 success（已用 `/actions/runs` 核对）。
 - S 11-27 08:34 指出：自选程序目录的安装，升级时沿用原目录，不会和数据重叠。所以 #148 不写迁移逻辑，只改新装的默认安装位置。
@@ -11723,3 +11723,19 @@ S 11-25 授权小问题自定，按此口径执行。
   - 卸载只删 DataChat 自己的文件。
 - S 11-27 08:39 确认自动更新沿用「提示后点一下」，安装方式用 `installMode: passive`（写入 §4 第 1 条）。
 - 方案先行：本 PR 只改文档，代码要等 S 审完 §3b 再写。
+
+## [223] 2026-11-27 安装目录与数据文件夹分离（issue #148） · commit <待提交>
+
+- 回填：[222] = 6e59282（PR #164），PR CI tests 45918108476 success（push CI 待核）。
+- 方案：phase6 §3b（S 11-27 审过）。
+- 改了什么：
+  - `desktop/src-tauri/installer.nsi`：新增，复制自 tauri-cli-v2.12.6 官方模板，改动有 7 处，都以 `; DATACHAT:` 标出。默认安装目录改为 `%LOCALAPPDATA%\Programs\DataChat`；新增「数据文件夹」页及校验（不能等于安装目录、互不嵌套、必须可写）；升级识别（注册表里有上次的安装目录时跳过该页，并忽略 `/DATADIR=`）；用注册表 `DataDir` 传递路径；卸载前先读出数据文件夹；新增 `/DELETEDATA`。
+  - `hooks.nsh`：「删除应用数据」改为只删 DataChat 自己的文件，最后对文件夹做一次不递归的 RMDir。
+  - `sidecar.rs`：`home_dir` 的读取顺序改为 env → 注册表 → 默认（新增直接依赖 winreg 0.56，Cargo.lock 中已有同版本）；新增 `--smoke-home`。
+  - `app/server/app.py`：`default_home` 用同一顺序（B 组，code_sha12 不变）。
+  - CI：`@tauri-apps/cli` 固定为 2.12.6；安装冒烟扩为五段（自选数据文件夹安装、`--smoke-home`、升级、不勾选删除的卸载、勾选删除的卸载）。
+  - 新增 `tests/test_desktop_installer.py`（9 条）。README「安装」、phase6 :28/:76、HANDOVER §8 同步更新。
+- 偏离：
+  - 方案 §3b 写的是「静默卸载不删数据」。新增的 `/DELETEDATA` 只在显式传入时生效，默认行为不变，用于 CI 验证勾选删除这条路径。
+  - 升级识别以注册表里有上次安装目录为准，所以「不勾选删除卸载后再重装」也算升级，沿用原来的 DataDir。
+- 本机只跑了定向测试 `test_desktop_installer.py`（9 passed）；NSIS / Rust 只能在 Windows CI（desktop job）上编译和验证；全量 pytest 交给 CI。

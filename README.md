@@ -58,14 +58,14 @@
 DataChat 用来**分析你自己的数据**：表里的内容会被模型读到，不要加载来路不明的 CSV（THREAT_MODEL §4 (a)）。
 
 1. 从 GitHub Actions 的 `desktop` 工作流下载工件 `datachat-setup-win64`，解压得到 `DataChat_<版本>_x64-setup.exe`。
-2. 双击安装（装在当前用户下，不要管理员权限）。安装包没有签名，第一次运行 SmartScreen 会拦：点「更多信息 → 仍要运行」。没有 WebView2 时安装程序会在线下载。
+2. 双击安装（装在当前用户下，不要管理员权限）。程序默认装到 `%LOCALAPPDATA%\Programs\DataChat`，下一页选「数据文件夹」：默认 `%LOCALAPPDATA%\datachat`，也可以自己选，但不能和程序放在同一个文件夹，也不能放在程序文件夹里面。静默安装用 `/S /DATADIR=<路径>`。安装包没有签名，第一次运行 SmartScreen 会拦：点「更多信息 → 仍要运行」。没有 WebView2 时安装程序会在线下载。
 3. 从开始菜单打开 DataChat。第一次会直接进设置页，先新建一个「连接」：选服务商（DeepSeek、阿里云百炼、Kimi、智谱、OpenAI、Anthropic、Azure、Ollama 等约 20 家，或「自定义」），Base URL 会自动填好（可改，可「恢复默认」），再填 API Key 和模型名（可点「获取模型列表」从服务商读取），保存后点卡片上的「测试」。连接名称自己起，同一个服务商可以建多个连接（比如不同账号、不同网关），每个连接单独保存 Key，同时只有一个连接生效。
    「测试」结果分两行：连接和工具调用。工具调用不通过的模型只能用工作流模式，对话页的「边想边做」（ReAct）会置灰。用自己的 OpenAI 兼容网关时选「自定义」并选协议；个别网关不认 `stream_options` 或分段消息时，在连接的「高级」里打开对应开关。**桌面版不读取仓库里的 `.env`**。从旧版本升级时，原来的模型设置和 Key 会自动迁移成一个连接（`api.deepseek.com` 归到 DeepSeek，其它地址归到「自定义」，名字叫「我的连接」）。
    导出 PNG 时，桌面版会把图片直接存进你的「下载」文件夹，并在按钮旁显示完整路径；重名时自动加 (1)、(2)。
-4. 升级：直接装新版本的安装包，数据不会丢。
-5. 卸载：「设置 → 应用」里卸载。数据目录 `%LOCALAPPDATA%\datachat` 默认保留（卸载页勾选「删除应用数据」才删）；保存在 Windows 凭据管理器里的 Key 不会被删，要删就运行 `python -m app.core.keystore delete`，或在凭据管理器里删掉 datachat 那一项。
+4. 升级：直接装新版本的安装包。程序留在原来的安装目录，数据文件夹不变，也不会再问。
+5. 卸载：「设置 → 应用」里卸载。数据文件夹默认保留；卸载页勾选「删除应用数据」时，只删 DataChat 自己的文件（`datachat.db`、`datasets`、`charts`、`server.log`），文件夹里你自己放的其他东西不会动；保存在 Windows 凭据管理器里的 Key 不会被删，要删就运行 `python -m app.core.keystore delete`，或在凭据管理器里删掉 datachat 那一项。
 
-桌面版和浏览器模式（`python -m app.server --open`）共用同一个数据目录，两种方式随便切换，但不要同时开。
+桌面版和浏览器模式（`python -m app.server --open`）共用同一个数据目录（顺序：环境变量 `DATACHAT_HOME` → 安装时选的数据文件夹 → `%LOCALAPPDATA%\datachat`），两种方式随便切换，但不要同时开。
 
 ## 运行
 

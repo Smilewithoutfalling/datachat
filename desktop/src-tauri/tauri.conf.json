@@ -37,7 +37,8 @@
           "SimpChinese"
         ],
         "displayLanguageSelector": false,
-        "installerHooks": "./hooks.nsh"
+        "installerHooks": "./hooks.nsh",
+        "template": "./installer.nsi"
       }
     }
   }

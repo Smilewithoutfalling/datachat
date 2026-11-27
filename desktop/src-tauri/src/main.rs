@@ -115,6 +115,10 @@ fn main() {
         let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("smoke-shell.json"));
         std::process::exit(sidecar::smoke(&out));
     }
+    if let Some(i) = args.iter().position(|a| a == "--smoke-home") {
+        let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("smoke-home.json"));
+        std::process::exit(sidecar::smoke_home(&out));
+    }
     if let Some(i) = args.iter().position(|a| a == "--smoke-selftest") {
         let out = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("selftest-in-job.json"));
         std::process::exit(sidecar::smoke_selftest(&out));

@@ -111,10 +111,35 @@ CSP = ("default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style
 logger = logging.getLogger("datachat.server")
 
 
+# 桌面安装器记录「数据文件夹」的注册表位置（HKCU；desktop/src-tauri/installer.nsi 的 MANUPRODUCTKEY，值名 DataDir）。
+# 与 desktop/src-tauri/src/sidecar.rs 的 DATA_DIR_REG_KEY 必须一致（tests/test_desktop_installer.py 核对）。
+DATA_DIR_REG_KEY = r"Software\smilewithoutfalling\DataChat"
+DATA_DIR_REG_VALUE = "DataDir"
+
+
+def _registry_data_dir() -> str | None:
+    """安装时选的数据文件夹；非 Windows、没装过桌面版、读不到都返回 None。"""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, DATA_DIR_REG_KEY) as k:
+            v, _ = winreg.QueryValueEx(k, DATA_DIR_REG_VALUE)
+    except OSError:
+        return None
+    v = str(v).strip()
+    return v or None
+
+
 def default_home() -> str:
-    """数据目录：DATACHAT_HOME；否则 Windows 用 %LOCALAPPDATA%\\datachat，其他系统 ~/.local/share/datachat。"""
-    if os.getenv("DATACHAT_HOME"):
-        return os.getenv("DATACHAT_HOME")
+    """数据目录（phase6-desktop.md §3b 第 3 条）：DATACHAT_HOME → 桌面安装时选的数据文件夹（注册表 DataDir）
+    → Windows 用 %LOCALAPPDATA%\\datachat，其他系统 ~/.local/share/datachat。与桌面壳 sidecar.rs home_dir 同一顺序。"""
+    env = (os.getenv("DATACHAT_HOME") or "").strip()
+    if env:
+        return env
+    reg = _registry_data_dir()
+    if reg:
+        return reg
     base = os.getenv("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(base, "datachat")
 

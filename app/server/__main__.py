@@ -33,7 +33,7 @@ class RedactToken(logging.Filter):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m app.server")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--home", default=None, help="数据目录（默认 DATACHAT_HOME 或 %%LOCALAPPDATA%%\\datachat）")
+    ap.add_argument("--home", default=None, help="数据目录（默认 DATACHAT_HOME → 桌面安装时选的数据文件夹 → %%LOCALAPPDATA%%\\datachat）")
     ap.add_argument("--token", default=os.getenv("DATACHAT_TOKEN"), help="默认每次启动随机生成")
     ap.add_argument("--open", action="store_true", help="启动后在浏览器打开前端")
     ap.add_argument("--desktop", action="store_true", help="由桌面壳启动：开启 POST /exports/png（写入「下载」文件夹）")

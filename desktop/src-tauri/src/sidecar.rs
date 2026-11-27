@@ -39,10 +39,37 @@ pub fn exe_path() -> PathBuf {
     dir.join("sidecar").join(name)
 }
 
-/// 数据目录：和浏览器模式（python -m app.server --open）的默认值一致，两种打开方式共用同一份数据。
+/// 安装器记录数据文件夹的注册表位置（HKCU，installer.nsi 的 `${MANUPRODUCTKEY}`，值名 `DataDir`）。
+/// `smilewithoutfalling` 是 Tauri 从 identifier 第二段推出的 manufacturer；改 identifier 或 publisher 会让
+/// 已装用户读不到上次的安装目录和数据文件夹。app/server/app.py 里有同样的常量，tests/test_desktop_installer.py 核对两边一致。
+pub const DATA_DIR_REG_KEY: &str = r"Software\smilewithoutfalling\DataChat";
+pub const DATA_DIR_REG_VALUE: &str = "DataDir";
+
+#[cfg(windows)]
+fn registry_data_dir() -> Option<PathBuf> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey(DATA_DIR_REG_KEY).ok()?;
+    let v: String = key.get_value(DATA_DIR_REG_VALUE).ok()?;
+    let v = v.trim();
+    if v.is_empty() { None } else { Some(PathBuf::from(v)) }
+}
+
+#[cfg(not(windows))]
+fn registry_data_dir() -> Option<PathBuf> {
+    None
+}
+
+/// 数据目录（phase6-desktop.md §3b 第 3 条）：DATACHAT_HOME → 安装时选的数据文件夹（注册表 DataDir）
+/// → %LOCALAPPDATA%\datachat。和浏览器模式（app/server/app.py default_home）同一顺序，两种打开方式共用一份数据。
 pub fn home_dir() -> PathBuf {
     if let Ok(p) = std::env::var("DATACHAT_HOME") {
-        return PathBuf::from(p);
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    if let Some(p) = registry_data_dir() {
+        return p;
     }
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
     PathBuf::from(base).join("datachat")
@@ -179,10 +206,32 @@ pub fn stop(r: &Running) -> Option<i32> {
 /// `--smoke <out.json>`：不开窗口，走一遍壳的启动 → 请求首页 → 正常退出，结果写 JSON。CI 安装冒烟用。
 pub fn smoke(out: &Path) -> i32 {
     let home = std::env::temp_dir().join(format!("datachat-smoke-{}", std::process::id()));
+    let code = smoke_at(out, &home);
+    let _ = std::fs::remove_dir_all(&home);
+    code
+}
+
+/// `--smoke-home <out.json>`：和 `--smoke` 一样走一遍，但数据目录用正式的 `home_dir()`，且不删。
+/// 结果里多 `home` 和 `db_exists`，CI 用来核对安装时选的数据文件夹确实生效（phase6-desktop.md §3b 验收）。
+pub fn smoke_home(out: &Path) -> i32 {
+    let home = home_dir();
+    let code = smoke_at(out, &home);
+    let db = home.join("datachat.db").exists();
+    let mut rep: serde_json::Value = std::fs::read(out)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    rep["home"] = home.display().to_string().into();
+    rep["db_exists"] = db.into();
+    let _ = std::fs::write(out, serde_json::to_vec_pretty(&rep).unwrap_or_default());
+    if code == 0 && db { 0 } else { 1 }
+}
+
+fn smoke_at(out: &Path, home: &Path) -> i32 {
     let exe = exe_path();
     let t0 = Instant::now();
     let mut rep = serde_json::json!({"sidecar": exe.display().to_string()});
-    let ok = match start(&exe, &home) {
+    let ok = match start(&exe, home) {
         Err(e) => {
             rep["error"] = e.into();
             false
@@ -200,7 +249,6 @@ pub fn smoke(out: &Path) -> i32 {
     };
     rep["ok"] = ok.into();
     let _ = std::fs::write(out, serde_json::to_vec_pretty(&rep).unwrap_or_default());
-    let _ = std::fs::remove_dir_all(&home);
     if ok { 0 } else { 1 }
 }
 
