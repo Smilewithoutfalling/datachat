@@ -11702,7 +11702,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - #147 核实：Tauri NSIS 模板 currentUser 默认 `$LOCALAPPDATA\${PRODUCTNAME}`，安装目录与数据目录重叠属实；phase6 :27 的写法留给 #148 改。
 - 不触 app/，不进内网链。
 
-## [221] 2026-11-26 #131/#132 节点 2 审查补交 + 分发方式落档（issue #131、#132、#147） · commit <待提交>
+## [221] 2026-11-26 #131/#132 节点 2 审查补交 + 分发方式落档（issue #131、#132、#147） · commit e3fc970（PR #163）
 
 - 回填：[220] = 859115d（PR #162），push CI tests 45834151200 success（已用 `/actions/runs` 核对 head_sha、event、conclusion）。
 - 起因：只读审查 PR #160（4bffa4c）发现 #131、#132 随 `Closes` 自动关闭时，§11 要求的审查对比表没有贴。S 11-26 22:27 同意补做并重开（重开 22:28 CST / 14:28 UTC）。
@@ -11712,3 +11712,16 @@ S 11-25 授权小问题自定，按此口径执行。
 - 分发方式（S 22:27）：先给几个朋友用，不签名。落在 decisions-pending「11-26 决定」表和 phase6-desktop 范围节。公开发布仍须签名。
 - 更正 #147 落档理由：「改安装目录会断已装用户的 NSIS 升级匹配」不对。模板的 `RestorePreviousInstallLocation` 会让升级沿用旧目录，因此已装用户既不会断，也不会自动分离。见 #147 更正评论。
 - 偏离：无。docs-only，本机未跑 pytest，CI 覆盖。
+
+## [222] 2026-11-27 #139 ② 缓存判读落定：探针两轮 A/B 行为学证据，预算回落 230 万/轮（issue #139） · commit <待提交>
+
+- 背景：#119 实锚后 ② 悬置「cache 真关还是只去记账」，DEVLOG [209] 三问网关方未回。评测侧行为学探针代答。
+- 方法：A=同一大提示连发（前缀可命中缓存），B=每发前缀置唯一 nonce（必全量 prefill）。两轮：a 3027 tok 交错（比值 0.88，信号稀释）；b 7527 tok 连发（**0.59，A 组除首发全部低于 B 组全部，完全分离**）。同时 26 发 prompt_tokens 全价、details 恒空，与 #119 互证：命中不记账。
+- 判读：**服务端前缀缓存仍在工作，11-23 变化是回包 schema 换栈后 cache 字段消失，不是缓存关停**。行为学证据非合同口径，网关方答复若冲突以其为准回改。
+- 落定：#139 ② 预算回落 **230 万 token/轮**，500 万翻倍占位撤销；成本警讯降级为「上报口径变化」。decisions-pending #139② 行同步更新。判读评论：issue #139 issuecomment-7206715178。
+- 归档：docs/eval/archives/cache-probe-139/（读数 JSON×2 + 探针脚本×2 + 评论正文，sha256 见下），供网关方答复冲突时复算。
+  - cache_probe_139.json 6d619c0e1550 / cache_probe_139b.json 22748005ba8e
+  - cache_probe_139.py e3e8493fc9fb / cache_probe_139b.py c5c25fc59f3f / issuecomment_body.md f267dd6e8c6b
+- 指纹：docs-only + archives，**不动任何指纹层，code/entry/judge/canary 四层不变，基线 e3fc970 直接延续**。
+- 明确不做：不做缓存记账字段恢复（采集端 llm.py 改动属 A 组越界）；不等网关方答复悬置预算（判读已足够落定，答复冲突再回改）。
+
