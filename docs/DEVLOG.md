@@ -11798,9 +11798,14 @@ S 11-25 授权小问题自定，按此口径执行。
 - 本机没能做 Rust 的 Windows 交叉 `cargo check`：ring 需要 MSVC 工具链。Rust 部分交给 Windows CI（desktop job）编译。
 - 待 S：用脚本生成密钥，把私钥和口令粘贴进 Secrets，把公钥发给我。之后的步骤：填公钥 → 发 v0.1.0 测试版 → 改版本号为 0.1.1 → 发测试版 → 运行 update-e2e → S 本机验证一次（#149 节点 2）。
 
-## [227] 2026-11-27 #149 填入更新公钥 · commit <待提交>
+## [227] 2026-11-27 #149 填入更新公钥 · commit 0317ed7（PR #170）
 
 - 回填：[226] = 1da0c58（PR #169）。CI：sidecar 45932538827、desktop 45932538896、tests 45932538828，均 success。
 - S 于 11-27 14:00 发来公钥（本机用 gen_update_key.py 生成，key id FAAA8FE893455A0D），已写进 `tauri.conf.json` 的 `plugins.updater.pubkey`。私钥和口令由 S 粘贴进 Secrets，我看不到，也核对不了；以 release 工作流能否签名为准。
 - 新增测试 `test_updater_pubkey_is_the_one_s_generated`：钉死 key id。换公钥会让已装用户再也收不到更新。
 - 公钥填好后，desktop 冒烟的 `--smoke-update` 会真的去查 latest。现在还没有 Release，预期 exit=1（出错）。
+
+## [228] 2026-11-27 #149 版本号改为 0.1.1（升级验收用的新版） · commit <待提交>
+
+- 回填：[227] = 0317ed7（PR #170）。CI：desktop 45949465791、tests 45949465733，均 success。
+- S 11-27 14:27 批准发布两个 pre-release 测试版。v0.1.0 由 release run 45952038235（success）从 0317ed7 发出，已核对：pre-release，资产为 setup.exe（74,231,600 字节）、.sig、latest.json。签名的 trusted comment 带 `version:0.1.0`，所以以后可以开 `requireSignedVersion`。本 PR 只把 `tauri.conf.json` 的 version 改为 0.1.1；合并后从新的 master 发 v0.1.1，再运行 update-e2e（old=v0.1.0，new=v0.1.1）。
