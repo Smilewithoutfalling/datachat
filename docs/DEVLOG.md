@@ -11740,7 +11740,7 @@ S 11-25 授权小问题自定，按此口径执行。
   - 升级识别以注册表里有上次安装目录为准，所以「不勾选删除卸载后再重装」也算升级，沿用原来的 DataDir。
 - 本机只跑了定向测试 `test_desktop_installer.py`（9 passed）；NSIS / Rust 只能在 Windows CI（desktop job）上编译和验证；全量 pytest 交给 CI。
 
-## [224] 2026-11-27 #148 数据文件夹校验补强（只读审查 B1–B3、B6、B9） · commit <待提交>
+## [224] 2026-11-27 #148 数据文件夹校验补强（只读审查 B1–B3、B6、B9） · commit ea12c5d（PR #167）
 
 - 回填：[223] = 5757bdd（PR #166），PR 的 CI 三条全部 success：tests 45919864287、sidecar 45919864312、desktop 45919864294（已用 `/actions/runs` 核对）。desktop 安装冒烟日志实读值：
   - `install_dir=…\AppData\Local\Programs\DataChat`，`reg_datadir=D:\a\_temp\我的数据dc`；
@@ -11758,3 +11758,15 @@ S 11-25 授权小问题自定，按此口径执行。
   - 未处理：B10（交互升级选「先卸载」并勾选删除后，DataDir 回落到默认值）、B11（可写检测会提前建出空目录）、B12（`sidecar\_internal\outputs\charts` 空目录残留，#148 之前就存在），三项都是低风险，暂记在此。
 - CI 新增 ⓪ 段，验证四种不安全的数据文件夹会被拒绝：非空且没有 db、相对路径、`C:\`、带 `..` 段。被拒时不安装、不写注册表。⑤ 段增加对 `charts` 的检查。
 - 测试：`tests/test_desktop_installer.py` 现为 11 条。其中 `test_uninstall_reads_data_dir_before_official_key_cleanup` 的断言改为「env 先读进 $0 并去空格」，原因是读取写法随 B9 一起变了，env → 注册表 → 默认的顺序没变。
+
+## [225] 2026-11-27 #148 收尾：第二轮审查剩余问题 · commit <待提交>
+
+- 回填：[224] = ea12c5d（PR #167）。PR CI：desktop 45924149056、tests 45924149031，均 success；master push tests 45925410869 success。第二轮审查表已贴 #148 评论 7208241871。
+- S 11-27 10:35：本机已验过两种卸载（勾选删除、不勾选），都没问题；第二轮审查剩下的问题「顺手修掉」。
+- 第二轮审查问题 1（B4）：没选过数据文件夹的新装也查重叠。`ValidateDataDir` 新增参数 `$R3`，取 0 时只查「是否与安装目录相同、是否嵌套」；升级不查。
+- 问题 2：数据文件夹来自 `DATACHAT_HOME` 时，卸载一律不删（`$UnFromEnv`）。
+- 问题 4：拒绝 `?`、`~`、`$`，以及以点或空格结尾的段。
+- 问题 5：CI ⓪ 段扩到 9 例，新增：等于安装目录、在安装目录里、`DataChat.\data`、安装目录在数据文件夹里、`\\?\` 设备路径。另加 ⓪b 段：`/S /D=%LOCALAPPDATA%\datachat` 不带 `/DATADIR=`，必须被拒。
+- 未处理：问题 6（B5，留到 #149 立项时定）；问题 8（节点 2 用例用的是当前 schema，旧 schema 兼容已有 `test_v1_database_gains_feedback_table_without_touching_old_tables` 覆盖）；B10–B12 低风险，已写进 phase6 §3b。
+- 越界说明（问题 7）：#148 独占边界以外还改了 desktop.yml、tests/、Cargo.toml/lock、main.rs、README、HANDOVER、DEVLOG。这些都是 §9、§10 和 §3b 验收要求的配套改动，没有改动其他功能。
+- 测试：`test_desktop_installer.py` 12 条，本机全部通过。
