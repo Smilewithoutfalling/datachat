@@ -10,7 +10,7 @@
 ;   3. .onInit：默认安装目录改为 $LOCALAPPDATA\Programs\${PRODUCTNAME}；识别升级；读 /DATADIR=
 ;   4. Section Install 开头：复核数据文件夹
 ;   5. Section Install：把选定的数据文件夹写进注册表 DataDir
-;   6. un.onInit：卸载前先读出数据文件夹（官方逻辑勾选删除时会先删掉注册表键）；/DELETEDATA
+;   6. un.onInit：卸载前先读出数据文件夹（官方逻辑勾选删除时会先删掉注册表键）；/DELETEDATA；6a un.TrimSpaces
 ;   7. （hooks.nsh 的 POSTUNINSTALL 用 6 读到的 $UnDataDir 只删 DataChat 自己的文件）
 ; ============================================================================
 Unicode true
@@ -477,45 +477,137 @@ Function DataDirPageLeave
   StrCpy $DataDirChosen 1
 FunctionEnd
 
-; 去掉末尾的反斜杠（盘符根目录 C:\ 保留原样）
-Function TrimDataDir
-  StrLen $1 $DataDir
-  ${If} $1 > 3
-    StrCpy $2 $DataDir 1 -1
-    ${If} $2 == "\"
-      StrCpy $DataDir $DataDir -1
+; 去掉首尾空格和末尾的反斜杠（可以有多个）。只用在 $DataDir / $5 这类路径上，结果写回 $0。
+Function TrimPath
+  ; 首部空格
+  ${Do}
+    StrCpy $1 $0 1
+    ${If} $1 == " "
+      StrCpy $0 $0 "" 1
+    ${Else}
+      ${ExitDo}
     ${EndIf}
-  ${EndIf}
+  ${Loop}
+  ; 尾部空格和反斜杠（盘符根 X:\ 保留 3 个字符，后面另行拒绝）
+  ${Do}
+    StrLen $2 $0
+    ${If} $2 <= 3
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $1 $0 1 -1
+    ${If} $1 == " "
+    ${OrIf} $1 == "\"
+      StrCpy $0 $0 -1
+    ${Else}
+      ${ExitDo}
+    ${EndIf}
+  ${Loop}
+FunctionEnd
+
+; $0 里有没有字符 $1：有则 $2 = 1
+Function HasChar
+  StrCpy $2 0
+  StrLen $3 $0
+  StrCpy $4 0
+  ${While} $4 < $3
+    StrCpy $5 $0 1 $4
+    ${If} $5 == $1
+      StrCpy $2 1
+      ${Break}
+    ${EndIf}
+    IntOp $4 $4 + 1
+  ${EndWhile}
 FunctionEnd
 
 ; $R0 = "" 表示通过，否则是原因。比较不区分大小写（StrCmp 本身不区分）。
+; 规则（phase6 §3b 第 2 条，#148 审查 B1–B3 补强）：
+;   - 必须是绝对路径（X:\… 或 \\server\share\…），不能用 / 、% 写法，不能是盘符根；
+;   - 用 GetFullPathName 规范化（去掉 . 和 ..）后再和安装目录比：不相同、互不嵌套；
+;   - 文件夹已存在时，必须是空的，或者里面已有 datachat.db（DataChat 以前的数据）——
+;     这样卸载勾选删除时删的 datasets\、charts\ 只可能是 DataChat 自己建的；
+;   - 必须可写。
 Function ValidateDataDir
   StrCpy $R0 ""
-  Call TrimDataDir
+  StrCpy $0 $DataDir
+  Call TrimPath
+  StrCpy $DataDir $0
   ${If} $DataDir == ""
     StrCpy $R0 "请选择数据文件夹。"
     Return
   ${EndIf}
+  StrCpy $0 $DataDir
+  StrCpy $1 "/"
+  Call HasChar
+  ${If} $2 = 1
+    StrCpy $R0 "路径请用反斜杠 \ 分隔：$DataDir"
+    Return
+  ${EndIf}
+  StrCpy $1 "%"
+  Call HasChar
+  ${If} $2 = 1
+    StrCpy $R0 "不支持 %变量% 写法，请选择实际的文件夹：$DataDir"
+    Return
+  ${EndIf}
+  ; 绝对路径：第 2、3 个字符是 :\，或者以 \\ 开头
+  StrCpy $1 $DataDir 2 1
+  StrCpy $2 $DataDir 2
+  ${If} $1 != ":\"
+  ${AndIf} $2 != "\\"
+    StrCpy $R0 "请填写完整路径（例如 D:\DataChat数据）：$DataDir"
+    Return
+  ${EndIf}
+  GetFullPathName $0 $DataDir
+  Call TrimPath
+  StrCpy $DataDir $0
+  StrLen $1 $DataDir
+  ${If} $1 <= 3
+    StrCpy $R0 "不能直接用磁盘根目录，请在里面新建或选择一个文件夹：$DataDir"
+    Return
+  ${EndIf}
+  ; 规范化后的安装目录放在 $R1
+  GetFullPathName $0 $INSTDIR
+  Call TrimPath
+  StrCpy $R1 $0
   ; 与安装目录相同
-  ${If} $DataDir == $INSTDIR
-    StrCpy $R0 "数据文件夹不能与安装目录相同：$INSTDIR"
+  ${If} $DataDir == $R1
+    StrCpy $R0 "数据文件夹不能与安装目录相同：$R1"
     Return
   ${EndIf}
   ; 数据文件夹在安装目录里面
-  StrCpy $1 "$INSTDIR\"
+  StrCpy $1 "$R1\"
   StrLen $2 $1
   StrCpy $3 "$DataDir\" $2
   ${If} $3 == $1
-    StrCpy $R0 "数据文件夹不能放在安装目录里面：$INSTDIR"
+    StrCpy $R0 "数据文件夹不能放在安装目录里面：$R1"
     Return
   ${EndIf}
   ; 安装目录在数据文件夹里面
   StrCpy $1 "$DataDir\"
   StrLen $2 $1
-  StrCpy $3 "$INSTDIR\" $2
+  StrCpy $3 "$R1\" $2
   ${If} $3 == $1
     StrCpy $R0 "安装目录不能放在数据文件夹里面：$DataDir"
     Return
+  ${EndIf}
+  ; 已存在的文件夹：必须是空的，或者已有 datachat.db
+  ${If} ${FileExists} "$DataDir\*.*"
+  ${AndIfNot} ${FileExists} "$DataDir\datachat.db"
+    FindFirst $6 $7 "$DataDir\*.*"
+    ${Do}
+      ${If} $7 == ""
+        ${ExitDo}
+      ${EndIf}
+      ${If} $7 != "."
+      ${AndIf} $7 != ".."
+        StrCpy $R0 "请选择一个空文件夹，或已有 DataChat 数据的文件夹（这个文件夹里已有别的东西）：$DataDir"
+        ${ExitDo}
+      ${EndIf}
+      FindNext $6 $7
+    ${Loop}
+    FindClose $6
+    ${If} $R0 != ""
+      Return
+    ${EndIf}
   ${EndIf}
   ; 可写
   ClearErrors
@@ -673,7 +765,9 @@ Function .onInit
     StrCpy $IsUpgrade 1
   ${EndIf}
   StrCpy $DataDirChosen 0
-  ReadEnvStr $DataDir "DATACHAT_HOME"
+  ReadEnvStr $0 "DATACHAT_HOME"
+  Call TrimPath ; 与壳、浏览器模式一样去掉首尾空格，全是空格就当没设
+  StrCpy $DataDir $0
   ${If} $DataDir == ""
     StrCpy $DataDir "$LOCALAPPDATA\datachat"
   ${EndIf}
@@ -951,6 +1045,26 @@ Function .onInstSuccess
   ${EndIf}
 FunctionEnd
 
+; DATACHAT: 6a. 卸载器用的去首尾空格（安装器的 TrimPath 不能在 un. 段里调用）
+Function un.TrimSpaces
+  ${Do}
+    StrCpy $1 $0 1
+    ${If} $1 == " "
+      StrCpy $0 $0 "" 1
+    ${Else}
+      ${ExitDo}
+    ${EndIf}
+  ${Loop}
+  ${Do}
+    StrCpy $1 $0 1 -1
+    ${If} $1 == " "
+      StrCpy $0 $0 -1
+    ${Else}
+      ${ExitDo}
+    ${EndIf}
+  ${Loop}
+FunctionEnd
+
 Function un.onInit
   !insertmacro SetContext
 
@@ -973,7 +1087,9 @@ Function un.onInit
   ; DATACHAT: 6. 先读出数据文件夹（顺序与壳一致：DATACHAT_HOME → 注册表 DataDir → 默认）。
   ;    官方逻辑在勾选「删除应用数据」时会先删掉 ${MANUPRODUCTKEY}，所以必须在这里读。
   ;    /DELETEDATA：静默卸载时等同勾选（CI 用）。
-  ReadEnvStr $UnDataDir "DATACHAT_HOME"
+  ReadEnvStr $0 "DATACHAT_HOME"
+  Call un.TrimSpaces
+  StrCpy $UnDataDir $0
   ${If} $UnDataDir == ""
     ReadRegStr $UnDataDir SHCTX "${MANUPRODUCTKEY}" "DataDir"
   ${EndIf}

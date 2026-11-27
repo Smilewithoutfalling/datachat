@@ -64,8 +64,9 @@ fn registry_data_dir() -> Option<PathBuf> {
 /// → %LOCALAPPDATA%\datachat。和浏览器模式（app/server/app.py default_home）同一顺序，两种打开方式共用一份数据。
 pub fn home_dir() -> PathBuf {
     if let Ok(p) = std::env::var("DATACHAT_HOME") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
+        let p = p.trim();
+        if !p.is_empty() {
+            return PathBuf::from(p); // 与 app.py default_home 一样去掉首尾空格
         }
     }
     if let Some(p) = registry_data_dir() {
