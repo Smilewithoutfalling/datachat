@@ -118,3 +118,9 @@ export const Spinner = ({ size = 11 }: { size?: number }) => (
     <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
   </svg>
 );
+export const IconHome = (p: P) => (
+  <Svg {...p}><path d="M2.6 7.2 8 2.8l5.4 4.4M4 6.2v6.6c0 .4.3.7.7.7h2.1V10h2.4v3.5h2.1c.4 0 .7-.3.7-.7V6.2" /></Svg>
+);
+export const IconSend = (p: P) => (
+  <Svg {...p}><path d="M8 13V3.2M4.2 7 8 3.2 11.8 7" /></Svg>
+);

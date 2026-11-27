@@ -1,0 +1,81 @@
+/* 原型（proto/genie-shell）：Genie 式侧栏 + 首页。只在这里写，便于整体回滚。
+   新增部分只用 3 档圆角（8 / 12 / 16）、2 档阴影；辅助文字用 #6E6E73（白底 5.1:1，#F5F5F7 上 4.7:1），不再用 #A0A0A5。 */
+:root {
+  --g-r-sm: 8px; --g-r-md: 12px; --g-r-lg: 16px;
+  --g-shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --g-shadow-md: 0 4px 16px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.05);
+  --g-aux: #6E6E73;
+}
+/* 微软雅黑没有 500，700 发胖发糊：主按钮回到 400 */
+button.primary { font-weight: 400; }
+
+/* ---------- 侧栏 */
+.g-side { gap: 0; }
+.g-nav { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 12px; }
+.g-side .nav-row { font-size: var(--fs-body); height: 34px; }
+.g-side .nav-row:hover:not(.active) { background: var(--line-muted); }
+.g-count { margin-left: auto; font-size: var(--fs-aux); color: var(--g-aux); }
+.g-new { width: 100%; height: 36px; justify-content: flex-start; gap: 8px; padding: 0 12px; border-radius: var(--g-r-sm); background: #fff; border: 1px solid var(--line-strong); box-shadow: var(--g-shadow-sm); font-size: var(--fs-body); }
+.g-new svg { color: var(--accent); }
+.g-chats { flex: 1; min-height: 0; overflow-y: auto; margin: 14px -4px 0; padding: 0 4px; }
+.g-side .side-head { margin: 0 2px 6px; }
+.g-side .side-head, .g-side .side-empty { color: var(--g-aux); }
+.g-side .sess-row { padding: 7px 34px 7px 10px; border-radius: var(--g-r-sm); }
+.g-side .sess-title { font-size: var(--fs-body); }
+.g-side .sess-row.active .sess-title { font-weight: 400; color: var(--accent); }
+.g-side .sess-meta { display: none; }
+.g-side .side-foot { margin-top: 8px; }
+
+/* ---------- 首页 */
+.g-main { display: flex; justify-content: center; padding-top: 0; }
+.g-home { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 32px; padding: 12vh 0 40px; }
+.g-hero { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+.g-hello { margin: 0; text-align: center; font-size: var(--fs-title-lg); font-weight: 400; letter-spacing: -.2px; }
+.g-ask { border: 1px solid var(--line-input); border-radius: var(--g-r-lg); background: #fff; box-shadow: var(--g-shadow-md); padding: 14px 14px 10px 16px; display: flex; flex-direction: column; gap: 8px; transition: border-color 120ms, box-shadow 120ms; }
+.g-ask:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,102,204,.12), var(--g-shadow-md); }
+.g-ask textarea { border: none; resize: none; min-height: 48px; font-size: var(--fs-read); line-height: 1.6; padding: 0; background: transparent; box-shadow: none; }
+.g-ask textarea:focus { box-shadow: none; }
+.g-ask textarea::placeholder { color: var(--g-aux); }
+.g-ask-row { display: flex; align-items: center; gap: 10px; }
+.g-ds-pick { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; border-radius: 9999px; background: var(--bg-subtle); color: var(--fg); font-size: var(--fs-aux); max-width: 280px; min-width: 0; }
+.g-ds-pick svg { color: var(--accent); flex: none; }
+.g-ds-pick select { border: none; background: transparent; height: 28px; padding: 0 4px; font-size: var(--fs-aux); min-width: 0; text-overflow: ellipsis; box-shadow: none; }
+.g-hint { font-size: var(--fs-aux); color: var(--g-aux); margin-left: auto; white-space: nowrap; }
+.g-send { width: 34px; height: 34px; padding: 0; border-radius: 50%; flex: none; }
+.g-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.g-sec-title { margin: 0; font-size: var(--fs-body); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.g-more { margin-left: auto; font-size: var(--fs-aux); font-weight: 400; }
+.g-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.g-card { width: 100%; height: auto; min-height: 76px; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; padding: 14px 16px; text-align: left; white-space: normal; border-radius: var(--g-r-md); border: 1px solid var(--line); background: #fff; box-shadow: var(--g-shadow-sm); transition: border-color 120ms, box-shadow 120ms; }
+.g-card:hover:not(:disabled) { background: #fff; border-color: var(--line-input); box-shadow: var(--g-shadow-md); }
+.g-card-title { font-size: var(--fs-body); font-weight: 700; color: var(--fg); }
+.g-card-desc { font-size: var(--fs-aux); color: var(--g-aux); line-height: 1.5; }
+.g-recent { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.g-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.g-item { width: 100%; height: 38px; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: var(--g-r-sm); background: none; text-align: left; }
+.g-item:hover:not(:disabled) { background: var(--bg-subtle); }
+.g-item svg { color: var(--g-aux); flex: none; }
+.g-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-body); }
+.g-item-meta { flex: none; font-size: var(--fs-aux); color: var(--g-aux); max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.g-empty { margin: 0; font-size: var(--fs-aux); color: var(--g-aux); }
+.g-home .empty-card { width: 100%; }
+
+/* ---------- 数据集页：卡片从侧栏挪过来，网格排 */
+.g-ds-page { max-width: 1100px; display: flex; flex-direction: column; gap: 16px; }
+.g-ds-page .upload { max-width: 420px; }
+.g-ds-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.g-ds-grid .ds-card { border: 1px solid var(--line); border-radius: var(--g-r-md); background: #fff; padding: 6px 8px 10px; box-shadow: var(--g-shadow-sm); }
+.g-ds-grid .ds-row { margin-top: 0; }
+.g-ds-grid .ds-row.active { border-color: transparent; }
+.g-ds-grid .ds-meta, .g-ds-grid .ds-tag { color: var(--g-aux); }
+.g-ds-grid .ds-stats, .g-ds-grid .ds-actions { padding: 0 10px; }
+
+@media (max-width: 720px) {
+  .g-home { padding-top: 6vh; gap: 24px; }
+  .g-cards, .g-recent { grid-template-columns: minmax(0, 1fr); }
+  .g-hint { display: none; }
+  .g-ds-pick { max-width: none; flex: 1; }
+}
+.g-side .sess-item { display: flex; flex-direction: column; } /* 更多菜单的包裹 span 是 inline-flex，会撑出一行空白 */
+.g-ds-grid .ds-stats { margin-top: 4px; gap: 4px; }
+.g-ds-grid .ds-actions { padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-muted); gap: 16px; }
