@@ -93,7 +93,8 @@ def test_uninstall_reads_data_dir_before_official_key_cleanup():
     nsi = (TAURI / "installer.nsi").read_text(encoding="utf-8")
     un_init = nsi[nsi.index("Function un.onInit"):nsi.index("Section Uninstall")]
     assert 'ReadRegStr $UnDataDir SHCTX "${MANUPRODUCTKEY}" "DataDir"' in un_init
-    assert 'ReadEnvStr $UnDataDir "DATACHAT_HOME"' in un_init
+    # env 先读进 $0 去首尾空格（审查 B9），再落到 $UnDataDir；顺序仍是 env → 注册表 → 默认
+    assert 'ReadEnvStr $0 "DATACHAT_HOME"' in un_init and "Call un.TrimSpaces" in un_init
     assert un_init.index("DATACHAT_HOME") < un_init.index("ReadRegStr $UnDataDir")
 
 
@@ -124,3 +125,44 @@ def test_default_home_falls_back_to_localappdata(clean_env):
 @pytest.mark.skipif(os.name == "nt", reason="非 Windows 才断言不读注册表")
 def test_registry_is_not_read_off_windows():
     assert server_app._registry_data_dir() is None
+
+
+# ---------------------------------------------------------------- 旧数据目录启动（#148 §9 / 节点 2）
+def test_old_data_dir_survives_restart_via_registry_resolution(tmp_path, clean_env, sample_path):
+    """升级或重装后，程序按「注册表 DataDir」找到原来的数据文件夹：旧会话、旧数据集、旧消息都在。
+    沿用 test_web.py::test_v1_database_gains_feedback_table_without_touching_old_tables 的做法：
+    先在一个数据目录里跑完一轮，再用 home=None（走 default_home 解析）新建 app 读回。"""
+    from fastapi.testclient import TestClient
+    from tests.test_core_analyze import wf_model
+    from tests.test_server import H, TOKEN
+    from tests.test_web import _one_turn
+
+    data = str(tmp_path / "我的数据")
+    c = TestClient(server_app.create_app(
+        data, TOKEN, chat_model_factory=lambda: wf_model(["result = int(df['units'].sum())"], answer="总销量 1685")))
+    sid, mid, _ = _one_turn(c, sample_path)
+    ds_before = c.get("/datasets", headers=H).json()
+    del c
+
+    clean_env.setattr(server_app, "_registry_data_dir", lambda: data)
+    assert server_app.default_home() == data
+    c2 = TestClient(server_app.create_app(None, TOKEN))
+    assert os.path.abspath(c2.app.state.home) == os.path.abspath(data)
+    assert c2.get("/datasets", headers=H).json() == ds_before
+    sess = c2.get(f"/sessions/{sid}", headers=H).json()
+    assert [m["id"] for m in sess["messages"]][-1] == mid
+    assert any(s["id"] == sid for s in c2.get("/sessions", headers=H).json())
+
+
+def test_installer_rejects_unsafe_data_dirs_by_rule():
+    """B1–B3 补强后的校验规则都在模板里（真正的行为由 desktop CI ⓪ 段在 Windows 上验）。"""
+    nsi = (TAURI / "installer.nsi").read_text(encoding="utf-8")
+    body = nsi[nsi.index("Function ValidateDataDir"):]
+    body = body[:body.index("FunctionEnd")]
+    # GetFullPathName 在路径不存在时返回空（新装时数据文件夹、安装目录都还没建），CI 红过一次（run 45922407138），不许再用
+    assert "GetFullPathName " not in body.replace("; 不用 GetFullPathName", "")
+    for needle in ('StrCpy $1 "\\..\\"', 'StrCpy $1 "\\.\\"', 'StrCpy $1 "/"', 'StrCpy $1 "%"',
+                   '${If} $1 <= 3', '${AndIfNot} ${FileExists} "$DataDir\\datachat.db"', 'FindFirst $6 $7'):
+        assert needle in body, needle
+    hook = _hook_body()
+    assert '${AndIf} ${FileExists} "$UnDataDir\\datachat.db"' in hook

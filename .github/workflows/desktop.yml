@@ -71,6 +71,16 @@ jobs:
           $setup = (Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1).FullName
           # phase6 §3b：默认装到 %LOCALAPPDATA%\Programs\DataChat；数据文件夹用 /DATADIR= 指定到一个自选位置
           $userData = Join-Path $env:RUNNER_TEMP "我的数据dc"
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\DataChat"
+          # ⓪ 不安全的数据文件夹必须被拒（#148 审查 B1–B3）：非空且没有 datachat.db、相对路径、盘符根、带 .. 段。拒了就不装
+          foreach ($bad in @($env:RUNNER_TEMP, "relative-data", "C:\", "$env:LOCALAPPDATA\..\dc-dotdot")) {
+            $p = Start-Process $setup -ArgumentList "/S", "/DATADIR=$bad" -Wait -PassThru
+            "reject_datadir=$bad exit=$($p.ExitCode) installed=$(Test-Path (Join-Path $dir 'uninstall.exe'))" | Tee-Object -FilePath $rep -Append
+            if ($p.ExitCode -eq 0) { throw "不安全的数据文件夹没被拒：$bad" }
+            if (Test-Path (Join-Path $dir "uninstall.exe")) { throw "被拒后仍然装上了：$bad" }
+          }
+          if (Test-Path "HKCU:\Software\smilewithoutfalling\DataChat") { throw "被拒的安装留下了注册表键" }
+
           Start-Process $setup -ArgumentList "/S", "/DATADIR=$userData" -Wait
           $dir = Join-Path $env:LOCALAPPDATA "Programs\DataChat"
           if (-not (Test-Path $dir)) { throw "安装目录不存在：$dir" }
@@ -140,15 +150,18 @@ jobs:
           if (-not (Test-Path (Join-Path $dir $exe.Name))) { throw "重装失败" }
           Set-Content (Join-Path $userData "keep.txt") "x"
           New-Item -ItemType Directory -Force (Join-Path $userData "datasets\ds1") | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $userData "charts") | Out-Null
+          Set-Content (Join-Path $userData "charts\c1.png") "x"
           Set-Content (Join-Path $userData "server.log") "x"
           Start-Process (Join-Path $dir "uninstall.exe") -ArgumentList "/S", "/DELETEDATA" -Wait
           for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $userData "datachat.db")); $i++) { Start-Sleep -Milliseconds 500 }
           $dbGone = -not (Test-Path (Join-Path $userData "datachat.db"))
           $dsGone = -not (Test-Path (Join-Path $userData "datasets"))
           $logGone = -not (Test-Path (Join-Path $userData "server.log"))
+          $chartsGone = -not (Test-Path (Join-Path $userData "charts"))
           $keepKept = Test-Path (Join-Path $userData "keep.txt")
-          "deletedata_db_gone=$dbGone datasets_gone=$dsGone log_gone=$logGone unrelated_kept=$keepKept" | Tee-Object -FilePath $rep -Append
-          if (-not ($dbGone -and $dsGone -and $logGone)) { throw "勾选删除没删干净 DataChat 的文件" }
+          "deletedata_db_gone=$dbGone datasets_gone=$dsGone charts_gone=$chartsGone log_gone=$logGone unrelated_kept=$keepKept" | Tee-Object -FilePath $rep -Append
+          if (-not ($dbGone -and $dsGone -and $chartsGone -and $logGone)) { throw "勾选删除没删干净 DataChat 的文件" }
           if (-not $keepKept) { throw "勾选删除误删了数据文件夹里的无关文件" }
       - uses: actions/upload-artifact@v7
         if: always()

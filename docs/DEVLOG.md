@@ -11724,7 +11724,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - S 11-27 08:39 确认自动更新沿用「提示后点一下」，安装方式用 `installMode: passive`（写入 §4 第 1 条）。
 - 方案先行：本 PR 只改文档，代码要等 S 审完 §3b 再写。
 
-## [223] 2026-11-27 安装目录与数据文件夹分离（issue #148） · commit <待提交>
+## [223] 2026-11-27 安装目录与数据文件夹分离（issue #148） · commit 5757bdd（PR #166）
 
 - 回填：[222] = 6e59282（PR #164），PR CI tests 45918108476 success（push CI 待核）。
 - 方案：phase6 §3b（S 11-27 审过）。
@@ -11739,3 +11739,22 @@ S 11-25 授权小问题自定，按此口径执行。
   - 方案 §3b 写的是「静默卸载不删数据」。新增的 `/DELETEDATA` 只在显式传入时生效，默认行为不变，用于 CI 验证勾选删除这条路径。
   - 升级识别以注册表里有上次安装目录为准，所以「不勾选删除卸载后再重装」也算升级，沿用原来的 DataDir。
 - 本机只跑了定向测试 `test_desktop_installer.py`（9 passed）；NSIS / Rust 只能在 Windows CI（desktop job）上编译和验证；全量 pytest 交给 CI。
+
+## [224] 2026-11-27 #148 数据文件夹校验补强（只读审查 B1–B3、B6、B9） · commit <待提交>
+
+- 回填：[223] = 5757bdd（PR #166），PR 的 CI 三条全部 success：tests 45919864287、sidecar 45919864312、desktop 45919864294（已用 `/actions/runs` 核对）。desktop 安装冒烟日志实读值：
+  - `install_dir=…\AppData\Local\Programs\DataChat`，`reg_datadir=D:\a\_temp\我的数据dc`；
+  - `smoke_home=D:\a\_temp\我的数据dc db_exists=True`；
+  - `upgrade_same_dir=True upgrade_reg_datadir=D:\a\_temp\我的数据dc upgrade_db_kept=True other_created=False`；
+  - `uninstalled=True data_kept=True`；
+  - `deletedata_db_gone=True datasets_gone=True log_gone=True unrelated_kept=True`。
+- 只读审查（review-166）找出的问题与本次处理：
+  - **B1**（高）卸载会递归删除 `datasets\`、`charts\`，而用户自选的文件夹里可能本来就有同名文件夹。修法：安装器只接受空文件夹或已有 `datachat.db` 的文件夹；卸载也只在 `datachat.db` 存在时才动手。
+  - **B2**（高）数据文件夹选盘符根时，「安装目录在数据文件夹里」这条校验失效。修法：直接拒绝盘符根。
+  - **B3**（中）没有校验路径是否为绝对路径，也没有规范化。修法：要求绝对路径，拒绝 `/`、`%`、`.` / `..` 段和中间的连续反斜杠，然后再比较。第一版用了 `GetFullPathName`，desktop run 45922407138 红了：⓪ 段三种不安全路径都按预期被拒（exit=2），但正常的自选目录也被拒，因为 `GetFullPathName` 在路径不存在时返回空，新装时数据文件夹和安装目录都还不存在。改为字符串规则，并加测试禁止再用 `GetFullPathName`。
+  - **B6**（中）缺少「旧数据目录启动」用例（#148 §9 / 节点 2）。修法：新增 `test_old_data_dir_survives_restart_via_registry_resolution`。
+  - **B9**（低）DATACHAT_HOME 首尾空格三处处理不一致。修法：Rust 和 NSIS 都改为去掉首尾空格后使用，与 Python 一致。
+  - **B7、B8**：偏离补记进 phase6 §3b「实现与偏离」。
+  - 未处理：B10（交互升级选「先卸载」并勾选删除后，DataDir 回落到默认值）、B11（可写检测会提前建出空目录）、B12（`sidecar\_internal\outputs\charts` 空目录残留，#148 之前就存在），三项都是低风险，暂记在此。
+- CI 新增 ⓪ 段，验证四种不安全的数据文件夹会被拒绝：非空且没有 db、相对路径、`C:\`、带 `..` 段。被拒时不安装、不写注册表。⑤ 段增加对 `charts` 的检查。
+- 测试：`tests/test_desktop_installer.py` 现为 11 条。其中 `test_uninstall_reads_data_dir_before_official_key_cleanup` 的断言改为「env 先读进 $0 并去空格」，原因是读取写法随 B9 一起变了，env → 注册表 → 默认的顺序没变。
