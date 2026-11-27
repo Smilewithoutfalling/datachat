@@ -75,9 +75,45 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
   - `GET /settings` 新增 `sources`，设置页显示每一项值的来源，并注明桌面版不读取 `.env`。
 - **遗留（D3 之前处理）**：安装目录 `%LOCALAPPDATA%\DataChat` 和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上其实是同一个目录。目前不会出错，因为卸载时只删自己装的文件，删目录用的是不递归的 RMDir。但做自动更新之前必须把两者分开，有两种办法：一是改安装目录（NSIS 模板或 productName），二是改数据目录（要迁移数据，还会影响浏览器模式共用同一份数据）。
 
+## 3b. 安装目录与数据文件夹（#148，S 11-27 定，代码待 S 审本节后再写）
+
+**起因**：现在的安装目录 `%LOCALAPPDATA%\DataChat` 和数据目录 `%LOCALAPPDATA%\datachat` 在 NTFS 上是同一个目录（见上节「遗留」，#147 用 CI 安装包核实过）。S 11-27 加了一条要求：安装时给一个「数据文件夹」选项，带默认值，也可以自己选。
+
+**已定**
+1. **默认安装目录**改为 `%LOCALAPPDATA%\Programs\DataChat`（与 §1 第 2 条一致）。Tauri 2 没有配置项能改这个默认值，所以要自带一份 NSIS 模板（`bundle.windows.nsis.template`），从 Tauri 当前版本的 `installer.nsi` 复制过来，只改必要的几行，并在文件头注明来源版本。以后升级 Tauri 时要重新对比这份模板（写进 HANDOVER）。
+2. **数据文件夹页**：放在「选程序位置」页之后。
+   - 默认值：设置了 `DATACHAT_HOME` 就用它，否则用 `%LOCALAPPDATA%\datachat`。可以点「浏览」自己选。
+   - 校验：
+     - 不能与程序目录相同；
+     - 不能在程序目录里面，程序目录也不能在它里面；
+     - 必须可写。
+   - 校验不过就提示原因，留在本页让用户重选。
+3. **路径怎么传给程序**：安装器把选定路径写进当前用户注册表（Tauri 记录安装目录的那个键下，值名 `DataDir`）。
+   - 解析顺序：`DATACHAT_HOME` 环境变量 → 注册表 `DataDir` → `%LOCALAPPDATA%\datachat`。
+   - 壳（`sidecar.rs` 的 `home_dir`）和浏览器模式（`app/server/app.py` 的 `default_home`）用同一个顺序，保证两种模式共用一份数据。
+   - `app/server/` 属于 B 组，改它不需要跑内网回归。
+4. **升级不搬数据**：遇到以下两种情况之一，就跳过数据文件夹页，不改注册表，也不移动任何文件：
+   - 以前装过（注册表里能读到上次的安装目录）；
+   - 以静默方式运行（自动更新走 passive / quiet）。
+   
+   已装用户升级后，程序继续装在原来的目录（模板的 `RestorePreviousInstallLocation`），数据也还在原来的位置。所以**不写迁移逻辑**：只有当年按默认安装的人，两个目录才会继续重叠；新装的人不会重叠。
+5. **卸载「删除应用数据」改成只删自家文件**：
+   - 现在 `hooks.nsh` 对数据目录做的是 `RMDir /r`。允许自选目录之后，用户如果选了 `D:\` 或「我的文档」，勾选删除就会把整个目录删光。
+   - 改为：只删 `datachat.db`（以及 `-wal` / `-shm` 等附属文件）、`datasets\`、`charts\`、`server.log`，然后对数据文件夹做一次不递归的 `RMDir`，里面还有别的东西就保留。
+   - 这份清单实现时以 `grep` 到的落盘位置为准，写成常量，并配一条测试。
+   - 默认不勾选、静默卸载不删数据，这两点不变。
+6. **不做**：安装后在设置页修改数据文件夹（要搬数据），以后真需要再单独开 issue。
+
+**验收**（CI desktop job 加三段，S 本机再验一次）：
+- 静默安装：`/S /D=<程序目录>`，数据目录用安装器参数或预置注册表值指定为 `<自选目录>`。启动 `--smoke` 后，数据库落在 `<自选目录>`，程序目录里没有 `datachat.db`。
+- 升级：在已装的基础上再装一次新包。程序目录不变，注册表 `DataDir` 不变，旧数据库还在。
+- 勾选删除卸载：在 `<自选目录>` 里预先放一个无关文件，卸载后 DataChat 自己的文件已删，无关文件和目录都还在。
+- `test_v1_database_gains_feedback_table_without_touching_old_tables` 的做法延伸到「旧数据目录启动」（#148 §9）。
+- pytest 定向：`default_home` 按 env → 注册表 → 默认的顺序解析；非 Windows 平台跳过注册表这一步。
+
 ## 4. D3 自动更新
 
-1. `tauri-plugin-updater`，endpoint 指向 GitHub Releases 的 `latest.json`。启动 10 s 后检查一次：有新版本就在顶栏提示「有新版本 x.y.z」，用户点了才下载、安装、重启，不静默更新。
+1. `tauri-plugin-updater`，endpoint 指向 GitHub Releases 的 `latest.json`。启动 10 s 后检查一次：有新版本就在顶栏提示「有新版本 x.y.z」，用户点了才下载、安装、重启，不静默更新。（S 11-27 再次确认：提示后点一下；安装方式用 `installMode: passive`，只显示进度条，不用再点。）
 2. 更新包用 Tauri 的更新签名（minisign）校验，**和 Authenticode 代码签名无关**，没有代码签名证书也能做。私钥放进 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`：密钥对由我在沙箱里生成，私钥由 S 亲手粘贴进 Secrets，私钥本身不进仓库、不进对话。公钥写进 `tauri.conf.json`。
 3. 版本号：`tauri.conf.json` 的 version 是唯一来源，打 tag `v0.x.y` 时触发 release 工作流，构建、签名、发 Release，并生成 latest.json。
 4. 数据兼容：升级不碰数据目录。SQLite 迁移沿用现有做法（启动时补表，参见 v1 → feedback 表的 `test_v1_database_gains_feedback_table_without_touching_old_tables`）。之后每次改表都要带一条「旧库启动」的测试。
