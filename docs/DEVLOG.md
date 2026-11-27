@@ -11756,5 +11756,5 @@ S 11-25 授权小问题自定，按此口径执行。
   - **B9**（低）DATACHAT_HOME 首尾空格三处处理不一致。修法：Rust 和 NSIS 都改为去掉首尾空格后使用，与 Python 一致。
   - **B7、B8**：偏离补记进 phase6 §3b「实现与偏离」。
   - 未处理：B10（交互升级选「先卸载」并勾选删除后，DataDir 回落到默认值）、B11（可写检测会提前建出空目录）、B12（`sidecar\_internal\outputs\charts` 空目录残留，#148 之前就存在），三项都是低风险，暂记在此。
-- CI 新增 ⓪ 段，验证三种不安全的数据文件夹会被拒绝：非空且没有 db、相对路径、`C:\`。被拒时不安装、不写注册表。⑤ 段增加对 `charts` 的检查。
+- CI 新增 ⓪ 段，验证四种不安全的数据文件夹会被拒绝：非空且没有 db、相对路径、`C:\`、带 `..` 段。被拒时不安装、不写注册表。⑤ 段增加对 `charts` 的检查。
 - 测试：`tests/test_desktop_installer.py` 现为 11 条。其中 `test_uninstall_reads_data_dir_before_official_key_cleanup` 的断言改为「env 先读进 $0 并去空格」，原因是读取写法随 B9 一起变了，env → 注册表 → 默认的顺序没变。
