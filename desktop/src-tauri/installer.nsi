@@ -519,10 +519,26 @@ Function HasChar
   ${EndWhile}
 FunctionEnd
 
+; $0 里有没有子串 $1：有则 $2 = 1（StrCmp 不区分大小写，这里只用来找 \..\ 这类片段）
+Function HasSubstr
+  StrCpy $2 0
+  StrLen $3 $0
+  StrLen $6 $1
+  StrCpy $4 0
+  ${While} $4 < $3
+    StrCpy $5 $0 $6 $4
+    ${If} $5 == $1
+      StrCpy $2 1
+      ${Break}
+    ${EndIf}
+    IntOp $4 $4 + 1
+  ${EndWhile}
+FunctionEnd
+
 ; $R0 = "" 表示通过，否则是原因。比较不区分大小写（StrCmp 本身不区分）。
 ; 规则（phase6 §3b 第 2 条，#148 审查 B1–B3 补强）：
 ;   - 必须是绝对路径（X:\… 或 \\server\share\…），不能用 / 、% 写法，不能是盘符根；
-;   - 用 GetFullPathName 规范化（去掉 . 和 ..）后再和安装目录比：不相同、互不嵌套；
+;   - 不能含 . / .. 段或中间的连续反斜杠（GetFullPathName 要求路径已存在，不能用），再和安装目录比：不相同、互不嵌套；
 ;   - 文件夹已存在时，必须是空的，或者里面已有 datachat.db（DataChat 以前的数据）——
 ;     这样卸载勾选删除时删的 datasets\、charts\ 只可能是 DataChat 自己建的；
 ;   - 必须可写。
@@ -556,16 +572,30 @@ Function ValidateDataDir
     StrCpy $R0 "请填写完整路径（例如 D:\DataChat数据）：$DataDir"
     Return
   ${EndIf}
-  GetFullPathName $0 $DataDir
-  Call TrimPath
-  StrCpy $DataDir $0
+  ; 不用 GetFullPathName：它要求路径已存在（不存在时返回空），而新装时数据文件夹和安装目录通常都还没建。
+  ; 改为直接拒绝 . / .. 段和中间的连续反斜杠，保证字符串比较可靠。
+  StrCpy $0 "$DataDir\"
+  StrCpy $1 "\..\"
+  Call HasSubstr
+  StrCpy $R2 $2
+  StrCpy $1 "\.\"
+  Call HasSubstr
+  IntOp $R2 $R2 | $2
+  StrCpy $0 $DataDir "" 2 ; 去掉开头两个字符（UNC 的 \\ 合法）再找连续反斜杠
+  StrCpy $1 "\\"
+  Call HasSubstr
+  IntOp $R2 $R2 | $2
+  ${If} $R2 = 1
+    StrCpy $R0 "路径里不能有 . 、.. 或连续的反斜杠，请直接选择实际的文件夹：$DataDir"
+    Return
+  ${EndIf}
   StrLen $1 $DataDir
   ${If} $1 <= 3
     StrCpy $R0 "不能直接用磁盘根目录，请在里面新建或选择一个文件夹：$DataDir"
     Return
   ${EndIf}
   ; 规范化后的安装目录放在 $R1
-  GetFullPathName $0 $INSTDIR
+  StrCpy $0 $INSTDIR
   Call TrimPath
   StrCpy $R1 $0
   ; 与安装目录相同

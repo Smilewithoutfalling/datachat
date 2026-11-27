@@ -72,8 +72,8 @@ jobs:
           # phase6 §3b：默认装到 %LOCALAPPDATA%\Programs\DataChat；数据文件夹用 /DATADIR= 指定到一个自选位置
           $userData = Join-Path $env:RUNNER_TEMP "我的数据dc"
           $dir = Join-Path $env:LOCALAPPDATA "Programs\DataChat"
-          # ⓪ 不安全的数据文件夹必须被拒（#148 审查 B1–B3）：非空且没有 datachat.db、相对路径、盘符根。拒了就不装
-          foreach ($bad in @($env:RUNNER_TEMP, "relative-data", "C:\")) {
+          # ⓪ 不安全的数据文件夹必须被拒（#148 审查 B1–B3）：非空且没有 datachat.db、相对路径、盘符根、带 .. 段。拒了就不装
+          foreach ($bad in @($env:RUNNER_TEMP, "relative-data", "C:\", "$env:LOCALAPPDATA\..\dc-dotdot")) {
             $p = Start-Process $setup -ArgumentList "/S", "/DATADIR=$bad" -Wait -PassThru
             "reject_datadir=$bad exit=$($p.ExitCode) installed=$(Test-Path (Join-Path $dir 'uninstall.exe'))" | Tee-Object -FilePath $rep -Append
             if ($p.ExitCode -eq 0) { throw "不安全的数据文件夹没被拒：$bad" }

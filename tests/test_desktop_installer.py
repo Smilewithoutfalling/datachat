@@ -159,7 +159,9 @@ def test_installer_rejects_unsafe_data_dirs_by_rule():
     nsi = (TAURI / "installer.nsi").read_text(encoding="utf-8")
     body = nsi[nsi.index("Function ValidateDataDir"):]
     body = body[:body.index("FunctionEnd")]
-    for needle in ('GetFullPathName $0 $DataDir', 'GetFullPathName $0 $INSTDIR', 'StrCpy $1 "/"', 'StrCpy $1 "%"',
+    # GetFullPathName 在路径不存在时返回空（新装时数据文件夹、安装目录都还没建），CI 红过一次（run 45922407138），不许再用
+    assert "GetFullPathName " not in body.replace("; 不用 GetFullPathName", "")
+    for needle in ('StrCpy $1 "\\..\\"', 'StrCpy $1 "\\.\\"', 'StrCpy $1 "/"', 'StrCpy $1 "%"',
                    '${If} $1 <= 3', '${AndIfNot} ${FileExists} "$DataDir\\datachat.db"', 'FindFirst $6 $7'):
         assert needle in body, needle
     hook = _hook_body()
