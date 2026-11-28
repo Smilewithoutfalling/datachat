@@ -32,6 +32,24 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $rep = "update-e2e.txt"
+          # 直接起安装目录里的 sidecar（和壳同样的参数），走产品 HTTP 接口建 / 读会话（#149 节点 1「旧会话在」）
+          function Invoke-Sidecar([string]$instDir, [string]$dataHome, [scriptblock]$body) {
+            $sc = Get-ChildItem $instDir -Recurse -Filter datachat-sidecar.exe | Select-Object -First 1
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($sc.FullName, "--port 0 --home `"$dataHome`" --desktop")
+            $psi.RedirectStandardOutput = $true
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            try {
+              $hs = $proc.StandardOutput.ReadLine() | ConvertFrom-Json
+              $base = "http://127.0.0.1:$($hs.port)"
+              $h = @{ Authorization = "Bearer $($hs.token)" }
+              for ($i = 0; $i -lt 60; $i++) { try { Invoke-RestMethod "$base/health" | Out-Null; break } catch { Start-Sleep -Milliseconds 500 } }
+              & $body $base $h
+            } finally {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              Start-Sleep -Seconds 2
+            }
+          }
           New-Item -ItemType Directory -Force old | Out-Null
           gh release download $env:OLD --repo $env:GITHUB_REPOSITORY --pattern "*-setup.exe" --dir old
           $setup = (Get-ChildItem old/*-setup.exe | Select-Object -First 1).FullName
@@ -46,6 +64,17 @@ jobs:
           # 旧版先跑一次，建出数据库（代表「旧会话」所在的库）
           $p = Start-Process $exe.FullName -ArgumentList "--smoke-home", "$PWD\home1.json" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "旧版 --smoke-home 失败" }
+          # 旧版建一个数据集和一个会话（「旧会话」）
+          "城市,销量`n北京,10`n上海,20" | Set-Content -Encoding utf8 old.csv
+          $oldSid = Invoke-Sidecar $dir $data {
+            param($base, $h)
+            $ds = Invoke-RestMethod "$base/datasets" -Method Post -Headers $h -Form @{ files = Get-Item old.csv; name = "升级前数据" }
+            $s = Invoke-RestMethod "$base/sessions" -Method Post -Headers $h -ContentType "application/json; charset=utf-8" `
+              -Body ([System.Text.Encoding]::UTF8.GetBytes((@{ dataset_id = $ds.id; title = "升级前会话" } | ConvertTo-Json)))
+            $s.id
+          }
+          "old_session_id=$oldSid" | Tee-Object -FilePath $rep -Append
+          if (-not $oldSid) { throw "旧版没能建出会话" }
           $db = Join-Path $data "datachat.db"
           $dbHash0 = (Get-FileHash $db).Hash
           "db_before=$dbHash0" | Tee-Object -FilePath $rep -Append
@@ -74,6 +103,14 @@ jobs:
           $h2 = Get-Content home2.json -Raw | ConvertFrom-Json
           "new_smoke_home=$($h2.home) db_exists=$($h2.db_exists) exit=$($p.ExitCode)" | Tee-Object -FilePath $rep -Append
           if ($p.ExitCode -ne 0 -or $h2.home -ne $data) { throw "新版没用原来的数据文件夹" }
+
+          # 新版读到旧会话
+          $found = Invoke-Sidecar $dir $data {
+            param($base, $h)
+            Invoke-RestMethod "$base/sessions" -Headers $h | Where-Object { $_.id -eq $oldSid }
+          }
+          "old_session_after_upgrade=$([bool]$found) title=$($found.title)" | Tee-Object -FilePath $rep -Append
+          if (-not $found -or $found.title -ne "升级前会话") { throw "升级后旧会话不见了" }
       - uses: actions/upload-artifact@v7
         if: always()
         with:

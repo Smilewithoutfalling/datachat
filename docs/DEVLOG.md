@@ -11805,7 +11805,16 @@ S 11-25 授权小问题自定，按此口径执行。
 - 新增测试 `test_updater_pubkey_is_the_one_s_generated`：钉死 key id。换公钥会让已装用户再也收不到更新。
 - 公钥填好后，desktop 冒烟的 `--smoke-update` 会真的去查 latest。现在还没有 Release，预期 exit=1（出错）。
 
-## [228] 2026-11-27 #149 版本号改为 0.1.1（升级验收用的新版） · commit <待提交>
+## [228] 2026-11-27 #149 版本号改为 0.1.1（升级验收用的新版） · commit 517447c（PR #171）
 
 - 回填：[227] = 0317ed7（PR #170）。CI：desktop 45949465791、tests 45949465733，均 success。
 - S 11-27 14:27 批准发布两个 pre-release 测试版。v0.1.0 由 release run 45952038235（success）从 0317ed7 发出，已核对：pre-release，资产为 setup.exe（74,231,600 字节）、.sig、latest.json。签名的 trusted comment 带 `version:0.1.0`，所以以后可以开 `requireSignedVersion`。本 PR 只把 `tauri.conf.json` 的 version 改为 0.1.1；合并后从新的 master 发 v0.1.1，再运行 update-e2e（old=v0.1.0，new=v0.1.1）。
+
+## [229] 2026-11-27 #149 升级验收补「旧会话在」 · commit <待提交>
+
+- 回填：[228] = 517447c（PR #171）。CI desktop 45952957037、tests 45952957046 均 success。v0.1.1 由 release run 45954415733 发布。第一次升级验收 update-e2e run 45955038116 success：0.1.0 → 0.1.1，安装目录和 DataDir 都没变，新版能用原来的数据文件夹启动。
+- 偏离：#149 节点 1 的通过标准写的是「版本号变、旧会话在」，45955038116 只证明了数据库还在，没有证明会话还在。按合同第 1 条，不能拿推理代替实测，所以补上：
+  - 升级前：起旧版安装目录里的 sidecar，按壳的参数启动，通过产品 HTTP 接口上传一个数据集、建一个会话；
+  - 升级后：起新版 sidecar，`GET /sessions` 必须读到同一个 id 和标题。
+- 分支上重跑 update-e2e run 45957224370（head aed7a27）success：`old_session_id=3155de4938e14214ac0d2d519eb4bdb5`，升级后 `old_session_after_upgrade=True title=升级前会话`。
+- S 11-27 15:14 本机验收节点 2：「都正确了」，即旧会话在、版本号为 0.1.1。
