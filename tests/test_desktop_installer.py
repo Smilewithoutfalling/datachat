@@ -191,7 +191,7 @@ def test_updater_config_matches_phase6_section4():
     """#149：endpoint 指向 GitHub Releases 的 latest.json；Windows 用 passive；PR 构建不生成更新签名。"""
     conf = _conf()
     up = conf["plugins"]["updater"]
-    assert up["endpoints"] == ["https://github.com/Smilewithoutfalling/datachat/releases/latest/download/latest.json"]
+    assert up["endpoints"] == ["https://github.com/Smilewithoutfalling/datachat/releases/download/update-channel/latest.json"]
     assert up["windows"]["installMode"] == "passive"
     assert "pubkey" in up
     assert "createUpdaterArtifacts" not in conf["bundle"], "签名只在 release.yml 里开（PR 构建没有私钥）"
@@ -209,3 +209,12 @@ def test_updater_pubkey_is_the_one_s_generated():
     assert text.splitlines()[0] == "untrusted comment: minisign public key: FAAA8FE893455A0D"
     raw = base64.b64decode(text.splitlines()[1])
     assert len(raw) == 42 and raw[:2] == b"Ed" and raw[2:10][::-1].hex().upper() == "FAAA8FE893455A0D"
+
+
+def test_release_workflow_update_channel():
+    # #149 [230]：正式发布才推到固定的 update-channel；只能从 master 发版
+    wf = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert 'refs/heads/master' in wf
+    assert "if: ${{ !inputs.prerelease }}" in wf
+    assert "gh release upload update-channel latest.json --clobber" in wf
+    assert "gh release create update-channel --prerelease" in wf

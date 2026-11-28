@@ -11810,7 +11810,7 @@ S 11-25 授权小问题自定，按此口径执行。
 - 回填：[227] = 0317ed7（PR #170）。CI：desktop 45949465791、tests 45949465733，均 success。
 - S 11-27 14:27 批准发布两个 pre-release 测试版。v0.1.0 由 release run 45952038235（success）从 0317ed7 发出，已核对：pre-release，资产为 setup.exe（74,231,600 字节）、.sig、latest.json。签名的 trusted comment 带 `version:0.1.0`，所以以后可以开 `requireSignedVersion`。本 PR 只把 `tauri.conf.json` 的 version 改为 0.1.1；合并后从新的 master 发 v0.1.1，再运行 update-e2e（old=v0.1.0，new=v0.1.1）。
 
-## [229] 2026-11-27 #149 升级验收补「旧会话在」 · commit <待提交>
+## [229] 2026-11-27 #149 升级验收补「旧会话在」 · commit e926bfd（PR #172）
 
 - 回填：[228] = 517447c（PR #171）。CI desktop 45952957037、tests 45952957046 均 success。v0.1.1 由 release run 45954415733 发布。第一次升级验收 update-e2e run 45955038116 success：0.1.0 → 0.1.1，安装目录和 DataDir 都没变，新版能用原来的数据文件夹启动。
 - 偏离：#149 节点 1 的通过标准写的是「版本号变、旧会话在」，45955038116 只证明了数据库还在，没有证明会话还在。按合同第 1 条，不能拿推理代替实测，所以补上：
@@ -11818,3 +11818,14 @@ S 11-25 授权小问题自定，按此口径执行。
   - 升级后：起新版 sidecar，`GET /sessions` 必须读到同一个 id 和标题。
 - 分支上重跑 update-e2e run 45957224370（head aed7a27）success：`old_session_id=3155de4938e14214ac0d2d519eb4bdb5`，升级后 `old_session_after_upgrade=True title=升级前会话`。
 - S 11-27 15:14 本机验收节点 2：「都正确了」，即旧会话在、版本号为 0.1.1。
+
+## [230] 2026-11-28 #149 更新地址改为固定的 update-channel · commit <待提交>
+
+- 回填：[229] = e926bfd（PR #172），PR CI tests 45957394479 success。
+- 问题：#149 只读审查实测发现，原 endpoint `releases/latest/download/latest.json` 返回 404。原因是仓库的「latest」Release 是 `holdout-2026-11-02`。CI 升级验收和 S 本机节点 2 用的都是 `DATACHAT_UPDATE_ENDPOINT` 指定的地址，所以没有测到这个默认地址。
+- S 11-28 15:16 选定方案二：改为固定地址。
+  - `tauri.conf.json` 的 endpoint 改为 `releases/download/update-channel/latest.json`。
+  - release.yml：只有正式发布（不勾 prerelease）才创建或更新 `update-channel`（它本身标成 pre-release），并用 `--clobber` 覆盖其中的 latest.json。测试发布不动 `update-channel`。
+  - 新增两个前置检查：只能从 master 触发；endpoint 必须是 update-channel。
+- 测试：`tests/test_desktop_installer.py` 钉住新的 endpoint，并新增检查 release.yml 含 master 守卫和通道步骤。
+- 已知限制：已装的 0.1.0 / 0.1.1 测试版里内置的仍是旧地址，这两个版本靠默认地址收不到更新。它们只是 pre-release 测试版，影响只限 S 本机。

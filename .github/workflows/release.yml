@@ -4,7 +4,10 @@
 # 产物：安装包、它的 .sig（Tauri 更新签名，minisign，和 Authenticode 代码签名无关）、latest.json。
 # 需要两个 Secret（S 用 scripts/desktop/gen_update_key.py 本机生成后亲手粘贴）：
 #   TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-# 测试发布（升级验收用）勾 prerelease：pre-release 不是 GitHub 的「latest」，已装用户查不到它。
+# 更新通道（S 11-28 定）：已装用户查的是固定地址 releases/download/update-channel/latest.json，
+# 不依赖 GitHub 的「latest」（仓库里别的 Release 会占住 latest，见 DEVLOG [230]）。
+# 正式发布（prerelease 不勾）才把 latest.json 覆盖到 update-channel；测试发布不碰它，已装用户查不到。
+# update-channel 本身标成 pre-release，免得它抢「latest」。
 name: release
 
 on:
@@ -45,6 +48,8 @@ jobs:
           $conf = Get-Content desktop/src-tauri/tauri.conf.json -Raw -Encoding utf8 | ConvertFrom-Json
           $v = $conf.version
           $tag = "v$v"
+          if ($env:GITHUB_REF -ne "refs/heads/master") { throw "只能从 master 发版（当前 $env:GITHUB_REF）" }
+          if ($conf.plugins.updater.endpoints -notcontains "https://github.com/$env:GITHUB_REPOSITORY/releases/download/update-channel/latest.json") { throw "更新地址不是 update-channel" }
           if (-not $conf.plugins.updater.pubkey) { throw "tauri.conf.json 的 plugins.updater.pubkey 还是空的" }
           if ($env:HAS_KEY -ne "true") { throw "缺少 Secret TAURI_SIGNING_PRIVATE_KEY" }
           gh release view $tag 2>$null
@@ -109,3 +114,20 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" $setup.FullName "$($setup.FullName).sig" latest.json `
             --target "$env:GITHUB_SHA" --title "DataChat ${{ steps.ver.outputs.version }}" --notes "$body" @pre
           if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }
+      - name: 正式发布才推到更新通道
+        if: ${{ !inputs.prerelease }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release view update-channel 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $global:LASTEXITCODE = 0
+            gh release create update-channel --prerelease --target "$env:GITHUB_SHA" --title "更新通道（勿删）" `
+              --notes "已装的 DataChat 从这里的 latest.json 查更新。由 release 工作流维护，请勿手动删除或改动。"
+            if ($LASTEXITCODE -ne 0) { throw "创建 update-channel 失败" }
+          }
+          gh release upload update-channel latest.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw "上传 latest.json 到 update-channel 失败" }
+          "update-channel 现在指向 ${{ steps.ver.outputs.tag }}"
