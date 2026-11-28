@@ -745,7 +745,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         for m in s.messages:
             if m.role == "user":
                 if q is not None:
-                    turns.append({"question": q.content, "answer": "", "status": "none", "charts": [], "result_text": ""})
+                    turns.append({"question": q.content, "answer": "", "answer_status": "unanswered", "charts": [], "result_text": ""})
                 q = m
                 continue
             try:
@@ -759,11 +759,11 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                 pngs.append(read_png(c.get("png"), chart_dir) if c.get("png") else client_pngs.get(m.id, {}).get(k))
             if not rec.get("charts") and rec.get("chart_path"):
                 pngs.append(read_png(rec.get("chart_path"), chart_dir))
-            turns.append({"question": q.content if q else "", "answer": m.content, "status": m.status,
+            turns.append({"question": q.content if q else "", "answer": m.content, "answer_status": m.status,
                           "charts": pngs, "result_text": rec.get("result_text") or ""})
             q = None
         if q is not None:
-            turns.append({"question": q.content, "answer": "", "status": "none", "charts": [], "result_text": ""})
+            turns.append({"question": q.content, "answer": "", "answer_status": "unanswered", "charts": [], "result_text": ""})
         title = s.title or "DataChat 分析"
         page = build_html(title=title, dataset=ds.name if ds else "（已删除）", exported_at=now(), turns=turns)
         data = page.encode("utf-8")

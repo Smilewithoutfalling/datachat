@@ -146,14 +146,14 @@ def _local_time(iso: str) -> str:
 
 
 def build_html(*, title: str, dataset: str, exported_at: str, turns: list[dict]) -> str:
-    """turns: [{"question", "answer", "status", "charts": [png bytes or None], "result_text"}]"""
+    """turns: [{"question", "answer", "answer_status", "charts": [png bytes or None], "result_text"}]"""
     exported_at = _local_time(exported_at)
     body = []
     for n, t in enumerate(turns, 1):
         parts = [f'<section class="turn"><p class="q">{n}. {html.escape(t["question"] or "（无提问）")}</p>']
         if t.get("answer"):
             parts.append(f'<div class="answer">{md_to_html(t["answer"])}</div>')
-        elif t.get("status") and t["status"] != "done":
+        elif t.get("answer_status") and t["answer_status"] != "done":
             parts.append('<p class="muted">这一轮没有完成。</p>')
         missing = 0
         for k, png in enumerate(t.get("charts") or []):
