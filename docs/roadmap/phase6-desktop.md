@@ -148,6 +148,7 @@ S 定：**目前只在自己的电脑上安装使用，不对外分发**，§1 �
 - **验收**：
   - `update-e2e.yml`（手动运行，输入旧 tag 和新 tag）：装旧版，运行 `--smoke-update` 检查并安装新版，然后确认四点：版本号变了、安装目录不变、注册表 `DataDir` 不变、新版能用原数据文件夹启动。
   - pre-release 不算 GitHub 的「latest」，所以测试时用 `DATACHAT_UPDATE_ENDPOINT` 指向新版的 latest.json。这个变量只能换地址，换不了包：签名仍由内置公钥校验。
+  - **更新通道（S 11-28 定，偏离第 1 条的「Releases 的 latest.json」）**：endpoint 改为固定地址 `releases/download/update-channel/latest.json`，不用 `releases/latest/...`。原因：仓库里别的 Release（`holdout-2026-11-02`）占着 GitHub 的「latest」，旧地址实测 404。release 工作流只在正式发布（不勾 prerelease）时把 latest.json 覆盖到 `update-channel`；`update-channel` 本身标成 pre-release，不抢「latest」。release 工作流只允许从 master 触发。
   - desktop.yml 的 PR 冒烟加一段 `--smoke-update`。
 - **#148 留下的 B5（旧版默认安装的用户）**：自动更新会装回原来的 `%LOCALAPPDATA%\DataChat`，两个目录继续重叠。不影响数据：安装器只覆盖程序文件，从不删除数据。只有勾选删除后卸载、再重装，才会真正分开。
 - **暂不做**：`requireSignedVersion`（防降级）。它要求签名里带版本号，还需要核实 tauri-cli 2.12.6 的签名里有没有这一项，留作后续。
