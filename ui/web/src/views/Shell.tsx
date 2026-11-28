@@ -221,8 +221,9 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   const pickSide = (list: File[]) => {
     if (!list.length) return;
     const e = checkFiles(list);
-    if (e) setError(e);
-    else (setError(""), onPick(list));
+    if (e) return setError(e);
+    setError("");
+    onPick(list);
   };
   const onPick = setPending;
   const sideInput = useRef<HTMLInputElement>(null);
