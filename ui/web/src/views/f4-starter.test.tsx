@@ -33,28 +33,29 @@ function setup({ key = KEY, datasets = [DS, OLD], routes = {}, wrap = (f) => f }
   return { be, sse };
 }
 
-test("f4 U4 首页结构：问候 → 数据资产 → 三张提问卡，卡面文字和顺序照验收", async () => {
+test("首页结构（原型 GenieHome）：问候 → 提问框 → 推荐问题三张卡 → 最近对话 / 数据集，卡面文字和顺序照 STARTERS", async () => {
   setup();
-  const home = await screen.findByTestId("starter-home");
+  const home = await screen.findByTestId("genie-home");
   const hello = within(home).getByRole("heading", { level: 2 });
-  const asset = within(home).getByTestId("starter-asset");
-  const cards = within(home).getByRole("list", { name: "提问卡" });
-  // DOM 顺序即视觉顺序
-  expect(hello.compareDocumentPosition(asset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(asset.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(["早上好", "中午好", "下午好", "晚上好"]).toContain(hello.textContent);
-  expect(within(cards).getAllByRole("button").map((b) => b.querySelector(".starter-card-title")?.textContent))
-    .toEqual(["看看这份数据有什么", "找出异常值", "两期对比"]);
-  expect(within(asset).getByTestId("starter-asset-name").textContent).toBe("门店"); // 列表按创建时间倒序，取最前面（刚上传的）那个
-  await act(async () => fireEvent.click(within(asset).getByRole("button", { name: "打开数据集「门店」" })));
-  expect(await screen.findByTestId("dataset-view")).toBeTruthy(); // 「打开」真实进数据集页
-  expect(screen.queryByText("拖入文件到此处")).toBeNull(); // 有数据集时不再是上传大卡
+  const box = within(home).getByLabelText("提问");
+  const cards = within(home).getByRole("region", { name: "推荐问题" });
+  expect(hello.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(box.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(hello.textContent).toMatch(/^(早上好|中午好|下午好|晚上好)，今天想分析什么？$/);
+  expect(within(cards).getAllByRole("button").map((b) => b.querySelector(".g-card-title")?.textContent))
+    .toEqual(STARTERS.map((x) => x.title));
+  // 框内选数据集：默认最新（列表按创建时间倒序，取最前面）
+  expect((within(home).getByRole("combobox", { name: "数据集" }) as HTMLSelectElement).value).toBe("d1");
+  const dsSec = within(home).getByRole("region", { name: "数据集" });
+  await act(async () => fireEvent.click(within(dsSec).getByRole("button", { name: /门店/ })));
+  expect(await screen.findByTestId("dataset-view")).toBeTruthy(); // 真实进数据集页
+  expect(screen.queryByText("拖入文件到此处")).toBeNull();
 });
 
 test("f4 U4 没有数据集时首页照旧是上传大卡，不出提问卡", async () => {
   setup({ datasets: [] });
   expect(await screen.findByText("拖入文件到此处")).toBeTruthy();
-  expect(screen.queryByTestId("starter-home")).toBeNull();
+  expect(screen.queryByRole("region", { name: "推荐问题" })).toBeNull();
 });
 
 for (const [i, s] of STARTERS.entries()) {
@@ -108,15 +109,7 @@ test("f4 U4 没配凭证：SessionView 不发 messages 请求，问题放进输�
   expect(be.calls.some((x) => x.method === "POST")).toBe(false);
 });
 
-test("f4 U4 资产区：没有概要时写明并给「剖析」，「剖析」真实发出 GET /datasets/{id}，回来后数字都来自 profile", async () => {
-  const { be } = setup();
-  const asset = await screen.findByTestId("starter-asset");
-  expect(within(asset).getByTestId("starter-asset-line").textContent).toBe("1 个表 · 还没读取概要");
-  await act(async () => fireEvent.click(within(asset).getByRole("button", { name: "剖析" })));
-  expect(be.calls.filter((x) => x.method === "GET" && x.path.startsWith("/datasets/d1")).map((x) => x.path)).toEqual(["/datasets/d1"]);
-  await waitFor(() => expect(within(asset).getByTestId("starter-asset-line").textContent).toBe("1 个表 · 5 行 · 4 列 · 3 列有缺失"));
-  expect(asset.textContent).toContain("2023-12-28 ~ 2024-03-31");
-});
+// 原型：「剖析」从首页资产区移到了「数据集」页的卡片上，由 u2-asset-card.test.tsx 覆盖。
 
 test("f4 U4 建会话中三张卡一起禁用，连点只建一个会话", async () => {
   let release!: () => void;

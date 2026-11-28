@@ -222,7 +222,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
     if (!list.length) return;
     const e = checkFiles(list);
     if (e) setError(e);
-    else onPick(list);
+    else (setError(""), onPick(list));
   };
   const onPick = setPending;
   const sideInput = useRef<HTMLInputElement>(null);
@@ -320,7 +320,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
               <div className="g-ds-page">
                 <Upload onPick={setPending} err={pickErr} setErr={setPickErr} />
                 {datasets.length === 0 ? <p className="g-empty">还没有数据集，先上传一份 CSV 或 Excel。</p> : (
-                  <ul className="g-ds-grid">{datasets.map(dsCard)}</ul>
+                  <nav aria-label="数据集"><ul className="g-ds-grid">{datasets.map(dsCard)}</ul></nav>
                 )}
               </div>
             </div>

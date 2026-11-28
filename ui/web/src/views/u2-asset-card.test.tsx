@@ -27,6 +27,12 @@ function setup(routes: Record<string, unknown> = {}) {
 }
 
 /** 卡片上出现的数字（日期整体算一个，千分位去掉）。只看概要区和「N 个表」那一行，不看用户起的名字和文件名。 */
+// 原型（proto/genie-shell）：数据集卡片从首页/侧栏移到了「数据集」页
+async function openCards() {
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
+  return screen.findByTestId("asset-card");
+}
+
 function cardNumbers(card: HTMLElement): string[] {
   const text = [card.querySelector(".ds-row .ds-meta")?.textContent ?? "", within(card).getByTestId("asset-stats").textContent ?? ""].join(" ");
   return (text.match(/\d{4}-\d{2}-\d{2}|\d[\d,]*/g) ?? []).map((t) => t.replace(/,/g, ""));
@@ -46,7 +52,7 @@ function profileValues(p: DatasetProfile): Set<string> {
 
 test("资产卡：没拿到概要时写明点「剖析」；「剖析」真实发出 GET /datasets/{id}（不带 rows），回来后填上概要", async () => {
   const be = setup();
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   expect(within(card).getByTestId("asset-stats").textContent).toBe("还没读取概要，点「剖析」");
   expect(be.calls.some((x) => x.path.startsWith("/datasets/d1"))).toBe(false); // 侧栏不为卡片逐个读文件（F1.1）
   await act(async () => fireEvent.click(within(card).getByRole("button", { name: "剖析「门店」" })));
@@ -60,7 +66,7 @@ test("资产卡：没拿到概要时写明点「剖析」；「剖析」真实�
 
 test("双向钉住：卡片上的每个数字都在 /datasets/{id} 的 profile 里；profile 的数据集级标量也都在卡片上", async () => {
   setup();
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   await act(async () => fireEvent.click(within(card).getByRole("button", { name: "剖析「门店」" })));
   await waitFor(() => expect(within(card).getByTestId("asset-stats").textContent).toContain("行"));
   const shown = cardNumbers(card);
@@ -82,7 +88,7 @@ test("大数加千分位、多表用 table_count、没有日期列和没有缺�
   };
   const D = { ...DS, files: [{ filename: "book.xlsx", size: 1, sha256: "h" }] }; // 一个 xlsx 读出 3 张表
   setup({ "GET /datasets": [D], "GET /datasets/d1": { ...D, summary: "", tables: {}, profile: big } });
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   expect(card.querySelector(".ds-row .ds-meta")?.textContent).toBe("1 个表"); // 剖析前按文件数
   await act(async () => fireEvent.click(within(card).getByRole("button", { name: "剖析「门店」" })));
   await waitFor(() => expect(within(card).getByTestId("asset-stats").textContent).toBe("1,234,567 行 · 21 列 · 无缺失列没有日期列"));
@@ -103,7 +109,7 @@ test("上传响应自带 profile：卡片直接显示，不再为卡片发 GET /
   const input = (await screen.findAllByLabelText("选择 CSV 文件"))[0] as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(["a\n1\n"], "n.csv", { type: "text/csv" })] } });
   await act(async () => fireEvent.click(await screen.findByRole("button", { name: "上传" })));
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   await waitFor(() => expect(within(card).getByTestId("asset-stats").textContent).toContain("5 行"));
   expect(be.calls.some((x) => x.method === "GET" && /^\/datasets\/d2(\?|$)/.test(x.path))).toBe(false);
 });
@@ -113,7 +119,7 @@ test("「提问」真实发出 POST /sessions（这个数据集、标准模式�
     "POST /sessions": SESSION,
     "GET /sessions/s9": { ...SESSION, messages: [] },
   });
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   await act(async () => fireEvent.click(within(card).getByRole("button", { name: "就「门店」提问" })));
   expect(be.calls.filter((x) => x.method === "POST" && x.path === "/sessions").map((x) => x.body)).toEqual([{ dataset_id: "d1", agent: "workflow" }]);
   await waitFor(() => expect(be.calls.some((x) => x.path === "/sessions/s9")).toBe(true));
@@ -132,14 +138,15 @@ test("「口径」进数据集页并滚到口径与规则（导入 / 导出在�
       "GET /settings": { model: "m", base_url: "", timeout: 60 },
       "GET /connections": { active: null, items: [] },
     });
-    const card = await screen.findByTestId("asset-card");
+    const card = await openCards();
     await act(async () => fireEvent.click(within(card).getByRole("button", { name: "「门店」的口径导入导出" })));
     const notes = await screen.findByTestId("notes-section");
     await waitFor(() => expect(scrolled).toContain(notes));
     expect(within(notes).getByRole("button", { name: "导入" })).toBeTruthy();
-    expect(within(card).getByText("使用中")).toBeTruthy();
-    // 打开数据集页拿到的详情带 profile，卡片顺带填上，不另发请求
-    await waitFor(() => expect(within(card).getByTestId("asset-stats").textContent).toContain("5 行"));
+    // 原型：卡片在「数据集」页，进了单个数据集页后卡片不在屏上，所以不再断言「使用中」。
+    // 打开数据集页拿到的详情带 profile，回到卡片页时卡片已填上，不另发请求
+    const again = await openCards();
+    await waitFor(() => expect(within(again).getByTestId("asset-stats").textContent).toContain("5 行"));
   } finally {
     Element.prototype.scrollIntoView = orig;
   }
@@ -147,7 +154,7 @@ test("「口径」进数据集页并滚到口径与规则（导入 / 导出在�
 
 test("「剖析」读到坏文件：卡片转成读取失败，收起概要和按钮", async () => {
   setup({ "GET /datasets/d1": { ...DS, error: "文件是空的", tables: {}, summary: "", profile: { ...PROFILE, table_count: 0, tables: [] } } });
-  const card = await screen.findByTestId("asset-card");
+  const card = await openCards();
   await act(async () => fireEvent.click(within(card).getByRole("button", { name: "剖析「门店」" })));
   await waitFor(() => expect(within(card).getByText("读取失败")).toBeTruthy());
   expect(within(card).queryByTestId("asset-stats")).toBeNull();

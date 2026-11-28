@@ -104,17 +104,17 @@ describe("清空标题 = 还原自动标题：侧栏和会话页都提交空串"
 
   test("侧栏：双击改名、清空、失焦 → PATCH {title: \"\"}，行上显示还原后的自动标题", async () => {
     const be = setup();
-    fireEvent.doubleClick(await screen.findByRole("button", { name: /^我改过的名字/ }));
+    fireEvent.doubleClick(await within(await screen.findByRole("navigation", { name: "会话" })).findByRole("button", { name: /^我改过的名字/ }));
     const input = screen.getByLabelText("重命名会话");
     fireEvent.change(input, { target: { value: "" } });
     await act(async () => fireEvent.blur(input));
     expect(patches(be)).toEqual([{ title: "" }]);
-    expect(await screen.findByRole("button", { name: new RegExp(`^${AUTO}`) })).toBeTruthy();
+    expect(await within(screen.getByRole("navigation", { name: "会话" })).findByRole("button", { name: new RegExp(`^${AUTO}`) })).toBeTruthy();
   });
 
   test("会话页：标题框清空、失焦 → 同样 PATCH {title: \"\"}，标题框显示还原后的自动标题", async () => {
     const be = setup();
-    fireEvent.click(await screen.findByRole("button", { name: /^我改过的名字/ }));
+    fireEvent.click(await within(await screen.findByRole("navigation", { name: "会话" })).findByRole("button", { name: /^我改过的名字/ }));
     const view = await screen.findByTestId("session-view");
     const input = within(view).getByLabelText("会话标题") as HTMLInputElement;
     fireEvent.focus(input);
