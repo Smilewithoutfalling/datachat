@@ -98,7 +98,8 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   expect(box.right).toBeLessThanOrEqual(box.vw - 8);
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
+  await page.locator('.g-nav .nav-row:has-text("数据集"), .rail button[aria-label="数据集"]').filter({ visible: true }).first().click(); // 原型：数据集卡片在「数据集」页
+  await page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
   await page.getByRole("button", { name: "数据集操作" }).click();
   await page.getByRole("menuitem", { name: "删除数据集" }).click();
   const bg = await page.locator("dialog.dialog[open]").evaluate((d) => getComputedStyle(d, "::backdrop").backgroundColor);
