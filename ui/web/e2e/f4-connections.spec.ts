@@ -91,6 +91,7 @@ test("新建连接 → 测试（两行）→ 设为生效 → 分析一题；工
   expect(JSON.stringify(key)).not.toContain("fake-key-not-secret");
 
   // 分析一题（标准模式）：回答出来，卡头悬停写着连接名和模型；「边想边做」恢复可选
+  await page.locator('.g-nav .nav-row:has-text("数据集"), .rail button[aria-label="数据集"]').filter({ visible: true }).first().click(); // 原型：数据集卡片在「数据集」页
   await page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: /^conn-/ }).first().click();
   await expect(dv.getByRole("option", { name: "边想边做", exact: true })).not.toHaveAttribute("disabled");
   await dv.getByRole("button", { name: "新建会话" }).click();

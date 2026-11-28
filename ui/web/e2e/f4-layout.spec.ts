@@ -56,8 +56,8 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
   };
   await check();
   // 去数据集页再回来：重新挂载，落在底部
-  await page.getByRole("button", { name: "会话列表" }).click();
-  await page.getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
+  await page.locator('.g-nav .nav-row:has-text("数据集"), .rail button[aria-label="数据集"]').filter({ visible: true }).first().click(); // 原型：数据集卡片在「数据集」页
+  await page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) }).click();
   await page.getByTestId("dataset-view").waitFor();
   await page.getByRole("button", { name: "会话列表" }).click();
   await page.locator(".sess-row").first().click();
@@ -85,7 +85,8 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   await page.getByTestId("session-view").getByLabel("提问").waitFor();
   release();
-  await expect(page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: new RegExp(`^${file.replace(".", "\\.")}`) })).toBeVisible();
+  // 原型：列表没被冲掉——侧栏会话行（副标题是数据集名）还在
+  await expect(page.getByRole("navigation", { name: "会话" }).getByRole("button", { name: new RegExp(file.replace(".", "\\.")) }).first()).toBeAttached();
 
   // 顶栏右上角的 ···：贴着视口右缘，原来菜单会被裁出去（P0-5）
   await page.getByTestId("session-view").getByRole("button", { name: "会话操作" }).click();

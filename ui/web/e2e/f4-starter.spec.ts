@@ -46,15 +46,13 @@ for (const card of CARDS) {
     await page.getByTestId("dataset-view").waitFor();
     await page.getByRole("button", { name: "返回", exact: true }).click();
 
-    // 结构：问候 → 数据资产（刚上传的这个，数字来自上传响应的 profile）→ 三张提问卡
-    const home = page.getByTestId("starter-home");
-    await expect(home.getByRole("heading", { level: 2 })).toHaveText(/^(早上好|中午好|下午好|晚上好)$/);
-    const asset = home.getByTestId("starter-asset");
-    await expect(asset.getByTestId("starter-asset-name")).toHaveText(new RegExp(`^${name.replace(".", "\\.")}( · \\d\\d:\\d\\d)?$`)); // 没填名称时数据集名就是文件名；重名时带创建时间
-    await expect(asset.getByTestId("starter-asset-line")).toHaveText("1 个表 · 4 行 · 3 列 · 无缺失列");
-    await expect(home.locator(".starter-card-title")).toHaveText(CARDS.map((c) => c.title));
+    // 结构（原型 GenieHome）：问候 → 提问框（默认选中刚上传的数据集）→ 三张推荐问题卡
+    const home = page.getByTestId("genie-home");
+    await expect(home.getByRole("heading", { level: 2 })).toHaveText(/^(早上好|中午好|下午好|晚上好)，今天想分析什么？$/);
+    await expect(home.getByRole("combobox", { name: "数据集" }).locator("option:checked")).toHaveText(new RegExp(`^${name.replace(".", "\\.")}( · \\d\\d:\\d\\d)?$`));
+    await expect(home.locator(".g-card-title")).toHaveText(CARDS.map((c) => c.title));
     const order = await home.evaluate((el) =>
-      [el.querySelector("h2"), el.querySelector("[data-testid=starter-asset]"), el.querySelector(".starter-cards")]
+      [el.querySelector("h2"), el.querySelector("textarea"), el.querySelector(".g-cards")]
         .map((x) => (x as HTMLElement).getBoundingClientRect().top));
     expect(order[0]).toBeLessThan(order[1]);
     expect(order[1]).toBeLessThan(order[2]);

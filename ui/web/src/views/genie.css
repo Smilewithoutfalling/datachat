@@ -20,10 +20,11 @@ button.primary { font-weight: 400; }
 .g-chats { flex: 1; min-height: 0; overflow-y: auto; margin: 14px -4px 0; padding: 0 4px; }
 .g-side .side-head { margin: 0 2px 6px; }
 .g-side .side-head, .g-side .side-empty { color: var(--g-aux); }
-.g-side .sess-row { padding: 7px 34px 7px 10px; border-radius: var(--g-r-sm); }
+.g-side .sess-row { position: relative; padding: 7px 34px 7px 10px; border-radius: var(--g-r-sm); }
 .g-side .sess-title { font-size: var(--fs-body); }
 .g-side .sess-row.active .sess-title { font-weight: 400; color: var(--accent); }
-.g-side .sess-meta { display: none; }
+/* 副标题（数据集名 · 时间）视觉上隐藏，但留给读屏和按名称查找（会话行的可访问名称里带数据集名） */
+.g-side .sess-meta { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .g-side .side-foot { margin-top: 8px; }
 
 /* ---------- 首页 */
