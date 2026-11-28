@@ -42,7 +42,7 @@ for (const card of CARDS) {
     await page.goto(`/#token=${E2E_TOKEN}`);
     const name = `starter-${card.id}.csv`;
     await page.getByLabel("选择 CSV 文件").setInputFiles([{ name, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-    await page.getByRole("button", { name: "上传" }).click();
+    await page.getByRole("button", { name: "上传", exact: true }).click();
     await page.getByTestId("dataset-view").waitFor();
     await page.getByRole("button", { name: "返回", exact: true }).click();
 

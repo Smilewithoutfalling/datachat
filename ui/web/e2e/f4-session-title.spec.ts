@@ -13,7 +13,7 @@ test("U5：首问后顶栏和侧栏的会话名是「地区销售额」；刷新
   await page.goto(`/#token=${E2E_TOKEN}`);
   const file = `u5-${Date.now()}.csv`;
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("各地区销售额是多少");

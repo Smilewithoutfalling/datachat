@@ -42,7 +42,7 @@ test("五种图型：canvas 渲染、图数一致、刷新重放仍在；零外�
 
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "charts.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
 
@@ -101,7 +101,7 @@ test("边界：bar 5000 点在 canvas 上画出，console 干净", async ({ page
   await setScenario(page, "chart-bar");
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "bar5000.csv", mimeType: "text/csv", buffer: Buffer.from(big) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("画 5000 点");

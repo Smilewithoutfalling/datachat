@@ -33,7 +33,7 @@ test("输入区不遮内容：1024×768 下两轮带图，落在底部，最后�
   expect((await page.request.put("/settings", { headers: auth, data: { model: "chart-bar" } })).ok()).toBe(true);
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   for (const [i, q] of ["画各城市销量柱状图", "再画一次"].entries()) {
@@ -81,7 +81,7 @@ test("删除对话框有遮罩；会话 ··· 菜单夹在视口里", async ({ 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   await page.getByTestId("session-view").getByLabel("提问").waitFor();
   release();
@@ -116,7 +116,7 @@ test("1024 宽会话：图表卡左缘到 y 轴线 ≤ 46px（读 canvas 像素�
   expect((await page.request.put("/settings", { headers: auth, data: { model: "chart-bar" } })).ok()).toBe(true);
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("画各城市销量柱状图");

@@ -134,7 +134,7 @@ test(`注入（主题 ${theme}${switchesOn ? "，开关全开" : ""}）：图表
   await expect(page.getByLabel("选择 CSV 文件")).toBeVisible();
   await page.evaluate(() => ((window as unknown as Win).__armed = true));
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "inject.csv", mimeType: "text/csv", buffer: Buffer.from(inject.csv) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   const rounds = ["inject-bar", "inject-pie", "inject-error"];

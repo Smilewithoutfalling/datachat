@@ -12,7 +12,7 @@ test("口径：添加 → 列表 → 导出可用 → 新建会话提问成功�
   expect((await page.request.put("/settings", { headers: auth, data: { model: "ok" } })).ok()).toBe(true);
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "notes.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   const view = page.getByTestId("dataset-view");
   const sec = view.getByTestId("notes-section");
   await expect(sec.getByTestId("notes-empty")).toBeVisible();

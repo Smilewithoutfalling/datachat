@@ -27,7 +27,7 @@ test("设置超时 → 上传 → 预览按文本渲染 → 建会话改名 → 
     { name: "fruit.dict.csv", mimeType: "text/csv", buffer: Buffer.from("列,含义\n数量,箱数\n", "utf-8") },
   ]);
   await page.getByPlaceholder("数据集名称（可选）").fill("水果");
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
 
   const view = page.getByTestId("dataset-view");
   await expect(view.getByRole("heading", { name: "水果" })).toBeVisible();

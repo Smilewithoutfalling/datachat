@@ -12,7 +12,7 @@ async function setScenario(page: Page, model: string) {
 async function ask(page: Page, csv: string, name: string, model: string, q: string) {
   await setScenario(page, model);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name, mimeType: "text/csv", buffer: Buffer.from(csv) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   return askAgain(page, q, 1);
 }
