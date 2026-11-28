@@ -145,3 +145,5 @@ export type KeyStatus = { configured: boolean; source: string | null };
 export type SettingsTest =
   | { ok: true; latency_ms: number; model: string }
   | { ok: false; llm_kind: string; message: string; latency_ms: number };
+
+export type PreviewTableOk = Extract<PreviewTable, { error?: undefined }>;

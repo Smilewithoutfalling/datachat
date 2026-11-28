@@ -156,6 +156,15 @@ class SessionIn(BaseModel):
     title: str = ""
 
 
+class ViewBody(BaseModel):
+    """原型：预览表全表排序 / 筛选。"""
+    table: str
+    sort_col: int | None = None
+    sort_dir: Literal["asc", "desc"] = "asc"
+    filters: dict[str, list[str | None]] = Field(default_factory=dict)   # {列序号: 保留的值（与预览显示的文本一致，None = 空）}
+    rows: int = Field(PREVIEW_DEFAULT_ROWS, ge=1, le=PREVIEW_MAX_ROWS)
+
+
 class SessionExportBody(BaseModel):
     charts: dict[str, dict[str, str]] = Field(default_factory=dict)   # 原型：前端离屏渲染的 ECharts 图 {message_id: {序号: PNG data URL}}
 
@@ -443,6 +452,89 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                "columns": columns, "dtypes": [str(t) for t in df.dtypes], "rows": body, **stats}
         if warnings:                     # xlsx 的读取提示（合并单元格、跳过的 sheet 等）；CSV 没有这个键
             out["warnings"] = [preview_cell(w, {"bidi_stripped": 0, "truncated_cells": 0}) for w in warnings]
+        return out
+
+    # ------------------------------------------------------------------ 原型：预览表全表排序 / 按值筛选
+    VIEW_VALUES_MAX = 500        # 列菜单里最多列多少个不同值（按出现次数降序）
+
+    def load_one_table(ds: Dataset, table: str):
+        """按 dataset_out 同样的规则枚举表，返回 (filename, df, enc)；找不到 404，读坏 409。"""
+        from app.tools.csv_io import read_csv_with_encoding
+        from app.tools.dataset import excel_tables, is_excel_file, table_paths
+        target = dataset_target(ds)
+        try:
+            tp = table_paths(target)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(409, user_error("dataset", e, trace_id=secrets.token_hex(16), context=f"dataset={ds.id}")) from None
+        multi = tp is not None
+        for name, path in tp or [("df", target)]:
+            fn = os.path.basename(path)
+            try:
+                if not is_excel_file(path):
+                    if name == table:
+                        df, enc = read_csv_with_encoding(path)
+                        return fn, df, enc
+                    continue
+                stem = os.path.splitext(fn)[0]
+                named = excel_tables(name if multi else stem, path)
+                if not multi and len(named) == 1:
+                    named = [("df", named[0][1])]
+                for t, st in named:
+                    if t == table:
+                        return fn, st.df, "xlsx"
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(409, user_error("dataset", e, trace_id=secrets.token_hex(16),
+                                                    context=f"dataset={ds.id} file={fn}")) from None
+        raise HTTPException(404, f"没有这张表：{table}")
+
+    def cell_keys(series) -> list:
+        """单元格的比较键：与预览里显示的文本一致（preview_cell），缺失值为 None。"""
+        st = {"bidi_stripped": 0, "truncated_cells": 0}
+        return [preview_cell(v, st) for v in series.tolist()]
+
+    def column_index(df, col: int):
+        if not (0 <= col < len(df.columns)):
+            raise HTTPException(422, f"列序号越界：{col}")
+        return df.iloc[:, col]
+
+    @app.get("/datasets/{dataset_id}/values", dependencies=[Depends(auth)])
+    def column_values(dataset_id: str, table: str = Query(...), col: int = Query(..., ge=0), db=Depends(db_dep)):
+        """列菜单：这一列在全表里的不同值和次数（按次数降序，最多 VIEW_VALUES_MAX 个）。"""
+        _fn, df, _enc = load_one_table(get_or_404(db, Dataset, dataset_id), table)
+        keys = cell_keys(column_index(df, col))
+        counts: dict = {}
+        for k in keys:
+            counts[k] = counts.get(k, 0) + 1
+        items = sorted(counts.items(), key=lambda kv: -kv[1])
+        return {"rows": len(keys), "distinct": len(items), "truncated": len(items) > VIEW_VALUES_MAX,
+                "values": [{"value": k, "count": n} for k, n in items[:VIEW_VALUES_MAX]]}
+
+    @app.post("/datasets/{dataset_id}/view", dependencies=[Depends(auth)])
+    def table_view(dataset_id: str, body: ViewBody, db=Depends(db_dep)):
+        """全表排序 / 按值筛选后取前 rows 行，返回与 preview 同形的表，外加 matched_rows（筛选后的行数）。只读，不改数据集。"""
+        import pandas as pd
+        fn, df, enc = load_one_table(get_or_404(db, Dataset, dataset_id), body.table)
+        mask = pd.Series(True, index=df.index)
+        for c, keep in body.filters.items():
+            try:
+                ci = int(c)
+            except ValueError:
+                raise HTTPException(422, f"列序号不对：{c}") from None
+            allowed = set(keep)
+            mask &= pd.Series([k in allowed for k in cell_keys(column_index(df, ci))], index=df.index)
+        view = df[mask]
+        if body.sort_col is not None:
+            s = column_index(view, body.sort_col)
+            num = pd.to_numeric(s, errors="coerce")
+            key = num if num.notna().sum() == s.notna().sum() else s.astype("string")
+            order = key.sort_values(ascending=body.sort_dir == "asc", na_position="last", kind="stable").index
+            view = view.loc[order]
+        out = preview_table(body.table, fn, view, enc, body.rows)
+        out["total_rows"] = int(len(df))
+        out["matched_rows"] = int(len(view))
+        out["row_numbers"] = [int(df.index.get_loc(i)) + 1 for i in view.index[: body.rows]]
         return out
 
     # ------------------------------------------------------------------ 路由

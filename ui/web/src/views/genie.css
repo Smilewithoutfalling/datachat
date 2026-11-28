@@ -131,3 +131,4 @@ button.primary { font-weight: 400; }
 .col-menu-foot .link { border: none; background: none; color: #6E6E73; padding: 0; height: auto; font-weight: 400; }
 .col-menu-foot .primary { height: 30px; padding: 0 16px; }
 .g-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; background: #1D1D1F; color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 13px; max-width: min(560px, calc(100vw - 32px)); overflow-wrap: anywhere; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.preview.is-busy .table-scroll { opacity: .55; transition: opacity .15s; }

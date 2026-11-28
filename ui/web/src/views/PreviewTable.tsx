@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PreviewTable as T } from "../types";
+import type { Client } from "../client";
+import type { PreviewTable as T, PreviewTableOk } from "../types";
 import { IconMore } from "./icons";
 
 // 单元格一律按文本渲染（THREAT_MODEL T9）；缺失值显示成灰色的"空"，和字符串 "null" 区分开
-// 原型（proto/genie-shell）：斑马纹、列类型标识、列菜单（排序、按值筛选）。排序和筛选只作用于预览里已加载的行，不改数据集。
+// 原型（proto/genie-shell）：斑马纹、列类型标识、列菜单（排序、按值筛选）。传了 server 时排序和筛选在后端对全表做（只读，不改数据集）；
+// 没传时只作用于已加载的预览行。
 
 type Cell = string | null;
 type Sort = { col: number; dir: "asc" | "desc" } | null;
@@ -31,16 +33,22 @@ function compare(a: Cell, b: Cell, num: boolean): number {
   return a.localeCompare(b, "zh-CN", { numeric: true });
 }
 
-function ColumnMenu({ name, dtype, values, sort, filter, onSort, onFilter, onClose, anchor }: {
-  name: string; dtype: string; values: Cell[]; sort: "asc" | "desc" | null; filter: Set<string> | null;
+type Counts = { rows: number; distinct: number; truncated: boolean; items: [string, number][] };
+
+function localCounts(values: Cell[], dtype: string): Counts {
+  const m = new Map<string, number>();
+  for (const v of values) m.set(keyOf(v), (m.get(keyOf(v)) ?? 0) + 1);
+  const items = [...m.entries()].sort((a, b) => compare(a[0] === NA ? null : a[0], b[0] === NA ? null : b[0], kindOf(dtype) === "num"));
+  return { rows: values.length, distinct: items.length, truncated: false, items };
+}
+
+function ColumnMenu({ name, data, sort, filter, onSort, onFilter, onClose, anchor, error }: {
+  name: string; data: Counts | null; sort: "asc" | "desc" | null; filter: Set<string> | null; error?: string;
   onSort: (d: "asc" | "desc" | null) => void; onFilter: (f: Set<string> | null) => void; onClose: () => void;
   anchor: DOMRect;
 }) {
-  const counts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const v of values) m.set(keyOf(v), (m.get(keyOf(v)) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => compare(a[0] === NA ? null : a[0], b[0] === NA ? null : b[0], kindOf(dtype) === "num"));
-  }, [values, dtype]);
+  const counts = data?.items ?? [];
+  // 已筛选时以筛选为准；否则全选（值还没回来时先空着，回来后由 key 重挂载）
   const [picked, setPicked] = useState<Set<string>>(() => new Set(filter ?? counts.map(([k]) => k)));
   const all = picked.size === counts.length;
   const box = useRef<HTMLDivElement>(null);
@@ -59,7 +67,7 @@ function ColumnMenu({ name, dtype, values, sort, filter, onSort, onFilter, onClo
     <div ref={box} className="col-menu" role="dialog" aria-label={`${name} 列操作`} style={{ left, top, width: W }}>
       <div className="col-menu-head">
         <strong>{name}</strong>
-        <span>{values.length} 行 · {counts.length} 个不同值</span>
+        <span>{data ? `${data.rows.toLocaleString()} 行 · ${data.distinct.toLocaleString()} 个不同值${data.truncated ? `（列出最多的 ${counts.length} 个）` : ""}` : error ?? "正在统计…"}</span>
       </div>
       <div className="col-menu-sec">排序</div>
       <button type="button" className={sort === "asc" ? "on" : undefined} onClick={() => (onSort("asc"), onClose())}>↑ 升序排序</button>
@@ -82,28 +90,67 @@ function ColumnMenu({ name, dtype, values, sort, filter, onSort, onFilter, onClo
       </div>
       <div className="col-menu-foot">
         <button type="button" className="link" disabled={!filter} onClick={() => (onFilter(null), onClose())}>清除筛选</button>
-        <button type="button" className="primary" disabled={picked.size === 0}
-          onClick={() => (onFilter(all ? null : picked), onClose())}>应用</button>
+        <button type="button" className="primary" disabled={picked.size === 0 || !data}
+          onClick={() => (onFilter(all && !data?.truncated ? null : picked), onClose())}>应用</button>
       </div>
     </div>
   );
 }
 
-export function PreviewTable({ table }: { table: T }) {
+type View = PreviewTableOk & { matched_rows: number; row_numbers: number[] };
+const SERVER_ROWS = 50;
+
+export function PreviewTable({ table, server }: { table: T; server?: { c: Client; datasetId: string } }) {
   const [sort, setSort] = useState<Sort>(null);
   const [filters, setFilters] = useState<Record<number, Set<string>>>({});
-  const [menu, setMenu] = useState<{ col: number; rect: DOMRect } | null>(null);
+  const [menu, setMenu] = useState<{ col: number; rect: DOMRect; data: Counts | null; error?: string } | null>(null);
+  const [view, setView] = useState<View | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const seq = useRef(0);
+
+  const ok = table.error === undefined ? table : null;
+
+  const refresh = (nextSort: Sort, nextFilters: Record<number, Set<string>>) => {
+    setSort(nextSort);
+    setFilters(nextFilters);
+    if (!server || !ok) return;
+    if (!nextSort && Object.keys(nextFilters).length === 0) return setView(null), setErr("");
+    const n = ++seq.current;
+    setBusy(true);
+    const f: Record<string, (string | null)[]> = {};
+    for (const [c, set] of Object.entries(nextFilters)) f[c] = [...set].map((k) => (k === NA ? null : k));
+    server.c.tableView(server.datasetId, { table: ok.name, sort_col: nextSort?.col ?? null, sort_dir: nextSort?.dir ?? "asc", filters: f, rows: SERVER_ROWS })
+      .then((v) => n === seq.current && (setView(v), setErr("")))
+      .catch((e: unknown) => n === seq.current && setErr(e instanceof Error ? e.message : "排序筛选失败"))
+      .finally(() => n === seq.current && setBusy(false));
+  };
+
+  const openMenu = (col: number, rect: DOMRect) => {
+    if (menu?.col === col) return setMenu(null);
+    if (!ok) return;
+    if (!server) return setMenu({ col, rect, data: localCounts(ok.rows.map((r) => (r as Cell[])[col]), ok.dtypes[col] ?? "") });
+    setMenu({ col, rect, data: null });
+    server.c.columnValues(server.datasetId, ok.name, col).then(
+      (r) => setMenu((m) => (m?.col === col ? { ...m, data: { rows: r.rows, distinct: r.distinct, truncated: r.truncated, items: r.values.map((x) => [keyOf(x.value), x.count] as [string, number]) } } : m)),
+      () => setMenu((m) => (m?.col === col ? { ...m, error: "统计失败" } : m)),
+    );
+  };
 
   const rows = useMemo(() => {
-    if (table.error !== undefined) return [];
-    let rs = table.rows.map((r, i) => ({ r: r as Cell[], n: i + 1 }));
+    if (!ok) return [];
+    if (server) {
+      if (view) return view.rows.map((r, i) => ({ r: r as Cell[], n: view.row_numbers[i] ?? i + 1 }));
+      return ok.rows.map((r, i) => ({ r: r as Cell[], n: i + 1 }));
+    }
+    let rs = ok.rows.map((r, i) => ({ r: r as Cell[], n: i + 1 }));
     for (const [c, set] of Object.entries(filters)) rs = rs.filter(({ r }) => set.has(keyOf(r[Number(c)])));
     if (sort) {
-      const num = kindOf(table.dtypes[sort.col] ?? "") === "num";
+      const num = kindOf(ok.dtypes[sort.col] ?? "") === "num";
       rs = [...rs].sort((a, b) => (sort.dir === "asc" ? 1 : -1) * compare(a.r[sort.col], b.r[sort.col], num));
     }
     return rs;
-  }, [table, sort, filters]);
+  }, [ok, server, view, sort, filters]);
 
   if (table.error !== undefined) {
     return (
@@ -113,8 +160,12 @@ export function PreviewTable({ table }: { table: T }) {
     );
   }
   const active = Object.keys(filters).length > 0 || sort;
+  const foot = !active ? "" : server
+    ? view ? `；已对全表排序筛选：符合 ${view.matched_rows.toLocaleString()} 行，显示前 ${rows.length} 行` : busy ? "；正在对全表排序筛选…" : ""
+    : `；排序和筛选只作用于这 ${table.rows.length} 行，当前显示 ${rows.length} 行`;
   return (
-    <div className="preview">
+    <div className={`preview${busy ? " is-busy" : ""}`}>
+      {err ? <p className="warn" role="alert">{err}</p> : null}
       <div className="table-scroll">
         <table className="zebra">
           <thead>
@@ -131,7 +182,7 @@ export function PreviewTable({ table }: { table: T }) {
                       {sort?.col === i ? <span className="col-flag">{sort.dir === "asc" ? "↑" : "↓"}</span> : null}
                       {filters[i] ? <span className="col-flag" title="已筛选">⏷</span> : null}
                       <button type="button" className="icon col-more" aria-label={`${c} 列操作`} title="列操作"
-                        onClick={(e) => setMenu(menu?.col === i ? null : { col: i, rect: e.currentTarget.getBoundingClientRect() })}>
+                        onClick={(e) => openMenu(i, e.currentTarget.getBoundingClientRect())}>
                         <IconMore size={14} />
                       </button>
                     </span>
@@ -158,17 +209,16 @@ export function PreviewTable({ table }: { table: T }) {
         </table>
       </div>
       {menu ? (
-        <ColumnMenu key={menu.col} name={table.columns[menu.col]} dtype={table.dtypes[menu.col] ?? ""}
-          values={table.rows.map((r) => (r as Cell[])[menu.col])} anchor={menu.rect}
+        <ColumnMenu key={`${menu.col}:${menu.data ? "ok" : "wait"}`} name={table.columns[menu.col]} data={menu.data} error={menu.error} anchor={menu.rect}
           sort={sort?.col === menu.col ? sort.dir : null} filter={filters[menu.col] ?? null}
-          onSort={(d) => setSort(d ? { col: menu.col, dir: d } : null)}
-          onFilter={(f) => setFilters((x) => { const n = { ...x }; if (f) n[menu.col] = f; else delete n[menu.col]; return n; })}
+          onSort={(d) => refresh(d ? { col: menu.col, dir: d } : null, filters)}
+          onFilter={(f) => { const n = { ...filters }; if (f) n[menu.col] = f; else delete n[menu.col]; refresh(sort, n); }}
           onClose={() => setMenu(null)} />
       ) : null}
       <p className="table-foot muted">
         {table.filename}：共 {table.total_rows} 行 × {table.total_columns} 列，编码 {table.encoding}
-        {table.rows.length < table.total_rows ? `，显示前 ${table.rows.length} 行` : ""}
-        {active ? `；排序和筛选只作用于这 ${table.rows.length} 行，当前显示 ${rows.length} 行` : ""}
+        {!view && table.rows.length < table.total_rows ? `，显示前 ${table.rows.length} 行` : ""}
+        {foot}
         {table.truncated_cells > 0 ? `；${table.truncated_cells} 个单元格超 200 字，已截断（末尾带 …）` : ""}
         {table.bidi_stripped > 0 ? `；${table.bidi_stripped} 处方向控制符已从预览中去掉（不影响分析）` : ""}
       </p>

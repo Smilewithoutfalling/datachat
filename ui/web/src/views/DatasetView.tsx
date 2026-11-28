@@ -156,7 +156,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
                 current.error !== undefined ? (
                   <PreviewTable table={current} />
                 ) : (
-                  <div className="table-card"><PreviewTable table={current} /></div>
+                  <div className="table-card"><PreviewTable key={current.name} table={current} server={{ c, datasetId: id }} /></div>
                 )
               ) : null}
               {/* 验收 P1-13：只在识别出非 UTF-8 编码时提示 */}
