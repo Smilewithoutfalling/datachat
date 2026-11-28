@@ -18,7 +18,7 @@ test("超预算：ReAct 按已有执行结果收尾，卡片部分完成、写�
   try {
     await page.goto(`/#token=${E2E_TOKEN}`);
     await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "budget.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-    await page.getByRole("button", { name: "上传" }).click();
+    await page.getByRole("button", { name: "上传", exact: true }).click();
     const view = page.getByTestId("dataset-view");
     await view.getByLabel("分析模式").selectOption("react");
     await view.getByRole("button", { name: "新建会话" }).click();

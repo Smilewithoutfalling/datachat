@@ -23,6 +23,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
   // Shell 按 id 设了 key，换数据集会重新挂载，这里不用手动复位状态
   const [detail, setDetail] = useState<DatasetDetail | null>(initial?.id === id && initial.preview ? initial : null);
   const [tab, setTab] = useState(0);
+  const [viewNote, setViewNote] = useState<string | null>(null); // 预览表排序/筛选后，右上角说明跟着变
   const [agent, setAgent] = useState<Agent>("workflow");
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState(false);
@@ -135,7 +136,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
                   <div className="segmented tabs" role="tablist">
                     {preview.tables.map((t, i) => (
                       <button key={t.name} type="button" role="tab" aria-selected={i === tab} className={t.error !== undefined ? "failed" : undefined}
-                        onClick={() => setTab(i)}>
+                        onClick={() => (setTab(i), setViewNote(null))}>
                         {t.name}
                         <span className="tab-meta">
                           {t.error !== undefined ? " 读取失败" : ` ${t.total_rows}×${t.total_columns} · ${t.encoding}`}
@@ -146,9 +147,9 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
                 ) : null}
                 {current && current.error === undefined ? (
                   <span className="note">
-                    {current.rows.length < current.total_rows
+                    {viewNote ?? (current.rows.length < current.total_rows
                       ? `预览前 ${current.rows.length} 行（共 ${current.total_rows.toLocaleString()} 行）· 只读`
-                      : `共 ${current.total_rows.toLocaleString()} 行，已全部显示 · 只读`}
+                      : `共 ${current.total_rows.toLocaleString()} 行，已全部显示 · 只读`)}
                   </span>
                 ) : null}
               </div>
@@ -156,7 +157,7 @@ export function DatasetView({ c, id, initial, displayName, sessionCount = 0, onL
                 current.error !== undefined ? (
                   <PreviewTable table={current} />
                 ) : (
-                  <div className="table-card"><PreviewTable table={current} /></div>
+                  <div className="table-card"><PreviewTable key={current.name} table={current} server={{ c, datasetId: id }} onViewNote={setViewNote} /></div>
                 )
               ) : null}
               {/* 验收 P1-13：只在识别出非 UTF-8 编码时提示 */}

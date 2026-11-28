@@ -48,7 +48,7 @@ export function Dialog({ open, onClose, label, children }: { open: boolean; onCl
 /** ··· 菜单：点外面或 Esc 关闭。items 的 danger 项用 --danger。 */
 export function MoreMenu({ label, items, className, align = "right" }: {
   label: string;
-  items: { label: string; onClick: () => void; danger?: boolean }[];
+  items: { label: string; onClick: () => void; danger?: boolean; icon?: ReactNode }[];
   className?: string;
   align?: "right" | "left";
 }) {
@@ -77,7 +77,7 @@ export function MoreMenu({ label, items, className, align = "right" }: {
   }, [open]);
   return (
     <span ref={box} style={{ position: "relative", display: "inline-flex" }}>
-      <button type="button" className={`icon ${className ?? ""}`} aria-label={label} aria-haspopup="menu" aria-expanded={open}
+      <button type="button" className={`icon ${className ?? ""}`} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation();
           if (!open) place(e.currentTarget);
@@ -90,7 +90,7 @@ export function MoreMenu({ label, items, className, align = "right" }: {
           {items.map((it) => (
             <button key={it.label} type="button" role="menuitem" className={it.danger ? "danger-item" : undefined}
               onClick={() => (setOpen(false), it.onClick())}>
-              {it.label}
+              {it.icon}{it.label}
             </button>
           ))}
         </div>

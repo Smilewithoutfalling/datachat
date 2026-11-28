@@ -45,7 +45,7 @@ async function firstTurn(page: Page, file: string) {
   expect((await page.request.put("/settings", { headers: auth, data: { model: "ok" } })).ok()).toBe(true);
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: file, mimeType: "text/csv", buffer: Buffer.from(SALES) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
   const sv = page.getByTestId("session-view");
   await sv.getByLabel("提问").fill("各城市销量");

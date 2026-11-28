@@ -22,7 +22,7 @@ const model = async (page: Page, m: string) =>
 
 async function upload(page: Page, name: string, body: string) {
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name, mimeType: "text/csv", buffer: Buffer.from(body) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   await page.getByTestId("dataset-view").waitFor();
 }
 

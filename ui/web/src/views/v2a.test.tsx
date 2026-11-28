@@ -1,5 +1,5 @@
 // F4 迭代 V2a（phase5 §10 验收）：状态标签、步骤条、部分完成、错误卡分级、未配置 Key 拦截、重名数据集、上传拦截。
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { Api } from "../api";
 import { client } from "../client";
 import { fakeBackend } from "../fakeBackend";
@@ -174,6 +174,7 @@ test("重名数据集：名称后追加创建时间，只改显示", async () =>
     { id: "b", name: "sales.csv", created_at: "2026-10-01T02:00:00Z", files: f },
     { id: "c", name: "warm.csv", created_at: today.toISOString(), files: f },
   ]);
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
   const nav = await screen.findByRole("navigation", { name: "数据集" });
   await within(nav).findByText("sales.csv · 10:42");
   expect(within(nav).getByText(/^sales\.csv · 10月1日$/)).toBeTruthy();
@@ -182,9 +183,11 @@ test("重名数据集：名称后追加创建时间，只改显示", async () =>
 
 test("上传区文案：CSV 与 Excel 分别标上限（M13 图表小批；后端 app.py MAX_FILE_BYTES、excel_io 300 MB）", async () => {
   shell([]);
+  // 原型：首屏（无数据集）是首页的上传卡；数据集页才有上传区
+  await waitFor(() => expect(document.querySelector(".em-sub")?.textContent).toBe("CSV 不超过 1 GB · Excel 解压后不超过 300 MB · 可多选"));
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
   const zone = await screen.findByTestId("upload-zone");
   expect(zone.querySelector(".upload-sub")?.textContent).toBe("CSV 不超过 1 GB，Excel 解压后不超过 300 MB");
-  expect(document.querySelector(".em-sub")?.textContent).toBe("CSV 不超过 1 GB · Excel 解压后不超过 300 MB · 可多选");
   expect(document.body.textContent).not.toContain("单个文件不超过 1 GB");
 });
 
@@ -192,7 +195,7 @@ test("上传区：非 .csv / .xlsx 前端拦下，不发请求", async () => {
   const be = shell([]);
   const file = new File(["x"], "a.txt");
   fireEvent.change(await screen.findByLabelText("选择 CSV 文件"), { target: { files: [file] } });
-  expect(screen.getByRole("alert").textContent).toBe("只支持 .csv 和 .xlsx；a.txt 不支持");
+  expect(screen.getByRole("alert").textContent).toBe("只支持 .csv 和 .xlsx；a.txt 不支持 关闭");
   expect(screen.queryByRole("button", { name: "上传" })).toBeNull();
   expect(be.calls.some((c) => c.method === "POST")).toBe(false);
 });
@@ -202,7 +205,7 @@ test("上传区：旧版 .xls 单独说明另存为 .xlsx；.xlsx 放行到上�
   const input = await screen.findByLabelText("选择 CSV 文件");
   expect(input.getAttribute("accept")).toBe(".csv,.xlsx");
   fireEvent.change(input, { target: { files: [new File(["x"], "old.xls")] } });
-  expect(screen.getByRole("alert").textContent).toBe("不支持旧版 .xls：old.xls，请在 Excel 里另存为 .xlsx 或 CSV");
+  expect(screen.getByRole("alert").textContent).toBe("不支持旧版 .xls：old.xls，请在 Excel 里另存为 .xlsx 或 CSV 关闭");
   fireEvent.change(input, { target: { files: [new File(["x"], "book.xlsx")] } });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(await screen.findByRole("button", { name: "上传" })).toBeTruthy();

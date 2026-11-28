@@ -156,6 +156,19 @@ class SessionIn(BaseModel):
     title: str = ""
 
 
+class ViewBody(BaseModel):
+    """原型：预览表全表排序 / 筛选。"""
+    table: str
+    sort_col: int | None = None
+    sort_dir: Literal["asc", "desc"] = "asc"
+    filters: dict[str, list[str | None]] = Field(default_factory=dict)   # {列序号: 保留的值（与预览显示的文本一致，None = 空）}
+    rows: int = Field(PREVIEW_DEFAULT_ROWS, ge=1, le=PREVIEW_MAX_ROWS)
+
+
+class SessionExportBody(BaseModel):
+    charts: dict[str, dict[str, str]] = Field(default_factory=dict)   # 原型：前端离屏渲染的 ECharts 图 {message_id: {序号: PNG data URL}}
+
+
 class SessionPatch(BaseModel):
     title: str = Field(max_length=200)
 
@@ -441,6 +454,130 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             out["warnings"] = [preview_cell(w, {"bidi_stripped": 0, "truncated_cells": 0}) for w in warnings]
         return out
 
+    # ------------------------------------------------------------------ 原型：预览表全表排序 / 按值筛选
+    VIEW_VALUES_MAX = 500        # 列菜单里最多列多少个不同值（按出现次数降序）
+
+    from collections import OrderedDict
+    _view_cache: OrderedDict = OrderedDict()     # (数据集 id, 表名, 各文件 mtime+size) → (filename, df, enc)
+    _view_lock = threading.Lock()
+    VIEW_CACHE_MAX = 4                           # 只缓存最近看的几张表；调用方不得原地修改 df
+
+    def load_one_table(ds: Dataset, table: str):
+        """带小缓存的 _load_one_table：列菜单和排序筛选会对同一张表连续请求，不必每次重读文件。
+        键里带数据集目录下各文件的 mtime 和大小，文件变了自动失效。"""
+        target = dataset_target(ds)
+        try:
+            files = sorted(os.scandir(target), key=lambda e: e.name) if os.path.isdir(target) else []
+            stamp = tuple((e.name, e.stat().st_mtime_ns, e.stat().st_size) for e in files if e.is_file()) \
+                or (os.stat(target).st_mtime_ns, os.stat(target).st_size)
+        except OSError:
+            stamp = None
+        key = (ds.id, table, stamp)
+        with _view_lock:
+            if stamp is not None and key in _view_cache:
+                _view_cache.move_to_end(key)
+                return _view_cache[key]
+        hit = _load_one_table(ds, table)
+        if stamp is not None:
+            with _view_lock:
+                for k in [k for k in _view_cache if k[0] == ds.id and k[1] == table]:
+                    _keys_cache.pop(id(_view_cache.pop(k)[1]), None)
+                _view_cache[key] = hit
+                while len(_view_cache) > VIEW_CACHE_MAX:
+                    _keys_cache.pop(id(_view_cache.popitem(last=False)[1][1]), None)
+        return hit
+
+    def _load_one_table(ds: Dataset, table: str):
+        """按 dataset_out 同样的规则枚举表，返回 (filename, df, enc)；找不到 404，读坏 409。"""
+        from app.tools.csv_io import read_csv_with_encoding
+        from app.tools.dataset import excel_tables, is_excel_file, table_paths
+        target = dataset_target(ds)
+        try:
+            tp = table_paths(target)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(409, user_error("dataset", e, trace_id=secrets.token_hex(16), context=f"dataset={ds.id}")) from None
+        multi = tp is not None
+        for name, path in tp or [("df", target)]:
+            fn = os.path.basename(path)
+            try:
+                if not is_excel_file(path):
+                    if name == table:
+                        df, enc = read_csv_with_encoding(path)
+                        return fn, df, enc
+                    continue
+                stem = os.path.splitext(fn)[0]
+                named = excel_tables(name if multi else stem, path)
+                if not multi and len(named) == 1:
+                    named = [("df", named[0][1])]
+                for t, st in named:
+                    if t == table:
+                        return fn, st.df, "xlsx"
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(409, user_error("dataset", e, trace_id=secrets.token_hex(16),
+                                                    context=f"dataset={ds.id} file={fn}")) from None
+        raise HTTPException(404, f"没有这张表：{table}")
+
+    _keys_cache: dict = {}        # id(df) → {列序号: 比较键}；随 _view_cache 淘汰一起清
+
+    def cell_keys(series, df=None, col: int | None = None) -> list:
+        """单元格的比较键：与预览里显示的文本一致（preview_cell），缺失值为 None。传 df+col 时按列缓存（大表逐格转文本较慢）。"""
+        if df is not None and col is not None:
+            per = _keys_cache.get(id(df))
+            if per is not None and col in per:
+                return per[col]
+        st = {"bidi_stripped": 0, "truncated_cells": 0}
+        keys = [preview_cell(v, st) for v in series.tolist()]
+        if df is not None and col is not None:
+            with _view_lock:
+                if any(v[1] is df for v in _view_cache.values()):
+                    _keys_cache.setdefault(id(df), {})[col] = keys
+        return keys
+
+    def column_index(df, col: int):
+        if not (0 <= col < len(df.columns)):
+            raise HTTPException(422, f"列序号越界：{col}")
+        return df.iloc[:, col]
+
+    @app.get("/datasets/{dataset_id}/values", dependencies=[Depends(auth)])
+    def column_values(dataset_id: str, table: str = Query(...), col: int = Query(..., ge=0), db=Depends(db_dep)):
+        """列菜单：这一列在全表里的不同值和次数（按次数降序，最多 VIEW_VALUES_MAX 个）。"""
+        _fn, df, _enc = load_one_table(get_or_404(db, Dataset, dataset_id), table)
+        keys = cell_keys(column_index(df, col), df, col)
+        counts: dict = {}
+        for k in keys:
+            counts[k] = counts.get(k, 0) + 1
+        items = sorted(counts.items(), key=lambda kv: -kv[1])
+        return {"rows": len(keys), "distinct": len(items), "truncated": len(items) > VIEW_VALUES_MAX,
+                "values": [{"value": k, "count": n} for k, n in items[:VIEW_VALUES_MAX]]}
+
+    @app.post("/datasets/{dataset_id}/view", dependencies=[Depends(auth)])
+    def table_view(dataset_id: str, body: ViewBody, db=Depends(db_dep)):
+        """全表排序 / 按值筛选后取前 rows 行，返回与 preview 同形的表，外加 matched_rows（筛选后的行数）。只读，不改数据集。"""
+        import pandas as pd
+        fn, df, enc = load_one_table(get_or_404(db, Dataset, dataset_id), body.table)
+        mask = pd.Series(True, index=df.index)
+        for c, keep in body.filters.items():
+            try:
+                ci = int(c)
+            except ValueError:
+                raise HTTPException(422, f"列序号不对：{c}") from None
+            allowed = set(keep)
+            mask &= pd.Series([k in allowed for k in cell_keys(column_index(df, ci), df, ci)], index=df.index)
+        view = df[mask]
+        if body.sort_col is not None:
+            s = column_index(view, body.sort_col)
+            num = pd.to_numeric(s, errors="coerce")
+            key = num if num.notna().sum() == s.notna().sum() else s.astype("string")
+            order = key.sort_values(ascending=body.sort_dir == "asc", na_position="last", kind="stable").index
+            view = view.loc[order]
+        out = preview_table(body.table, fn, view, enc, body.rows)
+        out["total_rows"] = int(len(df))
+        out["matched_rows"] = int(len(view))
+        out["row_numbers"] = [int(df.index.get_loc(i)) + 1 for i in view.index[: body.rows]]
+        return out
+
     # ------------------------------------------------------------------ 路由
     @app.get("/health")
     def health():
@@ -591,6 +728,53 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
         return {"path": path, "filename": os.path.basename(path), "rows": int(frame.shape[0]),
                 "columns": int(frame.shape[1]),
                 "matches_original": format_result(result) == (rec.get("result_text") or "")}
+
+    @app.post("/sessions/{session_id}/export", dependencies=[Depends(auth)])
+    def export_session(session_id: str, body: SessionExportBody | None = None,
+                       download: bool = Query(False), db=Depends(db_dep)):
+        """整段会话导出为自包含 HTML（提问、回答、图表、结果数据）。download=1 直接回文件（浏览器模式），
+        否则与代码 / 结果表导出一样写进「下载」文件夹，回 {path, filename}。"""
+        from app.server.session_export import SessionExportError, build_html, decode_client_pngs, read_png
+        s = get_or_404(db, ChatSession, session_id)
+        ds = db.get(Dataset, s.dataset_id)
+        try:
+            client_pngs = decode_client_pngs(body.charts if body else None)
+        except SessionExportError as e:
+            raise HTTPException(400, str(e)) from None
+        turns, q = [], None
+        for m in s.messages:
+            if m.role == "user":
+                if q is not None:
+                    turns.append({"question": q.content, "answer": "", "answer_status": "unanswered", "charts": [], "result_text": ""})
+                q = m
+                continue
+            try:
+                rec = json.loads(m.result_json) if m.result_json else {}
+            except ValueError:
+                rec = {}
+            pngs = []
+            for k, c in enumerate(rec.get("charts") or []):
+                if isinstance(c, str):
+                    c = {"png": c, "option": None}
+                pngs.append(read_png(c.get("png"), chart_dir) if c.get("png") else client_pngs.get(m.id, {}).get(k))
+            if not rec.get("charts") and rec.get("chart_path"):
+                pngs.append(read_png(rec.get("chart_path"), chart_dir))
+            turns.append({"question": q.content if q else "", "answer": m.content, "answer_status": m.status,
+                          "charts": pngs, "result_text": rec.get("result_text") or ""})
+            q = None
+        if q is not None:
+            turns.append({"question": q.content, "answer": "", "answer_status": "unanswered", "charts": [], "result_text": ""})
+        title = s.title or "DataChat 分析"
+        page = build_html(title=title, dataset=ds.name if ds else "（已删除）", exported_at=now(), turns=turns)
+        data = page.encode("utf-8")
+        if download:
+            from app.server.exports import clean_filename
+            fn = clean_filename(title) + ".html"
+            return Response(data, media_type="text/html; charset=utf-8",
+                            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"})
+        path = write_export(title, data, ".html")
+        logger.info("导出会话：%s（%d 轮）", os.path.basename(path), len(turns))
+        return {"path": path, "filename": os.path.basename(path)}
 
     def check_xlsx(path, fn):
         """xlsx 上传后按解压后体积判（zip 头里各成员 file_size 之和）；坏文件 400，超限 413。"""

@@ -134,7 +134,7 @@ test("多表：tab 上带行列数与编码，读坏的表标出；顶层 error 
 
 test("会话：消息按文本渲染；改名走 PATCH 并更新左栏", async () => {
   const be = setup();
-  fireEvent.click(await screen.findByRole("button", { name: /^旧标题/ }));
+  fireEvent.click(await within(await screen.findByRole("navigation", { name: "会话" })).findByRole("button", { name: /^旧标题/ }));
   const view = await screen.findByTestId("session-view");
   // 失败轮次的后端原文在错误卡的「技术详情」里（验收 P1-2/3），展开后同样按文本渲染
   for (const b of within(view).queryAllByRole("button", { name: "技术详情" })) fireEvent.click(b);
@@ -270,6 +270,7 @@ test("列表竞态：reload 在飞时新建会话，晚到的旧列表不能把�
     return be.fetchImpl(input, init);
   };
   render(<Shell c={client(new Api("t", fetchImpl))} initialKey={{ configured: true, source: "keyring" }} />);
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
   const nav = await screen.findByRole("navigation", { name: "数据集" });
   fireEvent.click(await within(nav).findByRole("button", { name: /^库存/ }));
   let view = await screen.findByTestId("dataset-view");
@@ -280,24 +281,26 @@ test("列表竞态：reload 在飞时新建会话，晚到的旧列表不能把�
   fireEvent.change(within(dlg).getByLabelText("输入数据集名称以确认"), { target: { value: "库存" } });
   await act(async () => fireEvent.click(within(dlg).getByRole("button", { name: "删除数据集", hidden: true })));
   expect(n).toBe(2); // reload 已发出、被扣住
-  fireEvent.click(await within(nav).findByRole("button", { name: /^销量/ }));
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
+  fireEvent.click(await within(await screen.findByRole("navigation", { name: "数据集" })).findByRole("button", { name: /^销量/ }));
   view = await screen.findByTestId("dataset-view");
   await act(async () => fireEvent.click(await within(view).findByRole("button", { name: "新建会话" })));
-  await screen.findByRole("button", { name: /^刚建的会话/ });
+  await within(await screen.findByRole("navigation", { name: "会话" })).findByRole("button", { name: /^刚建的会话/ });
   await act(async () => (release(), await new Promise((r) => setTimeout(r, 20))));
-  expect(screen.getByRole("button", { name: /^刚建的会话/ })).toBeTruthy(); // 旧快照被整体丢弃
+  expect(within(screen.getByRole("navigation", { name: "会话" })).getByRole("button", { name: /^刚建的会话/ })).toBeTruthy(); // 旧快照被整体丢弃
   expect(be.calls.filter((c) => c.method === "GET" && c.path === "/datasets")).toHaveLength(2);
 });
 
 // V2c §3：设置页、数据集页的「← 返回」回到最近一次停留的首页或会话
 test("返回：会话 → 设置 → 数据集 → 返回，回到会话（设置 ↔ 数据集之间不改锚点）", async () => {
   setup();
-  fireEvent.click(await screen.findByRole("button", { name: /^旧标题/ }));
+  fireEvent.click(await within(await screen.findByRole("navigation", { name: "会话" })).findByRole("button", { name: /^旧标题/ }));
   await screen.findByTestId("session-view");
   fireEvent.click(screen.getByRole("button", { name: "设置" }));
   await screen.findByTestId("settings-view");
   expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /^销量/ }));
+  fireEvent.click(within(await screen.findByRole("navigation", { name: "主导航" })).getByRole("button", { name: /^数据集/ }));
+  fireEvent.click(await within(await screen.findByRole("navigation", { name: "数据集" })).findByRole("button", { name: /^销量/ }));
   await screen.findByTestId("dataset-view");
   fireEvent.click(screen.getByRole("button", { name: "返回" }));
   expect(await screen.findByTestId("session-view")).toBeTruthy();

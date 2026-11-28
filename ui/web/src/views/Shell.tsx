@@ -1,18 +1,21 @@
-import { type DragEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api";
 import { setPngSaver } from "../charts/pngSaver";
 import { inDesktopShell, UPDATE_POLL_MS, UPDATE_URL } from "../desktop";
+import { exportPng } from "../charts/exportPng";
+import { type ChartInput, DEFAULT_UI } from "../charts/prepare";
+import { getChartTheme } from "../charts/themes";
 import { type Client, errText, formatSize } from "../client";
 import { titleEdit } from "../titles";
-import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session } from "../types";
+import type { Agent, Dataset, DatasetDetail, DatasetProfile, KeyStatus, Session, SessionDetail } from "../types";
 import { DatasetView } from "./DatasetView";
-import { IconChat, IconGear, IconPlus, IconSidebar, IconSpark, IconTable, IconUpload } from "./icons";
+import { GenieHome } from "./GenieHome";
+import { IconChat, IconDownload, IconGear, IconHome, IconPencil, IconPlus, IconSidebar, IconSpark, IconTable, IconTrash, IconUpload } from "./icons";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
-import { StarterHome } from "./StarterCards";
 import { createdSuffix, Dialog, MoreMenu, relTime, Topbar } from "./ui";
 
-type View = { kind: "home" } | { kind: "dataset"; id: string; focus?: "notes" } | { kind: "session"; id: string } | { kind: "settings" };
+type View = { kind: "home" } | { kind: "datasets" } | { kind: "dataset"; id: string; focus?: "notes" } | { kind: "session"; id: string } | { kind: "settings" };
 
 const isDict = (f: string) => /\.dict\.csv$/i.test(f);
 const stem = (f: string) => f.replace(/\.(csv|xlsx)$/i, "");
@@ -43,6 +46,12 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
   const [sessions, setSessions] = useState<Session[]>([]);
   const [view, setView] = useState<View>(initialKey.configured ? { kind: "home" } : { kind: "settings" });
   const [key, setKey] = useState(initialKey);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
   const [error, setError] = useState("");
   const [uploaded, setUploaded] = useState<DatasetDetail | undefined>(); // 上传响应（带预览）
   // 读取失败的数据集（phase5 V2a §3.1）：列表接口不带 error，只在拿到详情（上传响应、打开详情）后知道
@@ -125,8 +134,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         (e) => setError(errText(e)))
       .finally(() => setStarting(false))
   );
-  const homeDs = datasets.find((d) => !failed[d.id]); // 列表按创建时间倒序：刚上传的在最前；读取失败的不拿来提问
-
+  
   const newSession = (datasetId: string, agent: Agent) =>
     c.createSession(datasetId, agent).then(
       (s) => (touched(), setSessions((xs) => [s, ...xs]), go({ kind: "session", id: s.id })),
@@ -148,22 +156,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
       (e) => setError(errText(e)),
     );
 
-  const sidebar = (
-    <aside className="sidebar" aria-label="侧栏">
-      <div className="brand">
-        <span className="brand-logo"><IconSpark size={16} /></span>
-        <h1 className="brand-name">datachat</h1>
-        <button type="button" className="icon collapse-btn" aria-label="收起侧栏" onClick={() => (setCollapsed(true), setRailOpen(false))}>
-          <IconSidebar />
-        </button>
-      </div>
-
-      <div className="side-head"><span>数据源</span><span className="count">{datasets.length}</span></div>
-      <Upload onPick={setPending} err={pickErr} setErr={setPickErr} />
-      <nav aria-label="数据集">
-        {datasets.length === 0 ? <p className="side-empty">还没有数据集</p> : null}
-        <ul className="side-list">
-          {datasets.map((d) => {
+  const dsCard = (d: Dataset) => {
             const err = failed[d.id];
             const tables = d.files.filter((f) => !isDict(f.filename.toLowerCase()));
             const dicts = d.files.length - tables.length;
@@ -223,23 +216,56 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
                 )}
               </li>
             );
-          })}
-        </ul>
+  };
+
+  const pickSide = (list: File[]) => {
+    if (!list.length) return;
+    const e = checkFiles(list);
+    if (e) return setError(e);
+    setError("");
+    onPick(list);
+  };
+  const onPick = setPending;
+  const sideInput = useRef<HTMLInputElement>(null);
+  const inDatasets = view.kind === "datasets" || view.kind === "dataset";
+
+  // 原型（proto/genie-shell）：侧栏参考 Genie——上面是固定入口（首页 / 数据集 / 上传），中间「新对话」+ 对话列表，底部设置。
+  // 数据集卡片从侧栏挪到「数据集」页，侧栏只留对话，像聊天软件的会话列表。
+  const sidebar = (
+    <aside className="sidebar g-side" aria-label="侧栏">
+      <div className="brand">
+        <span className="brand-logo"><IconSpark size={16} /></span>
+        <h1 className="brand-name">datachat</h1>
+        <button type="button" className="icon collapse-btn" aria-label="收起侧栏" onClick={() => (setCollapsed(true), setRailOpen(false))}>
+          <IconSidebar />
+        </button>
+      </div>
+
+      <nav className="g-nav" aria-label="主导航">
+        <button type="button" className={`nav-row${view.kind === "home" ? " active" : ""}`} aria-current={view.kind === "home" ? "page" : undefined}
+          onClick={() => go({ kind: "home" })}><IconHome />首页</button>
+        <button type="button" className={`nav-row${inDatasets ? " active" : ""}`} onClick={() => go({ kind: "datasets" })}>
+          <IconTable />数据集<span className="g-count">{datasets.length}</span>
+        </button>
+        <button type="button" className="nav-row" onClick={() => sideInput.current?.click()}><IconUpload />上传数据</button>
+        <input ref={sideInput} type="file" accept=".csv,.xlsx" multiple hidden aria-label="选择 CSV 文件"
+          onChange={(e) => (pickSide(Array.from(e.target.files ?? [])), (e.target.value = ""))} />
       </nav>
 
-      <div className="side-sep" />
-      <nav aria-label="会话">
-        <div className="side-head"><span>会话</span><span className="count">{sessions.length}</span></div>
-        {sessions.length === 0 ? <p className="side-empty">还没有会话</p> : null}
+      <button type="button" className="g-new" onClick={() => go({ kind: "home" })}><IconPlus size={14} />新对话</button>
+
+      <nav aria-label="会话" className="g-chats">
+        <div className="side-head"><span>对话</span><span className="count">{sessions.length}</span></div>
+        {sessions.length === 0 ? <p className="side-empty">还没有对话</p> : null}
         <ul className="side-list">
           {sessions.map((s) => (
             <SessionRow key={s.id} s={s} active={view.kind === "session" && view.id === s.id} dsName={label[s.dataset_id] ?? ""}
-              onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)} />
+              onOpen={() => go({ kind: "session", id: s.id })} onRename={(t) => renameSession(s.id, t)} onDelete={() => deleteSession(s.id)}
+              onExport={() => exportSession(c, s.id).then(setNotice, (e) => setNotice(`导出失败：${errText(e)}`))} />
           ))}
         </ul>
       </nav>
 
-      <div className="side-spacer" />
       <div className="side-foot">
         <button type="button" className={`nav-row${view.kind === "settings" ? " active" : ""}`} onClick={() => go({ kind: "settings" })}>
           <IconGear />
@@ -256,7 +282,7 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         <button type="button" className="brand-logo rail-logo" aria-label="展开侧栏" onClick={() => (collapsed ? setCollapsed(false) : setRailOpen(!railOpen))}>
           <IconSpark size={16} />
         </button>
-        <button type="button" className={`icon${view.kind === "dataset" ? " on" : ""}`} aria-label="数据集" onClick={() => setRailOpen(true)}><IconTable /></button>
+        <button type="button" className={`icon${inDatasets ? " on" : ""}`} aria-label="数据集" onClick={() => go({ kind: "datasets" })}><IconTable /></button>
         <button type="button" className={`icon${view.kind === "session" ? " on" : ""}`} aria-label="会话列表" onClick={() => setRailOpen(true)}><IconChat /></button>
         <span className="side-spacer" />
         <button type="button" className={`icon${view.kind === "settings" ? " on" : ""}`} aria-label="打开设置" onClick={() => go({ kind: "settings" })}><IconGear /></button>
@@ -281,11 +307,25 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
           </p>
         )}
         {view.kind === "home" && (
-          <Home empty={datasets.length === 0} onPick={setPending} starter={homeDs ? (
-            <StarterHome name={label[homeDs.id]} profile={profiles[homeDs.id]} busy={starting} profiling={profiling === homeDs.id}
-              tableCount={homeDs.files.filter((f) => !isDict(f.filename.toLowerCase())).length}
-              onAsk={(q) => askStarter(homeDs.id, q)} onProfile={() => profileDataset(homeDs.id)} onOpen={() => go({ kind: "dataset", id: homeDs.id })} />
-          ) : undefined} />
+          <div className="main g-main">
+            <GenieHome datasets={datasets.filter((d) => !failed[d.id])} label={label} profiles={profiles} sessions={sessions} busy={starting}
+              upload={<HeroUpload onPick={setPending} />}
+              onAsk={askStarter} onOpenSession={(id) => go({ kind: "session", id })} onOpenDataset={(id) => go({ kind: "dataset", id })}
+              onAllDatasets={() => go({ kind: "datasets" })} />
+          </div>
+        )}
+        {view.kind === "datasets" && (
+          <>
+            <Topbar title="数据集" sub={`${datasets.length} 个数据集`} />
+            <div className="main">
+              <div className="g-ds-page">
+                <Upload onPick={setPending} err={pickErr} setErr={setPickErr} />
+                {datasets.length === 0 ? <p className="g-empty">还没有数据集，先上传一份 CSV 或 Excel。</p> : (
+                  <nav aria-label="数据集"><ul className="g-ds-grid">{datasets.map(dsCard)}</ul></nav>
+                )}
+              </div>
+            </div>
+          </>
         )}
         {view.kind === "dataset" && (
           <DatasetView
@@ -319,14 +359,62 @@ export function Shell({ c, initialKey, desktop = inDesktopShell() }: { c: Client
         )}
         {view.kind === "settings" && <SettingsView c={c} onKeyChange={setKey} onBack={onBack} />}
       </section>
+      {notice ? <div className="g-toast" role="status">{notice}</div> : null}
       <UploadDialog key={pending.map((f) => f.name).join("|")} c={c} files={pending} onClose={() => setPending([])} onDone={onUploaded} />
     </div>
   );
 }
 
-function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
-  s: Session; active: boolean; dsName: string; onOpen: () => void; onRename: (t: string) => void; onDelete: () => void;
+const parseIso = (iso: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+const fullTime = (iso: string) => {
+  const t = parseIso(iso);
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t), z = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+};
+
+/** 导出整段会话：ECharts 图用与屏幕同一条 prepare 离屏渲染成 PNG，连同会话交给后端拼成自包含 HTML。
+ *  桌面壳里后端直接写进「下载」文件夹（WebView2 里 <a download> 不生效），浏览器里拿文件触发下载。返回给用户看的一句话。 */
+async function exportSession(c: Client, id: string): Promise<string> {
+  const d: SessionDetail = await c.session(id);
+  const charts: Record<string, Record<string, string>> = {};
+  const theme = getChartTheme();
+  for (const m of d.messages) {
+    const list = (m.result as { charts?: { png: string | null; option: unknown }[] } | null)?.charts ?? [];
+    list.forEach((ch, i) => {
+      if (ch.png || !ch.option) return;
+      try {
+        (charts[m.id] ??= {})[String(i)] = exportPng(ch.option as ChartInput, DEFAULT_UI, theme, { width: 960, height: 540 });
+      } catch { /* 这一张交给后端标成「未能导出」 */ }
+    });
+  }
+  if (inDesktopShell()) {
+    const r = await c.exportSessionToDisk(id, charts);
+    return `已导出到 ${r.path}`;
+  }
+  const blob = await c.exportSessionFile(id, charts);
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: `${(d.title || "会话").replace(/[\\/:*?"<>|]/g, "_")}.html` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return "已导出为 HTML";
+}
+
+function SessionRow({ s, active, dsName, onOpen, onRename, onDelete, onExport }: {
+  s: Session; active: boolean; dsName: string; onOpen: () => void; onRename: (t: string) => void; onDelete: () => void; onExport: () => void;
 }) {
+  const [tip, setTip] = useState<{ top: number; left: number } | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const showTip = (el: HTMLElement) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      if (window.innerWidth < 720) return; // 窄屏侧栏是抽屉，卡片没地方放
+      const r = el.getBoundingClientRect();
+      setTip({ top: r.top, left: r.right + 12 });
+    }, 450);
+  };
+  const hideTip = () => (window.clearTimeout(timer.current), setTip(null));
+  useEffect(() => () => window.clearTimeout(timer.current), []);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(s.title);
   const [confirm, setConfirm] = useState(false);
@@ -354,14 +442,25 @@ function SessionRow({ s, active, dsName, onOpen, onRename, onDelete }: {
       ) : (
         <>
           <button type="button" className={`sess-row${active ? " active" : ""}`} aria-current={active ? "page" : undefined}
-            onClick={onOpen} onDoubleClick={() => (setDraft(s.title), setEditing(true))}>
+            onClick={() => (hideTip(), onOpen())} onDoubleClick={() => (setDraft(s.title), setEditing(true))}
+            onMouseEnter={(e) => showTip(e.currentTarget)} onMouseLeave={hideTip} onFocus={hideTip}>
             <span className="sess-title">{title}</span>
             <span className="sess-meta">{dsName}{dsName ? " · " : ""}{relTime(s.updated_at)}</span>
           </button>
           <MoreMenu label="更多操作" className="sess-more" align="left" items={[
-            { label: "重命名", onClick: () => (setDraft(s.title), setEditing(true)) },
-            { label: "删除", onClick: () => setConfirm(true), danger: true },
+            { label: "重命名", icon: <IconPencil size={14} />, onClick: () => (setDraft(s.title), setEditing(true)) },
+            { label: "导出", icon: <IconDownload size={14} />, onClick: onExport },
+            { label: "删除会话", icon: <IconTrash size={14} />, onClick: () => setConfirm(true), danger: true },
           ]} />
+          {tip ? (
+            <div className="sess-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>
+              <strong>{title}</strong>
+              <span>{dsName || "数据集已删除"}</span>
+              {active ? <span className="sess-tip-now">当前会话</span> : null}
+              <span>创建 {fullTime(s.created_at)}</span>
+              <span>更新 {relTime(s.updated_at)}</span>
+            </div>
+          ) : null}
         </>
       )}
       {confirm ? (
@@ -473,34 +572,6 @@ function uploadErr(e: unknown): string {
     return `上传失败：${e.detail}`;
   }
   return `上传失败：${errText(e)}`;
-}
-
-/** 首屏（phase5 V2a §7）。有数据集时换一句引导。 */
-function Home({ empty, onPick, starter }: { empty: boolean; onPick: (f: File[]) => void; starter?: ReactNode }) {
-  return (
-    <>
-      <Topbar title="新会话" sub={empty ? "上传一个数据集开始分析" : "选择一个数据集开始分析"} />
-      <div className="main">
-        {starter ?? <div className="empty">
-          <h2>把表丢进来，直接问</h2>
-          <p className="lead">读表、写代码、出图，一条提问跑完。数据不出本地。</p>
-          <HeroUpload onPick={onPick} />
-          <p className="tip">
-            {empty ? "可多选：多张表一起上传，或者加上 *.dict.csv 作数据字典" : "或者在左侧选一个数据集，新建会话后提问"}
-          </p>
-        </div>}
-      </div>
-      <div className="composer-wrap">
-        <div className="composer disabled">
-          <textarea aria-label="提问" disabled placeholder={empty ? "上传数据集后即可提问…" : "先选择一个数据集…"} rows={1} />
-          <div className="composer-row">
-            <span className="ctx-pill"><span>未选择数据源</span></span>
-            <button type="button" className="send primary" disabled>发送</button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
 }
 
 function HeroUpload({ onPick }: { onPick: (f: File[]) => void }) {

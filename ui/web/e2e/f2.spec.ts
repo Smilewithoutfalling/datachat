@@ -18,7 +18,7 @@ test("没 Key 拦截 → SSE 失败原因 → 👍 → 刷新重放一致", asyn
   expect(await key.json()).toEqual({ configured: false, source: null });
   await page.goto(`/#token=${E2E_TOKEN}`);
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "sales.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   const view = page.getByTestId("dataset-view");
   await view.getByRole("button", { name: "新建会话" }).click();
 

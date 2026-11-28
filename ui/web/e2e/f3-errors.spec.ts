@@ -18,7 +18,7 @@ for (const echo of ["echo", "echocut"]) {
     await useScenario(page, `fail-${echo}-400`);
     await page.goto(`/#token=${E2E_TOKEN}`);
     await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: "sales.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-    await page.getByRole("button", { name: "上传" }).click();
+    await page.getByRole("button", { name: "上传", exact: true }).click();
     await page.getByTestId("dataset-view").getByRole("button", { name: "新建会话" }).click();
     const sv = page.getByTestId("session-view");
     await sv.getByLabel("提问").fill(Q);

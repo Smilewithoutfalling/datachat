@@ -6,7 +6,7 @@ import { decodeTitleHeader } from "./titles";
 import type { Ev } from "./turn";
 import type {
   Agent, Catalog, Connection, ConnectionIn, Connections, ConnectionTest, ConnKey, Dataset, DatasetDetail, DatasetNote, KeyStatus,
-  ModelList, NoteImport, NoteIn, Rating, Session, SessionDetail, Settings, SettingsTest,
+  ModelList, NoteImport, NoteIn, PreviewTableOk, Rating, Session, SessionDetail, Settings, SettingsTest,
 } from "./types";
 
 const jsonBody = (method: string, body: unknown): RequestInit => ({
@@ -98,6 +98,19 @@ export function client(api: Api) {
     exportResult: (messageId: string, format: "csv" | "xlsx") =>
       api.json<ExportedFile & { rows: number; columns: number; matches_original: boolean }>(
         `/messages/${encodeURIComponent(messageId)}/export/result?format=${format}`, { method: "POST" }),
+
+    // 原型：预览表全表排序 / 按值筛选（只读）。值与预览显示的文本一致，null = 空。
+    columnValues: (id: string, table: string, col: number) =>
+      api.json<{ rows: number; distinct: number; truncated: boolean; values: { value: string | null; count: number }[] }>(
+        `/datasets/${encodeURIComponent(id)}/values?table=${encodeURIComponent(table)}&col=${col}`),
+    tableView: (id: string, body: { table: string; sort_col: number | null; sort_dir: "asc" | "desc"; filters: Record<string, (string | null)[]>; rows: number }) =>
+      api.json<PreviewTableOk & { matched_rows: number; row_numbers: number[] }>(`/datasets/${encodeURIComponent(id)}/view`, jsonBody("POST", body)),
+    // 原型：整段会话导出为 HTML。charts 是前端离屏渲染的 ECharts 图 {message_id: {序号: PNG data URL}}。
+    // download=true 直接拿文件（浏览器模式）；否则后端写进下载文件夹，返回路径（桌面模式）。
+    exportSessionFile: async (id: string, charts: Record<string, Record<string, string>>) =>
+      (await api.request(`/sessions/${encodeURIComponent(id)}/export?download=1`, jsonBody("POST", { charts }))).blob(),
+    exportSessionToDisk: (id: string, charts: Record<string, Record<string, string>>) =>
+      api.json<ExportedFile>(`/sessions/${encodeURIComponent(id)}/export`, jsonBody("POST", { charts })),
 
     settings: () => api.json<Settings>("/settings"),
     saveSettings: (s: Partial<Settings>) => api.json<Settings>("/settings", jsonBody("PUT", s)),

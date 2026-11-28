@@ -68,7 +68,7 @@ test("新建连接 → 测试（两行）→ 设为生效 → 分析一题；工
 
   // 数据集页：生效连接不支持工具调用 → 「边想边做」不可选
   await page.getByLabel("选择 CSV 文件").setInputFiles([{ name: `conn-${Date.now()}.csv`, mimeType: "text/csv", buffer: Buffer.from(CSV) }]);
-  await page.getByRole("button", { name: "上传" }).click();
+  await page.getByRole("button", { name: "上传", exact: true }).click();
   const dv = page.getByTestId("dataset-view");
   const react = dv.getByRole("option", { name: "边想边做（不可用）" });
   // Playwright 的 toBeDisabled 对 <select> 里的 <option> 判成 enabled（aria 快照却是 [disabled]），所以直接断言 disabled 属性
@@ -91,6 +91,7 @@ test("新建连接 → 测试（两行）→ 设为生效 → 分析一题；工
   expect(JSON.stringify(key)).not.toContain("fake-key-not-secret");
 
   // 分析一题（标准模式）：回答出来，卡头悬停写着连接名和模型；「边想边做」恢复可选
+  await page.locator('.g-nav .nav-row:has-text("数据集"), .rail button[aria-label="数据集"]').filter({ visible: true }).first().click(); // 原型：数据集卡片在「数据集」页
   await page.getByRole("navigation", { name: "数据集" }).getByRole("button", { name: /^conn-/ }).first().click();
   await expect(dv.getByRole("option", { name: "边想边做", exact: true })).not.toHaveAttribute("disabled");
   await dv.getByRole("button", { name: "新建会话" }).click();
