@@ -100,7 +100,7 @@ function ColumnMenu({ name, data, sort, filter, onSort, onFilter, onClose, ancho
 type View = PreviewTableOk & { matched_rows: number; row_numbers: number[] };
 const SERVER_ROWS = 50;
 
-export function PreviewTable({ table, server }: { table: T; server?: { c: Client; datasetId: string } }) {
+export function PreviewTable({ table, server, onViewNote }: { table: T; server?: { c: Client; datasetId: string }; onViewNote?: (s: string | null) => void }) {
   const [sort, setSort] = useState<Sort>(null);
   const [filters, setFilters] = useState<Record<number, Set<string>>>({});
   const [menu, setMenu] = useState<{ col: number; rect: DOMRect; data: Counts | null; error?: string } | null>(null);
@@ -115,13 +115,20 @@ export function PreviewTable({ table, server }: { table: T; server?: { c: Client
     setSort(nextSort);
     setFilters(nextFilters);
     if (!server || !ok) return;
-    if (!nextSort && Object.keys(nextFilters).length === 0) return setView(null), setErr("");
+    if (!nextSort && Object.keys(nextFilters).length === 0) return setView(null), setErr(""), onViewNote?.(null);
     const n = ++seq.current;
     setBusy(true);
     const f: Record<string, (string | null)[]> = {};
     for (const [c, set] of Object.entries(nextFilters)) f[c] = [...set].map((k) => (k === NA ? null : k));
     server.c.tableView(server.datasetId, { table: ok.name, sort_col: nextSort?.col ?? null, sort_dir: nextSort?.dir ?? "asc", filters: f, rows: SERVER_ROWS })
-      .then((v) => n === seq.current && (setView(v), setErr("")))
+      .then((v) => {
+        if (n !== seq.current) return;
+        setView(v);
+        setErr("");
+        const shown = Math.min(v.matched_rows, v.rows.length);
+        onViewNote?.(`${Object.keys(nextFilters).length ? `筛选后 ${v.matched_rows.toLocaleString()} 行` : "已排序"}（共 ${v.total_rows.toLocaleString()} 行）`
+          + `${shown < v.matched_rows ? `，显示前 ${shown} 行` : ""} · 只读`);
+      })
       .catch((e: unknown) => n === seq.current && setErr(e instanceof Error ? e.message : "排序筛选失败"))
       .finally(() => n === seq.current && setBusy(false));
   };

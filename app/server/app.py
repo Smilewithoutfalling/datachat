@@ -457,7 +457,37 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     # ------------------------------------------------------------------ 原型：预览表全表排序 / 按值筛选
     VIEW_VALUES_MAX = 500        # 列菜单里最多列多少个不同值（按出现次数降序）
 
+    from collections import OrderedDict
+    _view_cache: OrderedDict = OrderedDict()     # (数据集 id, 表名, 各文件 mtime+size) → (filename, df, enc)
+    _view_lock = threading.Lock()
+    VIEW_CACHE_MAX = 4                           # 只缓存最近看的几张表；调用方不得原地修改 df
+
     def load_one_table(ds: Dataset, table: str):
+        """带小缓存的 _load_one_table：列菜单和排序筛选会对同一张表连续请求，不必每次重读文件。
+        键里带数据集目录下各文件的 mtime 和大小，文件变了自动失效。"""
+        target = dataset_target(ds)
+        try:
+            files = sorted(os.scandir(target), key=lambda e: e.name) if os.path.isdir(target) else []
+            stamp = tuple((e.name, e.stat().st_mtime_ns, e.stat().st_size) for e in files if e.is_file()) \
+                or (os.stat(target).st_mtime_ns, os.stat(target).st_size)
+        except OSError:
+            stamp = None
+        key = (ds.id, table, stamp)
+        with _view_lock:
+            if stamp is not None and key in _view_cache:
+                _view_cache.move_to_end(key)
+                return _view_cache[key]
+        hit = _load_one_table(ds, table)
+        if stamp is not None:
+            with _view_lock:
+                for k in [k for k in _view_cache if k[0] == ds.id and k[1] == table]:
+                    _keys_cache.pop(id(_view_cache.pop(k)[1]), None)
+                _view_cache[key] = hit
+                while len(_view_cache) > VIEW_CACHE_MAX:
+                    _keys_cache.pop(id(_view_cache.popitem(last=False)[1][1]), None)
+        return hit
+
+    def _load_one_table(ds: Dataset, table: str):
         """按 dataset_out 同样的规则枚举表，返回 (filename, df, enc)；找不到 404，读坏 409。"""
         from app.tools.csv_io import read_csv_with_encoding
         from app.tools.dataset import excel_tables, is_excel_file, table_paths
@@ -489,10 +519,21 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
                                                     context=f"dataset={ds.id} file={fn}")) from None
         raise HTTPException(404, f"没有这张表：{table}")
 
-    def cell_keys(series) -> list:
-        """单元格的比较键：与预览里显示的文本一致（preview_cell），缺失值为 None。"""
+    _keys_cache: dict = {}        # id(df) → {列序号: 比较键}；随 _view_cache 淘汰一起清
+
+    def cell_keys(series, df=None, col: int | None = None) -> list:
+        """单元格的比较键：与预览里显示的文本一致（preview_cell），缺失值为 None。传 df+col 时按列缓存（大表逐格转文本较慢）。"""
+        if df is not None and col is not None:
+            per = _keys_cache.get(id(df))
+            if per is not None and col in per:
+                return per[col]
         st = {"bidi_stripped": 0, "truncated_cells": 0}
-        return [preview_cell(v, st) for v in series.tolist()]
+        keys = [preview_cell(v, st) for v in series.tolist()]
+        if df is not None and col is not None:
+            with _view_lock:
+                if any(v[1] is df for v in _view_cache.values()):
+                    _keys_cache.setdefault(id(df), {})[col] = keys
+        return keys
 
     def column_index(df, col: int):
         if not (0 <= col < len(df.columns)):
@@ -503,7 +544,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
     def column_values(dataset_id: str, table: str = Query(...), col: int = Query(..., ge=0), db=Depends(db_dep)):
         """列菜单：这一列在全表里的不同值和次数（按次数降序，最多 VIEW_VALUES_MAX 个）。"""
         _fn, df, _enc = load_one_table(get_or_404(db, Dataset, dataset_id), table)
-        keys = cell_keys(column_index(df, col))
+        keys = cell_keys(column_index(df, col), df, col)
         counts: dict = {}
         for k in keys:
             counts[k] = counts.get(k, 0) + 1
@@ -523,7 +564,7 @@ def create_app(home: str | None = None, token: str | None = None, *, chat_model_
             except ValueError:
                 raise HTTPException(422, f"列序号不对：{c}") from None
             allowed = set(keep)
-            mask &= pd.Series([k in allowed for k in cell_keys(column_index(df, ci))], index=df.index)
+            mask &= pd.Series([k in allowed for k in cell_keys(column_index(df, ci), df, ci)], index=df.index)
         view = df[mask]
         if body.sort_col is not None:
             s = column_index(view, body.sort_col)
